@@ -1,7 +1,8 @@
 // The refused pop-up rows (src/lib/splitGuard.ts REFUSED_POPUP_PATH_PATTERNS: the first-finish sign-in
 // ask shown, its eligibility row and its outcomes; ruling 2026-10-24) on a real SQLite engine:
 //   - they COUNT in every unsplit and per-ET-day total: /api/popups, the /api/metrics pop-up facts
-//     (popupRangePath, popupRangeDaily) and the ads routine's site-wide event read;
+//     (popupRangePath, popupRangeDaily); the ads routine's site-wide event read is pinned in
+//     scripts/ads-reads/beacon.splitGuard.test.ts (a Node-typed project);
 //   - they never reach an hour, place or device split: /api/geo leaves them out of every refused
 //     dimension, and no reader returns an hour of one (every such row comes back with `hr` NULL);
 //   - a sub-day window counts them over whole ET days, so hour windows never read them back per hour;
@@ -15,21 +16,18 @@ import { onRequestPost as geoPost } from './geo'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1, type HitRow } from '../_lib/testing/hitsDb'
 import { popupRateOracle } from '../_lib/testing/popupRateOracle'
-import { isSplitRefusedPath, REFUSED_POPUP_PATH_PATTERNS, refusedPathMatch, SPLIT_REFUSED_DIMS, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
+import { isSplitRefusedPath, REFUSED_POPUP_PATH_PATTERNS, SPLIT_REFUSED_DIMS, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
 import { REFUSED_SAMPLE_PATHS } from '../../src/lib/__fixtures__/refusedPaths'
 import { etWallTimeMs } from '../../src/lib/etTime'
 import { POPUPS, POPUP_RATE_SPECS } from '../../src/lib/popupEvents'
-import { summarizeSiteEvents } from '../../src/lib/adsRules'
-import { CAMPAIGNS } from '../../src/lib/campaigns'
 import { METRICS } from '../../src/lib/metrics/metrics'
-import { createBeaconSource, siteEventsQuery, taggedCountryQuery, WEB_SITE } from '../../scripts/ads-reads/beacon'
 import type { MetricsResponseBody } from '../../src/lib/metrics/types'
 
 const Z = (iso: string) => Date.parse(iso)
 const DAY = etWallTimeMs('2026-10-07') // 04:00Z, a 24 h EDT day
 const NEXT = etWallTimeMs('2026-10-08')
 const H = (h: number, m = 30) => DAY + h * 3_600_000 + m * 60_000 // h hours after ET midnight
-const SITE = WEB_SITE
+const SITE = 'bestsudoku-web' // the routine's WEB_SITE; its reads are pinned in scripts/ads-reads/beacon.splitGuard.test.ts
 const geoCols = { country: 'US', region: 'VA', city: 'Reston', device: 'mobile', browser: 'Chrome', os: 'Android', lang: 'en' }
 
 const FF_ASK = '/signin-prompt/first-finish'
@@ -193,28 +191,20 @@ describe('/api/metrics pop-up facts count it; placement and committed reasons ar
     expect(res.bsk_shown.value).toBe(5 + 4)
     expect(res.bsk_shown.liveSafe).toBe(true)
     expect(res.ff.liveSafe).toBeUndefined()
+    // The tile says so (a registry caveat); a whole-ET-day page range carries no whole-days note.
+    expect(res.bsk_shown.noteIds).toContain('popup-shown-excludes-first-finish-ask')
+    for (const k of ['ff', 'earned', 'shown', 'signed_in']) expect(res[k].noteIds ?? [], k).not.toContain('refused-whole-days')
   })
-})
 
-describe('the ads routine: site-wide counts include it per ET day; the country read never does', () => {
-  const select = (d: DatabaseSync) => async (sql: string, binds: unknown[]) => d.prepare(sql).all(...(binds as any[])) as any[]
-  it('siteEvents counts the ask, eligibility and outcome, each placed at its ET midnight', async () => {
-    const rows = await createBeaconSource(select(db)).siteEvents(DAY - 86_400_000)
-    for (const r of rows.filter((x) => isSplitRefusedPath(x.path) && !x.path.startsWith('/funnel/'))) {
-      expect([FF_ASK, FF_ELIGIBLE, FF_OUTCOME]).toContain(r.path)
-      expect([DAY, NEXT]).toContain(r.hourStartMs)
-    }
-    const s = summarizeSiteEvents(rows, NEXT + 86_400_000)
-    expect(s.shown['signin-prompt']).toBe(5 + FF_ASK_DAY + 1)
-    expect(s.signinEligible.earned).toBe(7 + 11 + 13 + FF_ELIGIBLE_DAY)
-    expect(s.outcomes['signin-prompt']['signed-in']).toBe(5)
-    const raw = db.prepare(siteEventsQuery(DAY - 86_400_000).sql).all(...(siteEventsQuery(DAY - 86_400_000).binds as any[])) as any[]
-    for (const x of raw.filter((x) => isSplitRefusedPath(String(x.path)))) expect(x.hr).toBeNull()
-  })
-  it('taggedCountryQuery leaves every refused row out, the first-finish ask included', () => {
-    const q = taggedCountryQuery(CAMPAIGNS[0])
-    expect(q.sql).toContain(`NOT ${refusedPathMatch().sql}`)
-    expect(refusedPathMatch().sql).toContain(`'${FF_ASK}'`)
+  it('a sub-day page range carries the whole-days note on the pop-up metrics, not on the opt-out tile', async () => {
+    const res = await metrics(db, { since: '2026-10-07T13:00:00Z', until: '2026-10-07T19:00:00Z' }, [
+      { key: 'ff', metric: 'popup.eligibleEarnedFirstFinish', window: 'page' },
+      { key: 'shown', metric: 'popup.shown', params: { popup: 'signin-prompt' }, window: 'page' },
+      { key: 'bsk_shown', metric: 'bsk.popupShown', window: 'page' },
+    ])
+    expect(res.ff.noteIds).toContain('refused-whole-days')
+    expect(res.shown.noteIds).toContain('refused-whole-days')
+    expect(res.bsk_shown.noteIds ?? []).not.toContain('refused-whole-days')
   })
 })
 
@@ -276,23 +266,6 @@ describe('every older refused row changes nothing (byte-identical outputs with a
         const b = await metrics(without, ctx, requests)
         for (const r of requests) expect(JSON.stringify({ ...a[r.key], asOfMs: 0 }), r.key).toBe(JSON.stringify({ ...b[r.key], asOfMs: 0 }))
       }
-    } finally {
-      without.close()
-    }
-  })
-
-  it('the routine site-event summary', async () => {
-    const without = open([...ORDINARY, ...FIRST_FINISH])
-    try {
-      const sel = (d: DatabaseSync) => async (sql: string, binds: unknown[]) => d.prepare(sql).all(...(binds as any[])) as any[]
-      const a = await createBeaconSource(sel(db)).siteEvents(DAY - 86_400_000)
-      const b = await createBeaconSource(sel(without)).siteEvents(DAY - 86_400_000)
-      const strip = (rows: typeof a) => rows.filter((r) => !r.path.startsWith('/funnel/'))
-      const key = (r: (typeof a)[number]) => `${r.path}|${r.hourStartMs}|${r.postInstallFix}`
-      expect(strip(a).map(key).sort()).toEqual(strip(b).map(key).sort())
-      const sa = summarizeSiteEvents(a, NEXT)
-      const sb = summarizeSiteEvents(b, NEXT)
-      expect(JSON.stringify({ ...sa, p1: { ...sa.p1, funnel: undefined } })).toBe(JSON.stringify({ ...sb, p1: { ...sb.p1, funnel: undefined } }))
     } finally {
       without.close()
     }

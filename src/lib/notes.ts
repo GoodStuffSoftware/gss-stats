@@ -413,11 +413,29 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     hideable: false,
     appliesTo: (w: AutoCaveatWidget) => w.popup === 'upsell' && w.popupKind === 'signed-in',
   },
+  // The Overview "pop-ups shown" tile (bsk.popupShown): it keeps its same-time arrows and live refresh, so it
+  // leaves out the first-finish sign-in ask, a counts-only row (lib/splitGuard.ts); popup.shown counts it.
+  'popup-shown-excludes-first-finish-ask': {
+    id: 'popup-shown-excludes-first-finish-ask',
+    text: 'Leaves out the first-finish sign-in ask (counted on the Pop-ups page).',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
+  // The Pop-ups page cards (lib/metrics/presets.ts POPUP_RATES, SIGNIN_ELIGIBILITY): the first-finish sign-in
+  // ask rows are counts only (lib/splitGuard.ts REFUSED_POPUP_PATH_PATTERNS), counted per whole ET day.
+  'first-finish-ask-whole-days': {
+    id: 'first-finish-ask-whole-days',
+    text: 'Any first-finish sign-in ask rows here are counted as whole ET days, never by hour, place or device.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['popup'],
+  },
   // The campaign-country card (lib/metrics/presets.ts CAMPAIGN_COUNTRY): the counts-only rule
   // (lib/splitGuard.ts) gives return and completion rows no country bucket.
   'country-split-excludes-refused': {
     id: 'country-split-excludes-refused',
-    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B and paid-funnel rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
+    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel, first-finish and first-finish sign-in ask rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],

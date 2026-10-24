@@ -201,7 +201,8 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
   'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
-  'tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B and paid-funnel rows, which are never shown by hour, place or device.'
+  'tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel, first-finish and first-finish sign-in ask rows, ' +
+  'which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {
@@ -282,8 +283,8 @@ export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-${hash
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
  * says "any", since most charts leave the event kinds out unless event beacons are included. */
 export const REFUSED_WHOLE_DAYS_CAPTION =
-  'Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B or paid-funnel rows here are counted ' +
-  'over whole ET days.'
+  'Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel, ' +
+  'first-finish or first-finish sign-in ask rows here are counted over whole ET days.'
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
  * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:

@@ -705,9 +705,10 @@ class Batch {
       }
     }
     // A snapped page window: say so on every metric that can count a refused row (a new array,
-    // never a push into a shared one).
+    // never a push into a shared one). popupRangePath snaps its refused pop-up rows (the first-finish
+    // sign-in ask) the same way, so a pop-up metric carries the note too.
     const ids =
-      plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def)
+      (plan.factId === 'bskRangePath' || plan.factId === 'popupRangePath') && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def)
         ? [...noteIds, 'refused-whole-days']
         : noteIds
     return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums, dayKind: wholeDays ? ('wholeDays' as const) : ('sameTime' as const) } : {}), asOfMs: plan.asOfMs }
