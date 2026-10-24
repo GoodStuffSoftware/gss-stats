@@ -76,7 +76,7 @@ plan, rules and checks are in "Flight 3" below. Its two rows are `by-date`: the 
 | Status | Campaign id | Name | Flight start | Flight end | Read window (ET) | Page |
 |---|---|---|---|---|---|---|
 | by-date | 24358792494 | F3 apps (display, Sudoku app placements) | 2026-10-17 | 2026-10-23 | start+1..end+1 | none |
-| by-date | 24358792551 | F3 search (desktop intent) | 2026-10-17 | 2026-10-23 | start+1..end+1 | none |
+| by-date | 24358792551 | F3 search (desktop intent) | 2026-10-17 | 2026-10-30 | start+1..end+1 | none |
 | by-date | 24369758153 | F3 apps play (display, Sudoku app placements, Play direct) | 2026-10-19 | 2026-10-23 | start+1..end+1 | none |
 | past | 24316608605 | F2 apps (display, Sudoku app placements) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
 | past | 24311309184 | F2 search (desktop intent) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
@@ -128,7 +128,7 @@ the release alone). Source: the BSK flight 3 launch plan (desk card ads-f3-16), 
 here; the cold-start notes are in [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
 Everything below is what the routine says and does for an arm once its `by-date` row holds dates;
 while an arm's dates are `-` none of it applies and no part reads, or sends anything about, that
-arm. The ids, tags, $10/day budget, $70 cap and the read-plan settings are in code
+arm. The ids, tags, $10/day budget, $70 cap (Search $140 since its 10-23 extension) and the read-plan settings are in code
 (`STAGED_FLIGHT_3` and `STAGED_FLIGHT_3_DATES` in `src/lib/campaigns.ts`,
 `STAGED_FLIGHT_3_PLAN_SETTINGS` in `src/lib/adsRules.ts`); an arm joins the registry the moment its
 dates are filled. Google Ads is read-only: every rule below only PROPOSES, and Mike decides any pause.
@@ -143,7 +143,7 @@ end date set at build and again at enable).
 | utm | google / display / `sudoku_funnel_f3_apps_hero` and `sudoku_funnel_f3_apps_feat` (plus the bare `sudoku_funnel_f3_apps` as a catch-all) | google / cpc / `sudoku_funnel_f3_search` | google / display / `sudoku_funnel_f3_apps_play`, carried by the Play install referrer (the ad opens the Play listing, no web page) |
 | Report label | `F3 apps` | `F3 search` | `F3 apps play` |
 | Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) | display; the same 17 Android app placements |
-| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
+| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $140 cap, 14 days (extended from 10-23 to 10-30 on 10-23, same budget and bid; thresholds 35 / 70 / 105 / 140) | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
 | Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day | 2026-10-19, serving from 12:00 ET; ends 2026-10-23 |
 | Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly | the printed device block |
 | Rules that are WATCH | none | none | rules 3, 5, 6 and 7 (every rule that reads tagged app rows); rules 1, 2, 4 and 8 stay real and can PROPOSE PAUSE; rule 9 stays NOT YET to day 8 with the interim tagged first opens and sign-ins beside it |

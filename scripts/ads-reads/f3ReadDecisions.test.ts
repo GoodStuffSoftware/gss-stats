@@ -44,14 +44,14 @@ const rows = (asks: number, completes: number, newAccounts: number): Tagged => [
 ]
 
 describe('the cap decision row (threshold read at the hard cap)', () => {
-  // $40 a day x 2 = $80, over the $70 F3 cap, so the read is a threshold read with the decision table printed.
+  // $80 a day x 2 = $160, over the $140 F3 Search cap (extended 10-23), so the read is a threshold read with the decision table printed.
   it.each([
     [25, 6, 'f3-go', 'GO'],
     [25, 3, 'f3-iterate', 'ITERATE'],
     [25, 1, 'f3-stop', 'STOP'],
     [19, 9, 'f3-inconclusive', 'INCONCLUSIVE'],
   ])('F3 with %i asks and %i new accounts reads %s', async (asks, accounts, row, word) => {
-    const deps = fixtureDeps(f3Fixture(40, rows(asks, 14, accounts)), true)
+    const deps = fixtureDeps(f3Fixture(80, rows(asks, 14, accounts)), true)
     const r = await runMorningRead(deps, optsFor(F3_SEARCH))
     expect(r.thresholdRead!.decision!.row).toBe(row)
     expect(formatMorningReport(r)).toContain('Decision (flight 3 table, spec section 2): row ' + row)

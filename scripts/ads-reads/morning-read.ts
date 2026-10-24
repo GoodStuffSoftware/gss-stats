@@ -17,7 +17,7 @@ import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId }
 import { runMorningRead } from './read'
 import { formatMorningReport, jsonOnly, withJson } from './report'
 
-const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only]`
+const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only] [--window-end YYYY-MM-DD]`
 
 async function main() {
   const opts = parseCli({
@@ -25,6 +25,7 @@ async function main() {
     'release-health-only': { type: 'boolean', default: false },
     'health-min-parent': { type: 'string', default: String(MIN_COHORT) },
     'health-parent-age-hours': { type: 'string', default: '24' },
+    'window-end': { type: 'string' },
   })
   if (opts.help) {
     process.stdout.write(HELP + '\n')
@@ -48,6 +49,7 @@ async function main() {
     healthOnly: !!opts['release-health-only'],
     healthMinParent: minParent,
     healthParentAgeHours: ageHours,
+    ...(opts['window-end'] ? { windowEndEt: opts['window-end'] as string } : {}),
   })
   process.stdout.write(opts['json-only'] ? jsonOnly(result) : withJson(formatMorningReport(result), result))
 }

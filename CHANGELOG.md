@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.58.1] — 2026-10-23
+
+### Changed
+- **Flight 3 Search runs a second week.** The Search campaign now ends 2026-10-30 (was 10-23) with the cap raised from $70 to $140; budget and bid are unchanged, so the daily read no longer proposes a pause for the old cap or end date.
+- **Morning read can pin a week-1 window.** `--window-end YYYY-MM-DD` closes the read's window at that day, so the 10-24 final read still reports Search's first week (10-17 to 10-23).
+
 ## [0.58.0] — 2026-10-23
 
 ### Added

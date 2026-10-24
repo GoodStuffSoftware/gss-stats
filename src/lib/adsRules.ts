@@ -279,8 +279,8 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
   },
   search: {
     channel: 'search',
-    thresholds: [18, 35, 53, 70],
-    killRulesFrom: 35,
+    thresholds: [35, 70, 105, 140], // the 25/50/75/100% ladder of the $140 cap (two weeks at $10/day)
+    killRulesFrom: 35, // unchanged from week 1: rules 3 and 6 arm at $35 spend
     ctrFloor: 0.01,
     allDevices: true,
     reportLabel: 'F3 search',

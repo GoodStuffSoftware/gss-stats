@@ -42,9 +42,9 @@ const TRACKING =
   /Tagged so far: .*tracking-check counts \(tagged ET-day totals; yesterday in brackets\): complete rows \d+ \(\d+\), sign-in ask rows \(placement, committed-repeat, committed-challenge\) \d+ \(\d+\), \/coach\/shown\/place rows \d+ \(\d+\)/
 
 describe.each(ARMS)('$label', (a) => {
-  it('is live in the registry with a seven-day week and the read window start + 1 .. end + 1', () => {
+  it('is live in the registry with a seven-day week (Search: two weeks) and the read window start + 1 .. end + 1', () => {
     expect(campaignById(a.id)).toBeTruthy()
-    expect(endOf(a)).toBe(addDays(startOf(a), 6))
+    expect(endOf(a)).toBe(addDays(startOf(a), a.arm === 'search' ? 13 : 6)) // Search was extended a week on 10-23
     expect(ADS_READ_PLANS[a.id].morningReadFirstEt).toBe(addDays(startOf(a), 1))
     expect(ADS_READ_PLANS[a.id].morningReadLastEt).toBe(addDays(endOf(a), 1))
   })
@@ -76,6 +76,16 @@ describe.each(ARMS)('$label', (a) => {
     expect(report).toContain(`closed days through ${endOf(a)}`)
     expect(report).toMatch(TRACKING)
     expect(report).toContain('Errors: none')
+  })
+  it.runIf(a.arm === 'search')('--window-end pins the week-1 read: on 10-24 the window closes at 2026-10-23 although the registry end is 2026-10-30', async () => {
+    const fx = armFixture(a, '2026-10-24')
+    const run = (windowEndEt?: string) =>
+      runMorningRead(fixtureDeps(fx, true), { campaignId: a.id, releaseHealth: 'auto', healthOnly: false, healthMinParent: MIN_COHORT, healthParentAgeHours: 24, ...(windowEndEt ? { windowEndEt } : {}) })
+    const pinned = formatMorningReport(await run('2026-10-23'))
+    expect(pinned).toContain('closed days through 2026-10-23')
+    expect(pinned).toContain('Errors: none')
+    expect(pinned).not.toContain('not due')
+    await expect(run('2026-10-31')).rejects.toThrow(/--window-end must be/)
   })
   it('a read one day past the window still reads the flight only (spend stays closed at the flight end, no error)', async () => {
     const report = await morning(a, addDays(endOf(a), 2))

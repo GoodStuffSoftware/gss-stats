@@ -86,11 +86,14 @@ describe('flight 3 staged config matches the launch plan', () => {
     expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 24]])
     expect(c.notes).toContain('google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat')
   })
-  it('search: tag sudoku_funnel_f3_search, $10/day, $70 cap, noon-ET schedule 12:00-24:00', () => {
+  it('search: tag sudoku_funnel_f3_search, $10/day, $140 cap (extended to 10-30 on 10-23), noon-ET schedule 12:00-24:00', () => {
     const c = STAGED_FLIGHT_3.search
     expect(c.ucValues).toEqual(['sudoku_funnel_f3_search'])
-    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 24]])
+    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 140, '12:00', [12, 24]])
+    expect(c.servingDays).toEqual({ min: 7, max: 14 })
     expect(c.notes).toContain('google / cpc / sudoku_funnel_f3_search')
+    expect(c.notes).toContain('Oct 23: Search extended one week to Oct 30, same budget and bid')
+    expect(STAGED_FLIGHT_3_DATES.search).toEqual({ flightStart: '2026-10-17', flightEnd: '2026-10-30' })
   })
   it('apps plan settings: display, the 17 approved placements, flight 2 leak limit and CTR floor, the 18/35/53/70 ladder', () => {
     const s = STAGED_FLIGHT_3_PLAN_SETTINGS.apps
@@ -108,7 +111,7 @@ describe('flight 3 staged config matches the launch plan', () => {
     expect(s.adGroupPlacementCounts).toBeUndefined()
     expect(s.placementLeakMaxShare).toBeUndefined()
     expect([s.ctrFloor, s.killRulesFrom, s.reportLabel, s.auditSlug]).toEqual([0.01, 35, 'F3 search', 'f3-search'])
-    expect(s.thresholds).toEqual([18, 35, 53, 70])
+    expect(s.thresholds).toEqual([35, 70, 105, 140]) // the $140 cap's 25/50/75/100% ladder
   })
   it('appsPlay: a play-direct arm, tag sudoku_funnel_f3_apps_play, $10/day, $49.14 cap over a 4-7 day window, 12/25/37/49.14 ladder', () => {
     const c = STAGED_FLIGHT_3.appsPlay
@@ -317,9 +320,9 @@ describe('staged arms are NOT registered, and cannot collide with what is', () =
 
 describe('activation is an id and dates only', () => {
   it('stagedCampaign builds a 7-day upcoming web flight with the arm\'s tag, budget, cap and noon-ET start', () => {
-    for (const [arm, id] of [['apps', APPS_ID], ['search', SEARCH_ID]] as const) {
+    for (const [arm, id, cap] of [['apps', APPS_ID, 70], ['search', SEARCH_ID, 140]] as const) {
       const c = stagedCampaign(arm, { id, flightStart: START, flightEnd: END })
-      expect(c).toMatchObject({ id, flightStart: START, flightEnd: END, flightStartTimeEt: '12:00', status: 'upcoming', kind: 'web', dailyBudgetUsd: 10, hardCapUsd: 70, servingHoursEt: [12, 24] })
+      expect(c).toMatchObject({ id, flightStart: START, flightEnd: END, flightStartTimeEt: '12:00', status: 'upcoming', kind: 'web', dailyBudgetUsd: 10, hardCapUsd: cap, servingHoursEt: [12, 24] })
       expect(c.ucValues).toEqual(STAGED_FLIGHT_3[arm].ucValues)
       expect(c.ucValues).not.toBe(STAGED_FLIGHT_3[arm].ucValues) // a copy: registering cannot mutate the staged config
     }
@@ -353,7 +356,7 @@ describe('activation is an id and dates only', () => {
     const search = readPlanFor(SEARCH_ID).plan
     expect([apps.channel, search.channel]).toEqual(['display', 'search'])
     expect([channelOf(APPS_ID), channelOf(SEARCH_ID)]).toEqual(['display', 'search'])
-    expect([apps.dailyBudget, apps.hardCap, search.dailyBudget, search.hardCap]).toEqual([10, 70, 10, 70])
+    expect([apps.dailyBudget, apps.hardCap, search.dailyBudget, search.hardCap]).toEqual([10, 70, 10, 140])
     expect([reportLabelFor(APPS_ID), reportLabelFor(SEARCH_ID)]).toEqual(['F3 apps', 'F3 search'])
     expect(auditPathFor(SEARCH_ID, '2026-10-22')).toBe('docs/marketing/google-ads/f3-search/data/2026-10-22.json')
     // each arm has its own week: the Search arm starts a day after the Apps arm here
@@ -501,6 +504,7 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
     for (const arm of ['apps', 'search', 'appsPlay'] as const) {
       const { flightStart, flightEnd } = STAGED_FLIGHT_3_DATES[arm]
       if (arm === 'appsPlay') expect([addDays(flightStart!, 3), addDays(flightStart!, 4), addDays(flightStart!, 5), addDays(flightStart!, 6)], arm).toContain(flightEnd)
+      else if (arm === 'search') expect(flightEnd, arm).toBe(addDays(flightStart!, 13)) // extended a week on 10-23
       else expect(flightEnd, arm).toBe(addDays(flightStart!, 6))
       expect(stagedArmIsLive(arm), arm).toBe(true)
       const c = campaignById(STAGED_FLIGHT_3[arm].ids.campaignId)!
@@ -535,5 +539,24 @@ describe('staged blocks are declared before the registries that activation edits
     const s = src('adsRules.ts')
     expect(s.indexOf('export const STAGED_FLIGHT_3_PLAN_SETTINGS')).toBeGreaterThan(-1)
     expect(s.indexOf('export const STAGED_FLIGHT_3_PLAN_SETTINGS')).toBeLessThan(s.indexOf('export const ADS_READ_PLANS'))
+  })
+})
+
+describe('F3 Search extended to 10-30: the runbook flight end + 1 path (A3) fires once, on 10-31', () => {
+  // A3 keys off the by-date row's end + 1. A date is Search's end + 1 day when it equals addDays(end, 1).
+  const searchEnd = () => legsRows().find((r) => r[2].startsWith('F3 search'))![4]
+  it('10-24 is not the Search end + 1 (the old end of 10-23 would have made it one); 10-31 is, and no other day in 10-24..11-05 is', () => {
+    const end = searchEnd()
+    expect(end).toBe('2026-10-30')
+    const days = Array.from({ length: 13 }, (_, i) => addDays('2026-10-24', i))
+    expect(days.filter((d) => d === addDays(end, 1))).toEqual(['2026-10-31'])
+    expect(addDays(end, 1)).not.toBe('2026-10-24')
+    // Apps and Apps Play are unchanged: their end + 1 stays 10-24.
+    for (const label of ['F3 apps (', 'F3 apps play']) expect(addDays(legsRows().find((r) => r[2].startsWith(label))![4], 1)).toBe('2026-10-24')
+  })
+  it('the Search read window runs 10-18 .. 10-31, so 10-24 is a normal in-window day', () => {
+    restoreFlight3() // the REAL registry, with the committed dates
+    const plan = ADS_READ_PLANS[STAGED_FLIGHT_3.search.ids.campaignId]
+    expect([plan.morningReadFirstEt, plan.morningReadLastEt]).toEqual(['2026-10-18', '2026-10-31'])
   })
 })

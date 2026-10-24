@@ -173,11 +173,12 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     },
     ucValues: ['sudoku_funnel_f3_search'],
     dailyBudgetUsd: 10,
-    hardCapUsd: 70,
+    hardCapUsd: 140, // $70 for the first week, doubled when the end date moved 10-23 -> 10-30 (owner decision 2026-10-23; budget and bid unchanged)
+    servingDays: { min: 7, max: 14 },
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 24],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-24:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
+      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-24:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation. Oct 23: Search extended one week to Oct 30, same budget and bid (end date moved 2026-10-24T02:53:50Z, owner decision logged 2026-10-23); the cap went $70 -> $140 and the window is 14 serving days. The D+7 final read of 10-24 still reports week 1.',
   },
   appsPlay: {
     label: 'Flight 3 — display, Sudoku app placements, Play direct',
@@ -253,7 +254,8 @@ export interface StagedArmDates {
 export const STAGED_FLIGHT_3_DATES: Record<StagedArm, StagedArmDates> = {
   // Both arms: approved to auto-enable by Mike (relayed by the ads session); ET days. Apps starts 2026-10-17, ahead of the Play release.
   apps: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
-  search: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
+  // Search: extended one week on 2026-10-24 (02:53Z, 10-23 ET) to 2026-10-30, same $10/day and bid; the D+7 final read of 10-24 still reports week 1.
+  search: { flightStart: '2026-10-17', flightEnd: '2026-10-30' },
   // Play direct: enabled 2026-10-19 (serves from 12:00 ET), a five-day window inside the 4-7 serving days its servingDays allows.
   appsPlay: { flightStart: '2026-10-19', flightEnd: '2026-10-23' },
 }

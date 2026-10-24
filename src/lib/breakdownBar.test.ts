@@ -137,20 +137,20 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
   const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
   const maxFlight = Math.max(...TRACKED.map(flight))
 
-  it('the configuration tracks Android, the retest, the two flight-2 arms and any live flight-3 arm; the longest is Android at 8 days', () => {
+  it('the configuration tracks Android, the retest, the two flight-2 arms and any live flight-3 arm; the longest is the F3 Search arm at 14 days (extended 10-23)', () => {
     expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id)])
-    expect(maxFlight).toBe(8)
+    expect(maxFlight).toBe(14)
     expect(flight(retest)).toBeLessThan(maxFlight)
   })
 
-  it('flight day: only the retest has rows; every other campaign is still a series (all 0), and the axis is Day 1 to 8', () => {
+  it('flight day: only the retest has rows; every other campaign is still a series (all 0), and the axis is Day 1 to 14', () => {
     const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
     const r = resp([['1', retest.id, 5], ['3', retest.id, 2]], ['flightDay', 'campaignFlight'])
     const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, r)
     expect(m.series).toEqual(TRACKED.map((c) => c.id))
     expect(m.axis).toEqual(Array.from({ length: maxFlight }, (_, i) => String(i + 1)))
     expect(m.values[0]).toEqual(Array(maxFlight).fill(0))
-    expect(m.values[1]).toEqual([5, 0, 2, 0, 0, 0, 0, 0])
+    expect(m.values[1]).toEqual([5, 0, 2, ...Array(maxFlight - 3).fill(0)])
     for (const i of m.series.keys()) if (i !== 1) expect(m.values[i], m.series[i]).toEqual(Array(maxFlight).fill(0))
     const cfg: any = buildChartConfig(w, r)
     expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([...TRACKED.map((c) => c.label), ...TRACKED.map((c) => `${c.label} (cumulative)`)])

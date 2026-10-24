@@ -896,6 +896,8 @@ export interface MorningOptions {
   healthOnly: boolean
   healthMinParent: number
   healthParentAgeHours: number
+  /** Pin the read window's last ET day (YYYY-MM-DD) before the registered flight end: every window and spend cut-off treats that day as the flight end. For a week-1 read of an arm whose end was extended (F3 Search, 10-23 -> 10-30). Unset = the registry's end. */
+  windowEndEt?: string
 }
 export interface MorningResult {
   tool: 'morning-read'
@@ -1165,7 +1167,12 @@ async function searchSideRead(deps: ReadDeps, campaign: CampaignFlight, todayEt:
 }
 
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
-  const { plan, campaign } = readPlanFor(opts.campaignId)
+  const registered = readPlanFor(opts.campaignId)
+  const { plan } = registered
+  if (opts.windowEndEt !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.windowEndEt) && opts.windowEndEt >= registered.campaign.flightStart! && opts.windowEndEt <= registered.campaign.flightEnd)) {
+    throw new Error(`--window-end must be a YYYY-MM-DD between ${registered.campaign.flightStart} and ${registered.campaign.flightEnd}`)
+  }
+  const campaign = opts.windowEndEt ? { ...registered.campaign, flightEnd: opts.windowEndEt } : registered.campaign
   const readAt = new Date(deps.nowMs).toISOString()
   const todayEt = etDateFromMs(deps.nowMs)
   const yesterdayEt = addEtDays(todayEt, -1)

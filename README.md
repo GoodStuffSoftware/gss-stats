@@ -1031,6 +1031,7 @@ the routine and the dashboard can't disagree.
 ```powershell
 npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
 npm run ads:morning-read -- --campaign <id> --dry-run --cf-token-file <path>   # daily read; no writes
+npm run ads:morning-read -- --campaign <id> --window-end <YYYY-MM-DD> --dry-run ...   # pin the window end before the registered flight end (F3 Search week-1 final read: 2026-10-23)
 npm run ads:postflight-read -- --stage wrapup --campaign <id> --dry-run --cf-token-file <path>
 npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
 npm run ads:morning-read -- --campaign <id> --fixture <file.json> --now <iso>   # offline, recorded data
