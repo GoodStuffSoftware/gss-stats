@@ -41,6 +41,15 @@ const postflight = async (a: Arm, nowEt: string, stage: 'wrapup' | 'day15') => r
 const TRACKING =
   /Tagged so far: .*tracking-check counts \(tagged ET-day totals; yesterday in brackets\): complete rows \d+ \(\d+\), sign-in ask rows \(placement, committed-repeat, committed-challenge\) \d+ \(\d+\), \/coach\/shown\/place rows \d+ \(\d+\)/
 
+it('Apps Play (24369758153, a five-day flight) never labels rule 9 interim, on any read day', async () => {
+  const play = { arm: 'appsPlay', id: '24369758153', uc: 'sudoku_funnel_f3_apps_play', label: 'F3 apps play', caveat: false } as unknown as Arm
+  const s = startOf(play)
+  for (let d = 1; d <= 6; d++) {
+    const report = await morning(play, addDays(s, d))
+    expect(report, addDays(s, d)).not.toContain('interim, week 2 running')
+  }
+})
+
 describe.each(ARMS)('$label', (a) => {
   it('is live in the registry with a seven-day week (Search: two weeks) and the read window start + 1 .. end + 1', () => {
     expect(campaignById(a.id)).toBeTruthy()
