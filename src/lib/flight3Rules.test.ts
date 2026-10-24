@@ -214,7 +214,7 @@ describe('rule 6: cost per complete row', () => {
   it('the first-finish WATCH line: n/a before the app ships it, the figure after, per-row figure labelled as repeats', () => {
     expect(firstFinishWatchLine(0, 40)).toBe('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows so far)')
     const line = firstFinishWatchLine(8, 40)
-    expect(line).toContain('WATCH · cost per person who finished: $5.00 ($40.00 cumulative spend / 8 people who finished')
+    expect(line).toContain('WATCH · cost per person who finished: $5.00 ($40.00 closed-day spend / 8 people who finished')
     expect(line).toContain('includes repeats')
     expect(firstFinishWatchLine(8, null)).toContain('spend not read')
     expect(firstFinishWatchLine(null, 40)).toContain('not read')

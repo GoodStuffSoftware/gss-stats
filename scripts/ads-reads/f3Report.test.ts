@@ -84,6 +84,23 @@ describe('the flight 3 rules block (Search, flight day 3)', () => {
     // cumulative $17.50 / 14 rows; yesterday (10-18) $9.50 / 8 rows
     expect(tagged).toContain('; cost per complete row, includes repeats $1.25 (yesterday $1.19)')
   })
+  it('the first-finish WATCH line is n/a while no first-finish row exists', async () => {
+    const out = await lines(day3())
+    expect(out).toContain('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows so far)')
+  })
+  it('the first-finish WATCH line divides closed-day spend by first-finish rows of the same closed days (a today row is left out)', async () => {
+    const fx = day3()
+    ;(fx.beacon as { tagged: { hour: string; path: string; visitor: string; count: number }[] }).tagged.push(
+      { hour: '2026-10-17T20:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 3 },
+      { hour: '2026-10-18T20:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 1 },
+      { hour: '2026-10-19T14:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 4 }, // today: spend not closed yet
+    )
+    const out = await lines(fx)
+    const line = out.find((l) => l.startsWith('WATCH · cost per person who finished'))!
+    // closed-day spend $17.50 / 4 people = $4.38 ($2.19 if today's rows were wrongly included)
+    expect(line).toContain('$4.38 ($17.50 closed-day spend / 4 people who finished')
+    expect(out.find((l) => l.startsWith('Tagged so far'))).toContain('cost per complete row, includes repeats')
+  })
   it('a tripped rule is listed in the proposal', async () => {
     const fx = day3()
     ;(fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>).tagged = (fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>).tagged.filter((r) => r.path !== '/signin-prompt/placement')

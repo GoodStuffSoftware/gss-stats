@@ -107,7 +107,6 @@ export function killRuleReadout(r: RuleResult, ctx: { taggedArrivals?: number | 
   return { n, name, number, threshold, verdict }
 }
 
-/** Cost per tagged complete row: closed-day spend over the tagged complete rows in the same closed days. null under 1 row. */
 /** Cost per PERSON who finished a puzzle: spend over tagged first-finish rows (one per device, so repeat finishers count once).
  * null when spend is unknown or no one has finished (never a divide by zero). */
 export function costPerFinisher(spend: number | null | undefined, people: number | null | undefined): number | null {
@@ -123,9 +122,11 @@ export function firstFinishWatchLine(people: number | null | undefined, spend: n
   if (people === 0) return `${head}: n/a until the app ships first-finish (0 first-finish rows so far)`
   const cost = costPerFinisher(spend, people)
   const usd2 = (x: number) => `$${x.toFixed(2)}`
-  return `${head}: ${cost == null ? 'spend not read' : usd2(cost)} (${spend == null ? '—' : usd2(spend)} cumulative spend / ${people} people who finished; first-finish rows, one per device; the per-row figure above includes repeats; WATCH only, no rule reads it)`
+  return `${head}: ${cost == null ? 'spend not read' : usd2(cost)} (${spend == null ? '—' : usd2(spend)} closed-day spend / ${people} people who finished in those days; first-finish rows, one per device; the per-row figure above includes repeats; WATCH only, no rule reads it)`
 }
 
+/** Cost per tagged complete row: closed-day spend over the tagged complete rows in the same closed days. null under 1 row. */
+/** Cost per tagged complete row: closed-day spend over the tagged complete rows in the same closed days. null under 1 row. */
 export function costPerCompleteRow(spend: number | null | undefined, rows: number | null | undefined): number | null {
   return spend != null && rows != null && rows > 0 ? spend / rows : null
 }

@@ -341,7 +341,7 @@ export function formatMorningReport(r: MorningResult): string {
         : `Tagged: NOT READ (${t.error})`,
     )
     if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts(), coachMeasurementNote(etDateFromMs(Date.parse(r.readAt))))}`)
-    if (r.flight3 && t.ok) out.push(firstFinishWatchLine(t.cumulative!.firstFinish ?? 0, r.spend.ok ? r.spend.cumulative.cost : null))
+    if (r.flight3 && t.ok) out.push(firstFinishWatchLine(t.cumulative!.firstFinishClosed ?? t.cumulative!.firstFinish ?? 0, r.spend.ok ? r.spend.cumulative.cost : null))
     out.push(...tagSplitLines(r.tagSplit, readStartOf(r.campaign.id)))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))

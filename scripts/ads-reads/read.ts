@@ -208,6 +208,8 @@ export interface TaggedCounts {
   coachShownPlace: number
   /** Tagged first-finish rows (FIRST_FINISH_PATH): people who finished a puzzle, one per device. Flight 3 reads only. */
   firstFinish?: number
+  /** The same rows over the closed ET days the cumulative spend covers (cumulative counts only): the figure cost per person who finished divides by. */
+  firstFinishClosed?: number
   /** Tagged /auth/success/<provider>/new rows (the headline new-account count; counts, not rates). Flight 3 reads only: left off flight 2 and the retest so their result JSON is unchanged. */
   newAccounts?: number
   /** Tagged coach-strip rows per tip and tour-opened: ET-day totals, never by hour, place or device. Flight 3 reads only. */
@@ -427,7 +429,7 @@ async function placementRowsFor(deps: ReadDeps, campaign: CampaignFlight, cs: Ca
   return { ok: true, value: rows }
 }
 
-function taggedCounts(s: TaggedSummary, f3: boolean): TaggedCounts {
+function taggedCounts(s: TaggedSummary, f3: boolean, firstFinishClosed?: number): TaggedCounts {
   return {
     taggedArrivals: s.taggedArrivals,
     taggedHits: s.taggedHits,
@@ -437,7 +439,7 @@ function taggedCounts(s: TaggedSummary, f3: boolean): TaggedCounts {
     completeRows: s.funnel.completed,
     flight3Asks: s.flight3Asks,
     coachShownPlace: s.coachShownPlace,
-    ...(f3 ? { firstFinish: s.firstFinish ?? 0, newAccounts: s.authSuccessSplit.new, coach: s.coach ?? emptyCoachCounts() } : {}),
+    ...(f3 ? { firstFinish: s.firstFinish ?? 0, ...(firstFinishClosed !== undefined ? { firstFinishClosed } : {}), newAccounts: s.authSuccessSplit.new, coach: s.coach ?? emptyCoachCounts() } : {}),
   }
 }
 
@@ -1215,7 +1217,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const tagged = {
     ok: taggedRows.ok,
     error: taggedRows.ok ? null : taggedRows.error,
-    cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value), !!plan.flight3Arm) : null,
+    cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value), !!plan.flight3Arm, spend.throughEt ? summarizeTaggedRows(taggedRows.value, { toMs: etMidnightUtcMs(addEtDays(spend.throughEt, 1)) }).firstFinish ?? 0 : 0) : null,
     yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd }), !!plan.flight3Arm) : null,
   }
 
