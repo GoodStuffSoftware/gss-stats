@@ -1346,7 +1346,7 @@ only a Play-direct arm's tagged-row rules, listed below, and never a pause propo
 per tagged complete row (at most $3), 7 the Apps first-move row ratio (at least 20% of d0 rows),
 8 traffic held (derived from rules 2 and 6) and 9 the D+7 go / iterate / stop table
 (`decideFlight3`, `src/lib/flight3Rules.ts`). Rules 5-7 read NOT YET until their data exists and CTR
-arms from flight day 3; rule 9 reads NOT YET until the final read. A rules 1-7 pause proposal pushes
+arms from flight day 3; rule 9 reads NOT YET until flight day 8; on an arm whose flight runs past day 7 (Search) the day 8 to flight-end dailies label it `D+7 verdict (interim, week 2 running; final on <end + 1>)`. A rules 1-7 pause proposal pushes
 once per ET day per arm; the cap decision push on a flight 3 row reads `F3 verdict GO | ITERATE |
 STOP | INCONCLUSIVE`. The cloud read on flight end + 1 stores its row but sends no push or bus
 message: the 07:05 final read reports the verdict. The flight 3 day15 read leaves out the purchase

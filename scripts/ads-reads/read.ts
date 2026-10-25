@@ -1138,6 +1138,8 @@ async function flight3BlockRead(
       closedCompletes,
       firstSession: steps ? { firstMove: steps.firstMove.tagged, arrivals: steps.arrivals.tagged } : null,
       signUps,
+      // An arm whose flight runs past its D+7 (this read's flight end, so a --window-end pin at the week-1 end gets none) and is still serving.
+      ...(flightDay <= flightDayOf(campaign.flightStart!, campaign.flightEnd) ? { interimFinalEt: addEtDays(campaign.flightEnd, 1) } : {}),
       // A Play-direct arm (the registry property, not an id) is checked on clicks against tagged d0 rows (rule 5).
       ...(campaign.kind === 'play-direct' ? { playDirect: { clicks: spend.ok ? spend.cumulative.clicks : null, d0Rows: steps ? steps.arrivals.tagged : null } } : {}),
     },

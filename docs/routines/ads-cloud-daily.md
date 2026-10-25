@@ -188,8 +188,10 @@ link that lost its suffix still counts. All three tags are the one arm.
   - **NOT YET** is day 1 for rule 5 (and day 2 while under its minimum rows) and days 1-2 for rules
     6 and 7 (the first read holding two days of data is day 3, the morning of the arm's third ET
     day); rule 2 (CTR) arms from day 3 too. Rule 9
-    reads NOT YET with the running figure ("the table would say ...") until the final read (day 8),
-    where it states the verdict word from the table below.
+    reads NOT YET with the running figure ("the table would say ...") until day 8, where it states the
+    verdict word from the table below. On an arm whose flight runs past day 7 (Search) that word is the
+    interim `D+7 verdict (interim, week 2 running; final on <end + 1>)` on days 8 to the flight end, and
+    the verdict proper on the read at end + 1.
   - **NO DATA** means the count could not be read or is too small to judge; it is never a pass and
     never a trip. A printed 0 is a true 0.
   - Rule 6 reads a tagged complete row at most $3; zero complete rows once cumulative spend is over
@@ -210,14 +212,19 @@ link that lost its suffix still counts. All three tags are the one arm.
 - **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
   `committed-challenge`, and placement). Under 20 asks the result is INCONCLUSIVE, whatever the
   new-account count.
-- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70 (the routine's own D + 7 08:37 read, which comes after the flight ends, stores the arm's readings row but reports nothing; the local gss-ads-f3-final-read task at 07:05 is the one reporter of the verdict):**
+- **Go / iterate / stop (proposals only), judged at the final read on the arm's own cap ($70 Apps, $140 Search, $49.14 Apps Play) (the routine's own D + 7 08:37 read, which comes after the flight ends, stores the arm's readings row but reports nothing; the local gss-ads-f3-final-read task at 07:05 is the one reporter of the verdict):**
 
   | Result | Proposal |
   |---|---|
-  | 5 or more new accounts within $70 | Go: propose flight 4 at a larger budget |
+  | 5 or more new accounts within the arm's cap | Go: propose flight 4 at a larger budget |
   | 2 to 4 | Iterate |
   | 0 to 1, with 20 or more asks | Stop paid acquisition |
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
+
+  An arm whose flight runs past its D+7 (Search, 10-17 to 10-30) reads day 8 and later while it is still serving, and those
+  dailies print rule 9 as `D+7 verdict (interim, week 2 running; final on 10-31)`: the word counts rows week 2 is still
+  adding to, so it is not the verdict. The date is the end + 1 of the flight end that read sees (the registry end, or the pin when one is given). The `--window-end` pinned week-1 read, the
+  read on end + 1, and arms that end at D+7 print the plain `D+7 verdict`.
 
 - **Coach meaning change:** when the coach strip line ends with "meaning change v1.99.3", × closes one tip and a written note ends the notes tip with no beacon from that day (web: 2026-10-17, so notes-tip completions are not counted from then; all flight-3 web traffic is on v1.99.3, while pre-flight organic rows since 2026-10-16 21:07Z mix v1.99.1, v1.99.2 and v1.99.3): do not compare coach rows across it or read a dismissed row as the tips stopping.
 - **Measurement change:** when a read prints a "MEASUREMENT CHANGE TODAY" or "Measurement change since" line, on or after that marked day do not read the tagged new-account rise as performance.
@@ -225,7 +232,7 @@ link that lost its suffix still counts. All three tags are the one arm.
   each, from rule 6, and CTR at or above the arm's flight 2 floor, Apps 0.15% and Search 1.0%, the
   floor rule 2 uses). Relay rule 8 and the cost per complete row on the "Tagged so far" line as
   printed; do not compute them.
-- **Printed decision row at the $70 cap:** on an F3 row the report prints `Decision (flight 3
+- **Printed decision row at the arm's cap ($70 Apps, $140 Search, $49.14 Apps Play):** on an F3 row the report prints `Decision (flight 3
   table, spec section 2)` and the verdict word (GO, ITERATE, STOP, INCONCLUSIVE) from the table
   above, judged on the new-account count and on the 20 asks counted from committed-repeat,
   committed-challenge and placement rows only. Flight 2's table (every ask row) still applies to
@@ -421,7 +428,7 @@ routine's; the steps below only make gss-stats read it.
      pulls), run by hand or as scheduled tasks;
    - Mike or the ads agent enabling the campaign in Google Ads, with its end date set.
 3. **Check** (no network): `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run
-   --campaign <id>` leads with the arm's `reportLabel` and shows the 18/35/53/70 ladder (README
+   --campaign <id>` leads with the arm's `reportLabel` and shows the arm's own ladder (25/50/75/100% of its cap in whole dollars: 18/35/53/70 on a $70 cap, 35/70/105/140 on Search's $140; README
    "Adding a new campaign", step 4).
 
 ## Step 0: date, mode, tools, install, preflight

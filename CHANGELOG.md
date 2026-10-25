@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.58.2] — 2026-10-25
+
+### Fixed
+- **Extended-flight dailies label the D+7 verdict interim.** On Search's second week the daily read's rule 9 now says "interim, week 2 running; final on 10-31" instead of reading as final; the week-1 pinned read, Apps and Apps Play are unchanged. Docs now state Search's $140 cap and 35/70/105/140 ladder.
+
 ## [0.58.1] — 2026-10-23
 
 ### Changed

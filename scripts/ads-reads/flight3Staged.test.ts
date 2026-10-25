@@ -104,7 +104,7 @@ describe('flight 3 staged config matches the launch plan', () => {
     expect([s.placementLeakMaxShare, s.ctrFloor, s.killRulesFrom, s.reportLabel, s.auditSlug]).toEqual([0.1, 0.0015, 35, 'F3 apps', 'f3-apps'])
     expect(s.thresholds).toEqual([18, 35, 53, 70])
   })
-  it('search plan settings: channel search, no placements, CTR floor 1%, the same ladder', () => {
+  it('search plan settings: channel search, no placements, CTR floor 1%, the 35/70/105/140 ladder', () => {
     const s = STAGED_FLIGHT_3_PLAN_SETTINGS.search
     expect(s.channel).toBe('search')
     expect(s.approvedPlacements).toBeUndefined()

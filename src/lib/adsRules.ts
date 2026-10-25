@@ -255,9 +255,9 @@ export function allDevicesOf(campaignId: string, plans: Readonly<Record<string, 
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Flight 3's read-plan settings per arm: in ADS_READ_PLANS only once the arm's dates are filled
- * (lib/campaigns.ts STAGED_FLIGHT_3 and STAGED_FLIGHT_3_DATES say why). The same ladder, kill-rule
- * arming and CTR floors as flight 2: the $70 cap in whole
- * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
+ * (lib/campaigns.ts STAGED_FLIGHT_3 and STAGED_FLIGHT_3_DATES say why). The same 25/50/75/100% ladder shape, kill-rule
+ * arming and CTR floors as flight 2: the cap in whole
+ * dollars ($70; Search $140 since its 10-23 extension; the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
  * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
  * a 1.0% CTR floor. Search is a buyer-intent test on ALL devices (Mike, 2026-10-15), so its plan
  * sets `allDevices` and the desktop-only device anomaly is not printed for it. Everything else
