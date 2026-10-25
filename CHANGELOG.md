@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-10-25
+
+### Added
+- **First-finish sign-in ask is counted.** Best Sudoku's new ask after a player's first finished puzzle now counts as a sign-in ask (shown, eligible and outcome rows), with its own "Earned: first finish" line on the eligibility card.
+
 ## [0.58.2] — 2026-10-25
 
 ### Fixed

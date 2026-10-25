@@ -652,7 +652,8 @@ export function nextThreshold(cumulative: number, thresholds: readonly number[])
  * REPLACES the sign-in dialog when it fires — never both. */
 // PROVISIONAL path names: planned, not shipped (best-sudoku docs/design/signin-ask-buyer-intent.md
 // section 7.4 @ ffc46239). /signin-prompt/tutorial and /signin-prompt/streak are being SILENCED by the
-// client but stay here so history keeps counting; committed-repeat and committed-challenge are the new asks.
+// client but stay here so history keeps counting; committed-repeat and committed-challenge are the new asks,
+// and first-finish (Best Sudoku 1.102.0, not shipped: once per device, on the first finished puzzle) is another.
 // The /ab/ask-order/<group>/... twin rows duplicate real rows and are never part of any list here.
 export const ASK_PATHS = [
   '/signin-prompt/placement',
@@ -660,6 +661,7 @@ export const ASK_PATHS = [
   '/signin-prompt/tutorial',
   '/signin-prompt/committed-repeat',
   '/signin-prompt/committed-challenge',
+  '/signin-prompt/first-finish',
   '/promo-first50/shown',
 ] as const
 /** The sign-in asks flight 3's v1.99.0 client can send: placement, committed-repeat and

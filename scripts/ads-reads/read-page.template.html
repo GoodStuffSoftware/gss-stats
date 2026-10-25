@@ -428,7 +428,7 @@ try {
         ["Tagged arrivals (floor)", int(f.arrivals)],
         ["Tagged hits", int(sm.taggedHits)],
         ["Game-screen views", int(f.played)],
-        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, tutorial ${ab["/signin-prompt/tutorial"] ?? 0}, committed-repeat ${ab["/signin-prompt/committed-repeat"] ?? 0}, committed-challenge ${ab["/signin-prompt/committed-challenge"] ?? 0}, promo ${ab["/promo-first50/shown"]})`],
+        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, tutorial ${ab["/signin-prompt/tutorial"] ?? 0}, committed-repeat ${ab["/signin-prompt/committed-repeat"] ?? 0}, committed-challenge ${ab["/signin-prompt/committed-challenge"] ?? 0}, first-finish ${ab["/signin-prompt/first-finish"] ?? 0}, promo ${ab["/promo-first50/shown"]})`],
         ["Accepts", int(sm.accepts.total)],
         ["Dismisses", `sign-in ${sm.dismisses.signinPrompt}, promo ${sm.dismisses.promoFirst50}`],
         ["Auth redirects", int(sm.authRedirect)],
