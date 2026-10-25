@@ -17,6 +17,11 @@
 // coach readouts (coachMeasurementNote): the Coach tips card, the Feature health Coach row and the
 // report's tagged coach line. They stay out of the auth-success caveat and the generic report lines.
 //
+// v1.102.0 Android (authErrorOnly, date null until the Play production go-live time is known): native Google
+// sign-in cancels move from the no-code row to user-cancelled. It feeds only the timeline and the
+// sign-in failure cards (lib/notes.ts 'auth-error-measurement-note'); it stays out of the auth-success caveat, the coach
+// readouts and the generic report lines.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -31,6 +36,8 @@ export interface MeasurementChange {
   coachNote?: string
   /** True when the whole entry is the coach change: it marks the timeline and feeds the coach readouts, but is kept out of the auth-success caveat and the generic report lines. */
   coachOnly?: boolean
+  /** True when the whole entry only moves the sign-in failure rows (/auth/error/<code>): it marks the timeline and feeds the sign-in failure cards' caveat, and is kept out of the auth-success caveat, the coach readouts and the generic report lines. */
+  authErrorOnly?: boolean
 }
 
 export type MarkedChange = MeasurementChange & { dateEt: string }
@@ -58,6 +65,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     note: 'Play release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. Committed 02:09 ET. Public on Play 06:34Z 10-17. Android installs after it may be a mix of 19902 and 19903 until updates spread. Android coach rows after this are a mix of old and new semantics until updates spread',
     coachOnly: true,
   },
+  {
+    id: 'v1.102.0 Android',
+    dateEt: null, // TODO: set to the ET day of the Play production go-live of 1.102.0 once that time is known (reaches users when Google's review clears)
+    note: 'Android 1.102.0: native Google sign-in cancels move from the no-code row (/auth/error/no-code) to /auth/error/user-cancelled, and other native Google failures carry a code such as api-10; older Android installs keep sending no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
+    authErrorOnly: true,
+  },
 ]
 
 /** The Apps-arm Play-install read caveat ends here: v1.99.3 (19903) went public on Google Play between 06:31:47Z and 06:34:32Z on 2026-10-17 (the listing first showed its "What's new" at 06:34:32Z), before flight 3's first serve (12:00 ET 10-17). */
@@ -68,9 +81,14 @@ export function appsPlayCaveatApplies(readStartMs: number | null | undefined): b
   return readStartMs == null || readStartMs < APPS_PLAY_CAVEAT_ENDS_AT_MS
 }
 
-/** The marked changes that move the auth-success counts (everything but the coach-only entries): the caveat under the tagged cards and the generic report lines use these. */
+/** The marked changes that move the auth-success counts (everything but the coach-only and sign-in-failure-only entries): the caveat under the tagged cards and the generic report lines use these. */
 export function authMarkedChanges(): MarkedChange[] {
-  return markedChanges().filter((c) => !c.coachOnly)
+  return markedChanges().filter((c) => !c.coachOnly && !c.authErrorOnly)
+}
+
+/** The marked sign-in-failure-only changes (the no-code to user-cancelled move): the caveat under the sign-in failure cards uses these. */
+export function authErrorMarkedChanges(): MarkedChange[] {
+  return markedChanges().filter((c) => c.authErrorOnly)
 }
 
 /** The changes that have a date, oldest first (a null-dated one is not yet marked). */

@@ -58,7 +58,7 @@ import type { CardSpec } from './metrics/types'
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
-import { MEASUREMENT_CHANGES, authMarkedChanges, markedChanges } from './measurementChanges'
+import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, markedChanges } from './measurementChanges'
 import { etOffsetHours } from './etTime'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
@@ -467,6 +467,19 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     hideable: false,
     activeWhen: () => authMarkedChanges().length > 0,
     appliesTo: (w: AutoCaveatWidget) => cardShowsAuthSuccess(w.card),
+  },
+  // A sign-in-failure-only counting change marked in lib/measurementChanges.ts (Android 1.102.0: cancels
+  // move from the no-code row to user-cancelled): on the cards that show the sign-in failure count only.
+  // Inactive (nothing shows) while no such change has a date.
+  'auth-error-measurement-note': {
+    id: 'auth-error-measurement-note',
+    text: () => `${authErrorMarkedChanges().map((c) => `From ${c.dateEt} (${c.id}): ${c.note}.`).join(' ')} Read the split between codes as moved, not as a change in how many sign-ins fail.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['campaigns', 'overview'],
+    hideable: false,
+    activeWhen: () => authErrorMarkedChanges().length > 0,
+    appliesTo: (w: AutoCaveatWidget) => cardShowsAuthErrors(w.card),
   },
   // The Cost card's cost per auth success (ratio campaign.costPerSignin): its denominator is every
   // auth success, not only new accounts, and from the first-touch change in lib/measurementChanges.ts
@@ -985,6 +998,22 @@ export function cardShowsAuthSuccess(card: Widget['card']): boolean {
   }
   return (Array.isArray(spec.sections) ? spec.sections : []).some(
     (sec) => !!sec && (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && isAuth(it.data)),
+  )
+}
+
+const AUTH_ERROR_METRICS: ReadonlySet<string> = new Set(['bsk.authErrors'])
+
+/** True when a card shows the sign-in failure count anywhere (a section item). Stored data, so every level is checked defensively. */
+export function cardShowsAuthErrors(card: Widget['card']): boolean {
+  const spec = cardSpecOf(card)
+  if (!spec) return false
+  return (Array.isArray(spec.sections) ? spec.sections : []).some(
+    (sec) =>
+      !!sec &&
+      (Array.isArray(sec.items) ? sec.items : []).some((it) => {
+        const m = !!it && !!it.data && typeof it.data === 'object' ? (it.data as { metric?: unknown }).metric : undefined
+        return typeof m === 'string' && AUTH_ERROR_METRICS.has(m)
+      }),
   )
 }
 
