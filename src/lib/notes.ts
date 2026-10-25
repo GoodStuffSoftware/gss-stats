@@ -473,7 +473,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // Inactive (nothing shows) while no such change has a date.
   'auth-error-measurement-note': {
     id: 'auth-error-measurement-note',
-    text: () => `${authErrorMarkedChanges().map((c) => `From ${c.dateEt} (${c.id}): ${c.note}.`).join(' ')} The total here counts every code, so it does not change; only the per-code counts (no-code, user-cancelled, api-<n>) move.`,
+    text: () => `${authErrorMarkedChanges().map((c) => `From ${c.dateEt} (${c.id}): ${c.note}.`).join(' ')} The total here counts every code, so it does not change; only the split between the no-code and user-cancelled counts moves.`,
     kind: 'note',
     severity: 'caveat',
     scopes: ['campaigns', 'overview'],

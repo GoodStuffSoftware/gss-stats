@@ -234,7 +234,8 @@ describe('Android 1.102.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(android.coachOnly).toBeUndefined()
     expect(android.note).toContain('from the no-code row to the user-cancelled row')
     expect(android.note).not.toContain('/auth/') // plain wording: the notes registry guard bans raw beacon paths
-    expect(android.note).toContain('older Android installs keep sending no-code')
+    expect(android.note).toContain('other native Google failures stay in no-code')
+    expect(android.note).toContain('older Android installs keep sending cancels as no-code')
   })
 
   it('undated shows nothing: no marked change, no caveat, no timeline marker', () => {

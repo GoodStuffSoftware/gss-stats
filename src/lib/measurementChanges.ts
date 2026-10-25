@@ -68,7 +68,7 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   {
     id: 'v1.102.0 Android',
     dateEt: null, // TODO: set to the ET day of the Play production go-live of 1.102.0 once that time is known (reaches users when Google's review clears)
-    note: 'Android 1.102.0: native Google sign-in cancels move from the no-code row to the user-cancelled row, and other native Google failures carry a code such as api-10; older Android installs keep sending no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
+    note: 'Android 1.102.0: native Google sign-in cancels move from the no-code row to the user-cancelled row, while other native Google failures stay in no-code; older Android installs keep sending cancels as no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
     authErrorOnly: true,
   },
 ]
