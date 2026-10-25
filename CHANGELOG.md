@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.59.1] — 2026-10-25
+
+### Fixed
+- **First-finish sign-in ask stays counts only.** Its showings, eligibility and outcome rows count in totals and per-ET-day trends on the Pop-ups page and in the morning read, but never in an hour, place or device split; the Overview pop-ups-shown tile leaves them out and says so, and the Overview tap rate, whose accepts still include the ask's taps, carries a caveat that it can read high.
+
 ## [0.59.0] — 2026-10-25
 
 ### Added

@@ -97,3 +97,16 @@ describe('an invalid registration throws', () => {
     await expect(import('./ratios')).rejects.toThrow(/campaign\.installPerPrompt .*invalid: same unit but no declared subset/)
   })
 })
+
+describe('notSubset: a caveated proportion whose numerator is not a subset', () => {
+  const tap = RATIO_DEFS.find((r) => r.id === 'bsk.popupTapRate')!
+  it('bsk.popupTapRate waives the subset, keeps its caveat, and accepts no longer claim to be part of shown', () => {
+    expect(tap).toMatchObject({ kind: 'proportion', notSubset: true, caveats: ['popup-tap-rate-includes-first-finish-taps'] })
+    expect(METRICS.get('bsk.popupAccepts')!.subsetOf).toBeUndefined()
+    expect(ratioVerdict({ kind: 'proportion', num: 'bsk.popupAccepts', den: 'bsk.popupShown' }).ok).toBe(false)
+  })
+  it('is refused without a caveat or on another kind', () => {
+    expect(() => defineRatios([{ ...tap, caveats: undefined }])).toThrow(/notSubset is for a caveated proportion only/)
+    expect(() => defineRatios([{ ...tap, id: 'x.pair', label: 'label.x.pair', kind: 'pair' }])).toThrow(/notSubset is for a caveated proportion only/)
+  })
+})

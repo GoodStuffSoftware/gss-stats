@@ -61,7 +61,8 @@ import {
   type StagedArm,
   type StagedArmDates,
 } from './campaigns'
-import { etOffsetHours } from './etTime'
+import { etDateFast, etOffsetHours, etWallTimeMs } from './etTime'
+import { isSplitRefusedPath } from './splitGuard'
 import type { ReadoutVerdict } from './flight3Rules'
 
 // ── Accounts and campaigns ───────────────────────────────────────────────────────────────
@@ -936,7 +937,9 @@ export interface SiteEventSummary {
   /** Popup shown counts since go-live. */
   shown: Record<OutcomePopup, number>
   /** Shown counts whose hour bucket ENDED at or before `maturedBeforeMs` — the parent side of
-   * a missing-child check, so an outcome window has had time to open. */
+   * a missing-child check, so an outcome window has had time to open. A refused-path row (lib/
+   * splitGuard.ts) carries only its ET day, placed at ET midnight, so it matures only once that
+   * whole ET day has ended. */
   shownMatured: Record<OutcomePopup, number>
   outcomes: OutcomeCounts
   /** Raw /install/pwa-installed | standalone-detected | play-detected — can double-count one
@@ -982,7 +985,7 @@ export function summarizeSiteEvents(
     addP1Row(s.p1, ev, r.count)
     const postFix = rowIsPostInstallFix(r, fixedAtMs)
     if ((INSTALL_GAP_PATHS as readonly string[]).includes(r.path) && !postFix) continue // unmeasured
-    const matured = r.hourStartMs + 3_600_000 <= maturedBeforeMs
+    const matured = refusedRowEndMs(r) <= maturedBeforeMs
     if (ev.kind === 'shown' && (OUTCOME_POPUPS as readonly string[]).includes(ev.family)) {
       const fam = ev.family as OutcomePopup
       s.shown[fam] += r.count
@@ -1004,15 +1007,28 @@ export function summarizeSiteEvents(
   return s
 }
 
+/** When a row's bucket ends: an hour after its start, or, for a refused-path row (lib/
+ * splitGuard.ts: an ET-day total placed at its ET midnight, never an hour), the next ET midnight. */
+function refusedRowEndMs(r: HourPathCount): number {
+  return isSplitRefusedPath(r.path) ? etWallTimeMs(addDays(etDateFast(r.hourStartMs), 1)) : r.hourStartMs + 3_600_000
+}
+
 /** Site-wide asks SHOWN — the same shown-ask set as ASK_PATHS (sign-in placement / streak /
  * tutorial and the first-50 promo that replaces the dialog), exact paths — in hour buckets
  * overlapping [fromMs, toMs): the untagged cross-check for kill rule 3, since the campaign tag
- * only rides beacons for 30 minutes. `paths` narrows the set (siteTutorialAsksShown). */
+ * only rides beacons for 30 minutes. `paths` narrows the set (siteTutorialAsksShown). A
+ * refused-path row (the first-finish ask) is an ET-day total placed at its ET midnight, so it
+ * counts when its ET day overlaps the window: whole days, never dropped by its placement. */
 export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, toMs: number, paths: readonly string[] = ASK_PATHS): number {
   const fromHour = Math.floor(fromMs / 3_600_000) * 3_600_000
+  const fromDay = etDateFast(fromMs)
+  const lastDay = etDateFast(toMs - 1)
   let n = 0
   for (const r of rows) {
-    if (r.hourStartMs < fromHour || r.hourStartMs >= toMs) continue
+    if (isSplitRefusedPath(r.path)) {
+      const day = etDateFast(r.hourStartMs)
+      if (toMs <= fromMs || day < fromDay || day > lastDay) continue
+    } else if (r.hourStartMs < fromHour || r.hourStartMs >= toMs) continue
     if (paths.includes(r.path)) n += r.count
   }
   return n

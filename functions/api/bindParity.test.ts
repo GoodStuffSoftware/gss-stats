@@ -264,13 +264,14 @@ describe('counts only: the hour, place and device splits still refuse every refu
   // Companions are the changed clauses: own hosts, uc list, game prefix, and all three together.
   const COMPANIONS: string[][] = [['referrer'], ['campaignFlight'], ['gameMode'], ['flightDay'], ['referrer', 'gameMode', 'campaignFlight']]
 
-  it('the refused set is exactly the fifteen patterns, and each fixture path is refused', () => {
+  it('the refused set is exactly the eighteen patterns, and each fixture path is refused', () => {
     expect(SPLIT_REFUSED_PATH_PATTERNS).toEqual([
       '/return/%', '/game/complete/%', '/game/complete-deferred/%', '/game/tutorial-complete/%', '/game/start/%',
       '/tour/exit-at/%', '/tour/exit-at', '/tour/skip', '/tour/skip/%', '/coach/dismissed/%', '/coach/closed-at/%', '/coach/shown/%',
       '/ab/ask-order/%',
       '/funnel/%',
       '/game/first-finish',
+      '/signin-prompt/first-finish', '/signin-eligible/earned/first-finish', '/popup-outcome/signin-prompt/first-finish/%',
     ])
     for (const p of REFUSED) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const p of ORDINARY) expect(isSplitRefusedPath(p), p).toBe(false)

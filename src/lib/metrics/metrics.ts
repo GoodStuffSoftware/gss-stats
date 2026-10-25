@@ -565,8 +565,13 @@ export const METRIC_DEFS: MetricDef[] = [
   // bsk.completions, so it can never go below zero or above the site-wide count.
   // Counts only: no hour, place or device split is possible (no such column is read).
   bskMetric({ id: 'bsk.carryOverCompletions', unit: 'completion', untagged: true, path: step('completed'), subsetOf: 'bsk.completions', instrumented: [GAME_COMPLETE] }),
-  bskMetric({ id: 'bsk.popupShown', countsRefused: false, unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
-  bskMetric({ id: 'bsk.popupAccepts', countsRefused: false, unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
+  // Not the refused pop-up rows (lib/splitGuard.ts, the first-finish sign-in ask): this tile keeps its
+  // same-time arrows and live refresh (countsRefused: false), so it leaves them out, like bsk.pageviews.
+  // The pop-up metrics (popup.shown and the rest) count them, over whole ET days.
+  bskMetric({ id: 'bsk.popupShown', countsRefused: false, unit: 'showing', path: (p) => isPopupShown(p) && !isSplitRefusedPath(p), instrumented: [TRACKING], caveats: ['popup-shown-excludes-first-finish-ask'] }),
+  // No subsetOf: the first-finish ask's taps are shared /signin-prompt/accept rows (no reason), so they count
+  // here while bsk.popupShown leaves that ask out; bsk.popupTapRate waives the subset with a caveat.
+  bskMetric({ id: 'bsk.popupAccepts', countsRefused: false, unit: 'showing', path: isPopupAccept, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', countsRefused: false, unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
   // The new/existing/unknown split (A2, review round 2026-09-27): the exact sign-up count the
   // current ad flight is judged on ('new'), plus existing sign-ins and the small unknown/old-

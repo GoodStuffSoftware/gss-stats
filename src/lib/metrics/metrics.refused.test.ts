@@ -37,4 +37,8 @@ describe('MetricDef.countsRefused', () => {
     const noted = all.filter((d) => Object.values(d.windows).includes('bskRangePath') && d.countsRefused !== false).map((d) => d.id)
     expect(noted.sort()).toEqual(['bsk.carryOverCompletions', 'bsk.completions', 'bsk.returnsD1plus', 'bsk.taggedArrivals', 'bsk.tourExitHub', 'bsk.tourExitPreamble', 'bsk.tourExitSection', 'bsk.tutorialFirstRun', 'bsk.tutorialReplay'])
   })
+  it('names the pop-up metrics that carry it on a sub-day page window (popupRangePath, fail-closed: every one without an opt-out)', () => {
+    const noted = all.filter((d) => Object.values(d.windows).includes('popupRangePath') && d.countsRefused !== false).map((d) => d.id)
+    expect(noted.sort()).toEqual(['popup.accepts', 'popup.eligibleBelowFloor', 'popup.eligibleCapped', 'popup.eligibleEarned', 'popup.eligibleEarnedCommittedChallenge', 'popup.eligibleEarnedCommittedRepeat', 'popup.eligibleEarnedFirst50', 'popup.eligibleEarnedFirstFinish', 'popup.eligibleEarnedLegacy', 'popup.eligibleEarnedOther', 'popup.eligibleEarnedPlacement', 'popup.eligibleFinishes', 'popup.eligibleNotNow', 'popup.eligibleStopped', 'popup.eligibleUnearned', 'popup.outcomeInstalled', 'popup.outcomeReturned', 'popup.outcomeSignedIn', 'popup.outcomeStillPlaying', 'popup.shown'])
+  })
 })

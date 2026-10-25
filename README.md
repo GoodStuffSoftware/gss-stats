@@ -862,7 +862,7 @@ part of the rule. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/
 `coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. The same holds for the once-per-device first-finish row (`/game/first-finish`, path family `game-first-finish`, constant `FIRST_FINISH_PATH`): it marks a person who finished a puzzle, a device remembering its own first finish (no id), so it is counts only like `/return`. Its metric components `campaign.firstFinish` (people who finished) and `campaign.costPerFinisher` (stored spend over those rows) are usable in the card and chart editors. The ads morning read prints a WATCH-only line for them (no rule reads it; n/a until the app ships the row) and labels its per-row cost as including repeats. `/api/popups` and the ads-read
-routine's hourly site-event read and per-country read leave them out too, and the routine's tagged read groups them by ET day (never by hour). The guard keys on dimensions and drills;
+routine's hourly site-event read and per-country read leave them out too, and the routine's tagged read groups them by ET day (never by hour). The first-finish sign-in ask is counts only for the same reason (ruling 2026-10-24): its showing (`/signin-prompt/first-finish`), its eligibility row (`/signin-eligible/earned/first-finish`) and its outcomes (`/popup-outcome/signin-prompt/first-finish/<outcome>`) each fire once per device, right after its first finish. They are pop-up rows (`REFUSED_POPUP_PATH_PATTERNS`), so they still count wherever no split is asked: `/api/popups`, the pop-up metrics (`popup.shown`, the sign-in eligibility and outcome metrics, their daily series) and the routine's site-wide event read count them per ET day over whole ET days, never by hour. Every geo hour, place and device split and the routine's per-country read leave them out. The Overview **pop-ups shown** tile (`bsk.popupShown`) keeps its same-time arrows and live refresh, so it leaves the ask out and says so in a caption. Its taps still count in the accepts tile, since every sign-in ask taps the same reasonless `/signin-prompt/accept` row, so the Overview **tap rate** (`bsk.popupTapRate`) is no true share: it carries a caveat that it can read high (even over 100%). The rule still holds when the ask runs in the routine's windowed reads: the rule-3 site-wide ask count and the 24-hour-old prompt count take a refused row as its whole ET day. The Pop-ups page counts it, and its cards say it is counted as whole ET days. The guard keys on dimensions and drills;
 a date range that is not whole ET days is handled by the whole-days rule below. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
 flight-day chart's. A chart that groups by the UTC `date` counts without these rows and carries the
@@ -901,8 +901,9 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B or paid-funnel rows
-here are counted over whole ET days." A chart shows it only when it can count one of those
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel,
+first-finish or first-finish sign-in ask rows here are counted over whole ET days." The pop-up metrics (`popupRangePath`) follow it for the first-finish
+sign-in ask and carry the same note. A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
 game starts are event beacons too, so it shows no caption. Rolling presets (last 24 hours, last
@@ -1717,7 +1718,8 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
 **Privacy: counts only (rows only).**
 
 - A refused row (`SPLIT_REFUSED_PATH_PATTERNS`: `/return`, game-complete, game-complete-deferred,
-  tutorial-complete, tour skip and exit, coach shown, dismissed and closed-at, ask-order A/B, paid funnel, game-start; any path containing a NUL byte counts as
+  tutorial-complete, tour skip and exit, coach shown, dismissed and closed-at, ask-order A/B, paid funnel, game-start, first-finish, and the first-finish
+  sign-in ask's showing, eligibility and outcome rows; any path containing a NUL byte counts as
   refused too, because SQLite LIKE stops reading at a NUL) **never triggers or shifts a ping**: the
   beacon does not call `gss-live` for it. The beacon keeps its own copy of the list, pinned equal to
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
