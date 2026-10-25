@@ -58,6 +58,20 @@ export interface ReleaseMarker {
   major?: boolean
 }
 
+/** A timeline marker that follows a lib/measurementChanges.ts entry: getters, so it tracks that config and is undated (dropped by datedReleases) while the entry's date is null. */
+function measurementMarker(c: (typeof MEASUREMENT_CHANGES)[number]): ReleaseMarker {
+  return {
+    version: c.id,
+    get dateEt() {
+      return c.dateEt
+    },
+    get note() {
+      return c.note
+    },
+    major: true,
+  }
+}
+
 export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.86.4',
@@ -200,18 +214,7 @@ export const RELEASES: ReleaseMarker[] = [
   // (the one place the date is entered; the web and the Play release of v1.99.2). Getters, so an entry
   // follows that config: while its date is null it is undated and datedReleases() drops it, so nothing
   // shows on the timeline.
-  ...MEASUREMENT_CHANGES.map(
-    (c): ReleaseMarker => ({
-      version: c.id,
-      get dateEt() {
-        return c.dateEt
-      },
-      get note() {
-        return c.note
-      },
-      major: true,
-    }),
-  ),
+  ...MEASUREMENT_CHANGES.filter((c) => !c.authErrorOnly).map(measurementMarker),
   // v1.99.4 web is a plain release marker, not a measurement change: it has no count effect (the
   // beacon is unchanged), so it stays out of MEASUREMENT_CHANGES and no caveat or read line follows it.
   // Listed last: newest; the Play entry follows the web one so it wins the same-day tie (it is the later-timed).
@@ -225,6 +228,9 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-18', // promoted to Play production 2026-10-18T15:15:55Z = 11:15:55 ET (full rollout, versionCode 19904)
     note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
   },
+  // The sign-in-failure-only measurement change (Android 1.102.0) is newer than every entry above, so it is listed last
+  // (the array is oldest to newest); it stays undated, and off the timeline, until its date is set in lib/measurementChanges.ts.
+  ...MEASUREMENT_CHANGES.filter((c) => c.authErrorOnly).map(measurementMarker),
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }

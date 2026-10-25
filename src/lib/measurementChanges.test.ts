@@ -25,16 +25,20 @@ const V1993_WEB = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
 const V1993_WEB_DATE = V1993_WEB.dateEt
 const V1993_PLAY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 Play')!
 const V1993_PLAY_DATE = V1993_PLAY.dateEt
+const ANDROID_1102 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.102.0 Android')!
+const ANDROID_1102_DATE = ANDROID_1102.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
   V1993_WEB.dateEt = null
   V1993_PLAY.dateEt = null
+  ANDROID_1102.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
 
 afterEach(() => {
+  ANDROID_1102.dateEt = ANDROID_1102_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -228,8 +232,8 @@ describe('Android 1.102.0 sign-in cancel move (authErrorOnly entry)', () => {
   it('is flagged authErrorOnly and names the no-code to user-cancelled move and the older-install tail', () => {
     expect(android.authErrorOnly).toBe(true)
     expect(android.coachOnly).toBeUndefined()
-    expect(android.note).toContain('/auth/error/no-code')
-    expect(android.note).toContain('/auth/error/user-cancelled')
+    expect(android.note).toContain('from the no-code row to the user-cancelled row')
+    expect(android.note).not.toContain('/auth/') // plain wording: the notes registry guard bans raw beacon paths
     expect(android.note).toContain('older Android installs keep sending no-code')
   })
 
@@ -248,6 +252,7 @@ describe('Android 1.102.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(cardShowsAuthErrors({ preset: 'bsk-kpis' })).toBe(true)
     expect(autoCaveatIds(widget({ dataset: 'overview', card: { preset: 'bsk-kpis' } }))).toContain(AE_NOTE_ID)
     expect(datedReleases().find((r) => r.version === android.id)).toMatchObject({ dateEt: DAY_AE, note: android.note })
+    expect(RELEASES[RELEASES.length - 1].version).toBe(android.id) // listed last, so RELEASES stays oldest to newest
   })
 
   it('dated: stays out of the auth-success caveat, the generic report lines, the coach readouts and the cards without a failure count', () => {
