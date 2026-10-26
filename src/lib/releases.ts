@@ -234,6 +234,12 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-26', // web live 2026-10-26T22:19:36Z = 18:19:36 ET
     note: 'Web live 22:19:36Z 10-26. Starts the first-finish and chunk-reload rows; no change to existing counts.',
   },
+  // Listed after the web entry so the later-timed Play entry wins the same-day tie (Play production 2026-10-26T22:28:21Z).
+  {
+    version: 'v1.103.0 Play',
+    dateEt: '2026-10-26', // promoted to Play production 2026-10-26T22:28:21Z = 18:28:21 ET (full rollout, versionCode 1103000)
+    note: 'Play production 22:28:21Z 10-26 (1103000); old and new Android builds mix until updates spread. Starts the first-finish and chunk-reload rows on Android; no change to existing counts.',
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }

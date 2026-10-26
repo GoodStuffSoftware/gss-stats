@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.60.4] — 2026-10-26
+
+### Added
+- **v1.103.0 Play release marker.** The release timeline and panel now date v1.103.0 Play at 2026-10-26 (promoted 22:28:21Z), the newest release; no change to existing counts.
+
 ## [0.60.3] — 2026-10-26
 
 ### Added
