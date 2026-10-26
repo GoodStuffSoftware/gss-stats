@@ -51,9 +51,9 @@ it('Apps Play (24369758153, a five-day flight) never labels rule 9 interim, on a
 })
 
 describe.each(ARMS)('$label', (a) => {
-  it('is live in the registry with a seven-day week (Search: two weeks) and the read window start + 1 .. end + 1', () => {
+  it('is live in the registry with a seven-day week (Search: three weeks) and the read window start + 1 .. end + 1', () => {
     expect(campaignById(a.id)).toBeTruthy()
-    expect(endOf(a)).toBe(addDays(startOf(a), a.arm === 'search' ? 13 : 6)) // Search was extended a week on 10-23
+    expect(endOf(a)).toBe(addDays(startOf(a), a.arm === 'search' ? 20 : 6)) // Search was extended a week on 10-23 and again on 10-26
     expect(ADS_READ_PLANS[a.id].morningReadFirstEt).toBe(addDays(startOf(a), 1))
     expect(ADS_READ_PLANS[a.id].morningReadLastEt).toBe(addDays(endOf(a), 1))
   })
@@ -81,12 +81,12 @@ describe.each(ARMS)('$label', (a) => {
   it('the read on flight end + 1 (D+7, the last window day) closes the spend at the flight end and still prints the tracking line', async () => {
     const day = addDays(endOf(a), 1)
     const report = await morning(a, day)
-    expect(report).toContain(`morning read, ${day} 08:05 ET`)
+    expect(report).toContain(`morning read, ${day} ${day >= '2026-11-01' ? '07' : '08'}:05 ET`) // the fixture clock is 12:05Z: 08:05 EDT, 07:05 once EST starts on 11-01
     expect(report).toContain(`closed days through ${endOf(a)}`)
     expect(report).toMatch(TRACKING)
     expect(report).toContain('Errors: none')
   })
-  it.runIf(a.arm === 'search')('--window-end pins the week-1 read: on 10-24 the window closes at 2026-10-23 although the registry end is 2026-10-30', async () => {
+  it.runIf(a.arm === 'search')('--window-end pins the week-1 read: on 10-24 the window closes at 2026-10-23 although the registry end is 2026-11-06', async () => {
     const fx = armFixture(a, '2026-10-24')
     const run = (windowEndEt?: string) =>
       runMorningRead(fixtureDeps(fx, true), { campaignId: a.id, releaseHealth: 'auto', healthOnly: false, healthMinParent: MIN_COHORT, healthParentAgeHours: 24, ...(windowEndEt ? { windowEndEt } : {}) })
@@ -94,7 +94,7 @@ describe.each(ARMS)('$label', (a) => {
     expect(pinned).toContain('closed days through 2026-10-23')
     expect(pinned).toContain('Errors: none')
     expect(pinned).not.toContain('not due')
-    await expect(run('2026-10-31')).rejects.toThrow(/--window-end must be/)
+    await expect(run('2026-11-07')).rejects.toThrow(/--window-end must be/)
   })
   describe('rule 9 label', () => {
     const rule9 = (report: string) => report.split(/\r?\n/).find((l) => l.startsWith('Rule 9 · '))!
@@ -102,7 +102,8 @@ describe.each(ARMS)('$label', (a) => {
     it('names rule 9 interim on every unpinned daily of an extended flight from day 8 up to the flight end, with the final read on end + 1; the final read and a pin are plain', async () => {
       const extended = endOf(a) > addDays(startOf(a), 6)
       const finalEt = addDays(endOf(a), 1)
-      for (let d = 1; d <= 16; d++) {
+      if (a.arm === 'search') expect(finalEt).toBe('2026-11-07') // Search's final read is 11-07 (end 11-06 + 1), shown as "final on 11-07"
+      for (let d = 1; d <= 22; d++) {
         const day = addDays(startOf(a), d)
         const inWindow = day <= finalEt
         if (!inWindow) continue

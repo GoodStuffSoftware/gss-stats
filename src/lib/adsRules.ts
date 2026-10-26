@@ -258,7 +258,7 @@ export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Flight 3's read-plan settings per arm: in ADS_READ_PLANS only once the arm's dates are filled
  * (lib/campaigns.ts STAGED_FLIGHT_3 and STAGED_FLIGHT_3_DATES say why). The same 25/50/75/100% ladder shape, kill-rule
  * arming and CTR floors as flight 2: the cap in whole
- * dollars ($70; Search $140 since its 10-23 extension; the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
+ * dollars ($70; Search $140 since its 10-23 extension, $210 since 10-26; the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
  * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
  * a 1.0% CTR floor. Search is a buyer-intent test on ALL devices (Mike, 2026-10-15), so its plan
  * sets `allDevices` and the desktop-only device anomaly is not printed for it. Everything else
@@ -280,7 +280,10 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
   },
   search: {
     channel: 'search',
-    thresholds: [35, 70, 105, 140], // the 25/50/75/100% ladder of the $140 cap (two weeks at $10/day)
+    // The 25/50/75/100% ladder of the $210 cap (three weeks at $10/day). Consumed thresholds are matched by value: the
+    // ladder's only rung below today's spend that is not on the old $140 ladder is $53, which already fired in week 1
+    // (the original $70 ladder, 18/35/53/70), so it cannot re-fire; 105, 158 and 210 are all still ahead.
+    thresholds: [53, 105, 158, 210],
     killRulesFrom: 35, // unchanged from week 1: rules 3 and 6 arm at $35 spend
     ctrFloor: 0.01,
     allDevices: true,

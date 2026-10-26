@@ -238,8 +238,9 @@ function fixture(arm: 'search' | 'apps', opts2: { heroImpr?: number; featImpr?: 
     ads: {
       status: { id, name: `fixture F3 ${arm}`, status: 'ENABLED', servingStatus: 'SERVING', primaryStatus: 'ELIGIBLE', dailyBudget: 10 },
       daily: {
-        '2026-10-17': { costMicros: 18_000_000, impressions: 5000, clicks: 80 },
-        '2026-10-18': { costMicros: 18_000_000, impressions: 5000, clicks: 80 },
+        // Search's first rung is $53 (the $210 cap's quarters), so its two closed days spend $54; Apps' first rung is $35, on $36.
+        '2026-10-17': { costMicros: arm === 'search' ? 27_000_000 : 18_000_000, impressions: 5000, clicks: 80 },
+        '2026-10-18': { costMicros: arm === 'search' ? 27_000_000 : 18_000_000, impressions: 5000, clicks: 80 },
         '2026-10-19': { costMicros: 0, impressions: 0, clicks: 0 },
       },
       placements: [],

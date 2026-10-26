@@ -53,7 +53,7 @@ describe('the flight 3 rules block (Search, flight day 3)', () => {
       'Rule 1 · placement leak: n/a (search campaign)',
       'Rule 2 · CTR: 2.22% (20 clicks / 900 impressions) | threshold at least 1.00% → PASS',
       'Rule 3 · funnel reach: armed at $35.00 | threshold at least 1 tagged sign-in ask → NOT YET',
-      'Rule 4 · hard cap: $17.50 of $140.00 | threshold under $140.00 → PASS',
+      'Rule 4 · hard cap: $17.50 of $210.00 | threshold under $210.00 → PASS',
       'Rule 5 · tracking check: 14 complete rows, 3 sign-in ask rows | threshold 10+ complete rows need 1+ sign-in ask row → PASS',
       'Rule 6 · cost per complete row: $1.25 per complete row ($17.50 / 14 rows) | threshold at most $3.00 a complete row → PASS',
       'Rule 7 · first-move row ratio: n/a (Apps arm only)',

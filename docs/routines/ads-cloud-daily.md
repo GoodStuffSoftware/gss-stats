@@ -78,7 +78,7 @@ plan, rules and checks are in "Flight 3" below. Its two rows are `by-date`: the 
 | Status | Campaign id | Name | Flight start | Flight end | Read window (ET) | Page |
 |---|---|---|---|---|---|---|
 | by-date | 24358792494 | F3 apps (display, Sudoku app placements) | 2026-10-17 | 2026-10-23 | start+1..end+1 | none |
-| by-date | 24358792551 | F3 search (desktop intent) | 2026-10-17 | 2026-10-30 | start+1..end+1 | none |
+| by-date | 24358792551 | F3 search (desktop intent) | 2026-10-17 | 2026-11-06 | start+1..end+1 | none |
 | by-date | 24369758153 | F3 apps play (display, Sudoku app placements, Play direct) | 2026-10-19 | 2026-10-23 | start+1..end+1 | none |
 | past | 24316608605 | F2 apps (display, Sudoku app placements) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
 | past | 24311309184 | F2 search (desktop intent) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
@@ -130,7 +130,7 @@ the release alone). Source: the BSK flight 3 launch plan (desk card ads-f3-16), 
 here; the cold-start notes are in [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
 Everything below is what the routine says and does for an arm once its `by-date` row holds dates;
 while an arm's dates are `-` none of it applies and no part reads, or sends anything about, that
-arm. The ids, tags, $10/day budget, $70 cap (Search $140 since its 10-23 extension) and the read-plan settings are in code
+arm. The ids, tags, $10/day budget, $70 cap (Search $210 since its 10-26 extension to 11-06: $140 on 10-23) and the read-plan settings are in code
 (`STAGED_FLIGHT_3` and `STAGED_FLIGHT_3_DATES` in `src/lib/campaigns.ts`,
 `STAGED_FLIGHT_3_PLAN_SETTINGS` in `src/lib/adsRules.ts`); an arm joins the registry the moment its
 dates are filled. Google Ads is read-only: every rule below only PROPOSES, and Mike decides any pause.
@@ -145,7 +145,7 @@ end date set at build and again at enable).
 | utm | google / display / `sudoku_funnel_f3_apps_hero` and `sudoku_funnel_f3_apps_feat` (plus the bare `sudoku_funnel_f3_apps` as a catch-all) | google / cpc / `sudoku_funnel_f3_search` | google / display / `sudoku_funnel_f3_apps_play`, carried by the Play install referrer (the ad opens the Play listing, no web page) |
 | Report label | `F3 apps` | `F3 search` | `F3 apps play` |
 | Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) | display; the same 17 Android app placements |
-| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $140 cap, 14 days (extended from 10-23 to 10-30 on 10-23, same budget and bid; thresholds 35 / 70 / 105 / 140) | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
+| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $210 cap, 21 days (extended from 10-23 to 10-30 on 10-23 and on to 11-06 on 10-26, same budget and bid; thresholds 53 / 105 / 158 / 210) | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
 | Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day | 2026-10-19, serving from 12:00 ET; ends 2026-10-23 |
 | Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly | the printed device block |
 | Rules that are WATCH | none | none | rules 3, 5, 6 and 7 (every rule that reads tagged app rows); rules 1, 2, 4 and 8 stay real and can PROPOSE PAUSE; rule 9 stays NOT YET to day 8 with the interim tagged first opens and sign-ins beside it |
@@ -214,7 +214,7 @@ link that lost its suffix still counts. All three tags are the one arm.
 - **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
   `committed-challenge`, and placement). Under 20 asks the result is INCONCLUSIVE, whatever the
   new-account count.
-- **Go / iterate / stop (proposals only), judged at the final read on the arm's own cap ($70 Apps, $140 Search, $49.14 Apps Play) (the routine's own D + 7 08:37 read, which comes after the flight ends, stores the arm's readings row but reports nothing; the local gss-ads-f3-final-read task at 07:05 is the one reporter of the verdict):**
+- **Go / iterate / stop (proposals only), judged at the final read on the arm's own cap ($70 Apps, $210 Search, $49.14 Apps Play) (the routine's own D + 7 08:37 read, which comes after the flight ends, stores the arm's readings row but reports nothing; the local gss-ads-f3-final-read task at 07:05 is the one reporter of the verdict):**
 
   | Result | Proposal |
   |---|---|
@@ -223,8 +223,8 @@ link that lost its suffix still counts. All three tags are the one arm.
   | 0 to 1, with 20 or more asks | Stop paid acquisition |
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
-  An arm whose flight runs past its D+7 (Search, 10-17 to 10-30) reads day 8 and later while it is still serving, and those
-  dailies print rule 9 as `D+7 verdict (interim, week 2 running; final on 10-31)`: the word counts rows week 2 is still
+  An arm whose flight runs past its D+7 (Search, 10-17 to 11-06) reads day 8 and later while it is still serving, and those
+  dailies print rule 9 as `D+7 verdict (interim, week 2 running; final on 11-07)`: the word counts rows week 2 is still
   adding to, so it is not the verdict. The date is the end + 1 of the flight end that read sees (the registry end, or the pin when one is given). The `--window-end` pinned week-1 read, the
   read on end + 1, and arms that end at D+7 print the plain `D+7 verdict`.
 
@@ -234,7 +234,7 @@ link that lost its suffix still counts. All three tags are the one arm.
   each, from rule 6, and CTR at or above the arm's flight 2 floor, Apps 0.15% and Search 1.0%, the
   floor rule 2 uses). Relay rule 8 and the cost per complete row on the "Tagged so far" line as
   printed; do not compute them.
-- **Printed decision row at the arm's cap ($70 Apps, $140 Search, $49.14 Apps Play):** on an F3 row the report prints `Decision (flight 3
+- **Printed decision row at the arm's cap ($70 Apps, $210 Search, $49.14 Apps Play):** on an F3 row the report prints `Decision (flight 3
   table, spec section 2)` and the verdict word (GO, ITERATE, STOP, INCONCLUSIVE) from the table
   above, judged on the new-account count and on the 20 asks counted from committed-repeat,
   committed-challenge and placement rows only. Flight 2's table (every ask row) still applies to
@@ -430,7 +430,7 @@ routine's; the steps below only make gss-stats read it.
      pulls), run by hand or as scheduled tasks;
    - Mike or the ads agent enabling the campaign in Google Ads, with its end date set.
 3. **Check** (no network): `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run
-   --campaign <id>` leads with the arm's `reportLabel` and shows the arm's own ladder (25/50/75/100% of its cap in whole dollars: 18/35/53/70 on a $70 cap, 35/70/105/140 on Search's $140; README
+   --campaign <id>` leads with the arm's `reportLabel` and shows the arm's own ladder (25/50/75/100% of its cap in whole dollars: 18/35/53/70 on a $70 cap, 53/105/158/210 on Search's $210; README
    "Adding a new campaign", step 4).
 
 ## Step 0: date, mode, tools, install, preflight

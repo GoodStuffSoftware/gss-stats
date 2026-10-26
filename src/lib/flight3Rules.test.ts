@@ -18,7 +18,8 @@ import {
   type ReadoutVerdict,
   type RuleReadout,
 } from './flight3Rules'
-import type { StagedArm } from './campaigns'
+import { STAGED_FLIGHT_3_DATES, type StagedArm } from './campaigns'
+import { addEtDays } from './overview'
 
 const DAYS = [1, 2, 3, 8] as const
 const ARMS: StagedArm[] = ['search', 'apps']
@@ -311,6 +312,11 @@ describe('rule 9: interim label on an extended flight', () => {
     expect({ ...interim, readouts: interim.readouts.map((r) => (r.n === 9 ? { ...r, name: 'D+7 verdict' } : r)) }).toEqual(plain)
     expect(interim.proposal).toBe(plain.proposal)
     expect(interim.tripped).toEqual(plain.tripped)
+  })
+  it('Search extended to 11-06: the final read is end + 1 = 11-07, so the label reads "final on 11-07"', () => {
+    expect(addEtDays(STAGED_FLIGHT_3_DATES.search.flightEnd!, 1)).toBe('2026-11-07')
+    const name = rule(buildFlight3Rules(input('search', 9, { ...live, interimFinalEt: addEtDays(STAGED_FLIGHT_3_DATES.search.flightEnd!, 1) })), 9).name
+    expect(name).toBe('D+7 verdict (interim, week 2 running; final on 11-07)')
   })
   it('labels the failed-read NO DATA word too', () => {
     expect(rule(buildFlight3Rules(input('search', 8, { signUps: null, interimFinalEt: '2026-10-31' })), 9).name).toBe(LABEL)

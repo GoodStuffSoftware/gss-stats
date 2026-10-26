@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Flight 3 Search runs a third week.** The Search campaign now ends 2026-11-06 (was 10-30) with the cap raised from $140 to $210; budget and bid are unchanged, so the daily read no longer proposes a pause for the old cap or end date, rule 9 stays labelled interim until its final read on 11-07, and the spend thresholds become $53 / $105 / $158 / $210 with no passed threshold firing again.
+
 ## [0.60.0] — 2026-10-26
 
 ### Added
