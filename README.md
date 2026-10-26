@@ -85,8 +85,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   The `v1.103.0 Android` entry (dated 2026-10-26: Play production 22:28:21Z, versionCode 1103000) is
   `authErrorOnly`: native Google sign-in cancels move from the no-code row to the user-cancelled row,
   while older Android installs keep sending cancels as no-code until they update. It adds a dated
-  caveat under the Sign-in failures tile (the only card with the `bsk.authErrors` metric; the total
-  counts every code, so it does not change) and nothing else: no timeline marker of its own (the plain
+  caveat under the card with the Sign-in failures tile (Today at a glance, the only card with the
+  `bsk.authErrors` metric; the total counts every code, so it does not change) and nothing else: no timeline marker of its own (the plain
   `v1.103.0 Play` marker is the one for that release), and never the auth-success caveat, the coach
   readouts or the read reports.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric

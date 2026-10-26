@@ -12,6 +12,7 @@ import {
   coachMeasurementNote,
 } from './measurementChanges'
 import { RELEASES, datedReleases } from './releases'
+import { PRESETS } from './metrics/presets'
 import { autoCaveatIds, cardShowsAuthErrors, cardShowsAuthSuccess, defaultNoteIdsForScope, getNote, isNoteActive, noteRawText } from './notes'
 import { allChartNotes } from './chartNotes'
 import { releaseItems } from './timelineOverlay'
@@ -273,6 +274,15 @@ describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
       expect(cardShowsAuthErrors(w.card), preset).toBe(false)
       expect(autoCaveatIds(w), preset).not.toContain(AE_NOTE_ID)
     }
+    // every preset: only the one with the Sign-in failures tile (bsk.authErrors) shows it, including cards that show other bsk.auth* tiles
+    expect(Object.keys(PRESETS).filter((id) => cardShowsAuthErrors({ preset: id }))).toEqual(['bsk-kpis'])
+    expect(cardShowsAuthErrors({ preset: 'release-before-after' })).toBe(false)
+    const specOf = (metric: unknown) => ({ spec: { v: 1, sections: [{ layout: 'rows', items: [{ id: 'x', data: { metric } }] }] } }) as unknown as Widget['card']
+    expect(cardShowsAuthErrors(specOf('bsk.authErrors'))).toBe(true)
+    expect(cardShowsAuthErrors(specOf('bsk.authRedirects'))).toBe(false)
+    expect(cardShowsAuthErrors(specOf('bsk.authSuccess'))).toBe(false)
+    expect(cardShowsAuthErrors(specOf(42))).toBe(false)
+    expect(cardShowsAuthErrors({ spec: { v: 1, sections: [null, { layout: 'rows', items: [null, { id: 'x' }, { id: 'y', data: null }, { id: 'z', data: 'bsk.authErrors' }] }] } } as unknown as Widget['card'])).toBe(false)
     expect(cardShowsAuthErrors(undefined)).toBe(false)
     expect(cardShowsAuthErrors({ preset: 'no-such-preset' })).toBe(false)
     expect(autoCaveatIds(widget({ type: 'line' }))).not.toContain(AE_NOTE_ID)

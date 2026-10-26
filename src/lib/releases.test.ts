@@ -76,6 +76,7 @@ describe('the flight 3 web releases', () => {
     expect(datedReleases().some((r) => r.version.startsWith('v1.102.0'))).toBe(false)
     expect(datedReleases().find((r) => r.version === 'v1.103.0 Play')).toMatchObject({ dateEt: '2026-10-26' })
     expect(at('v1.103.0 Play')).toBeGreaterThan(at('v1.103.0 web'))
+    expect(datedReleases().find((r) => r.version === 'v1.103.0 Play')!.note).toContain('from the no-code row to the user-cancelled row')
     expect(MEASUREMENT_CHANGES.filter((c) => c.id.startsWith('v1.103') && !c.authErrorOnly)).toEqual([])
     expect(RELEASES.filter((r) => r.version.startsWith('v1.103.0 ')).map((r) => r.version)).toEqual(['v1.103.0 web', 'v1.103.0 Play']) // one Play marker, not two
     expect(at('v1.103.0 web')).toBeGreaterThan(at('v1.99.4 Play'))

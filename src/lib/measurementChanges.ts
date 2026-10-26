@@ -69,7 +69,7 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   {
     id: 'v1.103.0 Android',
     dateEt: '2026-10-26', // 1.103.0 promoted to Play production 2026-10-26T22:28:21Z = 18:28:21 ET (full rollout, versionCode 1103000); 1.102.0 never reached any prod channel. Same day as the plain v1.103.0 Play marker in lib/releases.ts
-    note: 'Android 1.103.0: native Google sign-in cancels move from the no-code row to the user-cancelled row, while other native Google failures stay in no-code; older Android installs keep sending cancels as no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
+    note: 'native Google sign-in cancels on Android move from the no-code row to the user-cancelled row, while other native Google failures stay in no-code; older Android installs keep sending cancels as no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
     authErrorOnly: true,
   },
 ]
