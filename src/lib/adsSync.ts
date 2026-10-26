@@ -29,7 +29,7 @@
 // A run that pulled or read anything appends one ads_sync_runs row (not in --dry-run); a run
 // with nothing due writes nothing at all.
 
-import { CAMPAIGNS, type CampaignFlight } from './campaigns'
+import { CAMPAIGNS, campaignById, type CampaignFlight } from './campaigns'
 import { channelOf, microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import { mergePlacementDayRows, rowsToStoredSpend, type AdsSyncStore, type PlacementDayRow, type StoredDayRow, type SyncRunRecord, type SyncSource, type SyncStatus } from './adsStore'
 import { CLOSED_AFTER_ET, contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
@@ -409,8 +409,12 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
 }
 
 /** Whether a sync pulls a campaign's placements: never for a search campaign (it has none;
- * lib/adsRules.ts channelOf), and never when the caller turned placements off. */
-const pullsPlacements = (campaignId: string, opts: { placements?: boolean }): boolean => opts.placements !== false && channelOf(campaignId) === 'display'
+ * lib/adsRules.ts channelOf), never for a campaign flagged `noPlacements` (an App install
+ * campaign; lib/campaigns.ts), and never when the caller turned placements off. Every other
+ * campaign, with or without a read plan, pulls as before. A skipped pull is not a missing day:
+ * planCampaignSync gets `placements: false`, so missingPlacementDays is empty. */
+export const pullsPlacements = (campaignId: string, opts: { placements?: boolean }): boolean =>
+  opts.placements !== false && channelOf(campaignId) === 'display' && campaignById(campaignId)?.noPlacements !== true
 
 // ── One campaign ──────────────────────────────────────────────────────────────────────────
 const spanOf = (ranges: readonly SyncRange[]): SyncRange | null =>
@@ -784,13 +788,14 @@ export function setBuildSha(sha: string | null | undefined): void {
 /** FNV-1a of the campaign definitions the sync uses, over every field it writes to ads_campaigns
  * (review I1): the dashboard compares it with its own and flags a Worker built from other ones.
  * A non-display campaign's channel (channelOf) is appended to its tuple, since it decides
- * whether the sync pulls placements; a display-only config hashes exactly as before. */
+ * whether the sync pulls placements, and so is `noPlacements`; a display-only config hashes exactly as before. */
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
   const s = JSON.stringify(
     campaigns.map((c) => {
       const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
       const channel = channelOf(c.id)
       if (channel !== 'display') t.push(channel)
+      if (c.noPlacements) t.push('noPlacements')
       return t
     }),
   )

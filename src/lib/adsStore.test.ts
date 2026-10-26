@@ -41,8 +41,10 @@ const rec = (over: Partial<ReadingRecord> = {}): ReadingRecord => ({
 
 describe('write builders (routine side)', () => {
   it('campaign sync upserts every configured campaign with micros money and its kind', () => {
-    const [st, ...more] = campaignSyncStatements(CAMPAIGNS, '2026-09-26T16:00:00Z')
-    expect(more).toEqual([])
+    // 12 binds a row: at most 8 campaigns fit one statement, so a longer registry spans several.
+    const stmts = campaignSyncStatements(CAMPAIGNS, '2026-09-26T16:00:00Z')
+    expect(stmts).toHaveLength(Math.ceil(CAMPAIGNS.length / 8))
+    const st = { sql: stmts[0].sql, binds: stmts.flatMap((x) => x.binds) }
     expect(st.sql).toMatch(/^INSERT INTO ads_campaigns \(/)
     expect(st.sql).toMatch(/ON CONFLICT \(id\) DO UPDATE SET name = excluded\.name/)
     // An unchanged definition is a no-op: the update fires only when a field (not synced_at) differs.

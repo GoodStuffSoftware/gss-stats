@@ -82,6 +82,11 @@ export interface CampaignFlight {
   /** Where the ad sends people: a web page (beacon-measurable) or straight to the Play
    * listing. Synced into the gss-stats-ads `ads_campaigns` table (lib/adsStore.ts). */
   kind: 'web' | 'play-direct'
+  /** True for a campaign that has no placement report at all (an App install campaign): the sync
+   * (lib/adsSync.ts pullsPlacements) skips its group_placement_view pull and never counts a day
+   * as missing a placement pull. Unset (every other campaign) = the pull runs for a display
+   * campaign, exactly as before. Do not set it on a campaign that has stored placement rows. */
+  noPlacements?: boolean
   /** Google Ads daily budget in USD, as built (for pacing lines only). */
   dailyBudgetUsd?: number
   /** Cumulative-spend hard stop in USD, when the build spec set one. */
@@ -323,6 +328,11 @@ export function liveStagedCampaigns(dates: Record<StagedArm, StagedArmDates> = S
 // VERIFIED live 2026-09-25: `campaign='sudoku_tired_of_ads' AND ts >= <flightStart ET
 // midnight>` (no upper bound) → exactly 1,194 tagged hits, 353 tagged arrivals (visitor=
 // 'new') — matches the task brief's numbers exactly; the QA variant is excluded on purpose.
+/** Flight 4 (Android installs) sends no beacon rows, but `ucValues` must never be empty (an empty
+ * array makes the `path IN ()` / `LIKE` SQL in scripts/ads-reads/beacon.ts and lib/metrics/facts.ts
+ * invalid). This placeholder follows the `sudoku_<name>` tag convention and is a tag no link, app
+ * or row carries. */
+export const F4_NO_BEACON_TAG = 'sudoku_f4_android_installs_no_beacon'
 export const CAMPAIGNS: CampaignFlight[] = [
   {
     id: '24215315197',
@@ -400,6 +410,30 @@ export const CAMPAIGNS: CampaignFlight[] = [
     servingHoursEt: [12, 23],
     notes:
       '"Best Sudoku - Search - Desktop intent - F2 Search", utm google / cpc / sudoku_funnel_f2_search, budget resource 15915289115. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); desktop-only search, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). No placements: its read plan has channel search. The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
+  },
+  // ── Flight 4: Android installs, spend-only ──────────────────────────────────────────────
+  // A Google Ads App campaign for the Play app com.bestsudoku.app. Its result is the Play installs
+  // Google reports (conversion action 7756366796); it has no SDK, utm tag or install referrer, so
+  // it writes no beacon rows and Google's counts cannot be joined to the site's own. Registered
+  // spend-only with NO read plan (ADS_READ_PLANS): the morning and post-flight reads and the kill
+  // rules never run on it, and the sync pulls its daily spend but not placements
+  // (noPlacements; lib/adsSync.ts pullsPlacements). The ads lead reads its installs from Google Ads.
+  {
+    id: '24392866056',
+    label: 'Flight 4 — Android installs',
+    ucValues: [F4_NO_BEACON_TAG],
+    flightStart: '2026-10-26',
+    flightStartTimeEt: '12:00', // enabled at noon ET; Google stores the 09:14 creation time (the API takes only a midnight start)
+    flightEnd: '2026-11-02',
+    status: 'active',
+    kind: 'play-direct',
+    dailyBudgetUsd: 10,
+    hardCapUsd: 75,
+    measurement: 'spend-only',
+    noPlacements: true, // an App campaign has no placement report
+    measurabilityNote: 'App install campaign: Google counts the Play installs; it sends no visits to the site, so none of the site\'s own counts include it.',
+    notes:
+      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796): no SDK, no utm tag, no install referrer, so no beacon rows. The tag in ucValues is a placeholder no row carries (it exists only because an empty ucValues breaks the beacon SQL). Spend-only, no read plan: the ads lead reads installs from Google Ads.',
   },
   // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged.
   ...liveStagedCampaigns(),

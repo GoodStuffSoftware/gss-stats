@@ -581,9 +581,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   campaign tag only, with no date-based split — one swappable function decides row
   membership, and known verification/household traffic, lifecycle email and the app's own manual
   production checks (`utm_campaign=manual_check`, `/return/manual_check/` paths) are excluded
-  server-side. One
-  campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
-  at all; it's shown spend-only rather than an empty funnel.
+  server-side. Two
+  campaigns send their ads straight to the Play Store and so have no beacon rows
+  at all (the September Play-direct arm, and Flight 4); each is shown spend-only rather than an
+  empty funnel.
 - **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
   the card picker as the `retention-verdict` preset (a table, one row per campaign arm plus
   "Organic (web)": the verdict, the days 2-7 return rate with its 90% lower and upper bounds,
@@ -1469,6 +1470,23 @@ These lines are report text and data only: no widget, no kill rule, no visitor i
 no hour, place or device split on return, complete, start or tour rows. Tests:
 `playDirect.test.ts` (labels, baseline, lines) and `playDirectArm.test.ts` (a made-up arm read end
 to end).
+
+### Flight 4: an App install campaign, spend-only
+
+**Flight 4 - Android installs** (campaign 24392866056, `kind: 'play-direct'`, `measurement: 'spend-only'`;
+`src/lib/campaigns.ts`) is a Google Ads **App** campaign for the Play app: $10 a day, US/English,
+2026-10-26 (noon ET) to 2026-11-02, about $75 in all. Its result is the Play installs Google reports
+(conversion action 7756366796). It has no SDK, utm tag or install referrer, so it writes **no beacon
+rows**, and Google's install counts cannot be joined to the site's own counts. It is registered
+spend-only with **no read plan** (`ADS_READ_PLANS`): the morning and post-flight reads and the kill
+rules never run on it, and the morning read's default campaign still comes from the read plans only.
+The dashboard shows its spend against the $75 cap; the ads lead reads its installs from Google Ads.
+Its `ucValues` holds one placeholder tag, `sudoku_f4_android_installs_no_beacon` (`F4_NO_BEACON_TAG`),
+that no row carries; it exists only because an empty `ucValues` breaks the beacon SQL. The entry sets
+`noPlacements: true`, so the hourly sync (the `gss-stats-sync` Worker) pulls its daily spend but never
+the placement report (an App campaign has none; the pull would fail and mark the sync stale), and a
+skipped pull is never counted as a missing day. Every other campaign pulls exactly as before.
+Tests: `scripts/ads-reads/f4AndroidArm.test.ts`.
 
 ### Play installs (`ads:play-sync`, table `ads_play_daily`)
 
