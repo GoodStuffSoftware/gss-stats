@@ -10,6 +10,7 @@ import { planCampaignSync, pullsPlacements, syncAdsData, campaignsConfigHash, ty
 import { createSqlAdsStore, type PlacementDayRow } from '../../src/lib/adsStore'
 import { configRuling } from '../../src/lib/metrics/scope'
 import { resolveCampaignId } from './cli'
+import { closedPlayDirectCampaigns } from './playDirect'
 import { openMigratedSqlite, sqliteAdsDb } from './sqliteDb'
 
 const F4 = '24392866056'
@@ -199,7 +200,18 @@ describe('the sync skips F4\'s placements and treats nothing as missing', () => 
     const base = campaignsConfigHash(CAMPAIGNS)
     const without = CAMPAIGNS.map((c) => (c.id === F4 ? { ...c, noPlacements: undefined } : c))
     expect(campaignsConfigHash(without)).not.toBe(base)
-    expect(campaignsConfigHash(CAMPAIGNS.filter((c) => c.id !== F4))).toBe(campaignsConfigHash(CAMPAIGNS.filter((c) => c.id !== F4)))
+    // A campaign without the flag hashes as before: the flag only adds to its own tuple.
+    const others = CAMPAIGNS.filter((c) => c.id !== F4)
+    expect(campaignsConfigHash(others)).toBe(campaignsConfigHash(others.map((c) => ({ ...c, noPlacements: undefined }))))
+  })
+})
+
+describe('F4 is never a baseline twin', () => {
+  it('closedPlayDirectCampaigns leaves F4 out even once it is marked closed, and still finds the September twin', () => {
+    const closedF4: CampaignFlight = { ...f4(), status: 'closed' }
+    const found = closedPlayDirectCampaigns([...CAMPAIGNS.filter((c) => c.id !== F4), closedF4]).map((c) => c.id)
+    expect(found).not.toContain(F4)
+    expect(found).toContain(PLAY_DIRECT_SEPT)
   })
 })
 

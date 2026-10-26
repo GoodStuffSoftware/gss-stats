@@ -91,9 +91,10 @@ export interface PlayDirectBaseline {
   taggedAppRows: 'none'
 }
 
-/** The closed Play-direct campaigns in the registry (found by their kind and status, never by id). */
+/** The closed Play-direct campaigns in the registry (found by their kind and status, never by id). An App install
+ * arm (`noPlacements`, Flight 4) is not one: it has no tagged-twin baseline to print. */
 export function closedPlayDirectCampaigns(campaigns: readonly CampaignFlight[] = CAMPAIGNS): CampaignFlight[] {
-  return campaigns.filter((c) => c.kind === 'play-direct' && c.status === 'closed' && c.flightStart != null)
+  return campaigns.filter((c) => c.kind === 'play-direct' && c.status === 'closed' && c.flightStart != null && !c.noPlacements)
 }
 
 /** Days past a twin's flight end that its utm_campaign rows are still counted (late listing visits and installs; the tag is the twin's alone). */

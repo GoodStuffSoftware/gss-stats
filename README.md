@@ -582,8 +582,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   membership, and known verification/household traffic, lifecycle email and the app's own manual
   production checks (`utm_campaign=manual_check`, `/return/manual_check/` paths) are excluded
   server-side. Two
-  campaigns send their ads straight to the Play Store and so have no beacon rows
-  at all (the September Play-direct arm, and Flight 4); each is shown spend-only rather than an
+  campaigns have no beacon rows at all (the September Play-direct arm, whose ads go straight to the
+  Play Store, and Flight 4, an App install campaign); each is shown spend-only rather than an
   empty funnel.
 - **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
   the card picker as the `retention-verdict` preset (a table, one row per campaign arm plus
@@ -1480,12 +1480,14 @@ to end).
 rows**, and Google's install counts cannot be joined to the site's own counts. It is registered
 spend-only with **no read plan** (`ADS_READ_PLANS`): the morning and post-flight reads and the kill
 rules never run on it, and the morning read's default campaign still comes from the read plans only.
-The dashboard shows its spend against the $75 cap; the ads lead reads its installs from Google Ads.
+The dashboard shows its spend (the $75 cap is in the registry); the ads lead reads its installs from Google Ads.
 Its `ucValues` holds one placeholder tag, `sudoku_f4_android_installs_no_beacon` (`F4_NO_BEACON_TAG`),
 that no row carries; it exists only because an empty `ucValues` breaks the beacon SQL. The entry sets
 `noPlacements: true`, so the hourly sync (the `gss-stats-sync` Worker) pulls its daily spend but never
-the placement report (an App campaign has none; the pull would fail and mark the sync stale), and a
+the placement report (an App campaign has no placement report, so the pull is skipped rather than risked), and a
 skipped pull is never counted as a missing day. Every other campaign pulls exactly as before.
+It is also not a baseline twin: `closedPlayDirectCampaigns` leaves out a `noPlacements` arm, so a later
+Play-direct read never prints it as the September twin once it is marked closed.
 Tests: `scripts/ads-reads/f4AndroidArm.test.ts`.
 
 ### Play installs (`ads:play-sync`, table `ads_play_daily`)
