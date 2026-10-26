@@ -119,7 +119,7 @@ describe('the sync skips F4\'s placements and treats nothing as missing', () => 
     expect(pullsPlacements(PLAY_DIRECT_SEPT, {})).toBe(true) // closed Play-direct Display campaign with stored placements: unchanged
     expect(pullsPlacements(ANDROID_LAUNCH, { placements: false })).toBe(false)
     CAMPAIGNS.push(testFlight(DISPLAY_NO_PLAN), testFlight(DISPLAY_PLAN))
-    ADS_READ_PLANS[DISPLAY_PLAN] = buildReadPlan(DISPLAY_PLAN, { thresholds: [18, 35, 53, 70], killRulesFrom: 35, placementLeakMaxShare: 0.1, ctrFloor: 0.0015, approvedPlacements: RETEST_APPROVED_PLACEMENTS, morningReadFirstEt: '2026-10-27', morningReadLastEt: '2026-11-03' })
+    ADS_READ_PLANS[DISPLAY_PLAN] = buildReadPlan(DISPLAY_PLAN, { thresholds: [18, 35, 53, 70], killRulesFrom: 35, placementLeakMaxShare: 0.1, ctrFloor: 0.0015, approvedPlacements: RETEST_APPROVED_PLACEMENTS, morningReadFirstEt: '2026-10-27', morningReadLastEt: '2026-11-03', reportLabel: 'Display plan test', auditSlug: 'display-plan-test' })
     expect(pullsPlacements(DISPLAY_NO_PLAN, {})).toBe(true)
     expect(pullsPlacements(DISPLAY_PLAN, {})).toBe(true)
   })
