@@ -896,7 +896,7 @@ export interface MorningOptions {
   healthOnly: boolean
   healthMinParent: number
   healthParentAgeHours: number
-  /** Pin the read window's last ET day (YYYY-MM-DD) before the registered flight end: every window and spend cut-off treats that day as the flight end. For a week-1 read of an arm whose end was extended (F3 Search, 10-23 -> 10-30). Unset = the registry's end. */
+  /** Pin the read window's last ET day (YYYY-MM-DD) before the registered flight end: every window and spend cut-off treats that day as the flight end. For a week-1 read of an arm whose end was extended (F3 Search, 10-23 -> 10-30 -> 11-06). Unset = the registry's end. */
   windowEndEt?: string
 }
 export interface MorningResult {
