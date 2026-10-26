@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-10-26
+
 ### Added
 - **Flight 4 (Android installs) is registered as a spend-only arm.** The new App install campaign shows its spend; its installs are Google's own count, so no site count includes it. It has no read plan, so the morning and post-flight reads and the kill rules never run on it, and the hourly sync pulls its spend but not placements.
 
