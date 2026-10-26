@@ -225,6 +225,15 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-18', // promoted to Play production 2026-10-18T15:15:55Z = 11:15:55 ET (full rollout, versionCode 19904)
     note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
   },
+  // v1.103.0 web (1.102.0 never reached prod; 1.103.0 carries its paths) starts the first-finish beacons
+  // (/game/first-finish, /signin-prompt/first-finish, /signin-eligible/earned/first-finish,
+  // /popup-outcome/signin-prompt/first-finish/<outcome>) and /app/error/chunk-reload. A plain marker, not a
+  // measurement change: nothing already counted changes, the new rows just begin. No Play entry: Android is not live yet.
+  {
+    version: 'v1.103.0 web',
+    dateEt: '2026-10-26', // web live 2026-10-26T22:19:36Z = 18:19:36 ET
+    note: 'Web live 22:19:36Z 10-26. Starts the first-finish and chunk-reload rows; no change to existing counts.',
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }

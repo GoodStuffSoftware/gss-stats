@@ -70,7 +70,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   no app-version column; major releases get a labelled line, minor ones a short tick). The v1.99.1
   web release (live 2026-10-16 21:07Z) is a labelled marker that carries the v1.99.0 content, since
   v1.99.0 never went live on its own and so has no marker; the release panel takes the newest
-  release, v1.99.2 on that same day. The one Play-store marker is `v1.99.2 Play` (2026-10-17: committed to Play production at 22:49 ET 10-16, reaching users once Google's review clears). The `v1.99.4 web` (2026-10-18: live 14:57:49Z) and `v1.99.4 Play` (promoted 15:15:55Z, 19904) markers are plain release markers in `releases.ts`, not measurement changes: the beacon is unchanged.
+  release, v1.99.2 on that same day. The one Play-store marker is `v1.99.2 Play` (2026-10-17: committed to Play production at 22:49 ET 10-16, reaching users once Google's review clears). The `v1.99.4 web` (2026-10-18: live 14:57:49Z) and `v1.99.4 Play` (promoted 15:15:55Z, 19904) markers are plain release markers in `releases.ts`, not measurement changes: the beacon is unchanged. The `v1.103.0 web` marker (2026-10-26: live 22:19:36Z) is likewise plain; it is when the first-finish and chunk-reload rows begin, and there is no Play marker until Android ships.
   [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
   changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
   version is live (dated 2026-10-16 for the web). The Play release of v1.99.2 is a
