@@ -9,7 +9,7 @@ PROPOSAL awaiting Mike on the BSK Decision Desk
 2026-10-15: the launch plan is card ads-f3-16 (two arms, Apps and Search, each starting with its
 own release landing). In gss-stats each arm is activated by its dates alone: its ids, tags, budget, cap and
 read-plan settings are in code, and it joins the registry once `STAGED_FLIGHT_3_DATES` holds its
-flight start and end (both arms: 2026-10-17..2026-10-23; Apps started ahead of the Play release). Its LEGS rows in the runbook
+flight start and end (Apps: 2026-10-17..2026-10-23, started ahead of the Play release; Search: 2026-10-17..2026-11-06 with a $210 cap, extended 10-23 and 10-26). Its LEGS rows in the runbook
 are `by-date`.
 The read plan, rules, checks and the activation steps are in
 [docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "Flight 3"; the section
@@ -147,7 +147,7 @@ Registered by date. The ids are in code already; the only edit is each arm's two
 manual steps listed in [docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "To activate flight 3":
 
 - `src/lib/campaigns.ts`: `STAGED_FLIGHT_3_DATES.<arm>` `flightStart` and `flightEnd` (both arms are
-  filled, 2026-10-17..2026-10-23). Filling both registers the arm and its read plan.
+  filled: Apps 2026-10-17..2026-10-23; Search 2026-10-17..2026-11-06, $210 cap, extended 10-23 and 10-26). Filling both registers the arm and its read plan.
 - A `by-date` row in the Legs table of the runbook, with the same two dates (a test fails if they
   differ). Its post-flight reads (wrapup on flight end + 7, day15 on flight end + 15) are derived.
 - Not driven by a date: the D + 7 07:05 ET final read, the D + 21 and D + 35 purchase reads, and

@@ -318,6 +318,14 @@ describe('rule 9: interim label on an extended flight', () => {
     const name = rule(buildFlight3Rules(input('search', 9, { ...live, interimFinalEt: addEtDays(STAGED_FLIGHT_3_DATES.search.flightEnd!, 1) })), 9).name
     expect(name).toBe('D+7 verdict (interim, week 2 running; final on 11-07)')
   })
+  it('week follows the read day: 10-24..10-30 (days 8-14) say week 2, 10-31..11-06 (days 15-21) say week 3', () => {
+    const D = STAGED_FLIGHT_3_DATES.search.flightStart!
+    const label = (date: string) => rule(buildFlight3Rules(input('search', flightDayOf(D, date), { ...live, interimFinalEt: '2026-11-07' })), 9).name
+    expect(label('2026-10-24')).toBe('D+7 verdict (interim, week 2 running; final on 11-07)')
+    expect(label('2026-10-30')).toBe('D+7 verdict (interim, week 2 running; final on 11-07)')
+    expect(label('2026-10-31')).toBe('D+7 verdict (interim, week 3 running; final on 11-07)')
+    expect(label('2026-11-06')).toBe('D+7 verdict (interim, week 3 running; final on 11-07)')
+  })
   it('labels the failed-read NO DATA word too', () => {
     expect(rule(buildFlight3Rules(input('search', 8, { signUps: null, interimFinalEt: '2026-10-31' })), 9).name).toBe(LABEL)
   })

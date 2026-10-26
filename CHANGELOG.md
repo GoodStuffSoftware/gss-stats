@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Flight 3 Search's interim label follows the running week.** Rule 9 on the daily read said "week 2 running" for the whole extended flight; it now says week 2 through 10-30 and week 3 from 10-31, with the final read still on 11-07.
+
 ## [0.60.1] — 2026-10-26
 
 ### Changed

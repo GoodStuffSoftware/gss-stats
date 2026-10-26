@@ -39,8 +39,11 @@ export const F3_ITERATE_MIN = 2
 export const F3_JUDGE_FROM_DAY = 3
 /** First flight day whose read states the D+7 verdict (the final read, flight end + 1 = day 8). */
 export const F3_VERDICT_FROM_DAY = 8
+/** The running week of a flight day (days 1-7 = week 1, 8-14 = week 2, 15-21 = week 3). The caller sets the interim label only while the flight
+ * is still serving (flight day <= the last flight day), so the week never passes the arm's last serving week. */
+export const flightWeekOf = (flightDay: number): number => Math.floor((flightDay - 1) / 7) + 1
 /** Rule 9's name suffix on an unpinned daily read of an extended flight that is still running past its D+7 day. */
-export const F3_INTERIM_LABEL = 'interim, week 2 running'
+export const f3InterimLabel = (flightDay: number): string => `interim, week ${flightWeekOf(flightDay)} running`
 
 /** Baselines printed beside each arm's Spend line (stats-requirements spec section 1): what the earlier
  * flights paid per tagged ARRIVAL (not per click), and the F2 Apps first-move row ratio rule 7 uses. A
@@ -339,8 +342,8 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     const interim = playDirectArm
       ? `; interim, tagged first opens (/return/<uc>/d0): ${pd?.d0Rows ?? 'not read'}, tagged sign-ins (/auth/success/*/new): ${i.signUps ? i.signUps.count : 'not read'}; ${F3_PLAY_DIRECT_INSTALL_VERDICT_TEXT}`
       : ''
-    // An extended flight reads day 8+ before its end: the word counts rows that week 2 is still adding to, so it is labelled interim.
-    const name = i.interimFinalEt && day >= F3_VERDICT_FROM_DAY ? `D+7 verdict (${F3_INTERIM_LABEL}; final on ${i.interimFinalEt.slice(5)})` : 'D+7 verdict'
+    // An extended flight reads day 8+ before its end: the word counts rows that the running week is still adding to, so it is labelled interim.
+    const name = i.interimFinalEt && day >= F3_VERDICT_FROM_DAY ? `D+7 verdict (${f3InterimLabel(day)}; final on ${i.interimFinalEt.slice(5)})` : 'D+7 verdict'
     const threshold = `5+ new accounts go, 2-4 iterate, 0-1 stop; under ${F3_VALIDITY_ASKS} asks inconclusive`
     if (!t || !i.signUps) readouts.push({ n: 9, name, number: `tagged read failed${interim}`, threshold, verdict: day >= F3_VERDICT_FROM_DAY ? 'NO DATA' : 'NOT YET' })
     else {

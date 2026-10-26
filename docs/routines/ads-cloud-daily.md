@@ -192,7 +192,7 @@ link that lost its suffix still counts. All three tags are the one arm.
     day); rule 2 (CTR) arms from day 3 too. Rule 9
     reads NOT YET with the running figure ("the table would say ...") until day 8, where it states the
     verdict word from the table below. On an arm whose flight runs past day 7 (Search) that word is the
-    interim `D+7 verdict (interim, week 2 running; final on <end + 1>)` on days 8 to the flight end, and
+    interim `D+7 verdict (interim, week <n> running; final on <end + 1>)` (week 2 on days 8-14, week 3 on days 15-21) on days 8 to the flight end, and
     the verdict proper on the read at end + 1.
   - **NO DATA** means the count could not be read or is too small to judge; it is never a pass and
     never a trip. A printed 0 is a true 0.
@@ -224,7 +224,7 @@ link that lost its suffix still counts. All three tags are the one arm.
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
   An arm whose flight runs past its D+7 (Search, 10-17 to 11-06) reads day 8 and later while it is still serving, and those
-  dailies print rule 9 as `D+7 verdict (interim, week 2 running; final on 11-07)`: the word counts rows week 2 is still
+  dailies print rule 9 as `D+7 verdict (interim, week 2 running; final on 11-07)` (10-24 to 10-30), then `week 3 running` (10-31 to 11-06): the word counts rows the running week is still
   adding to, so it is not the verdict. The date is the end + 1 of the flight end that read sees (the registry end, or the pin when one is given). The `--window-end` pinned week-1 read, the
   read on end + 1, and arms that end at D+7 print the plain `D+7 verdict`.
 

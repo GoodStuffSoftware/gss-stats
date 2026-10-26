@@ -98,7 +98,7 @@ describe.each(ARMS)('$label', (a) => {
   })
   describe('rule 9 label', () => {
     const rule9 = (report: string) => report.split(/\r?\n/).find((l) => l.startsWith('Rule 9 · '))!
-    const INTERIM = /^Rule 9 · D\+7 verdict \(interim, week 2 running; final on (\d\d-\d\d)\)/
+    const INTERIM = /^Rule 9 · D\+7 verdict \(interim, week (\d) running; final on (\d\d-\d\d)\)/
     it('names rule 9 interim on every unpinned daily of an extended flight from day 8 up to the flight end, with the final read on end + 1; the final read and a pin are plain', async () => {
       const extended = endOf(a) > addDays(startOf(a), 6)
       const finalEt = addDays(endOf(a), 1)
@@ -110,7 +110,8 @@ describe.each(ARMS)('$label', (a) => {
         const line = rule9(await morning(a, day))
         if (extended && d >= 7 && day <= endOf(a)) {
           expect(line, day).toMatch(INTERIM)
-          expect(line.match(INTERIM)![1], day).toBe(finalEt.slice(5))
+          expect(line.match(INTERIM)![2], day).toBe(finalEt.slice(5))
+          expect(line.match(INTERIM)![1], day).toBe(String(Math.floor(d / 7) + 1)) // week 2 on 10-24..10-30, week 3 from 10-31
         } else expect(line, day).toMatch(/^Rule 9 · D\+7 verdict: /)
       }
     })
