@@ -71,12 +71,13 @@ describe('the flight 3 web releases', () => {
     expect(releaseSubjectOn('2026-10-27')?.version).toBe('v1.99.4 Play')
     expect(releaseSubjectOn('2026-10-28')?.version).toBe('v1.103.0 Play')
   })
-  it('v1.103.0 web and v1.103.0 Play are plain markers dated 2026-10-26 (web 22:19:36Z, Play 22:28:21Z; Play is newest), with no v1.102.0 entry and no measurement change', () => {
+  it('v1.103.0 web and v1.103.0 Play are plain markers dated 2026-10-26 (web 22:19:36Z, Play 22:28:21Z; Play is newest), with no v1.102.0 entry and no coach or counting measurement change (the Android sign-in cancel entry is authErrorOnly and mints no marker)', () => {
     expect(datedReleases().find((r) => r.version === 'v1.103.0 web')).toMatchObject({ dateEt: '2026-10-26' })
     expect(datedReleases().some((r) => r.version.startsWith('v1.102.0'))).toBe(false)
     expect(datedReleases().find((r) => r.version === 'v1.103.0 Play')).toMatchObject({ dateEt: '2026-10-26' })
     expect(at('v1.103.0 Play')).toBeGreaterThan(at('v1.103.0 web'))
-    expect(MEASUREMENT_CHANGES.some((c) => c.id.startsWith('v1.103'))).toBe(false)
+    expect(MEASUREMENT_CHANGES.filter((c) => c.id.startsWith('v1.103') && !c.authErrorOnly)).toEqual([])
+    expect(RELEASES.filter((r) => r.version.startsWith('v1.103.0 ')).map((r) => r.version)).toEqual(['v1.103.0 web', 'v1.103.0 Play']) // one Play marker, not two
     expect(at('v1.103.0 web')).toBeGreaterThan(at('v1.99.4 Play'))
   })
   it('v1.99.4 web is a plain marker dated 2026-10-18 (live 14:57:49Z, rules 14:58:51Z), not a measurement change', () => {

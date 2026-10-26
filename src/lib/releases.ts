@@ -199,8 +199,9 @@ export const RELEASES: ReleaseMarker[] = [
   // Measurement changes, not features: each one's date and note come from lib/measurementChanges.ts
   // (the one place the date is entered; the web and the Play release of v1.99.2). Getters, so an entry
   // follows that config: while its date is null it is undated and datedReleases() drops it, so nothing
-  // shows on the timeline.
-  ...MEASUREMENT_CHANGES.map(
+  // shows on the timeline. An authErrorOnly entry (v1.103.0 Android) mints no marker: it is the same
+  // release as the plain v1.103.0 Play marker below, and the timeline shows that release once.
+  ...MEASUREMENT_CHANGES.filter((c) => !c.authErrorOnly).map(
     (c): ReleaseMarker => ({
       version: c.id,
       get dateEt() {
@@ -228,7 +229,7 @@ export const RELEASES: ReleaseMarker[] = [
   // v1.103.0 web (1.102.0 never reached prod; 1.103.0 carries its paths) starts the first-finish beacons
   // (/game/first-finish, /signin-prompt/first-finish, /signin-eligible/earned/first-finish,
   // /popup-outcome/signin-prompt/first-finish/<outcome>) and /app/error/chunk-reload. A plain marker, not a
-  // measurement change: nothing already counted changes, the new rows just begin. No Play entry: Android is not live yet.
+  // measurement change: nothing already counted changes, the new rows just begin. The Android sign-in cancel move is an authErrorOnly entry in lib/measurementChanges.ts that adds a caveat under the Sign-in failures tile and no marker.
   {
     version: 'v1.103.0 web',
     dateEt: '2026-10-26', // web live 2026-10-26T22:19:36Z = 18:19:36 ET
@@ -238,7 +239,7 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.103.0 Play',
     dateEt: '2026-10-26', // promoted to Play production 2026-10-26T22:28:21Z = 18:28:21 ET (full rollout, versionCode 1103000)
-    note: 'Play production 22:28:21Z 10-26 (1103000); old and new Android builds mix until updates spread. Starts the first-finish and chunk-reload rows on Android; no change to existing counts.',
+    note: 'Play production 22:28:21Z 10-26 (1103000); old and new Android builds mix until updates spread. Starts the first-finish and chunk-reload rows on Android; native Google sign-in cancels move from the no-code row to the user-cancelled row (see the Sign-in failures note).',
   },
 ]
 

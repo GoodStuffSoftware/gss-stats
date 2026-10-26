@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Android sign-in cancels get a note on Sign-in failures.** From 2026-10-26 (Android 1.103.0) the tile carries a dated caveat that native Google sign-in cancels move from the no-code row to the user-cancelled row; the total does not change, and the release keeps its one v1.103.0 Play timeline marker.
+
 ## [0.60.4] — 2026-10-26
 
 ### Added

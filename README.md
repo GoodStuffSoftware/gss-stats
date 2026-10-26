@@ -82,6 +82,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   separate `v1.99.3 web` entry (dated 2026-10-17: live 05:58:55Z, 01:58 ET, before the first flight-3 serve; its note also lists the release's reset/duplicate fix, cross-device pop-up notices, no mid-game reloads and the save after email verification, and says notes-tip completions are not counted after it) plus a `v1.99.3 Play` entry (both coach-only; the Play one is dated 2026-10-17, promoted to production 06:09:41Z = 02:09 ET and public on Google Play 06:34Z 10-17, and carries no install caveat; Android beacons carry no app version, so Android coach rows after it mix old and new semantics until updates spread): it marks the timeline
   and shows only on the coach readouts (Coach tips card, Feature health Coach row, the report's
   tagged coach line), never under the auth-success cards.
+  The `v1.103.0 Android` entry (dated 2026-10-26: Play production 22:28:21Z, versionCode 1103000) is
+  `authErrorOnly`: native Google sign-in cancels move from the no-code row to the user-cancelled row,
+  while older Android installs keep sending cancels as no-code until they update. It adds a dated
+  caveat under the Sign-in failures tile (the only card with the `bsk.authErrors` metric; the total
+  counts every code, so it does not change) and nothing else: no timeline marker of its own (the plain
+  `v1.103.0 Play` marker is the one for that release), and never the auth-success caveat, the coach
+  readouts or the read reports.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional

@@ -4,13 +4,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   MEASUREMENT_CHANGES,
+  authMarkedChanges,
   markedChanges,
   measurementNoteOn,
   measurementNoteSince,
   measurementReportLines,
+  coachMeasurementNote,
 } from './measurementChanges'
 import { RELEASES, datedReleases } from './releases'
-import { autoCaveatIds, cardShowsAuthSuccess, defaultNoteIdsForScope, getNote, isNoteActive, noteRawText } from './notes'
+import { autoCaveatIds, cardShowsAuthErrors, cardShowsAuthSuccess, defaultNoteIdsForScope, getNote, isNoteActive, noteRawText } from './notes'
 import { allChartNotes } from './chartNotes'
 import { releaseItems } from './timelineOverlay'
 import type { Widget } from '../types'
@@ -23,16 +25,20 @@ const V1993_WEB = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
 const V1993_WEB_DATE = V1993_WEB.dateEt
 const V1993_PLAY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 Play')!
 const V1993_PLAY_DATE = V1993_PLAY.dateEt
+const ANDROID_1103 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.103.0 Android')!
+const ANDROID_1103_DATE = ANDROID_1103.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
   V1993_WEB.dateEt = null
   V1993_PLAY.dateEt = null
+  ANDROID_1103.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
 
 afterEach(() => {
+  ANDROID_1103.dateEt = ANDROID_1103_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -211,5 +217,64 @@ describe('v1.99.3 Play caption', () => {
   it('says it was public on Play 06:34Z 10-17, keeps the coach mixed-semantics sentence', () => {
     expect(V1993_PLAY.note).toContain('Public on Play 06:34Z 10-17.')
     expect(V1993_PLAY.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
+  })
+})
+
+describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
+  const android = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.103.0 Android')!
+  const ANDROID_SHIPPED = android.dateEt
+  const AE_NOTE_ID = 'auth-error-measurement-note'
+  const DAY_AE = '2099-02-01'
+  afterEach(() => {
+    android.dateEt = ANDROID_SHIPPED
+  })
+
+  it('is flagged authErrorOnly and names the no-code to user-cancelled move and the older-install tail', () => {
+    expect(android.authErrorOnly).toBe(true)
+    expect(android.coachOnly).toBeUndefined()
+    expect(android.note).toContain('from the no-code row to the user-cancelled row')
+    expect(android.note).not.toContain('/auth/') // plain wording: the notes registry guard bans raw beacon paths
+    expect(android.note).toContain('older Android installs keep sending cancels as no-code')
+  })
+
+  it('is dated the same day as the plain v1.103.0 Play marker (2026-10-26), which is the one timeline marker for the release', () => {
+    expect(ANDROID_SHIPPED).toBe('2026-10-26')
+    expect(ANDROID_SHIPPED).toBe(RELEASES.find((r) => r.version === 'v1.103.0 Play')!.dateEt)
+  })
+
+  it('undated shows nothing: no marked change and no caveat', () => {
+    android.dateEt = null
+    expect(markedChanges().some((c) => c.id === android.id)).toBe(false)
+    expect(isNoteActive(AE_NOTE_ID)).toBe(false)
+    expect(autoCaveatIds(widget({ dataset: 'overview', card: { preset: 'bsk-kpis' } }))).not.toContain(AE_NOTE_ID)
+  })
+
+  it('dated: the caveat shows on the sign-in failure cards from its day, and the timeline gets no second marker', () => {
+    android.dateEt = DAY_AE
+    expect(isNoteActive(AE_NOTE_ID)).toBe(true)
+    expect(noteRawText(AE_NOTE_ID)).toContain(`From ${DAY_AE} (${android.id}): ${android.note}.`)
+    expect(cardShowsAuthErrors({ preset: 'bsk-kpis' })).toBe(true)
+    expect(autoCaveatIds(widget({ dataset: 'overview', card: { preset: 'bsk-kpis' } }))).toContain(AE_NOTE_ID)
+    // One marker per release: the entry mints none, so the dated timeline never lists it and the Play marker stays newest.
+    expect(RELEASES.some((r) => r.version === android.id)).toBe(false)
+    expect(datedReleases().some((r) => r.version === android.id)).toBe(false)
+    expect(datedReleases().filter((r) => r.version.startsWith('v1.103.0')).map((r) => r.version)).toEqual(['v1.103.0 web', 'v1.103.0 Play'])
+    expect(RELEASES[RELEASES.length - 1].version).toBe('v1.103.0 Play')
+  })
+
+  it('dated: stays out of the auth-success caveat, the generic report lines, the coach readouts and the cards without a failure count', () => {
+    android.dateEt = DAY_AE
+    expect(authMarkedChanges().some((c) => c.id === android.id)).toBe(false)
+    expect(noteRawText('measurement-change-note')).not.toContain(android.id)
+    expect(measurementReportLines('2099-02-10').join(' ')).not.toContain(android.id)
+    expect(coachMeasurementNote('2099-02-10') ?? '').not.toContain(android.id)
+    for (const preset of ['campaign-scorecard', 'campaign-funnel', 'campaign-returns', 'campaign-cost', 'campaign-f3-daily']) {
+      const w = widget({ card: { preset } })
+      expect(cardShowsAuthErrors(w.card), preset).toBe(false)
+      expect(autoCaveatIds(w), preset).not.toContain(AE_NOTE_ID)
+    }
+    expect(cardShowsAuthErrors(undefined)).toBe(false)
+    expect(cardShowsAuthErrors({ preset: 'no-such-preset' })).toBe(false)
+    expect(autoCaveatIds(widget({ type: 'line' }))).not.toContain(AE_NOTE_ID)
   })
 })
