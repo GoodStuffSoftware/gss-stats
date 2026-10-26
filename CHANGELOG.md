@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.60.3] — 2026-10-26
+
 ### Added
 - **v1.103.0 web release marker.** The release timeline and panel now date v1.103.0 web at 2026-10-26 (live 22:19:36Z), when the first-finish and chunk-reload rows begin; no change to existing counts.
 
