@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.61.0] — 2026-10-27
+
 ### Added
 - **Sparkline day list in the card builder.** A sparkline item now has a "List the days" checkbox that prints the latest days with their counts under the line.
 - **Add and remove captions on a card.** The card builder's custom mode has an "Add a caption" picker and a Remove button on every caption, so a card's notes are no longer fixed by its preset.
