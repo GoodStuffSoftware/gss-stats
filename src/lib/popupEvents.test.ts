@@ -823,6 +823,18 @@ describe('aggregatePopupRows', () => {
     expect(computePopupRate(measuredAgg, noShown).value).toBeNull()
   })
 
+  it('computePopupRate: the upsell tap rate counts accept-signin taps too (accept alone stays 2)', () => {
+    const upsellRows: HourPathCount[] = [
+      { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/upsell/shown/cadence', count: 12 },
+      { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/upsell/accept/cadence', count: 2 },
+      { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/upsell/accept-signin/cadence', count: 3 },
+    ]
+    const a = aggregatePopupRows(upsellRows, '2026-01-15')
+    const tap = POPUP_RATE_SPECS.find((s) => s.key === 'upsell:tap')!
+    expect(computePopupRate(a, tap)).toEqual({ value: 5 / 12, insufficientCohort: false, numerator: 5, denominator: 12 })
+    expect(measuredCoarseCount(a, 'upsell', 'accept')).toBe(2)
+  })
+
   it('an empty aggregate renders every rate as null, never 0/NaN', () => {
     const empty = aggregatePopupRows([])
     for (const spec of POPUP_RATE_SPECS) expect(computePopupRate(empty, spec).value).toBeNull()

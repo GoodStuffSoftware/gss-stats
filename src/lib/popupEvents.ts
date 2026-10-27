@@ -1240,7 +1240,10 @@ export function computePopupRate(agg: PopupAggregate, spec: PopupRateSpec): Gate
   // Install-prompt "installed": post-fix outcomes over post-fix showings only.
   if (spec.key === INSTALL_GAP_RATE_KEY) return gateRate(agg.installPostFix.installed, agg.installPostFix.shown)
   const shown = measuredCoarseCount(agg, spec.popup!, 'shown')
-  if (spec.kind === 'tap') return gateRate(measuredCoarseCount(agg, spec.popup!, 'accept'), shown)
+  // A tap is every pass tap: accept plus accept-signin (a guest sent to sign in first; 0 for any other pop-up and before 1.104.0).
+  if (spec.kind === 'tap') {
+    return gateRate(measuredCoarseCount(agg, spec.popup!, 'accept') + measuredCoarseCount(agg, spec.popup!, 'accept-signin'), shown)
+  }
   // outcome
   return gateRate(measuredCoarseCount(agg, `popup-outcome:${spec.popup}`, spec.outcome!), shown)
 }
