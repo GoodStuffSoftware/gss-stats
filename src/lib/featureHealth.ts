@@ -15,6 +15,7 @@
 // WEB AND APP ARE COMBINED. Feature tracking is the same for both, so no step reads the site.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
+import { SPLIT_REFUSED_PATH_PATTERNS } from './splitGuard'
 
 /** Which beacon paths count toward a step. A path matches when it equals one of `exact`, or starts
  * with one of `prefix`, and is not in `except`. Plain strings only (the SQL compares with
@@ -193,6 +194,44 @@ export const FEATURES: readonly FeatureDef[] = [
     ],
   },
 ]
+
+// ── The `featureStep` chart dimension (functions/api/geo.ts, catalog.ts) ──────────────────────────
+// A step is addressed as `<featureId>.<stepId>` (ids hold letters, digits and '-', never '.'). The chart
+// editor reads FEATURES alone, so a new feature or step is still a one-entry change above.
+
+/** The chart-dimension value of one step. */
+export function featureStepKey(featureId: string, stepId: string): string {
+  return `${featureId}.${stepId}`
+}
+/** The step a `featureStep` value names, or null for a value that names none. No request text ever reaches
+ * SQL: the SQL reads the step's own match, looked up here. */
+export function featureStepOf(key: string): { feature: FeatureDef; step: StepDef } | null {
+  const dot = key.indexOf('.')
+  if (dot <= 0) return null
+  const feature = FEATURES.find((f) => f.id === key.slice(0, dot))
+  const step = feature?.steps.find((s) => s.id === key.slice(dot + 1))
+  return feature && step ? { feature, step } : null
+}
+/** "Tour: Started": the name of one step on a chart. An unknown value shows as it is. */
+export function featureStepLabel(key: string): string {
+  const hit = featureStepOf(key)
+  return hit ? `${hit.feature.label}: ${hit.step.label}` : key
+}
+/** Whether a step can match a path the split guard refuses (a static check on the config, never on data).
+ * It errs toward true: the prefix test ignores `except`. A step that cannot needs neither the whole-ET-day
+ * caption nor blocks a live refresh. */
+export function stepMayMatchRefused(match: StepMatch): boolean {
+  const lc = (s: string) => s.toLowerCase()
+  const exact = (match.exact ?? []).some((p) => {
+    const q = lc(p)
+    return SPLIT_REFUSED_PATH_PATTERNS.some((pat) => (pat.endsWith('%') ? q.startsWith(pat.slice(0, -1)) : q === pat))
+  })
+  if (exact) return true
+  return (match.prefix ?? []).some((p) => {
+    const q = lc(p)
+    return SPLIT_REFUSED_PATH_PATTERNS.some((pat) => (pat.endsWith('%') ? pat.slice(0, -1).startsWith(q) || q.startsWith(pat.slice(0, -1)) : pat.startsWith(q)))
+  })
+}
 
 /** The widget view that draws a feature's step chart: `steps:<featureId>`. */
 export const STEPS_VIEW_PREFIX = 'steps:'

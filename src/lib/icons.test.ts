@@ -110,7 +110,7 @@ describe('resolveIcon', () => {
       ['bsk-campaigns', 'megaphone', 'charts'], // campaigns 4 · geo 3
       ['bsk-popups', 'app-window', 'charts'], // popup 2 · geo 1
       ['bsk-launch', 'trending-up', 'explicit'], // geo 12 would be the map pin: explicit instead
-      ['bsk-features', 'activity', 'charts'], // features 13
+      ['bsk-features', 'activity', 'explicit'], // picked: its step charts read geo now, Auto would draw the map pin
     ])
     const launch = pages.find((p) => p.id === 'bsk-launch')!
     expect(autoIcon(launch, pages)).toMatchObject({ key: 'map-pin', source: 'charts', dataset: 'geo' })

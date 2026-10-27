@@ -6,7 +6,7 @@ import { LANDING_TAG_NOTE, LANDING_TAG_NOTE_LEGACY } from './landingTags'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
-import { FEATURES, stepsViewFor } from './featureHealth'
+import { FEATURES, featureIdOfView, featureStepKey, type FeatureDef } from './featureHealth'
 import { COACH_TIPS_VIEW } from './coachTips'
 import { ASK_ORDER_VIEW } from './askOrder'
 
@@ -794,28 +794,43 @@ export function featureHealthWidget(geom: { x: number; y: number; w: number; h: 
     ...geom,
   })
 }
+/** A feature's step chart (ordinary since T1 of the editor-tools plan, ADR 0005): the standard date line on the ET-day
+ * axis with one series per step, each a `featureStep` filter ("<feature>.<step>"). Web and app are combined (no site
+ * filter), per-ET-day totals only. Anyone can build the same chart in the chart editor. The caption is the feature's
+ * blurb, then its reading caveat if it has one. */
+export function featureStepWidget(f: FeatureDef, geom: { x: number; y: number; w: number; h: number }): Widget {
+  return w({
+    id: `fw-${f.id}`,
+    title: f.label,
+    type: 'line',
+    dataset: 'geo',
+    dimension: 'dateEt',
+    metric: 'pageviews',
+    limit: 500,
+    excludeKnownTraffic: true,
+    series: f.steps.map((s) => ({ label: s.label, filter: [{ field: 'featureStep', value: featureStepKey(f.id, s.id) }], axis: 'left' as const, style: 'solid' as const })),
+    caption: f.caption ? `${f.blurb} ${f.caption}` : f.blurb,
+    ...geom,
+  })
+}
+/** A saved Features-page step chart from before T1 (dataset 'features', view 'steps:<feature id>', no card) drawn as
+ * the ordinary chart it now is, at render time. Nothing stored is rewritten (ADR 0005 decision 2): the widget keeps
+ * its id, grid cell, title, site override, known-traffic switch, caption and the rest; the series, caption default and
+ * the geo query come from FEATURES. Any other widget, and a step chart naming a feature this build does not know, come
+ * back as they are. */
+export function stepChartFor(wd: Widget): Widget {
+  const id = wd.dataset === 'features' && !wd.card ? featureIdOfView(wd.view) : null
+  const f = id ? FEATURES.find((x) => x.id === id) : undefined
+  if (!f) return wd
+  const base = featureStepWidget(f, { x: wd.x, y: wd.y, w: wd.w, h: wd.h })
+  return { ...wd, type: 'line', dataset: 'geo', view: undefined, dimension: base.dimension, metric: base.metric, limit: base.limit, series: base.series, caption: wd.caption ?? base.caption }
+}
 /** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order,
  * then the Coach tips table (per-tip counts, src/lib/coachTips.ts) full width under them. */
 export function defaultFeaturesWidgets(): Widget[] {
   const chartRows = Math.ceil(FEATURES.length / 2)
   return factoryWidgets([
-    ...FEATURES.map((f, i) =>
-      w({
-        id: `fw-${f.id}`,
-        title: f.label,
-        type: 'line',
-        dataset: 'features',
-        view: stepsViewFor(f.id),
-        dimension: '',
-        metric: 'pageviews',
-        limit: 1,
-        excludeKnownTraffic: true,
-        x: (i % 2) * 6,
-        y: Math.floor(i / 2) * 8,
-        w: 6,
-        h: 8,
-      }),
-    ),
+    ...FEATURES.map((f, i) => featureStepWidget(f, { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 })),
     coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 }),
     askOrderWidget({ x: 0, y: chartRows * 8 + 10, w: 12, h: 17 }),
   ])
@@ -860,6 +875,9 @@ export function defaultFeaturesPage(): DashboardPage {
   return {
     id: 'bsk-features',
     name: 'Features',
+    // Picked, not Auto: the step charts read the geo dataset now, which would make Auto draw the map pin; the page keeps the
+    // pulse icon it always had (a saved layout keeps whatever it has).
+    icon: 'activity',
     isDefault: false,
     group: GROUP_BEST_SUDOKU,
     // A month of days shows whether a feature fires every day; "went silent" itself reads the last 8 days whatever the range.

@@ -6,7 +6,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import FeatureHealthCard from './FeatureHealthCard.vue'
 import { featureHealthWidget, defaultFeaturesWidgets } from '../lib/defaults'
 import { buildStepChartConfig } from '../lib/featureHealthChart'
-import { HEALTH_CAPTION, stepsViewFor, featureIdOfView, type FeatureHealth, type FeatureHealthModel } from '../lib/featureHealth'
+import { HEALTH_CAPTION, FEATURES, featureStepKey, stepsViewFor, featureIdOfView, type FeatureHealth, type FeatureHealthModel } from '../lib/featureHealth'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import { ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_FEATURES, ASK_ORDER_VIEW, askOrderFeatureId } from '../lib/askOrder'
 import { MEASUREMENT_CHANGES } from '../lib/measurementChanges'
@@ -102,9 +102,13 @@ describe('step chart and defaults', () => {
     expect(featureIdOfView(stepsViewFor('abc'))).toBe('abc')
     expect(featureIdOfView('health')).toBeNull()
     const widgets = defaultFeaturesWidgets()
-    for (const w of widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)) {
-      expect(w.dataset).toBe('features')
-      expect(featureIdOfView(w.view)).toBeTruthy()
+    // Since T1 a step chart is an ordinary geo date line: one series per step, each a featureStep filter (no features dataset).
+    const stepCharts = widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)
+    expect(stepCharts.map((w) => w.id)).toEqual(FEATURES.map((f) => `fw-${f.id}`))
+    for (const [i, w] of stepCharts.entries()) {
+      expect(w).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', metric: 'pageviews', excludeKnownTraffic: true })
+      expect(w.view).toBeUndefined()
+      expect(w.series!.map((s) => s.filter![0].value)).toEqual(FEATURES[i].steps.map((s) => featureStepKey(FEATURES[i].id, s.id)))
     }
     // The Coach tips table sits under the charts, full width, and appears once.
     const tips = widgets.filter((x) => x.view === COACH_TIPS_VIEW)

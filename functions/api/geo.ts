@@ -16,6 +16,8 @@ import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilt
 import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
+import { featureStepFilterSql, featureStepPrefilter, featureStepSqlCase, featureStepWindow } from '../../src/lib/featureHealthSql'
+import { featureStepOf, stepMayMatchRefused } from '../../src/lib/featureHealth'
 import { isDateDim } from '../../src/lib/rings'
 import {
   splitRefused,
@@ -74,6 +76,7 @@ export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'landingTag') return landingTagSqlCase(emptyLabel)
   if (dim === 'arrival') return arrivalSqlCase(emptyLabel)
   if (dim === 'keyEvent') return keyEventSqlCase(emptyLabel)
+  if (dim === 'featureStep') return featureStepSqlCase(emptyLabel)
   // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
   // blocked/failed before the measurement ran) — 0 is the "blank" sentinel here, not ''.
   if (dim === 'screenw') return `CASE WHEN screenw = 0 THEN '${emptyLabel}' ELSE CAST(screenw AS TEXT) END`
@@ -108,6 +111,9 @@ export function emptyLabelFor(dim: string): string {
 // empty blank label, compared against '' (screenwBucket: a 0-width row; the pop-up/completion/
 // flight dims: a row they don't describe; pathFamily is never blank).
 export function ringBlankExclusion(dim: string): string {
+  // featureStep: DIM_PREFILTERS already keeps only rows of some configured step, and a kept row always gets a step key, so
+  // the blank test would repeat the whole CASE (about 2.6 KB) for nothing.
+  if (dim === 'featureStep') return '1'
   if (DERIVED_ONLY_DIMS.has(dim)) return `(${breakdownColumnExpr(dim, '')}) <> ''`
   return dim === 'screenw' ? 'screenw <> 0' : `${dim} <> ''`
 }
@@ -152,6 +158,7 @@ export const GEO_DIMS = new Set([
   'hourEt', // US-Eastern hour of day — see etTime.ts etHourSql
   'landingTag', // the Flight 3 Apps arm's landing tag on its /return/<tag>/d0 arrival rows — see campaigns.ts landingTagSqlCase
   'flightDay', // day of the row's campaign flight, '1' = its first ET day — see campaigns.ts flightDaySqlCase
+  'featureStep', // a feature-walkthrough step, '<featureId>.<stepId>' — see featureHealthSql.ts featureStepSqlCase / featureStepFilterSql
 ])
 
 // Dimensions with no real backing column — computed via CASE/date() in breakdownColumnExpr,
@@ -163,7 +170,7 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay', 'landingTag'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay', 'landingTag', 'featureStep'])
 // Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
 // derived dim groups like a column (its CASE runs per row in the inner SELECT, and
 // ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
@@ -175,7 +182,7 @@ export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 // dimension describes), so the exclusion is lifted for that chart and the dimension's own bound
 // prefilter applies instead (only rows of that event family). Their blank rows are dropped even
 // in single-dim mode, so a page view never shows up as a "(none)" bar.
-export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent', 'landingTag'])
+export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent', 'landingTag', 'featureStep'])
 // Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
 // 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
 // and the metrics registry counts it as a tagged arrival (campaign.taggedArrivals), so the
@@ -193,6 +200,7 @@ const DIM_PREFILTERS: Record<string, (w: string[], b: unknown[]) => void> = {
   campaignFlight: campaignFlightPrefilter,
   flightDay: campaignFlightPrefilter, // only a tagged row can be in a flight
   landingTag: landingTagPrefilter, // only the arrival rows of a live landing tag; none live = no rows
+  featureStep: featureStepPrefilter, // only the rows of some configured feature step
 }
 // Dims whose blank rows are dropped in single-dim mode too (see EVENT_DIMS above).
 const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight', 'arrival', 'flightDay'])
@@ -280,7 +288,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const drillClause = (w: string[], b: any[]) => {
     for (const c of constraints) {
       const derivedExpr = DERIVED_FILTER_EXPR[c.field]
-      if (derivedExpr) {
+      if (c.field === 'featureStep') {
+        // The step's own match (featureHealthSql.ts), not the first-match CASE: two steps may share a path.
+        // A literal built from the config, never the request's text; an unknown step matches nothing.
+        w.push(featureStepFilterSql(c.value))
+      } else if (derivedExpr) {
         // The CASE expression already produces the exact label string for every row, including
         // its own blank/default bucket ('(unknown)' / 'page') — a plain bound equality matches
         // correctly with no separate blank-value branch needed.
@@ -382,14 +394,25 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // ET midnights gets the unchanged SQL, binds and cache key. Bare-date bounds here are UTC days,
   // so they snap too.
   const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })
+  // A query on the featureStep dimension (grouped or filtered) reads whole ET days for EVERY row, as /api/features does,
+  // so a step chart and the Features page count the same days. Per-ET-day totals only; with the guard active
+  // (a hour, place or device split) the guard's exact window applies and the refused rows are out entirely.
+  const featureStepActive = !splitGuardActive && [...activeDims, ...constraints.map((c) => c.field)].includes('featureStep')
+  const stepWindow = featureStepActive ? featureStepWindow(sinceMs, untilMs) : null
   const tsWindow = splitGuardActive
     ? { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
-    : refusedWindowClause(sinceMs, untilMs)
+    : stepWindow ?? refusedWindowClause(sinceMs, untilMs)
   // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
   // a /home drill or excluded event rows count none). The snap and its
   // cache-key marker still follow `moved` alone.
+  // A featureStep filter narrows to one step's paths: it reaches a refused path only if that step can match one.
+  const stepsReachRefused = constraints.every((c) => {
+    if (c.field !== 'featureStep') return true
+    const hit = featureStepOf(c.value)
+    return !!hit && stepMayMatchRefused(hit.step.match)
+  })
   const refusedReachable =
-    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, constraints }).length > 0
+    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, constraints }).length > 0 && stepsReachRefused
   const refusedWholeDays = tsWindow.moved && refusedReachable
   // Live-update opt-in (meta.liveSafe): only when no refused path can be counted by this query, so a
   // live "changed" ping may refetch it. Fail-closed, and independent of `moved`; omitted otherwise.
@@ -433,6 +456,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // Likewise only a snapped window gets a new key, keyed on the snap mode, so changing
     // REFUSED_WINDOW_SNAP never serves an entry cached under another mode.
     ...(tsWindow.moved ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
+    ...(stepWindow ? { featureStepWindow: stepWindow.key } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default

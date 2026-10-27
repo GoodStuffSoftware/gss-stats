@@ -6,6 +6,7 @@
 // literal, so whichever slice lands second only renumbers the map.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MEASUREMENT_CHANGES } from './measurementChanges'
+import { FEATURES } from './featureHealth'
 import {
   CAPTION_MAX_CHARS,
   CONFIG_VERSION,
@@ -97,8 +98,8 @@ describe('captions: normWidget limits', () => {
     expect('hiddenCaveats' in w).toBe(false)
     for (const p of normalizeConfig(defaultConfig()).pages)
       for (const dw of p.widgets) {
-        // the hero-vs-features donut is the one default that ships its caption (its one-line note)
-        expect('caption' in dw, dw.id).toBe(dw.id === F3_HERO_DONUT_ID)
+        // the hero-vs-features donut ships its caption (its one-line note), and so does each Features-page step chart (its blurb)
+        expect('caption' in dw, dw.id).toBe(dw.id === F3_HERO_DONUT_ID || FEATURES.some((f) => dw.id === `fw-${f.id}`))
         expect(dw.hiddenCaveats ?? [], dw.id).toEqual(autoCaveatIds(dw).filter(isNoteIdHideable))
       }
   })
