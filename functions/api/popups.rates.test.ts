@@ -73,8 +73,11 @@ describe('POPUP_RATE_TABLE_KEYS: valid ratios only', () => {
   it('also asks for signed-in/returned/still-playing as COUNTS (never a ratio), one row per pop-up each', () => {
     const items = PRESETS['popup-rates'].sections.flatMap((s) => s.items)
     const metricItems = items.filter((i) => 'metric' in i.data)
-    expect(metricItems.map((i) => ('metric' in i.data ? i.data.metric : ''))).toEqual(['popup.outcomeSignedIn', 'popup.outcomeReturned', 'popup.outcomeStillPlaying'])
-    for (const i of metricItems) {
+    // The upsell's guest pass taps (accept-signin) come first: one fixed count row, not repeated per pop-up.
+    expect(metricItems.map((i) => ('metric' in i.data ? i.data.metric : ''))).toEqual(['popup.acceptSignins', 'popup.outcomeSignedIn', 'popup.outcomeReturned', 'popup.outcomeStillPlaying'])
+    expect(metricItems[0].data).toMatchObject({ params: { popup: 'upsell' } })
+    expect(metricItems[0].repeat).toBeUndefined()
+    for (const i of metricItems.slice(1)) {
       expect(i.repeat).toEqual({ over: 'popups' })
       expect(i.display).toEqual({ as: 'number' })
     }

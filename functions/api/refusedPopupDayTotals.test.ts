@@ -221,7 +221,7 @@ describe('/api/metrics pop-up facts count it; placement and committed reasons ar
       const res = await metrics(d, day, [{ key: 'rate', ratio: 'bsk.popupTapRate', window: 'page' }])
       expect(res.rate).toMatchObject({ status: 'ok', value: 8 / 5, numerator: 8, denominator: 5 })
       expect(res.rate.noteIds).toContain('popup-tap-rate-includes-first-finish-taps')
-      expect(noteRawText('popup-tap-rate-includes-first-finish-taps')).toBe('Includes taps on the first-finish sign-in ask, which the shown count leaves out; can read high.')
+      expect(noteRawText('popup-tap-rate-includes-first-finish-taps')).toBe('Counts every pass tap, including guests who must sign in first, and taps on the first-finish sign-in ask, which the shown count leaves out; can read high.')
       expect(NOTES_REGISTRY['popup-tap-rate-includes-first-finish-taps'].scopes).toEqual(['overview'])
       const items = JSON.parse(JSON.stringify(BSK_KPIS)) as unknown
       const find = (x: any): any => (x && typeof x === 'object' ? (x.data?.ratio === 'bsk.popupTapRate' ? x : Object.values(x).map(find).find(Boolean)) : undefined)

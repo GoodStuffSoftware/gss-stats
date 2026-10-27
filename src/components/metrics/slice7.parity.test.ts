@@ -341,11 +341,12 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
     // A count, never a rate (these are lagged cohorts — see presets.ts's comment); an explicit
     // "0" where a pop-up had no rows this range (never blank), and "not yet tracking" for
     // first50-congrats (POPUPS.noOutcomeTracking — a product decision, not a gap).
-    expect(newRows.length).toBe(6 + 5 * 3) // 5 pop-ups x {signed-in, returned, still-playing}
+    expect(newRows.length).toBe(6 + 1 + 5 * 3) // 5 pop-ups x {signed-in, returned, still-playing}, plus the upsell's one "pass tapped, sign-in first" count row
     const byLabel = new Map(newRows.map((r) => [r.label, r.value]))
     expect(byLabel.get('First 50 congrats — signed in')).toBe('not yet tracking')
     expect(byLabel.get('First 50 congrats — returned')).toBe('not yet tracking')
     expect(byLabel.get('First 50 congrats — still playing')).toBe('not yet tracking')
+    expect(byLabel.get('Upsell — pass tapped, sign-in first')).toBe('0') // explicit zero before any guest has tapped
     expect(byLabel.get('Sign-in prompt — signed in')).toBe('1') // a real, nonzero count
     expect(byLabel.get('Upsell — returned')).toBe('1') // a real, nonzero count
     expect(byLabel.get('First 50 promo — signed in')).toBe('0') // explicit zero, never blank

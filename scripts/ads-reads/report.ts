@@ -46,7 +46,7 @@ const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFix
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
 /** ", pass tapped (sign-in first) N" for a guest's paywall pass taps (/upsell/accept-signin, best-sudoku 1.104.0): shown only when there are
  * any, so a read of a period before that release prints exactly as it did. The accepted figure beside it stays the signed-in tap only. */
-const upsellSigninFirst = (x: number): string => (x > 0 ? `, pass tapped (sign-in first) ${n(x)}` : '')
+export const upsellSigninFirst = (x: number): string => (x > 0 ? `, pass tapped (sign-in first) ${n(x)}` : '')
 /** Mike's cost-per-arrival benchmark (2026-10-15): the F1/F2 in-app campaign, about $0.32 a tagged arrival. */
 export const COST_PER_ARRIVAL_BENCHMARK = 0.32
 /** Flight 3 baselines beside the cost per arrival (spec section 1): Apps $0.32-0.34 (F1/F2 in-app), Search $0.64 (F2 Search). Flight 2 and the retest keep the single $0.32 above. */

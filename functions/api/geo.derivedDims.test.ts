@@ -70,7 +70,7 @@ const POPUP_PATHS = [
   '/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/accept', '/signin-prompt/dismiss', '/signin-prompt', '/signin-prompt/',
   '/promo-first50/shown', '/promo-first50/accept', '/promo-first50/dismiss', '/promo-first50/bogus',
   '/first50-congrats/shown', '/first50-congrats/ack', '/first50-congrats/close', '/first50-congrats/other',
-  '/upsell/shown/cadence', '/upsell/accept/limit', '/upsell/dismiss/daily-locked', '/upsell/shown/upgrade-tap', '/upsell/shown/settings-upgrade', '/upsell/shown',
+  '/upsell/shown/cadence', '/upsell/accept/limit', '/upsell/accept-signin/limit', '/upsell/accept-signin/upgrade-tap', '/upsell/accept-signin/future-reason', '/upsell/dismiss/daily-locked', '/upsell/shown/upgrade-tap', '/upsell/shown/settings-upgrade', '/upsell/shown',
   '/install/prompt/android', '/install/prompt/ios', '/install/prompt/desktop', '/install/prompt/dismiss', '/install/prompt/dismiss-forever', '/install/prompt/have-it',
   '/install/platforms/web', '/install/platforms/play', '/install/play', '/install/pwa-accept', '/install/app-store', '/install/pwa-decline',
   '/install/pwa-installed', '/install/standalone-detected', '/install/play-detected', '/install/bogus',
@@ -91,6 +91,7 @@ const POPUP_PATHS = [
   '/upsell/shown/cadence/extra',
   '/upsell//accept//limit',
   '/upsell/dismiss/',
+  '/upsell/accept-signin', '/upsell/accept-signin/', '/upsell/accept-signin/limit/extra', '/upsell//accept-signin//limit',
   '/install/prompt/android/',
   '/install//prompt//ios',
   '/install/play/extra',
@@ -143,6 +144,7 @@ describe('popupFamily / popupOutcome SQL match classifyPopupPath row for row', (
     expect(popupOutcomeOf('/signin-prompt/placement', LIVE)).toBe('shown')
     expect(popupOutcomeOf('/install/prompt/ios', LIVE)).toBe('shown')
     expect(popupOutcomeOf('/upsell/shown/cadence', LIVE)).toBe('shown')
+    expect(popupOutcomeOf('/upsell/accept-signin/cadence', LIVE)).toBe('accept-signin')
     expect(popupOutcomeOf('/first50-congrats/ack', LIVE)).toBe('accept')
     expect(popupOutcomeOf('/install/pwa-installed', LIVE)).toBe('pwa-installed')
     // No value: not a pop-up, the platform list, an unknown outcome name, unmeasured rows.
