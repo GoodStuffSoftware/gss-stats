@@ -722,6 +722,22 @@ export type OutcomePopup = (typeof OUTCOME_POPUPS)[number]
 export type OutcomeType = (typeof POPUP_OUTCOME_TYPES)[number]
 export type OutcomeCounts = Record<OutcomePopup, Record<OutcomeType, number>>
 
+/** The paywall (upsell) answers. `accept` is the signed-in tap only; a guest's pass tap sends only
+ * `/upsell/accept-signin/<reason>` (best-sudoku 1.104.0) and counts as `acceptSignin`, never as accept.
+ * Per render: shown = accept + acceptSignin + dismiss + abandoned (abandoned is the unanswered rest). */
+export interface UpsellCounts {
+  shown: number
+  accept: number
+  acceptSignin: number
+  dismiss: number
+}
+const emptyUpsell = (): UpsellCounts => ({ shown: 0, accept: 0, acceptSignin: 0, dismiss: 0 })
+/** Adds one classified upsell row (lib/popupEvents.ts UPSELL_KINDS) to `c`; any other kind is ignored. */
+function addUpsellRow(c: UpsellCounts, kind: string, count: number): void {
+  if (kind === 'shown' || kind === 'accept' || kind === 'dismiss') c[kind] += count
+  else if (kind === 'accept-signin') c.acceptSignin += count
+}
+
 function emptyOutcomes(): OutcomeCounts {
   const o = {} as OutcomeCounts
   for (const p of OUTCOME_POPUPS) o[p] = Object.fromEntries(POPUP_OUTCOME_TYPES.map((t) => [t, 0])) as Record<OutcomeType, number>
@@ -849,7 +865,7 @@ export interface TaggedSummary {
    * install metric; rawSignals = raw /install/<outcome> beacons, which can double-count. */
   install: { promptShown: number; taps: number; installed: number; rawSignals: number }
   promoFirst50: { shown: number; accept: number; dismiss: number }
-  upsell: { shown: number; accept: number; dismiss: number }
+  upsell: UpsellCounts
   signinEligible: { earned: number; capped: number; unearned: number }
   popupOutcomes: OutcomeCounts
   /** Provisional P1 / in-app-help beacon row counts (see P1BeaconCounts). */
@@ -874,7 +890,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     authSuccessSplit: { new: 0, existing: 0, unknown: 0, unsplit: 0 },
     install: { promptShown: 0, taps: 0, installed: 0, rawSignals: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
-    upsell: { shown: 0, accept: 0, dismiss: 0 },
+    upsell: emptyUpsell(),
     signinEligible: { earned: 0, capped: 0, unearned: 0 },
     popupOutcomes: emptyOutcomes(),
     p1: emptyP1Counts(),
@@ -912,7 +928,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       if (ev.kind === 'shown' || ev.kind === 'accept' || ev.kind === 'dismiss') s.promoFirst50[ev.kind] += r.count
       if (ev.kind === 'dismiss') s.dismisses.promoFirst50 += r.count
     }
-    if (ev.family === 'upsell' && (ev.kind === 'shown' || ev.kind === 'accept' || ev.kind === 'dismiss')) s.upsell[ev.kind] += r.count
+    if (ev.family === 'upsell') addUpsellRow(s.upsell, ev.kind, r.count)
     if (ev.family === 'install') {
       if (ev.kind === 'shown') s.install.promptShown += r.count
       if (ev.kind === 'accept') s.install.taps += r.count
@@ -950,7 +966,7 @@ export interface SiteEventSummary {
   rawInstallSignals: number
   signinEligible: { earned: number; capped: number; unearned: number }
   promoFirst50: { shown: number; accept: number; dismiss: number }
-  upsell: { shown: number; accept: number; dismiss: number }
+  upsell: UpsellCounts
   /** Provisional P1 / in-app-help beacon row counts (see P1BeaconCounts). */
   p1: P1BeaconCounts
   /** /install/pwa-accept taps on or after the install fix (all / hour ended before
@@ -977,7 +993,7 @@ export function summarizeSiteEvents(
     rawInstallSignals: 0,
     signinEligible: { earned: 0, capped: 0, unearned: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
-    upsell: { shown: 0, accept: 0, dismiss: 0 },
+    upsell: emptyUpsell(),
     p1: emptyP1Counts(),
     installAcceptPostFix: 0,
     installAcceptPostFixMatured: 0,
@@ -1001,7 +1017,7 @@ export function summarizeSiteEvents(
     if (ev.family === 'install' && ev.kind === 'outcome') s.rawInstallSignals += r.count
     if (ev.family === 'signin-eligible' && (ev.kind === 'earned' || ev.kind === 'capped' || ev.kind === 'unearned')) s.signinEligible[ev.kind] += r.count
     if (ev.family === 'promo-first50' && (ev.kind === 'shown' || ev.kind === 'accept' || ev.kind === 'dismiss')) s.promoFirst50[ev.kind] += r.count
-    if (ev.family === 'upsell' && (ev.kind === 'shown' || ev.kind === 'accept' || ev.kind === 'dismiss')) s.upsell[ev.kind] += r.count
+    if (ev.family === 'upsell') addUpsellRow(s.upsell, ev.kind, r.count)
     if (ev.family.startsWith('popup-outcome:')) {
       const popup = ev.family.slice('popup-outcome:'.length) as OutcomePopup
       if ((OUTCOME_POPUPS as readonly string[]).includes(popup)) s.outcomes[popup][ev.kind as OutcomeType] += r.count
@@ -1937,7 +1953,7 @@ export interface SegmentFigures {
   accepts: number
   authSuccess: number
   signUps: SignUpCount
-  upsell: { shown: number; accept: number; dismiss: number }
+  upsell: UpsellCounts
 }
 export interface FunnelSegments {
   boundaryMs: number
@@ -1954,13 +1970,13 @@ export const SEGMENT_NOTE =
 
 /** For the funnel card's upsell segment and the flight-day chart's day label (lib/metrics
  * scope.ts and instrumentation.ts, lib/charts.ts): where the upsell-fix boundary falls
- * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (split at the
+ * in a campaign's flight, and the tagged upsell shown/accept/accept-signin/dismiss on each side (split at the
  * instant by the query's flag — isPostBoundary). null when unset or outside the flight. */
 export interface CampaignSegmentMarker {
   boundaryMs: number
   boundaryLabel: string
   boundaryDate: string
-  upsell: { pre: { shown: number; accept: number; dismiss: number }; post: { shown: number; accept: number; dismiss: number } }
+  upsell: { pre: UpsellCounts; post: UpsellCounts }
 }
 export function campaignSegmentMarker(
   c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>,

@@ -196,9 +196,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Everything else needs a known popup family.
   if (!popup) return json({ rows: [], totals: { pageviews: 0, visits: 0 }, meta })
 
-  // 'kind' (shown/accept/dismiss) is the summary count widget for a popup — activation-gated.
+  // 'kind' (shown/accept/dismiss) is the summary count widget for a popup — activation-gated. The upsell
+  // also lists its guest pass tap ('accept-signin', best-sudoku 1.104.0) as a row of its own: 'accept' stays the
+  // signed-in tap only. No other pop-up has that kind, so no other pop-up gets the row.
   if (dim === 'kind') {
-    const rowsOut: Row[] = ['shown', 'accept', 'dismiss'].map((k) => {
+    const kinds = popup === 'upsell' ? ['shown', 'accept', 'accept-signin', 'dismiss'] : ['shown', 'accept', 'dismiss']
+    const rowsOut: Row[] = kinds.map((k) => {
       const c = measuredCoarseCount(agg, popup, k)
       return { key: { kind: k }, pageviews: c, visits: c }
     })

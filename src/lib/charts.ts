@@ -42,6 +42,7 @@ const STABLE_COLORS: Record<string, Record<string, string>> = {
   popupOutcome: {
     shown: PALETTE[0],
     accept: PALETTE[1],
+    'accept-signin': PALETTE[11],
     dismiss: PALETTE[7],
     'signed-in': PALETTE[3],
     installed: PALETTE[9],

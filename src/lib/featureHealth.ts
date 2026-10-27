@@ -119,13 +119,15 @@ export const FEATURES: readonly FeatureDef[] = [
   {
     id: 'upsell',
     label: 'Upsell',
-    blurb: 'The upgrade pop-up (any reason): shown, accepted or declined.',
+    blurb: 'The upgrade pop-up (any reason): shown, accepted, pass tapped with sign-in first (a guest), or declined.',
     // The device-anchored guest trial (and its limit pop-up) rode in v1.99.0, which went live as v1.99.1.
     caption: 'Not comparable to flight 2: the guest trial changed in v1.99.1. A dismiss can be a sign-in tap: net it against the signed-in outcome for that reason before calling it rejection. From v1.99.1 the post-sign-in passes upsell shows but sends no shown beacon, so /upsell/shown does not count its views.',
     steps: [
       { id: 'shown', label: 'Shown', match: { prefix: ['/upsell/shown/'] } },
       // No rows yet (one shown row has arrived).
       { id: 'accept', label: 'Accepted', match: { prefix: ['/upsell/accept/'] }, ratioOf: { per: 'shown' } },
+      // A guest's pass tap (best-sudoku 1.104.0) sends only this row, never the accept row too; Accepted stays the signed-in tap.
+      { id: 'accept-signin', label: 'Pass tapped, sign-in first', match: { prefix: ['/upsell/accept-signin/'] }, ratioOf: { per: 'shown' } },
       { id: 'dismiss', label: 'Declined', match: { prefix: ['/upsell/dismiss/'] }, ratioOf: { per: 'shown' } },
     ],
   },

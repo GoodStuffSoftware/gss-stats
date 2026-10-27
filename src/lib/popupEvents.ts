@@ -288,6 +288,13 @@ function segments(path: string, prefix: string): string[] {
 // upsell reason. Any reason segment not in this list is still counted, bucketed as 'other'
 // (see classifyPopupPath below) — never silently dropped or passed through raw.
 export const UPSELL_REASONS = ['cadence', 'limit', 'daily-locked', 'upgrade-tap'] as const
+/** The upsell kinds, one beacon per answer (best-sudoku 1.104.0, "guest paywall prices"): each render sends
+ * exactly one shown, then at most one of accept, accept-signin or dismiss. A guest's pass tap sends ONLY
+ * `/upsell/accept-signin/<reason>` (never `/upsell/accept/<reason>` as well), so the identity is
+ * shown = accept + accept-signin + dismiss + abandoned. Every other upsell count (accept, the tap rate) stays
+ * the signed-in tap only. */
+export const UPSELL_KINDS = ['shown', 'accept', 'accept-signin', 'dismiss'] as const
+export type UpsellKind = (typeof UPSELL_KINDS)[number]
 export const INSTALL_SHOWN_PLATFORMS = ['android', 'ios', 'desktop'] as const
 export const INSTALL_PLATFORM_LIST = ['web', 'play', 'app-store'] as const
 export const INSTALL_OUTCOMES = ['pwa-installed', 'standalone-detected', 'play-detected'] as const
@@ -485,12 +492,12 @@ export function classifyPopupPath(path: string): PopupEvent | null {
 
   if (path === '/upsell' || path.startsWith('/upsell/')) {
     const [kind, reason] = segments(path, '/upsell')
-    if ((kind === 'shown' || kind === 'accept' || kind === 'dismiss') && reason) {
+    if ((UPSELL_KINDS as readonly string[]).includes(kind) && reason) {
       // FINAL LIST: reasons are exactly UPSELL_REASONS — an unknown/removed reason (e.g. a
       // leftover 'settings-upgrade' beacon) is counted under 'other', never dropped and
       // never passed through as its own ad-hoc breakdown bucket.
       const known = (UPSELL_REASONS as readonly string[]).includes(reason) ? reason : 'other'
-      return { family: 'upsell', kind, extra: known }
+      return { family: 'upsell', kind: kind as UpsellKind, extra: known }
     }
     return null
   }
@@ -1107,10 +1114,10 @@ export function popupDimSqlCase(dim: 'popupFamily' | 'popupOutcome', emptyLabel:
     const map: [string, string][] = [['shown', 'shown'], ['ack', 'accept'], ['close', 'dismiss']]
     branch.push(`WHEN ${g.match} THEN ${caseMap(g.s1, fam ? map.map(([k]) => [k, 'first50-congrats']) : map, E)}`)
   }
-  // /upsell/<shown|accept|dismiss>/<reason> — the reason segment is required.
+  // /upsell/<shown|accept|accept-signin|dismiss>/<reason> — the reason segment is required.
   {
     const g = pathSegmentsSql('/upsell')
-    const kinds = ['shown', 'accept', 'dismiss']
+    const kinds: readonly string[] = UPSELL_KINDS
     branch.push(`WHEN ${g.match} THEN CASE WHEN ${g.s2} = '' THEN ${E} ELSE ${caseMap(g.s1, fam ? kinds.map((k) => [k, 'upsell']) : same(kinds), E)} END`)
   }
   // /install/...: prompt/<platform> shown, prompt/<dismiss kind> dismiss, platforms/* no value,
@@ -1176,10 +1183,11 @@ export function popupOutcomeOf(path: string, tsMs: number): string {
 // order): the pop-ups in POPUPS order; shown first, then taps, then outcomes, then install's
 // raw signals.
 export const POPUP_FAMILY_ORDER: string[] = POPUPS.map((p) => p.id)
-export const POPUP_OUTCOME_ORDER: string[] = ['shown', 'accept', 'dismiss', ...POPUP_OUTCOME_TYPES, ...INSTALL_OUTCOMES]
+export const POPUP_OUTCOME_ORDER: string[] = ['shown', 'accept', 'accept-signin', 'dismiss', ...POPUP_OUTCOME_TYPES, ...INSTALL_OUTCOMES]
 export const POPUP_OUTCOME_LABELS: Record<string, string> = {
   shown: 'Shown',
   accept: 'Tapped / accepted',
+  'accept-signin': 'Pass tapped, sign-in first',
   dismiss: 'Dismissed',
   'signed-in': 'Signed in',
   installed: 'Installed',

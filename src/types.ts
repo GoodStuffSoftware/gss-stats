@@ -71,7 +71,7 @@ export interface Widget {
   // dataset 'popup' only: which pop-up funnel (lib/popupEvents.ts POPUPS id, e.g.
   // 'signin-prompt') a 'kind'/'reason'/'date'/'outcome' dimension chart is scoped to.
   popup?: string
-  // dataset 'popup' only: which funnel stage ('shown'/'accept'/'dismiss') a 'reason' or
+  // dataset 'popup' only: which funnel stage ('shown'/'accept'/'accept-signin'/'dismiss') a 'reason' or
   // 'date' dimension chart breaks down / trends. Defaults to 'shown' when unset.
   popupKind?: string
   // Nested doughnut only: further outer-ring dimensions beyond `breakdown`. The full ring
