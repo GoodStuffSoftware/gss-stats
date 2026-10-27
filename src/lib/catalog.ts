@@ -79,6 +79,8 @@ export const POPUP_OPTIONS: { value: string; label: string }[] = POPUPS.map((p) 
 export const POPUP_KIND_OPTIONS: { value: string; label: string }[] = [
   { value: 'shown', label: 'Shown' },
   { value: 'accept', label: 'Accepted' },
+  // Upsell only (a guest's pass tap, best-sudoku 1.104.0); 'Accepted' stays the signed-in tap.
+  { value: 'accept-signin', label: 'Pass tapped, sign-in first' },
   { value: 'dismiss', label: 'Dismissed' },
   // Outcomes (the popup-outcome rows, by reason when the chart breaks down 'reason'; the window each counts is the pop-up's own).
   { value: 'signed-in', label: 'Signed in after' },
