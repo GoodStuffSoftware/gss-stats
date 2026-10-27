@@ -723,13 +723,19 @@ stays on the Feature health card.
 - **The axis starts at the first day any step has a row**, as on every series line chart, and
   its ticks are whole numbers.
 - **Page filters apply.** A drill or filter on the page (a country, a device) narrows the step
-  charts, which the old step charts ignored. Under an hour, place or device filter, a step that
-  reads counts-only rows (see the counts-only rule under Data & dimensions) shows nothing and the
-  chart says so; a step that reads only other rows still counts.
+  charts, which the old step charts ignored. Under an hour, place or device filter the counts-only
+  rows (see the counts-only rule under Data & dimensions) drop out and the chart says so: a step
+  made only of those rows shows nothing, Sign-in ask "Shown" keeps every showing but the
+  first-finish ask's, and a step with none of them counts as before.
+- **Like any chart.** A click on a point opens a drill on that day, and a step chart with no
+  counts-only rows refreshes on live updates; the old step charts did neither.
 - **One request per chart.** A chart whose every series is one `featureStep` filter asks
   `/api/geo` once with `stepSeries` (the step values in legend order, at most 16) and gets one
-  response per series, from one D1 statement, each equal to that series' own request. The page
-  makes 14 such requests for its 14 step charts.
+  response per series from one D1 statement. Each series' total, caption and live flags equal its
+  own request's; its days are the newest `limit` days with any step's rows, so with a short limit
+  a step's own request could keep older days of its own (the shipped limit, 500 days, is never
+  reached). The page makes 14 such requests for its 14 step charts, where the old step charts
+  shared one `/api/features` request ([docs/capacity.md](docs/capacity.md) §11).
 - **Saved layouts are not rewritten.** A step chart saved by an older build (dataset
   `features`, view `steps:<feature>`) is drawn, edited and duplicated as the ordinary chart at
   render time (`stepChartFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its

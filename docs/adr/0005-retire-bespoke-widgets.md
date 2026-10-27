@@ -386,7 +386,8 @@ funnel included) are ordinary geo date lines with one `featureStep` series per s
 chart is mapped at render time (`stepChartFor`, decision 2): nothing stored is rewritten, and
 there is no `CONFIG_VERSION` change because no new widget field is stored. Counts only (decision
 4) holds: per-ET-day totals over whole ET days, and under an hour, place or device split the
-split guard drops the steps that read refused rows. Parity with `/api/features` is a test
+split guard drops the refused rows, so a step made only of them reads nothing. The page's load
+cost is in `docs/capacity.md` §11. Parity with `/api/features` is a test
 (`functions/api/featureStep.parity.test.ts`, decision 3); its differences are listed in the
 README (Feature health, Step charts). Left: T2-T4 (the Feature health card, Coach tips and
 Ask-order on the metric registry) and T7 (a Features page template, an editor guard against new

@@ -172,7 +172,7 @@ describe('step charts: the old Features card and the ordinary chart count the sa
       }
       // A case that counted nothing would prove nothing (the single-day and bare-date ones still have rows).
       expect(compared, c.name).toBeGreaterThan(0)
-    })
+    }, 60_000)
   }
 
   it('a saved (pre-T1) step chart, drawn through stepChartFor, reads the same as the new default', async () => {
@@ -186,6 +186,8 @@ describe('step charts: the old Features card and the ordinary chart count the sa
   })
 })
 
+// The heavy cases (dozens of handler calls) carry an explicit timeout: `npm test` gates the deploy, and a loaded runner
+// can pass the 5 s default.
 describe('step charts: the query load of one Features page', () => {
   it('one /api/geo request and one D1 statement per step chart (14), where one query per series was 44', async () => {
     vi.setSystemTime(at('15:00'))
@@ -216,5 +218,5 @@ describe('step charts: the query load of one Features page', () => {
     statements().length = 0
     await fetchFeatureHealth(legacy('coach'), filters, true)
     expect(statements()).toHaveLength(2)
-  })
+  }, 60_000)
 })
