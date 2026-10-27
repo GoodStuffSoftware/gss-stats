@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.62.0] — 2026-10-27
+
 ### Added
 - **"Pass tapped, sign-in first" upsell outcome.** A guest who taps the pass on the upsell and is sent to sign in first now has its own outcome (`accept-signin`, from Best Sudoku 1.104.0) in the pop-ups chart, the kind picker, the Feature health Upsell row, the campaign funnel's upsell column, the Pop-ups rate table and the ads reads; "accepted" stays signed-in only.
 
