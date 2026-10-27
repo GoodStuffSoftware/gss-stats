@@ -665,11 +665,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Feature health
 
-The **Feature health** card sits on the Best Sudoku Overview under the KPIs, and the
-**Features** page (last in the Best Sudoku group) charts every step of every feature, one
-line per step and one point per ET day. Both read `/api/features`
-([`functions/api/features.ts`](functions/api/features.ts)), web and app combined, and follow
-the page's range, sites and exclusions. Rows from the app's manual production checks
+The **Feature health** card sits on the Best Sudoku Overview under the KPIs and reads
+`/api/features` ([`functions/api/features.ts`](functions/api/features.ts)). The **Features**
+page (last in the Best Sudoku group) charts every step of every feature, one line per step and
+one point per ET day, as ordinary line charts (see *Step charts* below). Both count web and app
+combined and follow the page's range, sites and exclusions. Rows from the app's manual production checks
 (`manual_check` campaign or paths) never count here, even with known traffic shown. A feature can
 carry a one-sentence caption, shown on its step chart and under the card table: Tour says
 `/tour/start` no longer counts tours opened from the coach strip (from v1.99.1), and Upsell says
@@ -701,7 +701,39 @@ counts as a dismissal.
 - **Adding a feature** is one entry in `FEATURES` in
   [`src/lib/featureHealth.ts`](src/lib/featureHealth.ts): it adds a card row and a Features
   chart.
-- Counts only: nothing here splits by hour, place, device or visitor.
+- Counts only: the card splits by nothing (no hour, place, device or visitor).
+
+### Step charts
+
+Each Features-page step chart is an ordinary chart-editor line chart: the beacon dataset on the
+ET-day axis (`dateEt`), one series per step, each series a filter on the **Feature step**
+dimension (`featureStep`, value `<feature>.<step>`, e.g. `tour.start`; see Data & dimensions).
+It can be edited or duplicated like any chart, and the same chart can be built from scratch in
+the chart editor. The chart caption is the feature's blurb, then its caption; the status chip
+stays on the Feature health card.
+
+- **Same numbers as the card.** A step counts exactly the rows the card counts for it (web and
+  app combined, known test and household traffic hidden unless the chart shows it, manual checks
+  never), per ET day. `functions/api/featureStep.parity.test.ts` pins every step of every feature
+  against `/api/features`, per day and in total.
+- **Whole ET days; today from noon ET.** As on the card, each bound of the range moves to the
+  nearest ET midnight, and the axis draws exactly the counted days. Before 12:00 ET a range that
+  ends now stops at yesterday, so there is no "today" point; from 12:00 ET today is drawn with
+  its rows so far.
+- **The axis starts at the first day any step has a row**, as on every series line chart, and
+  its ticks are whole numbers.
+- **Page filters apply.** A drill or filter on the page (a country, a device) narrows the step
+  charts, which the old step charts ignored. Under an hour, place or device filter, a step that
+  reads counts-only rows (see the counts-only rule under Data & dimensions) shows nothing and the
+  chart says so; a step that reads only other rows still counts.
+- **One request per chart.** A chart whose every series is one `featureStep` filter asks
+  `/api/geo` once with `stepSeries` (the step values in legend order, at most 16) and gets one
+  response per series, from one D1 statement, each equal to that series' own request. The page
+  makes 14 such requests for its 14 step charts.
+- **Saved layouts are not rewritten.** A step chart saved by an older build (dataset
+  `features`, view `steps:<feature>`) is drawn, edited and duplicated as the ordinary chart at
+  render time (`stepChartFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its
+  place, title, caption and settings. The layout version does not change.
 
 ### Coach tips
 
@@ -768,7 +800,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
-   │  - /api/features → Feature health: per-step daily counts from the same D1 (web and app combined)
+   │  - /api/features → the Feature health card, Coach tips and Ask-order from the same D1 (web and app combined)
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
    │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
@@ -978,7 +1010,11 @@ a first-ever beacon, `tagged` when a flight claims it, else `untagged`); the Fli
 (`landingTag`, the `/return/<tag>/d0` arrival rows of a tag a registered campaign claims; see the Campaigns
 page card above); and **key event**
 (`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
-`game-complete`); the **ET hour of day** (`hourEt`, `0`-`23`, DST-aware like `dateEt`); and the
+`game-complete`); the **feature step** (`featureStep`: `<feature>.<step>` for a Feature health
+step in `FEATURES`, [`src/lib/featureHealth.ts`](src/lib/featureHealth.ts); grouped, a row lands on
+its first matching step, while as a filter a step matches all its own paths, so two steps that share
+a path each count it; with no split guard it counts whole ET days, like `/api/features`, and
+echoes the counted window as `meta.since` / `meta.until`); the **ET hour of day** (`hourEt`, `0`-`23`, DST-aware like `dateEt`); and the
 **campaign flight day** (`flightDay`: `1` for the first ET day of the flight the row is
 attributed to, as `campaignFlight` decides it, blank outside that flight's serving days). A
 chart on `hourEt` shows all 24 hours, and one on `flightDay` by `campaignFlight` every day up

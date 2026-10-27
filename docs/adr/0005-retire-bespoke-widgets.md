@@ -378,6 +378,21 @@ old-side numbers from `functions/_lib/testing/popupRateOracle.ts`, the retired b
 restated over the same fixture. The editor shows a one-line hint under Chart type: a pop-up rate is
 a metric card (the "Pop-up rates" preset).
 
+Editor tools, T1 done (2026-10-27): the 2026-10-18 custom-widgets audit named the work left
+after these slices as editor tools T1-T7, which move the 17 `features` widgets (16 on the
+Features page, the Overview's Feature health card) onto the editors. T1 is built: the chart
+editor has a `featureStep` dimension (geo), and the 14 Features-page step charts (the money
+funnel included) are ordinary geo date lines with one `featureStep` series per step. A saved step
+chart is mapped at render time (`stepChartFor`, decision 2): nothing stored is rewritten, and
+there is no `CONFIG_VERSION` change because no new widget field is stored. Counts only (decision
+4) holds: per-ET-day totals over whole ET days, and under an hour, place or device split the
+split guard drops the steps that read refused rows. Parity with `/api/features` is a test
+(`functions/api/featureStep.parity.test.ts`, decision 3); its differences are listed in the
+README (Feature health, Step charts). Left: T2-T4 (the Feature health card, Coach tips and
+Ask-order on the metric registry) and T7 (a Features page template, an editor guard against new
+`features` widgets, then removing `FeatureHealthCard`'s steps branch and the `features`
+dataset, the exit criterion).
+
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
 styles noted above.
