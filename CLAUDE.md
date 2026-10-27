@@ -35,6 +35,8 @@ bump and changelog promotion (see Changelog).
 
 Mike doesn't review PRs (2026-10-06): the writer spawns its own parity reviewer, runs one fix round, then merges to main and verifies the deploy; Mike looks at the live result.
 
+Dashboard changes (Mike, 2026-10-27): chart, card, caption and campaign changes ship straight to production; only large changes (a new page or tab, a navigation or layout overhaul, a new editor tool or workflow, or removing/restructuring existing views) go to the dev preview (https://dev.gss-stats.pages.dev) for Mike's look first.
+
 ## Environment data
 
 The repo is **public**. Env data (tokens, keys, secrets, email addresses, IP addresses, the
