@@ -129,14 +129,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   evenly (check the report's impressions balance before reading the share as how well each ad
   converts). A saved layout still carrying the old caption gets the new one on load; an edited caption
   is left alone. It is counts only: no cost and no
-  impressions, because the ads sync keeps campaign-level spend, not per-ad. While the arm is staged
-  (its dates in `STAGED_FLIGHT_3_DATES` still null, so not yet in `CAMPAIGNS`) the card reads "Flight 3
-  isn't live yet" and sends no query; it fills in when the arm's dates are filled. Like every `/return/` read it is whole ET days and never split by hour,
+  impressions, because the ads sync keeps campaign-level spend, not per-ad. Flight 3 is live (the Apps
+  arm's dates in `STAGED_FLIGHT_3_DATES` are filled, so it is in `CAMPAIGNS`), so the card draws the
+  donut. Only if no registered campaign carried these tags (a staged arm, its dates null) would it read
+  "Flight 3 isn't live yet" and send no query. Like every `/return/` read it is whole ET days and never split by hour,
   place or device. The card is in the defaults only; a saved layout gets it by adding the widget.
   The legend shares come from the chart editor's **Show each slice's share in the legend** option
   (`Widget.showShares`, doughnut and pie only; saved as an explicit true or false), which the
   landing-tag dimension turns on by default, so this donut looks the same with no saved change. The
-  slice labels, colours and the "isn't live yet" text belong to the dimension's definition
+  slice labels, colours and the not-live text belong to the dimension's definition
   (`DimensionDef` in [`src/lib/catalog.ts`](src/lib/catalog.ts): `valueLabel`, `valueColors`,
   `sharesByDefault`, `unavailableText`), not to code that names the dimension; another dimension
   gets the same behaviour by declaring those traits. Shares also work on a doughnut or pie with a
@@ -470,7 +471,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
   over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
   report" under `MIN_COHORT`), the sign-in eligibility counts with their rate, and two upsell
-  charts by reason. The eligibility card also splits the earned finishes by the reason on the row
+  charts by reason. The upsell has four outcome kinds on `/upsell/<kind>/<reason>`: `shown`,
+  `accept` (the pass tapped while signed in), `accept-signin` ("Pass tapped, sign-in first": a guest
+  tapped the pass and was sent to sign in first, tracked from Best Sudoku 1.104.0) and `dismiss`; the
+  chart series, the kind picker, the Feature health Upsell row, the campaign funnel's upsell column and
+  a count row in the rate table all carry it. The tap rates (`popup.tapRate`, `bsk.popupTapRate`)
+  count **every** pass tap in the numerator (`accept` plus `accept-signin`; `popup.taps`,
+  `bsk.popupTaps`), while the accept counts (`popup.accepts`, `bsk.popupAccepts`, the campaign
+  upsell "accepted") stay signed-in only, so a rate before 1.104.0 is unchanged (no `accept-signin`
+  rows exist then); once guests see the paywall the accept count no longer includes their taps. The eligibility card also splits the earned finishes by the reason on the row
   (placement, committed repeat, committed challenge, first-50, first finish, rows from before the reason existed,
   any other) and counts, outside the rate, finishes below the floor, "not now" and stopped
   (`/signin-eligible/{below-floor,not-now,stopped}`; counts only). The two upsell charts
