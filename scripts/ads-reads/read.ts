@@ -632,6 +632,7 @@ function segmentCounts(s: FunnelSegments | null): Record<string, number | null> 
     [`${p}SignUps`]: f.signUps.count,
     [`${p}UpsellShown`]: f.upsell.shown,
     [`${p}UpsellAccept`]: f.upsell.accept,
+    [`${p}UpsellAcceptSignin`]: f.upsell.acceptSignin,
   })
   return { segmentBoundaryMs: s.boundaryMs, fixDaySpend: s.boundaryDaySpend, ...side('preFix', s.pre), ...side('postFix', s.post) }
 }

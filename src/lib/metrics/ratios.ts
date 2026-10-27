@@ -137,9 +137,10 @@ export const RATIO_DEFS: RatioDef[] = [
   // A per: completions per arrival (E1). Can exceed 1, inflated by repeat players; NOT the share who played.
   ratio('campaign.engagementPerArrival', 'per', 'campaign.completions', 'campaign.returnD0', { caveats: ['engagement-per-arrival'] }),
   // Site-wide and pop-up proportions.
-  // Not a true share: accepts include the first-finish ask's taps, which bsk.popupShown leaves out (can exceed 100%).
-  ratio('bsk.popupTapRate', 'proportion', 'bsk.popupAccepts', 'bsk.popupShown', { notSubset: true, caveats: ['popup-tap-rate-includes-first-finish-taps'] }),
-  ratio('popup.tapRate', 'proportion', 'popup.accepts', 'popup.shown'),
+  // Not a true share: taps include the first-finish ask's taps, which bsk.popupShown leaves out (can exceed 100%).
+  // Taps are every pass tap (accepted + the guests' sign-in-first taps), not the signed-in accepts alone.
+  ratio('bsk.popupTapRate', 'proportion', 'bsk.popupTaps', 'bsk.popupShown', { notSubset: true, caveats: ['popup-tap-rate-includes-first-finish-taps'] }),
+  ratio('popup.tapRate', 'proportion', 'popup.taps', 'popup.shown'),
   ratio('popup.signedInRate', 'proportion', 'popup.outcomeSignedIn', 'popup.shown'),
   ratio('popup.installedRate', 'proportion', 'popup.outcomeInstalled', 'popup.shown', { alignDenominator: true }),
   ratio('popup.returnedRate', 'proportion', 'popup.outcomeReturned', 'popup.shown'),

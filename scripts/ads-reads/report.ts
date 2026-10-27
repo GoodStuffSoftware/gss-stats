@@ -44,6 +44,9 @@ const GAME_VIEWS = noteRawText('label.campaign.gameViews').toLowerCase()
 
 const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFixed(2)}`)
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
+/** ", pass tapped (sign-in first) N" for a guest's paywall pass taps (/upsell/accept-signin, best-sudoku 1.104.0): shown only when there are
+ * any, so a read of a period before that release prints exactly as it did. The accepted figure beside it stays the signed-in tap only. */
+export const upsellSigninFirst = (x: number): string => (x > 0 ? `, pass tapped (sign-in first) ${n(x)}` : '')
 /** Mike's cost-per-arrival benchmark (2026-10-15): the F1/F2 in-app campaign, about $0.32 a tagged arrival. */
 export const COST_PER_ARRIVAL_BENCHMARK = 0.32
 /** Flight 3 baselines beside the cost per arrival (spec section 1): Apps $0.32-0.34 (F1/F2 in-app), Search $0.64 (F2 Search). Flight 2 and the retest keep the single $0.32 above. */
@@ -258,7 +261,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
       const rates = POPUP_OUTCOME_TYPES.map((o) => `${o} ${formatGated(r.site!.outcomeRates[p][o])}`).join(', ')
       out.push(`  ${label}: shown ${n(s.shown[p])}; outcomes ${rates}${p === 'promo-first50' && promoNote ? `; ${promoArmAbsentNote()}` : ''}`)
     }
-    out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
+    out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}${upsellSigninFirst(s.upsell.acceptSignin)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
     out.push(`  signin-eligible: earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)} (${SIGNIN_ELIGIBLE_COUNT_NOTE})`)
     const sp1 = p1Line(s.p1, { omitPurchases: opts.omitPurchases })
     if (sp1) out.push(`  site-wide P1 beacons: ${sp1}`)
@@ -289,7 +292,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     out.push(`Segments at the signed-out upsell fix (${s.boundaryLabel}) — two separate short tests (spec section 14a):`)
     for (const [name, f] of [['pre-fix', s.pre], ['post-fix', s.post]] as const) {
       out.push(
-        `  ${name}: spend ${money(f.spend)} over ${f.spendDays} closed day(s); ${n(f.taggedArrivals)} tagged arrivals; asks ${n(f.asks)}, accepts ${n(f.accepts)} (accept rate ${formatGated(gateRate(f.accepts, f.asks))}); ${f.signUps.label}; upsell shown ${n(f.upsell.shown)}, accepted ${n(f.upsell.accept)}`,
+        `  ${name}: spend ${money(f.spend)} over ${f.spendDays} closed day(s); ${n(f.taggedArrivals)} tagged arrivals; asks ${n(f.asks)}, accepts ${n(f.accepts)} (accept rate ${formatGated(gateRate(f.accepts, f.asks))}); ${f.signUps.label}; upsell shown ${n(f.upsell.shown)}, accepted ${n(f.upsell.accept)}${upsellSigninFirst(f.upsell.acceptSignin)}`,
       )
     }
     out.push(`  fix day ${s.boundaryDay}: spend ${money(s.boundaryDaySpend)} (straddles the fix; Ads spend is per ET day)`)

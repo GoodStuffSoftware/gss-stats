@@ -169,6 +169,14 @@ export const POPUP_RATES: CardSpec = {
           display: { as: 'percent', decimals: 1 },
           ...COMPACT,
         },
+        // The upsell's guest pass taps (they sign in first): their own count, not part of "accepted"; the tap rate above counts them.
+        {
+          id: 'acceptSignins',
+          label: { note: 'label.card.popupAcceptSignins' },
+          data: { metric: 'popup.acceptSignins', params: { popup: 'upsell' }, window: 'page' },
+          display: { as: 'number' },
+          ...COMPACT,
+        },
         // Counts, not rates — signed-in/returned/still-playing are lagged cohorts (see this
         // file's header comment on the rate-validity rule), so unlike 'installed' above they
         // never get a percentage here; the per-outcome breakdown already lives in the 'pu-bars'
@@ -204,7 +212,7 @@ export const POPUP_RATES: CardSpec = {
       ],
     },
   ],
-  captions: ['first-finish-ask-whole-days'],
+  captions: ['first-finish-ask-whole-days', 'tap-rate-counts-every-pass-tap'],
 }
 
 /** Sign-in eligibility (the Pop-ups page's 'eligible' chart): signed-out finishes that earned a
@@ -325,6 +333,7 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
         { id: 'side', label: { note: 'label.card.taggedUpsell' }, data: { field: 'window.label' }, display: { as: 'text' } },
         { id: 'shown', label: { note: 'label.card.shown' }, data: { metric: 'campaign.upsellShown', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
         { id: 'accepted', label: { note: 'label.card.accepted' }, data: { metric: 'campaign.upsellAccepts', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+        { id: 'acceptedSigninFirst', label: { note: 'label.card.acceptedSigninFirst' }, data: { metric: 'campaign.upsellAcceptSignins', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
         { id: 'dismissed', label: { note: 'label.card.dismissed' }, data: { metric: 'campaign.upsellDismisses', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
       ],
     },

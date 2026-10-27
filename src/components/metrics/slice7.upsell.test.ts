@@ -98,7 +98,10 @@ describe('the upsell-fix segment section, with the fix set', () => {
     expect(withTable.map((c) => norm(c.find('.mc-title').text()))).toEqual(['US+CA web retest'])
     const section = withTable[0].find('.metric-section.layout-table')
     expect(norm(section.find('.section-title').text())).toBe('▼ Signed-out upsell fix at 2026-09-26 14:00 ET (flight day 1) — a funnel segment boundary: read the two sides as separate short tests.')
-    expect(section.findAll('thead th').map((th) => norm(th.text()))).toEqual(['Tagged upsell', 'Shown', 'Accepted', 'Dismissed'])
-    expect(section.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => norm(td.text())))).toEqual(oldRows)
+    expect(section.findAll('thead th').map((th) => norm(th.text()))).toEqual(['Tagged upsell', 'Shown', 'Accepted', 'Pass tapped, sign-in first', 'Dismissed'])
+    expect(section.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => norm(td.text())))).toEqual(
+      // The old table plus the new "sign-in first" column (after Accepted): 0 here, since no guest has tapped yet.
+      oldRows.map(([side, shown, accepted, dismissed]) => [side, shown, accepted, '0', dismissed]),
+    )
   })
 })

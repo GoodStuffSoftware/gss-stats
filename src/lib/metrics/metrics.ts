@@ -46,7 +46,7 @@ import {
   TRACKING_ACTIVATION_DATE_ET,
   type PopupEvent,
 } from '../popupEvents'
-import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
+import { isEventPath, isPopupAccept, isPopupShown, isPopupTap, isReturnD1Plus } from '../overview'
 import { isSplitRefusedPath } from '../splitGuard'
 import { resolveCampaignSpend, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
@@ -239,9 +239,10 @@ const OUTCOME_METRICS: { id: string; outcome: string; lag: [number, number] }[] 
 const noOutcomeTracking = (popup: string | undefined) => !!POPUPS.find((p) => p.id === popup)?.noOutcomeTracking
 
 // ── Tagged upsell showings, split at the upsell fix (lib/adsRules.ts summarizeTaggedRows' upsell) ─
-const UPSELL_METRICS: { id: string; kind: 'shown' | 'accept' | 'dismiss' }[] = [
+const UPSELL_METRICS: { id: string; kind: 'shown' | 'accept' | 'accept-signin' | 'dismiss' }[] = [
   { id: 'campaign.upsellShown', kind: 'shown' },
   { id: 'campaign.upsellAccepts', kind: 'accept' },
+  { id: 'campaign.upsellAcceptSignins', kind: 'accept-signin' },
   { id: 'campaign.upsellDismisses', kind: 'dismiss' },
 ]
 const UPSELL_WINDOWS = { attribution: 'campaignPathVisitor', upsellPre: 'campaignPathVisitor', upsellPost: 'campaignPathVisitor' } as const
@@ -572,6 +573,9 @@ export const METRIC_DEFS: MetricDef[] = [
   // No subsetOf: the first-finish ask's taps are shared /signin-prompt/accept rows (no reason), so they count
   // here while bsk.popupShown leaves that ask out; bsk.popupTapRate waives the subset with a caveat.
   bskMetric({ id: 'bsk.popupAccepts', countsRefused: false, unit: 'showing', path: isPopupAccept, instrumented: [TRACKING] }),
+  // Every tap: accepted PLUS the guests' "sign-in first" pass taps (accept-signin). Only the tap-rate numerator
+  // (bsk.popupTapRate); the Overview "accepted" count above stays signed-in only. Equal to it before the guest paywall.
+  bskMetric({ id: 'bsk.popupTaps', countsRefused: false, unit: 'showing', path: isPopupTap, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', countsRefused: false, unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
   // The new/existing/unknown split (A2, review round 2026-09-27): the exact sign-up count the
   // current ad flight is judged on ('new'), plus existing sign-ins and the small unknown/old-
@@ -619,6 +623,30 @@ export const METRIC_DEFS: MetricDef[] = [
     path: (p, ctx) => {
       const ev = popupEventOf(p)
       return !!ev && ev.family === ctx.params.popup && ev.kind === 'accept'
+    },
+    instrumented: [TRACKING],
+  }),
+  // A guest's pass tap on the upsell (they must sign in first): not an accept, and counted in popup.taps below.
+  popupMetric({
+    id: 'popup.acceptSignins',
+    unit: 'showing',
+    subsetOf: 'popup.shown',
+    params: ['popup'],
+    path: (p, ctx) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === ctx.params.popup && ev.kind === 'accept-signin'
+    },
+    instrumented: [TRACKING],
+  }),
+  // Every tap (accept + accept-signin): the numerator of popup.tapRate. For every pop-up but the upsell it equals popup.accepts.
+  popupMetric({
+    id: 'popup.taps',
+    unit: 'showing',
+    subsetOf: 'popup.shown',
+    params: ['popup'],
+    path: (p, ctx) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === ctx.params.popup && (ev.kind === 'accept' || ev.kind === 'accept-signin')
     },
     instrumented: [TRACKING],
   }),

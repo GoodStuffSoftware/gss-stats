@@ -31,6 +31,14 @@ export function isPopupAccept(path: string): boolean {
   const ev = classifyPopupPath(path)
   return !!ev && ev.kind === 'accept' && POPUPS.some((p) => p.id === ev.family)
 }
+/** Any tap on a registered pop-up's ask: an "accept" row, or an "accept-signin" row (a guest's pass
+ * tap on the upsell, who must sign in first). The tap-rate numerator; the accepted COUNTS stay
+ * isPopupAccept (signed-in only). Before the guest paywall (v1.104.0) there are no accept-signin
+ * rows, so this equals isPopupAccept and every historical rate is unchanged. */
+export function isPopupTap(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && (ev.kind === 'accept' || ev.kind === 'accept-signin') && POPUPS.some((p) => p.id === ev.family)
+}
 
 // ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
 /** `site IN (...) AND ts >= ? AND ts < ?` plus every row-exclusion rule (see

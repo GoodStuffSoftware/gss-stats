@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MEASUREMENT_CHANGES } from '../../src/lib/measurementChanges'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
-import { formatMorningReport, formatPostflightReport } from './report'
+import { formatMorningReport, formatPostflightReport, upsellSigninFirst } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -91,6 +91,10 @@ describe('flight 2 and retest report output is unchanged by the flight 3 rule re
     const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8')) as Record<string, string>
     expect(Object.keys(got)).toEqual(Object.keys(golden))
     for (const k of Object.keys(golden)) expect(got[k], k).toBe(golden[k])
+  })
+  it("the paywall's pass-tapped (sign-in first) figure prints only when there is one, so a read before 1.104.0 prints as it did", () => {
+    expect(upsellSigninFirst(0)).toBe('')
+    expect(upsellSigninFirst(3)).toBe(', pass tapped (sign-in first) 3')
   })
   it('the F2 and retest text carries no flight 3 wording', async () => {
     const golden = JSON.parse(fs.readFileSync(GOLDEN, 'utf8')) as Record<string, string>

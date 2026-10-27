@@ -426,13 +426,22 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // /signin-prompt/accept row has no reason), its shown count leaves that ask out.
   'popup-tap-rate-includes-first-finish-taps': {
     id: 'popup-tap-rate-includes-first-finish-taps',
-    text: 'Includes taps on the first-finish sign-in ask, which the shown count leaves out; can read high.',
+    text: 'Counts every pass tap, including guests who must sign in first, and taps on the first-finish sign-in ask, which the shown count leaves out; can read high.',
     kind: 'note',
     severity: 'caveat',
     scopes: ['overview'],
   },
   // The Pop-ups page cards (lib/metrics/presets.ts POPUP_RATES, SIGNIN_ELIGIBILITY): the first-finish sign-in
   // ask rows are counts only (lib/splitGuard.ts REFUSED_POPUP_PATH_PATTERNS), counted per whole ET day.
+  // The Pop-ups rate table's tap rates (popup.tapRate): the numerator is every pass tap, so the upsell's rate
+  // counts a guest's tap that goes to sign-in first (the 'Pass tapped, sign-in first' row), not only the accepts.
+  'tap-rate-counts-every-pass-tap': {
+    id: 'tap-rate-counts-every-pass-tap',
+    text: 'Each tap rate counts every pass tap, including guests who must sign in first (counted on their own row below), over the times it was shown.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['popup'],
+  },
   'first-finish-ask-whole-days': {
     id: 'first-finish-ask-whole-days',
     text: 'Any first-finish sign-in ask rows here are counted as whole ET days, never by hour, place or device.',
@@ -563,6 +572,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.carryOverCompletions': 'Carry-over completions',
     'label.bsk.popupShown': 'Pop-ups shown',
     'label.bsk.popupAccepts': 'Pop-ups accepted',
+    'label.bsk.popupTaps': 'Pop-up taps',
     'label.bsk.authSuccess': 'Auth successes',
     // The new/existing/unknown split that rides alongside every base auth-success row (A2,
     // review round 2026-09-27 — see lib/metrics/metrics.ts AUTH_NEW_EXISTING). "New" is the
@@ -584,6 +594,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.returnsD1plus': 'Return visits (day 1+)',
     'label.popup.shown': 'Shown',
     'label.popup.accepts': 'Accepted',
+    'label.popup.acceptSignins': 'Pass tapped, sign-in first',
+    'label.popup.taps': 'All taps',
     'label.popup.outcomeSignedIn': 'Signed in',
     'label.popup.outcomeInstalled': 'Installed',
     'label.popup.outcomeReturned': 'Returned',
@@ -607,6 +619,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.release.windowDays': 'Days on each side',
     'label.campaign.upsellShown': 'Shown',
     'label.campaign.upsellAccepts': 'Accepted',
+    'label.campaign.upsellAcceptSignins': 'Pass tapped, sign-in first',
     'label.campaign.upsellDismisses': 'Dismissed',
     'label.campaign.spendSource': 'Source',
     'label.campaign.spendThrough': 'Spend through',
@@ -775,6 +788,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.taggedUpsell': 'Tagged upsell',
     'label.card.shown': 'Shown',
     'label.card.accepted': 'Accepted',
+    'label.card.acceptedSigninFirst': 'Pass tapped, sign-in first',
+    'label.card.popupAcceptSignins': 'Upsell — pass tapped, sign-in first',
     'label.card.dismissed': 'Dismissed',
     'label.card.perArrival': 'Per arrival',
     'label.card.perAuthSuccess': 'Per auth success',
