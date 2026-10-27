@@ -476,10 +476,11 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
   const axisTitle = (text?: string) => (text ? { display: !narrow, text, color: tickColor(), font: { family: 'Inter', size: 10 } } : { display: false })
   const scales: any = {
     x: { grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, maxRotation: 0, autoSkip: true } },
-    y: { position: 'left', beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } }, title: axisTitle(widget.axisTitles?.left) },
+    // Every series is a row count, so a tick is a whole number (a quiet chart would otherwise read 0.5 rows).
+    y: { position: 'left', beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, precision: 0 }, title: axisTitle(widget.axisTitles?.left) },
   }
   if (hasRight) {
-    scales.y2 = { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } }, title: axisTitle(widget.axisTitles?.right) }
+    scales.y2 = { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, precision: 0 }, title: axisTitle(widget.axisTitles?.right) }
   }
   return {
     type: 'line',

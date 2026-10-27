@@ -15,6 +15,8 @@
 
 export const MAX_SITES = 50
 export const MAX_CONSTRAINTS = 16
+/** The most series one /api/geo step-series request (`stepSeries`) carries: a feature has at most a handful of steps. */
+export const MAX_STEP_SERIES = 16
 export const MAX_BOUND_PARAMS = 100
 export const MAX_SQL_BYTES = 90_000
 

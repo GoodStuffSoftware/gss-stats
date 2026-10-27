@@ -13,6 +13,7 @@ import { onRequestPost } from './geo'
 import { FEATURES, flatSteps, featureStepKey, stepMatches, stepMayMatchRefused } from '../../src/lib/featureHealth'
 import { isSplitRefusedPath, SPLIT_REFUSED_DIMS } from '../../src/lib/splitGuard'
 import { insertHits, installCaches, memoryCache, openHitsDb, sqliteD1, type HitRow } from '../_lib/testing/hitsDb'
+import { buildSeriesLineConfig, formatKey } from '../../src/lib/charts'
 
 let db: DatabaseSync
 let undo: () => void
@@ -279,5 +280,100 @@ describe('featureStep: whole ET days for every row', () => {
     // With a split the guard's exact window applies (and refused rows are out).
     const split = await post({ ...window, dimension: 'dateEt', constraints: [step('tour.start'), { field: 'device', value: 'mobile' }], excludeKnownTraffic: true })
     expect(byDay(split.body.rows)['2026-10-12']).toBe(perDay(0))
+  })
+})
+
+describe('featureStep: today on the step chart axis (the counted window is the echoed one)', () => {
+  beforeEach(seed)
+  // Today is 10-15 (EDT). Rows at 01:00 ET today; the range starts on an ET midnight and ends "now".
+  const since = '2026-10-12T04:00:00Z'
+  const chart = (resp: any) => buildSeriesLineConfig({ id: 't', i: 't', x: 0, y: 0, w: 6, h: 8, type: 'line', dataset: 'geo', dimension: 'dateEt', metric: 'pageviews', series: [{ label: 'Started', filter: [step('tour.start')], axis: 'left', style: 'solid' }] } as any, [resp])!
+  const labels = (c: any) => c.data.labels as string[]
+  const points = (c: any) => c.data.datasets[0].data as number[]
+  beforeEach(() => insertHits(db, [row('2026-10-15', '/tour/start', 'bestsudoku-web', 5, { ts: Date.parse('2026-10-15T05:00:00Z') })]))
+
+  it('before noon ET today is neither counted nor drawn (the old card had no such day either)', async () => {
+    const { body } = await post({ since, until: '2026-10-15T14:00:00Z', dimension: 'dateEt', constraints: [step('tour.start')], excludeKnownTraffic: true })
+    expect(byDay(body.rows)['2026-10-15']).toBeUndefined()
+    expect(body.meta.since).toBe('2026-10-12T04:00:00.000Z')
+    expect(body.meta.until).toBe('2026-10-15T03:59:59.999Z') // the last counted ms: 10-14 23:59:59.999 ET
+    const c = chart(body)
+    expect(labels(c)).toEqual(DAYS.map((d) => formatKey('date', d)))
+    expect(points(c)).toEqual(DAYS.map((_, i) => perDay(i)))
+  })
+
+  it('from noon ET today is counted so far and drawn', async () => {
+    const { body } = await post({ since, until: '2026-10-15T20:00:00Z', dimension: 'dateEt', constraints: [step('tour.start')], excludeKnownTraffic: true })
+    expect(byDay(body.rows)['2026-10-15']).toBe(5)
+    expect(body.meta.until).toBe('2026-10-16T03:59:59.999Z')
+    const c = chart(body)
+    expect(labels(c)).toEqual([...DAYS, '2026-10-15'].map((d) => formatKey('date', d)))
+    expect(points(c)).toEqual([...DAYS.map((_, i) => perDay(i)), 5])
+  })
+
+  it('a query with no featureStep, or with a split, echoes the window it was sent', async () => {
+    const until = '2026-10-15T14:00:00Z'
+    const plain = await post({ since, until, dimension: 'dateEt', constraints: [{ field: 'path', value: '/tour/start' }] })
+    expect([plain.body.meta.since, plain.body.meta.until]).toEqual([since, until])
+    const split = await post({ since, until, dimension: 'dateEt', constraints: [step('tour.start'), { field: 'device', value: 'mobile' }] })
+    expect([split.body.meta.since, split.body.meta.until]).toEqual([since, until])
+  })
+})
+
+describe('featureStep: a step chart asks once (stepSeries), each series as its own query would answer', () => {
+  beforeEach(seed)
+  const keysOf = (f: (typeof FEATURES)[number]) => f.steps.map((s) => featureStepKey(f.id, s.id))
+  const variants: Record<string, Record<string, unknown>> = {
+    'known traffic hidden': { excludeKnownTraffic: true },
+    'known traffic shown': { excludeKnownTraffic: false },
+    'app only': { excludeKnownTraffic: true, sites: ['bestsudoku-app'] },
+    'a sub-day window': { excludeKnownTraffic: true, since: '2026-10-12T14:00:00Z', until: '2026-10-14T18:00:00Z' },
+    'before noon ET': { excludeKnownTraffic: true, until: '2026-10-14T14:00:00Z' },
+    'a device drill (split guard)': { excludeKnownTraffic: true, constraints: [{ field: 'device', value: 'mobile' }] },
+    'a featureStep drill': { excludeKnownTraffic: true, constraints: [step('games.start')] },
+    'own visits hidden': { excludeKnownTraffic: true, excludeOwnVisits: true, ownBrowser: 'Chrome', ownOS: 'Android' },
+    'a short limit': { excludeKnownTraffic: true, limit: 2 },
+  }
+  for (const [name, v] of Object.entries(variants)) {
+    it(`${name}: every feature's batched series equal its per-series answers, from one statement`, async () => {
+      for (const f of FEATURES) {
+        const keys = keysOf(f)
+        const drills = (v.constraints as unknown[]) ?? []
+        const batched = await post({ ...v, dimension: 'dateEt', stepSeries: keys })
+        expect(batched.status).toBe(200)
+        expect(batched.statements, f.id).toHaveLength(1)
+        expect(batched.body.series).toHaveLength(keys.length)
+        for (const [i, key] of keys.entries()) {
+          const one = await post({ ...v, dimension: 'dateEt', constraints: [...drills, step(key)] })
+          expect(batched.body.series[i], `${name} ${key}`).toEqual(one.body)
+        }
+      }
+    })
+  }
+
+  it('repeated and unknown values: each series still answers for itself', async () => {
+    const keys = ['games.start', 'games-easy.start', 'games.start', 'nope.x', "games.start' OR 1=1 --"]
+    const { body, status } = await post({ dimension: 'dateEt', stepSeries: keys, excludeKnownTraffic: true })
+    expect(status).toBe(200)
+    expect(byDay(body.series[0].rows)).toEqual(byDay(body.series[1].rows))
+    expect(body.series[2]).toEqual(body.series[0])
+    for (const i of [3, 4]) expect(body.series[i].totals.pageviews).toBe(0)
+  })
+
+  it('the batched statement reads no hour, place, device or visitor column, joins nothing and groups by the date key alone', async () => {
+    const { statements } = await post({ dimension: 'dateEt', stepSeries: keysOf(FEATURES.find((f) => f.id === 'install')!), excludeKnownTraffic: true })
+    const sql = statements[0]
+    expect(sql).not.toMatch(/\bJOIN\b/i)
+    expect(sql).not.toMatch(/\bvisitor\b/)
+    expect(sql).toMatch(/GROUP BY k\)/)
+    const selectList = sql.slice(sql.indexOf('FROM (SELECT ') + 'FROM (SELECT '.length, sql.indexOf(' FROM hits'))
+    expect(selectList).not.toMatch(/\b(visitor|device|browser|os|country|region|city|postal|lat|lon|colo|org|screenw|timezone|lang)\b/)
+  })
+
+  it('refuses a non-date dimension, points, a ring and too many series', async () => {
+    expect((await post({ dimension: 'country', stepSeries: ['tour.start'] })).status).toBe(400)
+    expect((await post({ dimension: 'points', stepSeries: ['tour.start'] })).status).toBe(400)
+    expect((await post({ dimension: 'site', dims: ['site', 'featureStep'], stepSeries: ['tour.start'] })).status).toBe(400)
+    expect((await post({ dimension: 'dateEt', stepSeries: Array.from({ length: 17 }, () => 'tour.start') })).status).toBe(400)
   })
 })

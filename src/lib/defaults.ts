@@ -875,9 +875,6 @@ export function defaultFeaturesPage(): DashboardPage {
   return {
     id: 'bsk-features',
     name: 'Features',
-    // Picked, not Auto: the step charts read the geo dataset now, which would make Auto draw the map pin; the page keeps the
-    // pulse icon it always had (a saved layout keeps whatever it has).
-    icon: 'activity',
     isDefault: false,
     group: GROUP_BEST_SUDOKU,
     // A month of days shows whether a feature fires every day; "went silent" itself reads the last 8 days whatever the range.

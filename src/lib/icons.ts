@@ -57,6 +57,7 @@ import {
 } from '@lucide/vue'
 import type { DashboardPage, Dataset, GroupMeta, Widget } from '../types'
 import { ancestorsOf } from './nav'
+import { featureStepSeriesOf } from './featureHealth'
 
 // The navigation UI's own glyphs (menus, the drill mark, …), re-exported so this file stays the
 // only one importing the icon library.
@@ -184,7 +185,8 @@ export const DATASET_ICON: Readonly<Record<Dataset, IconKey>> = Object.freeze({
 })
 
 /** The dataset most of a page's charts read: note widgets don't count, a chart with no dataset
- * counts as 'rum' (as it does everywhere else), and a tie goes to the dataset whose first chart
+ * counts as 'rum' (as it does everywhere else), a feature step chart (geo, every series a featureStep filter: the
+ * ordinary chart the 'features' step charts became, lib/defaults.ts stepChartFor) counts as 'features', and a tie goes to the dataset whose first chart
  * comes first in layout order (top to bottom, then left to right). null = no charts. */
 export function chartsDataset(widgets: readonly Widget[]): Dataset | null {
   const inLayoutOrder = widgets
@@ -194,7 +196,7 @@ export function chartsDataset(widgets: readonly Widget[]): Dataset | null {
   const count = new Map<Dataset, number>()
   const first = new Map<Dataset, number>()
   inLayoutOrder.forEach(({ w }, pos) => {
-    const d: Dataset = w.dataset ?? 'rum'
+    const d: Dataset = featureStepSeriesOf(w) ? 'features' : w.dataset ?? 'rum'
     count.set(d, (count.get(d) ?? 0) + 1)
     if (!first.has(d)) first.set(d, pos)
   })
