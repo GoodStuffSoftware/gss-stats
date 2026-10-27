@@ -256,11 +256,11 @@ describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(noteRawText(AE_NOTE_ID)).toContain(`From ${DAY_AE} (${android.id}): ${android.note}.`)
     expect(cardShowsAuthErrors({ preset: 'bsk-kpis' })).toBe(true)
     expect(autoCaveatIds(widget({ dataset: 'overview', card: { preset: 'bsk-kpis' } }))).toContain(AE_NOTE_ID)
-    // One marker per release: the entry mints none, so the dated timeline never lists it and the Play marker stays newest.
+    // One marker per release: the entry mints none, so the dated timeline never lists it.
     expect(RELEASES.some((r) => r.version === android.id)).toBe(false)
     expect(datedReleases().some((r) => r.version === android.id)).toBe(false)
     expect(datedReleases().filter((r) => r.version.startsWith('v1.103.0')).map((r) => r.version)).toEqual(['v1.103.0 web', 'v1.103.0 Play'])
-    expect(RELEASES[RELEASES.length - 1].version).toBe('v1.103.0 Play')
+    expect(RELEASES.some((r) => r.version === 'v1.103.0 Play')).toBe(true) // the 1.103.0 Play marker is still the release's one marker
   })
 
   it('dated: stays out of the auth-success caveat, the generic report lines, the coach readouts and the cards without a failure count', () => {

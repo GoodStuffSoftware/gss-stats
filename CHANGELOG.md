@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.62.1] — 2026-10-27
+
+### Added
+- **v1.104.0 web and Play release markers.** The release timeline and panel now date v1.104.0 at 2026-10-27 (web live 17:04:17Z, Play promoted 17:18:40Z), Play the newest; guests now see pass prices on the paywall, so their pass taps count as "Pass tapped, sign-in first" and Paywall shown rises from this release.
+
 ## [0.62.0] — 2026-10-27
 
 ### Added

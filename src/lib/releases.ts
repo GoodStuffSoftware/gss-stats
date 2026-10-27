@@ -241,6 +241,20 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-26', // promoted to Play production 2026-10-26T22:28:21Z = 18:28:21 ET (full rollout, versionCode 1103000)
     note: 'Play production 22:28:21Z 10-26 (1103000); old and new Android builds mix until updates spread. Starts the first-finish and chunk-reload rows on Android; native Google sign-in cancels move from the no-code row to the user-cancelled row (see the Sign-in failures note).',
   },
+  // v1.104.0 ("guest paywall prices"): guests now see pass prices on the paywall, and a guest's pass tap sends
+  // the accept-signin upsell beacon. A plain marker: nothing already counted changes, the paywall-shown count rises
+  // because guests now see it.
+  {
+    version: 'v1.104.0 web',
+    dateEt: '2026-10-27', // web live 2026-10-27T17:04:17Z = 13:04:17 ET
+    note: 'Web live 17:04:17Z 10-27. Guests now see the paywall with prices; a guest tapping a pass counts as "Pass tapped, sign-in first", and Paywall shown rises from this release because guests now see it.',
+  },
+  // Listed after the web entry so the later-timed Play entry wins the same-day tie (Play production 2026-10-27T17:18:40Z).
+  {
+    version: 'v1.104.0 Play',
+    dateEt: '2026-10-27', // promoted to Play production ~2026-10-27T17:18:40Z = 13:18:40 ET (full rollout, versionCode 1104000)
+    note: 'Play production 17:18:40Z 10-27 (1104000); old and new Android builds mix until updates spread. Guests now see the paywall with prices; a guest tapping a pass counts as "Pass tapped, sign-in first", and Paywall shown rises from this release because guests now see it.',
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }
