@@ -509,8 +509,16 @@ export function syncRunInsert(r: SyncRunRecord): SqlStatement {
   }
 }
 
+/** The conversions-and-assets pass (lib/adsSync.ts syncAdsExtras) keeps its own rows in
+ * ads_sync_runs, keyed with this prefix. Every reader of the COST sync's runs below (the claim,
+ * the rate limit, lastSync) skips them, so that pass can never delay, block or stale the cost
+ * sync; LAST_PULLS_SQL needs no filter (those rows always have campaigns_pulled '[]'). */
+export const EXTRAS_RUN_KEY_PREFIX = 'extras:'
+const NOT_EXTRAS_RUN = `run_key NOT LIKE '${EXTRAS_RUN_KEY_PREFIX}%'`
+
 /** The atomic claim a Worker sync makes BEFORE it syncs (migration 0004): a 'running' row,
- * inserted only when no sync run (claim or finished) ended inside the last `windowMs`. One
+ * inserted only when no sync run (claim or finished; never a conversions-and-assets row) ended
+ * inside the last `windowMs`. One
  * statement, so of two concurrent requests exactly one inserts (changes = 1) and the other gets
  * changes = 0. A claim that is never followed by a finished row is a run that died (e.g. out of
  * CPU) — visible in the table, and it only blocks for one window. */
@@ -519,7 +527,7 @@ export function syncClaimStatement(source: SyncSource, nowMs: number, windowMs: 
   return {
     sql:
       "INSERT INTO ads_sync_runs (run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error, detail, campaigns_pulled) " +
-      "SELECT ?, ?, ?, ?, '[]', '[]', 0, 0, 0, 0, 'running', NULL, '{}', '[]' WHERE NOT EXISTS (SELECT 1 FROM ads_sync_runs WHERE finished_at > ?) ON CONFLICT DO NOTHING",
+      `SELECT ?, ?, ?, ?, '[]', '[]', 0, 0, 0, 0, 'running', NULL, '{}', '[]' WHERE NOT EXISTS (SELECT 1 FROM ads_sync_runs WHERE finished_at > ? AND ${NOT_EXTRAS_RUN}) ON CONFLICT DO NOTHING`,
     binds: [`claim:${source}:${now}`, source, now, now, new Date(nowMs - windowMs).toISOString()],
   }
 }
@@ -551,12 +559,15 @@ export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHE
 export const PLAY_DAILY_SQL = 'SELECT date, device_installs, user_installs, device_uninstalls, active_device_installs FROM ads_play_daily ORDER BY date'
 /** Coverage rows for spendThrough (every campaign; a few hundred rows at most). */
 export const COVERAGE_ROWS_SQL = 'SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
-/** Latest successful sync per campaign, from the 50 newest finished runs only (index on
+/** Latest successful sync per campaign, from the 50 newest finished cost runs only (index on
  * finished_at), so the cost stays flat as the log grows. */
 export const LAST_SYNC_SQL =
-  "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value"
-/** When the latest sync run (any source) finished — the on-demand rate limit. */
-export const LAST_RUN_SQL = 'SELECT MAX(finished_at) AS last FROM ads_sync_runs'
+  `SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' AND ${NOT_EXTRAS_RUN} ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value`
+/** When the latest cost sync run (any source) finished — the on-demand rate limit. */
+export const LAST_RUN_SQL = `SELECT finished_at AS last FROM ads_sync_runs WHERE ${NOT_EXTRAS_RUN} ORDER BY finished_at DESC LIMIT 1`
+/** The latest conversions-and-assets run: its detail carries that pass's state forward
+ * (lib/adsSync.ts syncAdsExtras). Those runs never write a 'running' row. */
+export const LAST_EXTRAS_RUN_SQL = `SELECT detail, finished_at FROM ads_sync_runs WHERE run_key LIKE '${EXTRAS_RUN_KEY_PREFIX}%' ORDER BY finished_at DESC, id DESC LIMIT 1`
 /** Sync claims with no finished run after them (review I2): a 'running' row started between the
  * two bounds whose source and start have no non-running row. The Worker's finished row reuses
  * its claim's source and started_at. */
@@ -791,6 +802,8 @@ export interface AdsSyncStore {
   /** Upserts the catalog rows these name FIRST, then the daily rows: a run cut short leaves the
    * daily rows unwritten, so the next run sees them as new and sends both again. */
   putAssets?(campaignId: string, rows: readonly AssetDayRow[], fetchedAt: string): Promise<boolean>
+  /** The latest conversions-and-assets run's detail (parsed JSON), or null when there is none. */
+  getLastExtrasRun?(): Promise<{ detail: unknown; finishedAt: string } | null>
   appendSyncRun(run: SyncRunRecord): Promise<boolean>
   /** The atomic claim (syncClaimStatement): true only for the one caller that inserted it. */
   claimSync(source: SyncSource, nowMs: number, windowMs: number): Promise<boolean>
@@ -896,6 +909,17 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
     putConversions: (campaignId, rows, fetchedAt) => writeAll(conversionDailyUpserts(campaignId, rows, fetchedAt)),
     getAssetRows: async (campaignId, since, until) => (await select(ASSET_ROWS_SQL, [campaignId, since, until])).map(mapAssetRow),
     putAssets: (campaignId, rows, fetchedAt) => writeAll([...assetCatalogUpserts(assetCatalogFrom(rows)), ...assetDailyUpserts(campaignId, rows, fetchedAt)]),
+    async getLastExtrasRun() {
+      const r = (await select(LAST_EXTRAS_RUN_SQL, []))[0]
+      if (!r) return null
+      let detail: unknown = null
+      try {
+        detail = JSON.parse(String(r.detail ?? '{}'))
+      } catch {
+        detail = null // unreadable: the pass starts over (its upserts are idempotent)
+      }
+      return { detail, finishedAt: String(r.finished_at) }
+    },
     async appendSyncRun(run) {
       if (opts.dryRun) return false
       await exec(syncRunInsert(run), true)
