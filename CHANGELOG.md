@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.65.0] — 2026-10-28
+
 ### Added
 - **Installs and cost per install for the Android campaign.** The campaign page can now show Google's installs per day and cost per install, and ad clicks per day, from the stored ads data. A campaign with no install action shows no install figure rather than 0.
 
