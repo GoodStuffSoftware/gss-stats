@@ -1272,7 +1272,7 @@ lacks the pin, pin it in the same PR as the registration.
   `campaignStatusOn(campaign, todayEt)` (`upcoming` before `flightStart` or with no start yet,
   `active` from the start day through `flightEnd`, `closed` after), and the `status` on a `CAMPAIGNS`
   entry is a live getter for today in ET. Anything holding an injected date calls the function with
-  it. The ads sync writes the derived status to the `ads_campaigns` row, so a flight closes itself.
+  it. The ads sync writes the derived status to the `ads_campaigns` row whenever it writes data (so that row can lag the in-app status). Cron syncs of a closed flight pull through `flightEnd` + 3 days; the post-flight reads pull through yesterday (`uncapped`), so stray spend after the end is still seen. A spend day newer than the latest stored conversion day has no install figure yet (the extras pass stores conversions apart from spend).
   Installs and cost per install: registry metrics `campaign.adsInstalls` (Google's conversions on the
   campaign's `installActionId`, summed over the stored spend days, attribution window) and
   `campaign.costPerAdsInstall` (stored spend over those installs, a ratio of sums, no data at 0

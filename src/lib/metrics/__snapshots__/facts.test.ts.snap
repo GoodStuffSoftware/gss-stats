@@ -16,7 +16,7 @@ exports[`fact SQL snapshots > adsInstallsDaily {} 1`] = `
     "24392866056",
   ],
   "db": "gss_stats_ads",
-  "sql": "SELECT m.campaign_id AS campaign_id, m.date AS date, COALESCE(SUM(c.conversions), 0) AS installs FROM ads_daily_metrics AS m LEFT JOIN ads_daily_conversions AS c ON c.campaign_id = m.campaign_id AND c.date = m.date AND c.conversion_action_id = (CASE m.campaign_id WHEN ? THEN ? END) WHERE m.campaign_id IN (?) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date",
+  "sql": "SELECT m.campaign_id AS campaign_id, m.date AS date, COALESCE(SUM(c.conversions), 0) AS installs FROM ads_daily_metrics AS m LEFT JOIN ads_daily_conversions AS c ON c.campaign_id = m.campaign_id AND c.date = m.date AND c.conversion_action_id = (CASE m.campaign_id WHEN ? THEN ? END) WHERE m.campaign_id IN (?) AND m.date <= (SELECT MAX(x.date) FROM ads_daily_conversions AS x WHERE x.campaign_id = m.campaign_id) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date",
 }
 `;
 

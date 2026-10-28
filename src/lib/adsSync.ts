@@ -91,6 +91,8 @@ export interface SyncOptions {
   full?: boolean
   /** Also read today's partial numbers (returned, never stored). */
   includeToday?: boolean
+  /** A read, not the cron: pull through yesterday even for a closed flight (the post-flight reads look for stray spend). */
+  uncapped?: boolean
   /** Default true. */
   placements?: boolean
   /** Most closed days pulled in one run, all campaigns together; the rest wait for later runs.
@@ -213,30 +215,31 @@ export function syncableCampaigns(ids?: readonly string[]): CampaignFlight[] {
 /** The closed ET days a campaign's data can be pulled for at `todayEt`: flight start through
  * yesterday (a closed campaign: through flight end + CLOSED_CAMPAIGN_GRACE_DAYS). Days after the
  * flight end are pulled (stray spend shows up) but never zero-filled or required. */
-export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string): SyncRange | null {
+export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string, uncapped = false): SyncRange | null {
   if (!c.flightStart) return null
   const yesterday = addDays(todayEt, -1)
-  const cap = campaignStatusOn(c, todayEt) === 'closed' ? addDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
+  // `uncapped`: a READ (the post-flight reads) pulls through yesterday even for a closed flight, so stray spend long after the end is seen.
+  const cap = !uncapped && campaignStatusOn(c, todayEt) === 'closed' ? addDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
   const until = cap < yesterday ? cap : yesterday
   return c.flightStart <= until ? { since: c.flightStart, until } : null
 }
 
 /** Pure: what to pull for one campaign, given its stored rows and its last pull. */
 export function planCampaignSync(
-  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd' | 'status'>,
+  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'>,
   rows: readonly StoredDayRow[],
   todayEt: string,
-  opts: { full?: boolean; includeToday?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; restatementRecheckMs?: number } = {},
+  opts: { full?: boolean; includeToday?: boolean; uncapped?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; restatementRecheckMs?: number } = {},
 ): CampaignSyncPlan {
   // Before 03:00 ET yesterday cannot be stored as closed yet (lib/adsFreshness.ts
   // CLOSED_AFTER_ET), so it is not due at all: a flight's hourly cron pulls it once, at 03:05 ET,
   // instead of at 00:05, 01:05, 02:05 and again at 03:05 (final review Low-1). A read at 08:00
   // ET is unaffected.
-  const fullWindow = syncWindow(c, todayEt)
+  const fullWindow = syncWindow(c, todayEt, opts.uncapped)
   const beforeClose = opts.nowMs != null && etDateFast(opts.nowMs) === todayEt && opts.nowMs < etWallTimeMs(todayEt, CLOSED_AFTER_ET)
   const lastClosed = addDays(todayEt, beforeClose ? -2 : -1)
   const window = fullWindow && fullWindow.until > lastClosed ? (fullWindow.since <= lastClosed ? { since: fullWindow.since, until: lastClosed } : null) : fullWindow
-  const today = opts.includeToday && campaignStatusOn(c, todayEt) !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
+  const today = opts.includeToday && (opts.uncapped || campaignStatusOn(c, todayEt) !== 'closed') && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
   const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
   if (!window) return none
   const byDate = new Map(rows.map((r) => [r.date, r]))
@@ -419,6 +422,7 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
     const plan = planCampaignSync(c, snap.rows.get(c.id) ?? [], todayEt, {
       full: opts.full,
       includeToday: opts.includeToday,
+      uncapped: opts.uncapped,
       placements: pullsPlacements(c.id, opts) ? opts.placements : false,
       nowMs: opts.now,
       lastPullAt: snap.lastPulls.get(c.id) ?? null,

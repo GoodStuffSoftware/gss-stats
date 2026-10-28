@@ -116,16 +116,22 @@ describe('installsDaysStatement on the real schema', () => {
     const s = installsDaysStatement(pairs)
     return db.prepare(s.sql).all(...(s.binds as never[])) as { campaign_id: string; date: string; installs: number }[]
   }
-  it('one row per stored spend day; the install action only; a spend day with no conversion row is 0; an unsynced day has no row', () => {
+  it('one row per stored spend day; the install action only; a spend day Google sent no conversion row for (inside the covered range) is 0', () => {
     const db = adsDb(
-      [...SPEND, { campaign_id: F4, date: '2026-10-28', cost: 5 }], // 10-28 stored, no conversion row
-      CONVS,
+      [...SPEND, { campaign_id: F4, date: '2026-10-28', cost: 5 }, { campaign_id: F4, date: '2026-10-29', cost: 5 }],
+      [...CONVS, { campaign_id: F4, date: '2026-10-29', action: F4_ACTION, conversions: 3 }], // 10-28 has none, between covered days
     )
     expect(stmt(db, [{ campaignId: F4, actionId: F4_ACTION }])).toEqual([
       { campaign_id: F4, date: '2026-10-26', installs: 4 },
       { campaign_id: F4, date: '2026-10-27', installs: 20 },
       { campaign_id: F4, date: '2026-10-28', installs: 0 },
+      { campaign_id: F4, date: '2026-10-29', installs: 3 },
     ])
+  })
+  it('a spend day newer than the latest stored conversion day is a gap, never a false 0; no conversion rows at all is no rows', () => {
+    const later = adsDb([...SPEND, { campaign_id: F4, date: '2026-10-28', cost: 5 }], CONVS) // extras pass has not reached 10-28
+    expect(stmt(later, [{ campaignId: F4, actionId: F4_ACTION }]).map((r) => r.date)).toEqual(['2026-10-26', '2026-10-27'])
+    expect(stmt(adsDb(SPEND, []), [{ campaignId: F4, actionId: F4_ACTION }])).toEqual([])
   })
   it('a conversion on a day with no stored spend is not a row (no spend day to hang it on)', () => {
     const db = adsDb(SPEND, [...CONVS, { campaign_id: F4, date: '2026-10-29', action: F4_ACTION, conversions: 7 }])

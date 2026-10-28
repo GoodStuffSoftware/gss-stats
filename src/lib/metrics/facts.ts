@@ -383,15 +383,16 @@ const beaconDaily = (raw: Record<string, unknown>[]): FactRows => ({
 export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros, clicks FROM ads_daily_metrics ORDER BY campaign_id, date'
 
 /** Installs per stored spend day, for the campaigns that name an installActionId (migration 0007's ads_daily_conversions). One row per
- * (campaign, ET day the ads store holds spend for): the LEFT JOIN makes a spend day with no conversion row an explicit 0, and a day the
- * store never synced has no row at all (a gap, not a zero). The action id binds per campaign through one CASE, so a campaign only ever
+ * (campaign, ET day the ads store holds spend for): the LEFT JOIN makes a spend day with no conversion row an explicit 0 (Google returns no row for a
+ * day with none), but only up to the campaign's latest stored conversion day: the extras pass stores conversions apart from spend, so a spend
+ * day newer than that is not yet covered and is a gap, not a false 0. A day the store never synced has no row at all. The action id binds per campaign through one CASE, so a campaign only ever
  * counts its own action; a campaign with no installActionId is not in the IN list and has no rows. */
 export function installsDaysStatement(pairs: readonly { campaignId: string; actionId: string }[]): { sql: string; binds: string[] } {
   if (!pairs.length) return { sql: 'SELECT campaign_id, date, 0 AS installs FROM ads_daily_metrics WHERE 0', binds: [] }
   const sql =
     `SELECT m.campaign_id AS campaign_id, m.date AS date, COALESCE(SUM(c.conversions), 0) AS installs FROM ads_daily_metrics AS m ` +
     `LEFT JOIN ads_daily_conversions AS c ON c.campaign_id = m.campaign_id AND c.date = m.date AND c.conversion_action_id = (CASE m.campaign_id ${pairs.map(() => 'WHEN ? THEN ?').join(' ')} END) ` +
-    `WHERE m.campaign_id IN (${pairs.map(() => '?').join(', ')}) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date`
+    `WHERE m.campaign_id IN (${pairs.map(() => '?').join(', ')}) AND m.date <= (SELECT MAX(x.date) FROM ads_daily_conversions AS x WHERE x.campaign_id = m.campaign_id) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date`
   return { sql, binds: [...pairs.flatMap((p) => [p.campaignId, p.actionId]), ...pairs.map((p) => p.campaignId)] }
 }
 

@@ -366,7 +366,7 @@ interface SpendRead {
 async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFlight, todayEt: string, source: SyncSource): Promise<SpendRead> {
   const sync = await syncAdsData(
     { ads: deps.ads, adsInitError: deps.adsInitError, store: deps.store },
-    { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true, restatementRecheckMs: 0 },
+    { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true, uncapped: true, restatementRecheckMs: 0 },
   )
   const cs = sync.campaigns[0]
   const summary: SyncSummary = {

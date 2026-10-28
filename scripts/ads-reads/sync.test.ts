@@ -263,6 +263,17 @@ describe('syncAdsData: gap fill, restatements, the no-op rerun', () => {
     expect(third).toMatchObject({ nothingDue: true, daysChanged: 0, placementRowsChanged: 0 })
   })
 
+  it('a READ (uncapped) pulls a closed flight through yesterday, so stray spend after the grace window is seen; the cron stays capped', () => {
+    const c = { flightStart: '2026-10-17', flightEnd: '2026-10-20' }
+    expect(syncWindow(c, '2026-10-28')).toEqual({ since: '2026-10-17', until: '2026-10-23' })
+    expect(syncWindow(c, '2026-10-28', true)).toEqual({ since: '2026-10-17', until: '2026-10-27' })
+    const plan = (uncapped: boolean) => planCampaignSync({ id: 'x', ...c }, [], '2026-10-28', { uncapped, includeToday: true })
+    expect(plan(false).window?.until).toBe('2026-10-23')
+    expect(plan(false).today).toBeNull()
+    expect(plan(true).window?.until).toBe('2026-10-27')
+    expect(plan(true).today).toBe('2026-10-28')
+  })
+
   it('a closed campaign is zero-filled only through its flight end; spend-through stops there; later runs cost no API call', async () => {
     const { sqlite, store } = setup()
     expect(syncWindow(campaignById(CLOSED)!, '2026-09-30')).toEqual({ since: '2026-09-09', until: '2026-09-16' })

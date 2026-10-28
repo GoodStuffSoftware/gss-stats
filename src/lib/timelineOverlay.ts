@@ -11,7 +11,7 @@
 // plugin only turns them into pixels. Every item also carries its date, label and note, which
 // the chart shows on hover/tap and in the accessible list under the chart (ChartCard.vue).
 import { datedReleases } from './releases'
-import { CAMPAIGNS, type CampaignFlight } from './campaigns'
+import { CAMPAIGNS, campaignStatusOn, type CampaignFlight } from './campaigns'
 import {
   TRACKING_ACTIVATION_DATE_ET,
   NEW_BEACONS_LIVE_AT_ET,
@@ -63,12 +63,12 @@ export function releaseItems(): OverlayItem[] {
 
 /** A flight's band: closed flights end at flightEnd. An ACTIVE flight is open-ended (runs to the
  * axis end) only while it's still inside its serving window (ET today <= flightEnd); once past
- * it, it ends at flightEnd like any other, even if nobody has flipped its status yet. */
+ * it, it ends at flightEnd like any other (the status is derived from the dates for todayEt). */
 export function flightItems(flights: CampaignFlight[] = CAMPAIGNS, todayEt: string = etDateFast(Date.now())): OverlayItem[] {
   return flights
-    .filter((f) => f.flightStart !== null && f.status !== 'upcoming')
+    .filter((f) => f.flightStart !== null && campaignStatusOn(f, todayEt) !== 'upcoming')
     .map((f) => {
-      const open = f.status === 'active' && todayEt <= f.flightEnd
+      const open = campaignStatusOn(f, todayEt) === 'active'
       return {
         kind: 'flight' as const,
         date: f.flightStart!,
