@@ -12,6 +12,12 @@
 //    last 10 minutes; a concurrent request loses and gets 429), then the Ads client (secrets +
 //    OAuth, cached for 45 minutes in the isolate), then the pull — at most WORKER_MAX_DAYS
 //    closed days and WORKER_MAX_STATEMENTS D1 statements per run; the rest continues next run.
+//  - Conversions and per-asset results (src/lib/adsSync.ts syncAdsExtras) run on a cron trigger
+//    of their OWN, EXTRAS_CRON, a few ticks after the 03:00 ET close: scheduled() dispatches on
+//    event.cron, so a cost tick never does extras work and an extras tick never touches cost
+//    rows, claims or the cost run rows. One state read decides; nothing due → return. A run pulls
+//    at most WORKER_EXTRAS_MAX_DAYS closed days per campaign and kind, WORKER_EXTRAS_MAX_CAMPAIGNS
+//    campaigns and WORKER_MAX_STATEMENTS D1 statements; the rest continues next tick.
 //
 // Google Ads credentials come from Cloudflare Secrets Store bindings (Bitwarden stays the source
 // of truth; rotation: README "The sync Worker"). They live in memory only, are registered with
@@ -21,7 +27,17 @@
 // Deliberately free of Workers ambient types (minimal local interfaces instead), so the same
 // file typechecks under the dashboard's config and the Node test config.
 
-import { createAdsClient, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, type AdsClient, type AdsCredentials, type FetchLike } from '../../../src/lib/adsApi'
+import {
+  createAdsClient,
+  fetchDailyAssets,
+  fetchDailyConversions,
+  fetchDailySpend,
+  fetchPlacementDaily,
+  fetchRangeTotal,
+  type AdsClient,
+  type AdsCredentials,
+  type FetchLike,
+} from '../../../src/lib/adsApi'
 import { redact, registerSecret } from '../../../src/lib/adsRedact'
 import { createSqlAdsStore, d1BindingAdsDb, readLastSyncRun, type D1Like, type SyncSource } from '../../../src/lib/adsStore'
 import {
@@ -29,12 +45,16 @@ import {
   ON_DEMAND_MIN_INTERVAL_MS,
   planSync,
   rateLimit,
+  extrasResultSummary,
   setBuildSha,
   syncableCampaigns,
   syncAdsData,
+  syncAdsExtras,
   syncResultSummary,
   workerInfo,
+  type AdsExtrasSource,
   type AdsMetricsSource,
+  type ExtrasResult,
   type SyncOptions,
   type SyncResult,
 } from '../../../src/lib/adsSync'
@@ -43,6 +63,13 @@ import {
 export const WORKER_MAX_DAYS = 7
 /** D1 statements one run may send (the Free limit is 50 per invocation). */
 export const WORKER_MAX_STATEMENTS = 40
+/** The conversions-and-assets pass's own trigger (UTC): hourly 08:35-11:35, after the 03:00 ET
+ * close in both EDT and EST. Must match workers/sync/wrangler.toml [triggers] exactly. */
+export const EXTRAS_CRON = '35 8-11 * * *'
+/** Closed days one extras run pulls per campaign and kind (newest first). */
+export const WORKER_EXTRAS_MAX_DAYS = 7
+/** Campaigns one extras run pulls; the rest take their turn next tick. */
+export const WORKER_EXTRAS_MAX_CAMPAIGNS = 4
 /** Reuse an access token this long (Google's last an hour). */
 const TOKEN_REUSE_MS = 45 * 60_000
 
@@ -84,17 +111,34 @@ async function credentials(env: Env): Promise<AdsCredentials> {
   return { clientId: values[0], clientSecret: values[1], refreshToken: values[2], developerToken: values[3] }
 }
 
+/** The Ads client, cached in the isolate for TOKEN_REUSE_MS (a test's fetchImpl always builds a
+ * fresh one). Shared by the cost and the extras pass. */
+async function adsClient(env: Env, nowMs: number, fetchImpl?: FetchLike): Promise<AdsClient> {
+  if (!cachedClient || nowMs - cachedClient.atMs > TOKEN_REUSE_MS || fetchImpl) {
+    cachedClient = { client: await createAdsClient(await credentials(env), { fetchImpl, timeoutMs: 25_000 }), atMs: nowMs }
+  }
+  return cachedClient.client
+}
+
 /** The Ads source, built only when the sync has something to pull. */
 function adsFactory(env: Env, nowMs: number, fetchImpl?: FetchLike): () => Promise<AdsMetricsSource> {
   return async () => {
-    if (!cachedClient || nowMs - cachedClient.atMs > TOKEN_REUSE_MS || fetchImpl) {
-      cachedClient = { client: await createAdsClient(await credentials(env), { fetchImpl, timeoutMs: 25_000 }), atMs: nowMs }
-    }
-    const client = cachedClient.client
+    const client = await adsClient(env, nowMs, fetchImpl)
     return {
       daily: (id, since, until) => fetchDailySpend(client, id, since, until),
       placements: (id, since, until) => fetchPlacementDaily(client, id, since, until),
       rangeTotal: (id, since, until) => fetchRangeTotal(client, id, since, until),
+    }
+  }
+}
+
+/** The extras pass's Ads source (two read-only SELECTs), built only when something is due. */
+function extrasAdsFactory(env: Env, nowMs: number, fetchImpl?: FetchLike): () => Promise<AdsExtrasSource> {
+  return async () => {
+    const client = await adsClient(env, nowMs, fetchImpl)
+    return {
+      conversions: (id, since, until) => fetchDailyConversions(client, id, since, until),
+      assets: (id, since, until) => fetchDailyAssets(client, id, since, until),
     }
   }
 }
@@ -176,9 +220,26 @@ export async function handleScheduled(event: ScheduledEventLike, env: Env, opts:
   return out.result
 }
 
+/** The EXTRAS_CRON tick: conversions and per-asset results only (src/lib/adsSync.ts
+ * syncAdsExtras). No cost gate, no claim, no cost row: nothing due → one D1 read and return. */
+export async function handleExtrasScheduled(event: ScheduledEventLike, env: Env, opts: { fetchImpl?: FetchLike; nowMs?: number } = {}): Promise<ExtrasResult> {
+  setBuildSha(env.GIT_SHA)
+  const nowMs = opts.nowMs ?? Date.now()
+  const result = await syncAdsExtras(
+    { adsFactory: extrasAdsFactory(env, nowMs, opts.fetchImpl), store: storeFor(env) },
+    { now: nowMs, dryRun: false, source: 'worker-cron', maxDays: WORKER_EXTRAS_MAX_DAYS, maxCampaigns: WORKER_EXTRAS_MAX_CAMPAIGNS },
+  )
+  const head = result.nothingDue ? { event: 'skip', cron: event.cron, reason: 'nothing due' } : { event: 'extras', cron: event.cron, worker: workerInfo() }
+  console.log(JSON.stringify({ ...head, ...extrasResultSummary(result) }))
+  return result
+}
+
 export default {
   fetch: (request: Request, env: Env) => handleFetch(request, env),
+  // One handler per trigger: only the EXTRAS_CRON tick runs the extras pass; every other tick is
+  // the cost sync, unchanged.
   scheduled: async (event: ScheduledEventLike, env: Env) => {
-    await handleScheduled(event, env)
+    if (event.cron === EXTRAS_CRON) await handleExtrasScheduled(event, env)
+    else await handleScheduled(event, env)
   },
 }
