@@ -1083,6 +1083,7 @@ npm run typecheck:scripts
 - **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
   `SELECT`s only, enforced before wrangler runs.
 - **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
+  daily conversions and per-asset results ([below](#daily-conversions-and-per-asset-results-syncadsextras)),
   an append-only readings log and fire-once threshold state). Why and how:
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
@@ -1695,7 +1696,8 @@ none adds a data source of its own.
   after the last) every tick checks what is due: yesterday once, at 03:05 ET (before 03:00 ET it
   cannot close yet, so it is not due), a retry after a failure, and the restatement window once
   its last pull is 6 h old. Outside a flight only the 03:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
-  claim, no secret read, no token refresh, no write.
+  claim, no secret read, no token refresh, no write. A second cron, `35 8-11 * * *` UTC, runs only
+  the conversions-and-assets pass ([below](#daily-conversions-and-per-asset-results-syncadsextras)).
 - **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
   the Worker has no `workers.dev` URL, no preview URLs and no route. Nothing due → 200 "up to
   date". Otherwise it claims atomically (a `'running'` row, only if no run finished in the last
@@ -1726,6 +1728,34 @@ none adds a data source of its own.
   `update` can't take a value on stdin non-interactively). Nothing is printed, logged or
   written to disk; the Worker picks the new value up on its next run, no redeploy. The local
   routines keep reading Bitwarden directly.
+
+### Daily conversions and per-asset results (`syncAdsExtras`)
+
+A second pass, [`syncAdsExtras`](src/lib/adsSync.ts), stores two counts the cost sync does not,
+read-only GAQL like the rest, counts only (no user, device or place split):
+
+- **Tables** (migration `0007_daily_conversions_assets.sql`): `ads_daily_conversions` (per
+  campaign, closed ET day and conversion action: conversions and all conversions),
+  `ads_daily_assets` (per campaign, ad group, ad, asset, field type and day: impressions, clicks,
+  conversions, performance label) and `ads_assets` (what each asset is: type, text or name, first
+  and last day seen). Every syncable campaign is included, the spend-only arm too.
+- **Schedule:** its own Worker cron, `35 8-11 * * *` UTC (four ticks, 04:35-07:35 EDT or
+  03:35-06:35 EST, after the 03:00 ET close). The hourly cost cron never runs it, and it never
+  runs the cost sync. Planning is the cost sync's: every missing closed day, plus the last 3
+  closed days re-checked at most every 6 h, newest first; a tick with nothing due reads one row
+  and stops.
+- **Per-run caps (Workers Free):** at most 7 closed days per campaign and kind, 4 campaigns
+  (least recently tried first, live before closed) and the same 40 D1 statements; the rest
+  continues next tick.
+- **Error isolation:** the pass keeps its state only in its own `ads_sync_runs` rows (`run_key`
+  starting `extras:`), which the cost sync's "synced" time, rate
+  limit and claim ignore. A failed conversions or assets pull marks only that kind stale for
+  that campaign; it never touches the spend rows, their freshness or the other kind. An empty
+  response over stored days counts as an error and writes nothing; a conversion action missing
+  from a returned day is stored as zero (asset rows are never zero-filled).
+- **Backfill:** `npm run ads:backfill -- --dry-run --cf-token-file <path>`, then the same without
+  `--dry-run`: after the cost backfill it runs this pass with `full` and no cap, every
+  campaign's whole window in one run, whatever the cost sync's outcome.
 
 ## Live updates
 
