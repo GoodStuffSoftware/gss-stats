@@ -18,7 +18,7 @@
 //
 // Every instant is an EXISTING constant (lib/popupEvents.ts, lib/campaigns.ts) — never a copy.
 
-import { classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../campaigns'
+import { campaignStatusOn, classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../campaigns'
 import { addDays, etDateFast, etWallTimeMs } from '../etTime'
 import { comparisonGateForGoLive } from '../kpiFormat'
 
@@ -59,12 +59,14 @@ export interface IntervalInput {
   /** seenInFlightWindow's evidence: did any flightPathsSeen row match the metric? Only read for
    * a closed campaign (seenInFlightRequired); absent evidence counts as not seen. */
   seenInFlight?: boolean
+  /** The ET day a campaign's status is derived for (default: the real clock's). */
+  todayEt?: string
 }
 
 /** Whether seenInFlightWindow applies: only a CLOSED flight's serving window is final. An
  * active or upcoming flight can still see a path for the first time, so it stays live. */
-export function seenInFlightRequired(campaign: CampaignFlight | undefined): boolean {
-  return !!campaign && campaign.status === 'closed'
+export function seenInFlightRequired(campaign: CampaignFlight | undefined, todayEt: string = etDateOfMs(Date.now())): boolean {
+  return !!campaign && campaignStatusOn(campaign, todayEt) === 'closed'
 }
 
 // ET date <-> instant conversions: the engine asks for the same handful of go-live dates and
@@ -88,7 +90,7 @@ export function servingEndMs(campaign: CampaignFlight): number {
 
 const unmeasured = (reason: string, goLiveEt: string | null = null): MeasuredInterval => ({ status: 'unmeasured', from: Number.POSITIVE_INFINITY, reason, noteIds: [], goLiveEt })
 
-export function measuredInterval({ rules, window, campaign, seenInFlight }: IntervalInput): MeasuredInterval {
+export function measuredInterval({ rules, window, campaign, seenInFlight, todayEt }: IntervalInput): MeasuredInterval {
   // No closures in here: it runs for every request side, and the production bundle names every
   // named closure (esbuild keepNames) at each creation.
   const a = window[0]
@@ -126,7 +128,7 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
         note = rule.noteId
         break
       case 'seenInFlightWindow':
-        if (seenInFlightRequired(campaign)) {
+        if (seenInFlightRequired(campaign, todayEt)) {
           if (!campaign!.flightStart) return unmeasured('flight-pending')
           if (seenInFlight !== true) return unmeasured('not-seen-in-flight') // no evidence is not evidence of a path
         }

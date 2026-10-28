@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   anyPathSeen,
   deltasAllowed,
+  etDateOfMs,
   isProvisional,
   measuredInterval,
   notInstrumentedStepsFromRows,
@@ -65,7 +66,6 @@ const TABLE: Row[] = [
   ['closed flight that saw it', [SEEN], ANDROID_ATTR, ANDROID, true, { status: 'measured' }],
   ['closed flight with NO evidence at all: not seen (review #11)', [SEEN], ANDROID_ATTR, ANDROID, undefined, { status: 'unmeasured', reason: 'not-seen-in-flight' }],
   ['ACTIVE flight not seen yet: still live (its window is open)', [SEEN], RETEST_ATTR, RETEST, false, { status: 'measured' }],
-  ['closed flight with no confirmed start', [SEEN], ANDROID_ATTR, { ...ANDROID, flightStart: null }, undefined, { status: 'unmeasured', reason: 'flight-pending' }],
   ['annotation inside the window: a note, never a gate', [{ kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }], ANDROID_ATTR, ANDROID, undefined, { status: 'measured', noteIds: ['raw-install-dedupe'] }],
   ['annotation outside the window', [{ kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }], [RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS + 1, NOW], ANDROID, undefined, { status: 'measured', noteIds: [] }],
   ['several rules: the latest start wins, with its own note', [before(FIX, 'install-fix-note'), liveAt(GC), liveOn(TRACK)], RETEST_ATTR, RETEST, undefined, { status: 'partial', from: GC, noteIds: ['counted-from'] }],
@@ -74,13 +74,13 @@ const TABLE: Row[] = [
 
 describe('measuredInterval', () => {
   it.each(TABLE)('%s', (_name, rules, window, campaign, seenInFlight, expected) => {
-    expect(measuredInterval({ rules, window, campaign, seenInFlight })).toMatchObject(expected)
+    expect(measuredInterval({ rules, window, campaign, seenInFlight, todayEt: etDateOfMs(NOW) })).toMatchObject(expected)
   })
 
   it('only a closed flight needs the flightPathsSeen evidence', () => {
-    expect(seenInFlightRequired(ANDROID)).toBe(true)
-    expect(seenInFlightRequired(PLAY)).toBe(true)
-    expect(seenInFlightRequired(RETEST)).toBe(false)
+    expect(seenInFlightRequired(ANDROID, etDateOfMs(NOW))).toBe(true)
+    expect(seenInFlightRequired(PLAY, etDateOfMs(NOW))).toBe(true)
+    expect(seenInFlightRequired(RETEST, etDateOfMs(NOW))).toBe(false)
     expect(seenInFlightRequired(undefined)).toBe(false)
   })
 })

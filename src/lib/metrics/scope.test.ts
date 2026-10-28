@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CAMPAIGNS, campaignById } from '../campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, type CampaignFlight } from '../campaigns'
 import { POPUPS } from '../popupEvents'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import {
@@ -39,8 +39,8 @@ describe('resolveRepeat', () => {
 
   it('over campaigns: status filters', () => {
     const out = resolveRepeat({ over: 'campaigns', status: ['closed'] }, { todayEt: '2026-09-27' })
-    expect(out.every((s) => (s as { campaign: { status: string } }).campaign.status === 'closed')).toBe(true)
-    expect(out.length).toBe(CAMPAIGNS.filter((c) => c.status === 'closed').length)
+    expect(out.every((s) => campaignStatusOn((s as { campaign: CampaignFlight }).campaign, '2026-09-27') === 'closed')).toBe(true)
+    expect(out.length).toBe(CAMPAIGNS.filter((c) => campaignStatusOn(c, '2026-09-27') === 'closed').length)
   })
 
   it('over campaigns: flightingToday keeps only campaigns serving on that ET date', () => {
@@ -86,7 +86,7 @@ describe('scopeField', () => {
 
   it('campaign.statusToday: "flighting today" only while the flight is actually serving', () => {
     expect(scopeField(campaignScope(ACTIVE_RETEST), 'campaign.statusToday', '2026-09-27')).toBe('flighting today')
-    expect(scopeField(campaignScope(ACTIVE_RETEST), 'campaign.statusToday', '2020-01-01')).toBe('active')
+    expect(scopeField(campaignScope(ACTIVE_RETEST), 'campaign.statusToday', '2020-01-01')).toBe('upcoming') // before the flight starts: derived from the dates
     expect(scopeField(campaignScope(CLOSED_ANDROID), 'campaign.statusToday', '2026-09-27')).toBe('closed')
   })
 
@@ -238,7 +238,7 @@ describe('flattenSectionItems', () => {
     const item: MetricItem = { ...baseItem, repeat: { over: 'campaigns', status: ['closed'] } }
     const section: Section = { layout: 'tiles', items: [item] }
     const out = flattenSectionItems(section, { kind: 'root' }, { todayEt: '2026-09-27' })
-    expect(out.length).toBe(CAMPAIGNS.filter((c) => c.status === 'closed').length)
+    expect(out.length).toBe(CAMPAIGNS.filter((c) => campaignStatusOn(c, '2026-09-27') === 'closed').length)
     expect(out.every((fi) => fi.item === item && fi.scope.kind === 'campaign')).toBe(true)
   })
 

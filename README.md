@@ -1262,12 +1262,22 @@ lacks the pin, pin it in the same PR as the registration.
 
 - **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
   Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
-  (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
-  `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
+  (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `kind`,
+  `installActionId` (the Google conversion action id whose conversions are this campaign's installs;
+  unset means the campaign has no install figure, never 0), `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
   are directional. This alone puts the campaign on the dashboard and in the sync. The id and
   tag `organic` are reserved for the organic baseline row: a campaign using either fails at
-  load.
+  load. `status` is not stored in the registry: it is derived from the flight dates by
+  `campaignStatusOn(campaign, todayEt)` (`upcoming` before `flightStart` or with no start yet,
+  `active` from the start day through `flightEnd`, `closed` after), and the `status` on a `CAMPAIGNS`
+  entry is a live getter for today in ET. Anything holding an injected date calls the function with
+  it. The ads sync writes the derived status to the `ads_campaigns` row, so a flight closes itself.
+  Installs and cost per install: registry metrics `campaign.adsInstalls` (Google's conversions on the
+  campaign's `installActionId`, summed over the stored spend days, attribution window) and
+  `campaign.costPerAdsInstall` (stored spend over those installs, a ratio of sums, no data at 0
+  installs). `campaign.adsInstalls` also has a daily series, like `campaign.spend` and `campaign.clicks`
+  (the latter two now draw ad clicks too); the cost per install has no series by design.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),

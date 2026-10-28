@@ -8,6 +8,18 @@ exports[`fact SQL snapshots > adsCoverage {} 1`] = `
 }
 `;
 
+exports[`fact SQL snapshots > adsInstallsDaily {} 1`] = `
+{
+  "binds": [
+    "24392866056",
+    "7756366796",
+    "24392866056",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT m.campaign_id AS campaign_id, m.date AS date, COALESCE(SUM(c.conversions), 0) AS installs FROM ads_daily_metrics AS m LEFT JOIN ads_daily_conversions AS c ON c.campaign_id = m.campaign_id AND c.date = m.date AND c.conversion_action_id = (CASE m.campaign_id WHEN ? THEN ? END) WHERE m.campaign_id IN (?) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date",
+}
+`;
+
 exports[`fact SQL snapshots > adsLastSync {} 1`] = `
 {
   "binds": [],
@@ -36,7 +48,7 @@ exports[`fact SQL snapshots > adsSpendDaily {} 1`] = `
 {
   "binds": [],
   "db": "gss_stats_ads",
-  "sql": "SELECT campaign_id, date, cost_micros FROM ads_daily_metrics ORDER BY campaign_id, date",
+  "sql": "SELECT campaign_id, date, cost_micros, clicks FROM ads_daily_metrics ORDER BY campaign_id, date",
 }
 `;
 

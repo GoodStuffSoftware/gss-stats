@@ -95,7 +95,9 @@ function warmChunk(requests: MetricRequest[]): boolean {
           ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, cost_micros: 1_000_000, days: 1, first_date: '2026-09-20', last_date: '2026-09-20', fetched_at: '2026-09-20T12:00:00Z' }))
           : f.id === 'adsCoverage'
             ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', fetched_at: '2026-09-21T12:00:00Z' }))
-            : f.id === 'adsLastSync'
+            : f.id === 'adsInstallsDaily'
+              ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', installs: 1 }))
+              : f.id === 'adsLastSync'
               ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, last_sync: '2026-09-21T12:00:00Z' }))
               : f.id === 'adsPlayDaily'
                 ? [{ date: '2026-09-22', device_installs: 4, user_installs: 3, device_uninstalls: 1, active_device_installs: 40 }]

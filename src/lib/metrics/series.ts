@@ -15,7 +15,7 @@
 // Pure and synchronous: engine.ts picks the rows; nothing here sees SQL or a clock.
 
 import { addDays } from '../etTime'
-import type { DailyBeaconRow, FactId, SpendDayRow } from './facts'
+import type { DailyBeaconRow, FactId, InstallDayRow, SpendDayRow } from './facts'
 import type { MetricDef } from './metrics'
 import { etMidnightMs } from './instrumentation'
 import type { SeriesPoint, WindowName } from './types'
@@ -33,17 +33,21 @@ export const DAILY_TWIN: Readonly<Partial<Record<FactId, FactId>>> = {
   bskRangePath: 'bskRangeDaily',
   popupRangePath: 'popupRangeDaily',
   adsSpend: 'adsSpendDaily',
+  adsInstallsDaily: 'adsInstallsDaily', // its own twin: the fact is already one row per campaign per stored day
 }
 
 /** The daily twin a metric's series reads in `window`, or null when it has no series: only a
  * beacon count or a stored-spend amount, in a ranged window with a twin. */
 export function seriesTwin(def: MetricDef, window: WindowName): FactId | null {
-  if (!SERIES_WINDOWS.has(window) || def.store) return null
+  if (!SERIES_WINDOWS.has(window)) return null
   const fact = def.windows[window]
   const twin = fact ? DAILY_TWIN[fact] : undefined
   if (!twin) return null
-  // Dollars per day: a spend-store reducer that returns a count (ad clicks) has no such series.
-  if (twin === 'adsSpendDaily') return def.spend && def.unit === 'usd' ? twin : null
+  // Google's installs per stored day: the one store metric with a series (its reducer sums the same rows).
+  if (twin === 'adsInstallsDaily') return def.store && def.unit === 'install' ? twin : null
+  if (def.store) return null
+  // Dollars or ad clicks per stored day (spendSeries reads the column the unit names).
+  if (twin === 'adsSpendDaily') return def.spend && (def.unit === 'usd' || def.unit === 'click') ? twin : null
   if (def.unit === 'instant' || def.unit === 'code' || def.unit === 'rate' || def.unit === 'usd') return null
   if (twin === 'popupRangeDaily' && def.visitor) return null // that twin has no visitor column
   return twin
@@ -112,6 +116,8 @@ export function beaconSeries(i: BeaconSeriesInput): SeriesPoint[] {
 
 export interface SpendSeriesInput {
   rows: readonly SpendDayRow[]
+  /** 'cost' (default): dollars per day; 'clicks': the stored ad clicks per day. */
+  field?: 'cost' | 'clicks'
   campaignId: string
   firstDay: string | null
   capDay: string
@@ -125,5 +131,18 @@ export function spendSeries(i: SpendSeriesInput): SeriesPoint[] {
     .filter((r) => r.campaignId === i.campaignId && r.date <= i.capDay && (i.firstDay === null || r.date >= i.firstDay))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   const keep = days.length > SERIES_MAX_DAYS ? days.slice(days.length - SERIES_MAX_DAYS) : days
-  return keep.map((r) => ({ day: r.date, value: round2(r.costMicros / 1_000_000) }))
+  return keep.map((r) => ({ day: r.date, value: i.field === 'clicks' ? r.clicks : round2(r.costMicros / 1_000_000) }))
+}
+
+export interface InstallsSeriesInput {
+  rows: readonly InstallDayRow[]
+  campaignId: string
+  capDay: string
+}
+/** A campaign's installs (Google's conversions on its installActionId) per stored spend day. A day the ads store never synced has no
+ * point (a gap, not a zero); a synced day with no conversion row is an explicit 0. */
+export function installsSeries(i: InstallsSeriesInput): SeriesPoint[] {
+  const days = i.rows.filter((r) => r.campaignId === i.campaignId && r.date <= i.capDay).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  const keep = days.length > SERIES_MAX_DAYS ? days.slice(days.length - SERIES_MAX_DAYS) : days
+  return keep.map((r) => ({ day: r.date, value: round2(r.installs) }))
 }

@@ -103,7 +103,7 @@ describe('itemViewModel — display kinds (status "ok")', () => {
     expect(lastDay.primary).toBe('flighting today')
     expect(lastDay.badgeTone).toBe('live')
     const afterEnd = itemViewModel(item, undefined, activeScope, { todayEt: '2026-10-03' }) // the day after ACTIVE_RETEST's flightEnd
-    expect(afterEnd.primary).toBe('active') // not flighting any more: the campaign's own status
+    expect(afterEnd.primary).toBe('closed') // not flighting any more: the campaign's own status, derived from its dates
     expect(afterEnd.badgeTone).toBe('neutral')
   })
 

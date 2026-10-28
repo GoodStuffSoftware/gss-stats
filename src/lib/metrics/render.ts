@@ -13,6 +13,7 @@
 //   unmeasured       Gating.whenUnmeasured ('auto' default: omit for a closed campaign, else
 //                    the registry's "not yet tracking" label | 'omit' | 'label').
 //   error            an em dash; the item's own caption still renders if set.
+import { campaignStatusOn } from '../campaigns'
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
@@ -205,9 +206,9 @@ function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; vi
   if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : '—', visible: true }
   return { primary: '—', visible: true }
 }
-function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue): { primary: string; visible: boolean } {
+function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue, todayEt: string): { primary: string; visible: boolean } {
   const mode = gating?.whenUnmeasured ?? 'auto'
-  const closedCampaign = campaignOfScope(scope)?.status === 'closed' // the card's campaign, however deep the cell
+  const closedCampaign = ((c) => !!c && campaignStatusOn(c, todayEt) === 'closed')(campaignOfScope(scope)) // the card's campaign, however deep the cell
   if (mode === 'omit' || (mode === 'auto' && closedCampaign)) return { primary: '', visible: false }
   // A specific reason (e.g. 'flight-pending') is more useful than the generic label when the
   // server supplied one and it's a real registry label, not just an internal reason code.
@@ -372,7 +373,7 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
   }
   if (value.status === 'unmeasured') {
-    const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value)
+    const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value, todayEt)
     return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt, values), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'

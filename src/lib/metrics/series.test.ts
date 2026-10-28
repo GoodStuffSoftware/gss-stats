@@ -110,9 +110,9 @@ describe('beaconSeries / spendSeries: gaps are not zeros', () => {
   })
   it('spend: only stored days get a point (a day never synced is a gap, not $0), in dollars', () => {
     const rows = [
-      { campaignId: 'a', date: '2026-10-02', costMicros: 5_250_000 },
-      { campaignId: 'a', date: '2026-10-01', costMicros: 4_000_000 },
-      { campaignId: 'b', date: '2026-10-01', costMicros: 9_000_000 },
+      { campaignId: 'a', date: '2026-10-02', costMicros: 5_250_000, clicks: 7 },
+      { campaignId: 'a', date: '2026-10-01', costMicros: 4_000_000, clicks: 3 },
+      { campaignId: 'b', date: '2026-10-01', costMicros: 9_000_000, clicks: 1 },
     ]
     expect(spendSeries({ rows, campaignId: 'a', firstDay: null, capDay: '2026-10-05' })).toEqual([
       { day: '2026-10-01', value: 4 },

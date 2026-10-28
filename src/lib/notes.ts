@@ -508,6 +508,14 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // Travels with the campaign.costPerFinisher ratio (lib/metrics/ratios.ts): the first-finish rows only exist from the day after
   // the v1.103.0 web release (lib/releases.ts FIRST_FINISH_START_ET), so spend and finishers both count from that day. The date
   // comes from that constant, never typed here.
+  // Travels with campaign.adsInstalls and campaign.costPerAdsInstall (lib/metrics/metrics.ts, ratios.ts).
+  'ads-installs-google': {
+    id: 'ads-installs-google',
+    text: () => "Installs are the conversions Google Ads reports on the campaign's Play-install action, summed over the days the ads store holds spend for (the same days as the spend). They can be fractional when Google splits credit, Google restates recent days, and they are not joined to the site's own counts.",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
   'first-finish-window': {
     id: 'first-finish-window',
     text: () => `Cost per person who finished divides the spend from ${FIRST_FINISH_START_ET} on, the first whole day the first-finish rows exist (a window ending earlier reads no data), by every first-finish row in the window, which also includes the evening before; Android counts rise as devices update.`,
@@ -564,6 +572,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.newAccounts': 'New accounts',
     'label.campaign.f3Asks': 'Sign-in asks (flight 3)',
     'label.campaign.clicks': 'Ad clicks',
+    'label.campaign.adsInstalls': 'Installs (Google Ads)',
     'label.campaign.installPrompts': 'Install prompts',
     'label.campaign.installs': 'Installs',
     'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
@@ -656,6 +665,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.costPerArrival': 'Cost / arrival',
     'label.campaign.costPerSignin': 'Cost / sign-in',
     'label.campaign.avgCpc': 'Average CPC',
+    'label.campaign.costPerAdsInstall': 'Cost / install (Google Ads)',
     'label.campaign.costPerComplete': 'Cost / completed game',
     'label.campaign.costPerFinisher': 'Cost per person who finished',
     'label.campaign.gameViewsVsArrivals': 'Game-screen views vs arrivals',
@@ -678,6 +688,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.signin': 'sign-ins',
     'unit.finish': 'finishes',
     'unit.click': 'clicks',
+    'unit.install': 'installs',
     'unit.usd': 'USD',
     'unit.day': 'days',
     'unit.arrivals': 'arrivals',

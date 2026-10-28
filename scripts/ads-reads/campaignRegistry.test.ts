@@ -26,7 +26,7 @@ import {
   readPlanFor,
   type AdsReadPlan,
 } from '../../src/lib/adsRules'
-import { CAMPAIGNS, campaignById, isDirectionalDay, type CampaignFlight } from '../../src/lib/campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, isDirectionalDay, type CampaignFlight } from '../../src/lib/campaigns'
 import { addDays } from '../../src/lib/etTime'
 import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 
@@ -511,7 +511,7 @@ describe('flight 2 arms in the real registry', () => {
     for (const id of [F2_APPS, F2_SEARCH]) {
       const c = campaignById(id)!
       const plan = ADS_READ_PLANS[id]
-      expect(c.status, id).toBe('upcoming')
+      expect(campaignStatusOn(c, '2026-10-03'), id).toBe('upcoming') // derived from the dates (the registry no longer hand-keeps it)
       expect(c.flightEnd, id).toBe(addDays(c.flightStart!, 6))
       expect(c.flightStartTimeEt, id).toBe('12:00')
       expect(c.servingHoursEt, id).toEqual([12, 23])

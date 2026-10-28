@@ -16,7 +16,7 @@
 // Runs behind the auth gate (functions/_middleware.ts) like every /api/* route, so a hit never
 // bypasses sign-in.
 
-import { CAMPAIGNS, campaignById, ORGANIC_ARM_ID } from '../../src/lib/campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, ORGANIC_ARM_ID } from '../../src/lib/campaigns'
 import { FACTS, rangeMs, type FactStatement, type FactTtl } from '../../src/lib/metrics/facts'
 import { buildFact, type FactResult, type Plan, type PlannedFact } from '../../src/lib/metrics/engine'
 import { etMidnightMs, servingEndMs } from '../../src/lib/metrics/instrumentation'
@@ -137,7 +137,7 @@ export function factTtlSeconds(ttl: FactTtl, f: Pick<PlannedFact, 'params'>, tod
   }
   const campaign = f.params.campaignId ? campaignById(f.params.campaignId) : undefined
   if (!campaign) return LIVE_SECONDS
-  if (ttl === 'campaign') return campaign.status === 'closed' ? CLOSED_CAMPAIGN_SECONDS : LIVE_SECONDS
+  if (ttl === 'campaign') return campaignStatusOn(campaign, todayEt) === 'closed' ? CLOSED_CAMPAIGN_SECONDS : LIVE_SECONDS
   return servingEndMs(campaign) <= todayStart ? CLOSED_SECONDS : LIVE_SECONDS // 'flightWindow'
 }
 

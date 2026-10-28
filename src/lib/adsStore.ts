@@ -16,7 +16,8 @@
 // writes the beacon's gss-geo database.
 
 import type { CampaignFlight } from './campaigns'
-import { CAMPAIGNS, STAGED_ARMS, type StagedArm } from './campaigns'
+import { etDateFast } from './etTime'
+import { CAMPAIGNS, campaignStatusOn, STAGED_ARMS, type StagedArm } from './campaigns'
 import {
   microsToDollars,
   readingEntryKind,
@@ -110,7 +111,7 @@ export function campaignSyncStatements(campaigns: readonly CampaignFlight[], syn
       c.flightStart,
       c.flightStartTimeEt ?? null,
       c.flightEnd,
-      c.status,
+      campaignStatusOn(c, etDateFast(Date.parse(syncedAt))), // derived from the flight dates on the sync's own ET day
       dollarsToMicros(c.dailyBudgetUsd),
       dollarsToMicros(c.hardCapUsd),
       c.measurement === 'spend-only' ? 'spend-only' : 'beacon',

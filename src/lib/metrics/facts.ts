@@ -104,6 +104,7 @@ export type FactId =
   | 'bskRangeDaily'
   | 'popupRangeDaily'
   | 'adsSpendDaily'
+  | 'adsInstallsDaily'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -179,12 +180,21 @@ export interface SpendDayRow {
   campaignId: string
   date: string
   costMicros: number
+  clicks: number
+}
+/** One stored spend day of a campaign that has an installActionId, with the conversions Google reported on that action that day
+ * (0 when it returned no row: Google sends none for an action with nothing on a day). */
+export interface InstallDayRow {
+  campaignId: string
+  date: string
+  installs: number
 }
 
 export type FactRows =
   | { kind: 'beacon'; rows: BeaconRow[] }
   | { kind: 'beaconDaily'; rows: DailyBeaconRow[] }
   | { kind: 'spendDaily'; rows: SpendDayRow[] }
+  | { kind: 'installsDaily'; rows: InstallDayRow[] }
   | { kind: 'spend'; rows: SpendSummary[] }
   | { kind: 'coverage'; rows: CoverageRow[] }
   | { kind: 'lastSync'; rows: LastSyncRow[] }
@@ -370,7 +380,20 @@ const beaconDaily = (raw: Record<string, unknown>[]): FactRows => ({
 })
 
 /** Every stored spend day, whole micros per (campaign, ET date): the adsSpend twin. */
-export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros FROM ads_daily_metrics ORDER BY campaign_id, date'
+export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros, clicks FROM ads_daily_metrics ORDER BY campaign_id, date'
+
+/** Installs per stored spend day, for the campaigns that name an installActionId (migration 0007's ads_daily_conversions). One row per
+ * (campaign, ET day the ads store holds spend for): the LEFT JOIN makes a spend day with no conversion row an explicit 0, and a day the
+ * store never synced has no row at all (a gap, not a zero). The action id binds per campaign through one CASE, so a campaign only ever
+ * counts its own action; a campaign with no installActionId is not in the IN list and has no rows. */
+export function installsDaysStatement(pairs: readonly { campaignId: string; actionId: string }[]): { sql: string; binds: string[] } {
+  if (!pairs.length) return { sql: 'SELECT campaign_id, date, 0 AS installs FROM ads_daily_metrics WHERE 0', binds: [] }
+  const sql =
+    `SELECT m.campaign_id AS campaign_id, m.date AS date, COALESCE(SUM(c.conversions), 0) AS installs FROM ads_daily_metrics AS m ` +
+    `LEFT JOIN ads_daily_conversions AS c ON c.campaign_id = m.campaign_id AND c.date = m.date AND c.conversion_action_id = (CASE m.campaign_id ${pairs.map(() => 'WHEN ? THEN ?').join(' ')} END) ` +
+    `WHERE m.campaign_id IN (${pairs.map(() => '?').join(', ')}) GROUP BY m.campaign_id, m.date ORDER BY m.campaign_id, m.date`
+  return { sql, binds: [...pairs.flatMap((p) => [p.campaignId, p.actionId]), ...pairs.map((p) => p.campaignId)] }
+}
 
 /**
  * The organic returns arm's MATURITY BAND (R-2b), `s` on its campaignReturns rows, by ET DAY only:
@@ -760,7 +783,22 @@ export const FACTS: Record<FactId, FactDef> = {
     splitAt: null,
     ttl: { seconds: 300 },
     build: () => ({ db: 'gss_stats_ads', sql: SPEND_DAYS_SQL, binds: [] }),
-    parse: (raw) => ({ kind: 'spendDaily', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), costMicros: num(r.cost_micros) })) }),
+    parse: (raw) => ({ kind: 'spendDaily', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), costMicros: num(r.cost_micros), clicks: num(r.clicks) })) }),
+  },
+
+  adsInstallsDaily: {
+    id: 'adsInstallsDaily',
+    db: 'gss_stats_ads',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build: () => {
+      const s = installsDaysStatement(CAMPAIGNS.filter((c) => c.installActionId).map((c) => ({ campaignId: c.id, actionId: c.installActionId! })))
+      return { db: 'gss_stats_ads', sql: s.sql, binds: s.binds }
+    },
+    parse: (raw) => ({ kind: 'installsDaily', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), installs: num(r.installs) })) }),
   },
 }
 

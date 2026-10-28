@@ -483,16 +483,16 @@ describe('review L1-L3 (2026-09-26): never a false $0, no starving, a re-check o
   it('L2: under a cap the newest needed days go first, and after-flight days past them go last', async () => {
     const { store } = setup()
     const rows = await store.getAllDailyRows()
-    // retest flight ends 10-02; on 10-12 the window runs to 10-11
-    const plan = planCampaignSync(campaignById(RETEST)!, rows.get(RETEST) ?? [], '2026-10-12')
+    // retest flight ends 10-02; on 10-06 the closed flight's window runs to flight end + 3 days = 10-05
+    const plan = planCampaignSync(campaignById(RETEST)!, rows.get(RETEST) ?? [], '2026-10-06')
     expect(plan.ranges).toEqual([
-      { since: '2026-10-09', until: '2026-10-11' },
-      { since: '2026-09-26', until: '2026-10-08' },
+      { since: '2026-10-03', until: '2026-10-05' },
+      { since: '2026-09-26', until: '2026-10-02' },
     ])
     capPlan(plan, 5)
     // 3 recent days, then the 2 newest NEEDED days (flight days), not after-flight days
     expect(plan.ranges).toEqual([
-      { since: '2026-10-09', until: '2026-10-11' },
+      { since: '2026-10-03', until: '2026-10-05' },
       { since: '2026-10-01', until: '2026-10-02' },
     ])
     expect(plan.deferred).toBe(true)

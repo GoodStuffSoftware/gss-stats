@@ -351,6 +351,15 @@ function lastSyncOf(rows: FactRows, ctx: MetricCtx): { value: number | null } {
   return { value: Number.isFinite(ms) ? ms : null }
 }
 
+// ── Google Ads installs (conversions on the campaign's installActionId, ads_daily_conversions) ──
+/** The campaign's installs: the sum of its stored spend days' conversions on its registered install action. No installActionId, or no
+ * stored spend day, is no value (never 0); a stored day Google returned no conversion row for contributes 0. */
+function adsInstallsOf(rows: FactRows, ctx: MetricCtx): StoreResult {
+  if (rows.kind !== 'installsDaily' || !ctx.campaign?.installActionId) return { value: null }
+  const mine = rows.rows.filter((r) => r.campaignId === ctx.campaign!.id)
+  return mine.length ? { value: round2(mine.reduce((a, r) => a + r.installs, 0)) } : { value: null }
+}
+
 // ── Google Play's own per-day totals (R-4; ads_play_daily, synced by `npm run ads:play-sync`) ──
 // Whole-app counts by PLAY day, as Google reports them: never a beacon row, never joined to one.
 // Page-range only. A day's count is null when Play's report had no such figure, and no stored day
@@ -546,6 +555,18 @@ export const METRIC_DEFS: MetricDef[] = [
       const stored = rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null
       return stored && resolveCampaignSpend(stored, null).source === 'google-ads-api' ? stored.clicks : null
     },
+    instrumented: [],
+  }),
+
+  // Google Ads installs: the conversions on the campaign's installActionId (lib/campaigns.ts), per stored spend day. Not campaign.installs:
+  // that is the site's own install-prompt funnel step. Attribution window only, like the spend it is divided into.
+  campaignMetric({
+    id: 'campaign.adsInstalls',
+    unit: 'install',
+    params: ['campaignId'],
+    windows: { attribution: 'adsInstallsDaily' },
+    store: adsInstallsOf,
+    caveats: ['ads-installs-google'],
     instrumented: [],
   }),
 
@@ -764,7 +785,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {

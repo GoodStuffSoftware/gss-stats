@@ -32,7 +32,7 @@
 // Conversions and per-asset results (migration 0007) are NOT part of this sync: they have a
 // pass of their own, syncAdsExtras() at the end of this file, run in its own invocation.
 
-import { CAMPAIGNS, campaignById, type CampaignFlight } from './campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, type CampaignFlight } from './campaigns'
 import { channelOf, microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import {
   ASSET_CATALOG_ROWS_PER_STATEMENT,
@@ -213,10 +213,10 @@ export function syncableCampaigns(ids?: readonly string[]): CampaignFlight[] {
 /** The closed ET days a campaign's data can be pulled for at `todayEt`: flight start through
  * yesterday (a closed campaign: through flight end + CLOSED_CAMPAIGN_GRACE_DAYS). Days after the
  * flight end are pulled (stray spend shows up) but never zero-filled or required. */
-export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd' | 'status'>, todayEt: string): SyncRange | null {
+export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string): SyncRange | null {
   if (!c.flightStart) return null
   const yesterday = addDays(todayEt, -1)
-  const cap = c.status === 'closed' ? addDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
+  const cap = campaignStatusOn(c, todayEt) === 'closed' ? addDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
   const until = cap < yesterday ? cap : yesterday
   return c.flightStart <= until ? { since: c.flightStart, until } : null
 }
@@ -236,7 +236,7 @@ export function planCampaignSync(
   const beforeClose = opts.nowMs != null && etDateFast(opts.nowMs) === todayEt && opts.nowMs < etWallTimeMs(todayEt, CLOSED_AFTER_ET)
   const lastClosed = addDays(todayEt, beforeClose ? -2 : -1)
   const window = fullWindow && fullWindow.until > lastClosed ? (fullWindow.since <= lastClosed ? { since: fullWindow.since, until: lastClosed } : null) : fullWindow
-  const today = opts.includeToday && c.status !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
+  const today = opts.includeToday && campaignStatusOn(c, todayEt) !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
   const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
   if (!window) return none
   const byDate = new Map(rows.map((r) => [r.date, r]))
@@ -413,7 +413,7 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
   snap.rows = rows.value
   snap.lastPulls = pulls.ok ? pulls.value : new Map() // unreadable: re-check restatement (safe)
   // Live campaigns first, so a capped run spends its budget where freshness matters.
-  const ordered = [...campaigns].sort((a, b) => Number(a.status === 'closed') - Number(b.status === 'closed'))
+  const ordered = [...campaigns].sort((a, b) => Number(campaignStatusOn(a, todayEt) === 'closed') - Number(campaignStatusOn(b, todayEt) === 'closed'))
   let budget = opts.maxDays != null && opts.maxDays > 0 ? Math.floor(opts.maxDays) : Infinity
   for (const c of ordered) {
     const plan = planCampaignSync(c, snap.rows.get(c.id) ?? [], todayEt, {
@@ -1501,7 +1501,7 @@ export function setBuildSha(sha: string | null | undefined): void {
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
   const s = JSON.stringify(
     campaigns.map((c) => {
-      const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
+      const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
       const channel = channelOf(c.id)
       if (channel !== 'display') t.push(channel)
       if (c.noPlacements) t.push('noPlacements')
@@ -1521,10 +1521,10 @@ export function workerInfo(): { gitSha: string | null; campaignsHash: string } {
 
 // ── The gss-stats-sync Worker's schedule and on-demand guard (workers/sync/) ──────────────
 /** Campaigns in a live flight today (ET): from the first flight day through the day after the
- * last one (so the last day is pulled once it has closed). Closed campaigns never count. */
+ * last one (so the last day is pulled once it has closed); a flight past that day never counts. */
 export function liveFlightCampaigns(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): CampaignFlight[] {
   const todayEt = etDateFast(nowMs)
-  return campaigns.filter((c) => c.flightStart != null && c.status !== 'closed' && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
+  return campaigns.filter((c) => c.flightStart != null && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
 }
 /** The ET hour of the daily pass outside a flight: 03:xx, once yesterday counts as closed
  * (lib/adsFreshness.ts CLOSED_AFTER_ET). */

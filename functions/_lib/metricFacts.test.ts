@@ -102,7 +102,7 @@ describe('cache keys (review finding #9): SQL and bound values, never the live "
     statementCacheKeyUrl({ id, params: { campaignId } }, FACTS[id].build({ campaignId }, KEY_NOW, factCuts(id)))
   it('changing a campaign\'s flightStartTimeEt, flightStart, flightEnd or tags changes its facts\' keys', () => {
     const retest = campaignById(RETEST)!
-    const saved = { ...retest }
+    const { status: _derived, ...saved } = retest // status is derived from the dates, not config to restore
     const before = { pv: keyFor('campaignPathVisitor', RETEST), seen: keyFor('flightPathsSeen', RETEST), ret: keyFor('campaignReturns', RETEST) }
     try {
       retest.flightStartTimeEt = '13:00'

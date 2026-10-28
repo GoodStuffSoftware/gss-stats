@@ -5,7 +5,7 @@
 // scope when left unset. Pure functions only — MetricCard.vue and MetricSection.vue call
 // these to decide what to render and what to request, so the expansion is unit-testable
 // without mounting a component.
-import { CAMPAIGNS, campaignById, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
@@ -224,7 +224,7 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
   switch (repeat.over) {
     case 'campaigns': {
       let list = repeat.ids?.length ? repeat.ids.map((id) => campaignById(id)).filter((c): c is CampaignFlight => !!c) : CAMPAIGNS
-      if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(c.status))
+      if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(campaignStatusOn(c, ctx.todayEt)))
       if (repeat.tracked) list = list.filter((c) => c.measurement !== 'spend-only')
       if (repeat.flightingToday) list = list.filter((c) => flightDayIndex(c, ctx.todayEt) != null)
       const out: ScopeInstance[] = list.map((campaign) => (ctx.ads?.[campaign.id] ? { kind: 'campaign', campaign, ads: ctx.ads[campaign.id] } : { kind: 'campaign', campaign }))
@@ -300,10 +300,10 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     case 'campaign.label':
       return campaign ? campaign.label : organic ? noteRawText('label.arm.organic') : null
     case 'campaign.status':
-      return campaign ? campaign.status : null
+      return campaign ? campaignStatusOn(campaign, todayEt) : null
     case 'campaign.statusToday':
       if (!campaign) return null
-      return flightDayIndex(campaign, todayEt) != null ? 'flighting today' : campaign.status
+      return flightDayIndex(campaign, todayEt) != null ? 'flighting today' : campaignStatusOn(campaign, todayEt)
     case 'campaign.flight':
       // The dateRange renderer wants both bounds; encode as "start|end" and let it split, so
       // this function's signature stays a single ScopePath -> string | null.
@@ -409,8 +409,8 @@ export function scopeVars(scope: ScopeInstance, todayEt: string = todayEtFrom(Da
     vars.campaign = {
       id: campaign.id,
       label: campaign.label,
-      status: campaign.status,
-      statusToday: scopeField(scope, 'campaign.statusToday', todayEt) ?? campaign.status,
+      status: campaignStatusOn(campaign, todayEt),
+      statusToday: scopeField(scope, 'campaign.statusToday', todayEt) ?? campaignStatusOn(campaign, todayEt),
     }
   } else if (isOrganicScope(scope)) {
     vars.campaign = { id: ORGANIC_ARM_ID, label: noteRawText('label.arm.organic') }
@@ -596,7 +596,7 @@ export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt
     const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
     if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return 'spend-only'
     // The ads store's reads (spend and its freshness) need no flight date, only a campaign.
-    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync') return 'flight-pending'
+    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync' && fact !== 'adsInstallsDaily') return 'flight-pending'
   }
   return null
 }

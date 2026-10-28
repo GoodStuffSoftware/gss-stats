@@ -274,7 +274,7 @@ describe('MetricCard — following the page context and the ET day', () => {
     await settle()
     expect(kpis.findAll('.mi-tile-label').map((l) => l.text())).not.toContain('Tagged arrivals — US+CA web retest')
     expect(kpis.find('.mp-tile-text').text()).toBe('no campaign flighting today')
-    expect(badge()).toBe('active')
+    expect(badge()).toBe('closed')
     const todaySoFar = bodies.slice(before).flatMap((b) => b.requests).filter((r) => r.window === 'todaySoFar')
     expect(todaySoFar.some((r) => r.metric === 'bsk.pageviews')).toBe(true)
     expect(todaySoFar.some((r) => r.params?.campaignId === RETEST)).toBe(false)

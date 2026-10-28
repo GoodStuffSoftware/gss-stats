@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Installs and cost per install for the Android campaign.** The campaign page can now show Google's installs per day and cost per install, and ad clicks per day, from the stored ads data. A campaign with no install action shows no install figure rather than 0.
+
+### Fixed
+- **Campaign statuses follow the flight dates.** The retest no longer shows as active and the second-flight arms and the live Search flight no longer show as upcoming; a flight closes itself the day after it ends.
+
 ## [0.64.0] — 2026-10-28
 
 ### Added

@@ -14,8 +14,8 @@ import type { MetricValue } from './types'
 
 const RETEST = campaignById('24279250691')!
 const UC = RETEST.ucValues[0]
-const NOW = Date.parse('2026-10-10T16:00:00Z')
-const TODAY = '2026-10-10'
+const NOW = Date.parse('2026-09-30T16:00:00Z') // inside the retest flight (09-26..10-02): its status is derived from the date
+const TODAY = '2026-09-30'
 
 type Raw = Record<string, unknown>
 const ret = (bucket: string, c: number): Raw => ({ path: `/return/${UC}/${bucket}`, c })

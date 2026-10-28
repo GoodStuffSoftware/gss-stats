@@ -129,6 +129,9 @@ export const RATIO_DEFS: RatioDef[] = [
   // Average CPC: stored spend over the stored clicks of the same Google Ads days. Cost per completed game: tagged completions only.
   ratio('campaign.avgCpc', 'cost', 'campaign.spend', 'campaign.clicks'),
   ratio('campaign.costPerComplete', 'cost', 'campaign.spend', 'campaign.completions'),
+  // Cost per Google Ads install: stored spend over the installs of the same stored days, a ratio of the two sums (never a mean of daily
+  // ratios). No installs (or no installActionId) is no data, never a figure over zero.
+  ratio('campaign.costPerAdsInstall', 'cost', 'campaign.spend', 'campaign.adsInstalls'),
   // Cost per PERSON who finished a puzzle: stored spend over first-finish rows (one per device), so repeat finishers count once.
   // The rows only exist from the v1.103.0 release (evening of FIRST_FINISH_START_ET minus a day), so the numerator is the spend from
   // FIRST_FINISH_START_ET (lib/releases.ts) on. The finisher count comes from a fact with no time bucket, so it cannot be trimmed to

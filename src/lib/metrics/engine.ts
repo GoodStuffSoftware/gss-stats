@@ -31,7 +31,7 @@ import { latestDatedRelease } from '../releases'
 import { addDays as addEtDays } from '../etTime'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
-import { beaconSeries, seriesTwin, spendSeries } from './series'
+import { beaconSeries, installsSeries, seriesTwin, spendSeries } from './series'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -126,6 +126,7 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     case 'bskFirstHit':
     case 'adsSpend':
     case 'adsSpendDaily':
+    case 'adsInstallsDaily':
     case 'adsCoverage':
     case 'adsLastSync':
     case 'adsPlayDaily':
@@ -159,20 +160,20 @@ type Static = MeasuredInterval & { needsSeen: boolean }
 
 /** Store facts: a campaign's config-only reads (spend and its freshness), measurable even before
  * its flight has a start date. */
-const STORE_FACTS: ReadonlySet<FactId> = new Set(['adsSpend', 'adsCoverage', 'adsLastSync'])
+const STORE_FACTS: ReadonlySet<FactId> = new Set(['adsSpend', 'adsCoverage', 'adsLastSync', 'adsInstallsDaily'])
 
 /** The measured interval from config alone (optimistic about seenInFlightWindow), plus whether
  * the flightPathsSeen evidence is needed. A null window is a release window the batch could not
  * resolve (no dated release, or no full day on a side). */
-function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, number] | null): Static {
+function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, number] | null, todayEt: string): Static {
   const factId = def.windows[ctx.window]!
   if (window === null) return { status: 'unmeasured', from: Infinity, reason: 'no-release-window', noteIds: ['release-pending'], goLiveEt: null, needsSeen: false }
   if (ctx.campaign && ctx.campaign.flightStart === null && !STORE_FACTS.has(factId)) {
     return { status: 'unmeasured', from: Infinity, reason: 'flight-pending', noteIds: ['flight-pending'], goLiveEt: null, needsSeen: false }
   }
   const rules = rulesOf(def, ctx)
-  const m = measuredInterval({ rules, window, campaign: ctx.campaign, seenInFlight: true })
-  const needsSeen = m.status !== 'unmeasured' && rules.some((r) => r.kind === 'seenInFlightWindow') && seenInFlightRequired(ctx.campaign) && !!ctx.campaign?.flightStart
+  const m = measuredInterval({ rules, window, campaign: ctx.campaign, seenInFlight: true, todayEt })
+  const needsSeen = m.status !== 'unmeasured' && rules.some((r) => r.kind === 'seenInFlightWindow') && seenInFlightRequired(ctx.campaign, todayEt) && !!ctx.campaign?.flightStart
   return { ...m, needsSeen }
 }
 
@@ -180,6 +181,8 @@ function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, nu
 interface Clock {
   /** The start of the day the today-so-far windows read: today's, or the chosen past day's. */
   todayStartMs: number
+  /** The real ET today (a campaign's status is derived for it, even while a past day is read). */
+  todayEt: string
   /** The end of a chosen past day (its closed window's end); null for today, which runs to now. */
   dayEndMs: number | null
   pageRange: [number, number] | null
@@ -192,6 +195,7 @@ function clockOf(env: BatchEnv): Clock {
   const pageRange = env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null
   return {
     todayStartMs: etMidnightMs(env.dayEt ?? env.todayEt),
+    todayEt: env.todayEt,
     dayEndMs: env.dayEt ? etMidnightMs(addEtDays(env.dayEt, 1)) : null,
     pageRange,
     pageRefusedWholeDays: pageRange !== null && refusedWindowMoved(pageRange[0], pageRange[1]),
@@ -242,7 +246,7 @@ function resolveStatic(memo: SideMemo, def: MetricDef, req: Pick<ResolvedRequest
   let v = memo.get(key)
   if (!v) {
     const ctx = metricCtx(def, req)
-    memo.set(key, (v = { ctx, stat: sideStatic(def, ctx, windowOf(ctx, clock, endMs)) }))
+    memo.set(key, (v = { ctx, stat: sideStatic(def, ctx, windowOf(ctx, clock, endMs), clock.todayEt) }))
   }
   return v
 }
@@ -634,7 +638,7 @@ class Batch {
       const mask = idx ? this.mask(idx, seenKey, def, ctx) : new Uint8Array(0)
       let saw = false
       for (let p = 0; idx && p < idx.paths.length && !saw; p++) saw = mask[p] === 1 && idx.pathTotal[p] > 0
-      m = measuredInterval({ rules: rulesOf(def, ctx), window: windowOf(ctx, this.clock, ctx.window === 'todaySoFar' ? plan.asOfMs : this.env.nowMs)!, campaign: ctx.campaign, seenInFlight: saw })
+      m = measuredInterval({ rules: rulesOf(def, ctx), window: windowOf(ctx, this.clock, ctx.window === 'todaySoFar' ? plan.asOfMs : this.env.nowMs)!, campaign: ctx.campaign, seenInFlight: saw, todayEt: this.env.todayEt })
       if (m.status === 'unmeasured') return { status: 'unmeasured', value: null, reason: m.reason, noteIds: m.noteIds }
     }
     if (!fact || !fact.ok) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
@@ -726,7 +730,9 @@ class Batch {
     const plan = this.side(def, req, null)
     let points: SeriesPoint[] = []
     if (fact.rows.kind === 'spendDaily') {
-      points = spendSeries({ rows: fact.rows.rows, campaignId: req.params.campaignId ?? '', firstDay: null, capDay: this.env.todayEt })
+      points = spendSeries({ rows: fact.rows.rows, field: def.unit === 'click' ? 'clicks' : 'cost', campaignId: req.params.campaignId ?? '', firstDay: null, capDay: this.env.todayEt })
+    } else if (fact.rows.kind === 'installsDaily') {
+      points = installsSeries({ rows: fact.rows.rows, campaignId: req.params.campaignId ?? '', capDay: this.env.todayEt })
     } else if (fact.rows.kind === 'beaconDaily') {
       const win = windowOf(plan.ctx, this.clock, this.env.nowMs)
       if (!win) return undefined

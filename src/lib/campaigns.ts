@@ -23,7 +23,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and the metrics facts issue one
 // small query per campaign rather than one UNIONed mega-query across all of them.
 
-import { addDays, etDateSql } from './etTime'
+import { addDays, etDateFast, etDateSql } from './etTime'
 import { LANDING_TAGS, LANDING_SITES, landingArrivalPath } from './landingTags'
 import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql, pathRestSql, POPUP_OUTCOME_TYPES } from './popupEvents'
 
@@ -66,6 +66,9 @@ export interface CampaignFlight {
    * only (flightDayIndex, the "daily arrivals by flight day" chart, servingHoursEt shading).
    * NOT used to bound attribution — see flightStart above. */
   flightEnd: string
+  /** Where the flight stands today, DERIVED from flightStart and flightEnd (campaignStatusOn) for every
+   * campaign in CAMPAIGNS: never hand-kept, so it cannot drift. 'upcoming' before the start (or while the
+   * start is unset), 'active' from the start day through flightEnd, 'closed' after. */
   status: 'closed' | 'active' | 'upcoming'
   /** [startHourEt, endHourExclusiveEt) — descriptive only; charts DON'T filter to this
    * window (a click outside serving hours is still a real click), the hour-of-day chart
@@ -93,7 +96,7 @@ export interface CampaignFlight {
   hardCapUsd?: number
   /** The Google Ads conversion action id (digits only, not a secret) whose conversions are this
    * campaign's Google-reported installs. Set only on an install campaign (F4). The daily spend-only
-   * line (adsRules.ts buildSpendOnlyLine) and the metrics read their installs from this field and
+   * line (adsRules.ts buildSpendOnlyLine) and the metrics (campaign.adsInstalls, campaign.costPerAdsInstall) read their installs from this field and
    * from no hardcoded id. Unset = the campaign has no install count. */
   installActionId?: string
   /** Flight days 1..N (day 1 = flightStart) are "directional" figures, per the brief —
@@ -338,14 +341,14 @@ export function liveStagedCampaigns(dates: Record<StagedArm, StagedArmDates> = S
  * invalid). This placeholder follows the `sudoku_<name>` tag convention and is a tag no link, app
  * or row carries. */
 export const F4_NO_BEACON_TAG = 'sudoku_f4_android_installs_no_beacon'
-export const CAMPAIGNS: CampaignFlight[] = [
+/** The hand-kept registry. `status` is not kept here: CAMPAIGNS derives it from the flight dates. */
+const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   {
     id: '24215315197',
     label: 'Android launch — "tired of ads"',
     ucValues: ['sudoku_tired_of_ads', 'tired_of_ads', 'launch_2026'],
     flightStart: '2026-09-02',
     flightEnd: '2026-09-09',
-    status: 'closed',
     kind: 'web',
     dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the week-1 campaign's ($14.29)")
     hardCapUsd: 100, // same spec: "Mike pauses the campaign at $100 ... exactly as the week-1 build required"
@@ -358,7 +361,6 @@ export const CAMPAIGNS: CampaignFlight[] = [
     ucValues: ['sudoku_tired_of_ads_play'],
     flightStart: '2026-09-09',
     flightEnd: '2026-09-13', // stopped early; configured to run through 2026-09-16
-    status: 'closed',
     kind: 'play-direct',
     dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the twin's ($14.29)"); no hard cap on record
     measurement: 'spend-only',
@@ -373,7 +375,6 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-09-26', // confirmed — now serving (ads session, 2026-09-26)
     flightStartTimeEt: '12:00', // the ad schedule's actual start — see campaignAttributionClause
     flightEnd: '2026-10-02', // 7 serving days
-    status: 'active',
     kind: 'web',
     dailyBudgetUsd: 13,
     hardCapUsd: 100,
@@ -393,7 +394,6 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-10-04',
     flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
     flightEnd: '2026-10-10', // 7 serving days
-    status: 'upcoming',
     kind: 'web',
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
@@ -408,7 +408,6 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-10-04',
     flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
     flightEnd: '2026-10-10', // 7 serving days
-    status: 'upcoming',
     kind: 'web',
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
@@ -430,7 +429,6 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-10-26',
     flightStartTimeEt: '12:00', // enabled at noon ET; Google stores the 09:14 creation time (the API takes only a midnight start)
     flightEnd: '2026-11-02',
-    status: 'active',
     kind: 'play-direct',
     dailyBudgetUsd: 10,
     hardCapUsd: 75,
@@ -444,6 +442,22 @@ export const CAMPAIGNS: CampaignFlight[] = [
   // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged.
   ...liveStagedCampaigns(),
 ]
+
+/** A flight's status on an ET date: 'upcoming' before flightStart (or with no start yet), 'active' from the start
+ * day through flightEnd inclusive, 'closed' after. Attribution is unaffected: it has no upper bound. */
+export function campaignStatusOn(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string): CampaignFlight['status'] {
+  if (c.flightStart == null || todayEt < c.flightStart) return 'upcoming'
+  return todayEt > c.flightEnd ? 'closed' : 'active'
+}
+
+/** The registry with `status` read live from today's ET date each time (a getter, so an isolate that lives
+ * past midnight still answers for today). Copies of the object (spreads, JSON) carry the value read then. */
+function withDerivedStatus(c: Omit<CampaignFlight, 'status'>): CampaignFlight {
+  const out = { ...c } as CampaignFlight
+  Object.defineProperty(out, 'status', { enumerable: true, configurable: true, get: () => campaignStatusOn(c, etDateFast(Date.now())) })
+  return out
+}
+export const CAMPAIGNS: CampaignFlight[] = CAMPAIGN_REGISTRY.map(withDerivedStatus)
 
 export function campaignById(id: string): CampaignFlight | undefined {
   return CAMPAIGNS.find((c) => c.id === id)
