@@ -105,6 +105,7 @@ export type FactId =
   | 'popupRangeDaily'
   | 'adsSpendDaily'
   | 'adsInstallsDaily'
+  | 'adsAssetDaily'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -190,7 +191,18 @@ export interface InstallDayRow {
   installs: number
 }
 
+/** One ad asset's delivery on one ET day (ads_daily_assets summed over the campaign's ads and ad groups). Counts only: Google's own aggregates. */
+export interface AssetDayRow {
+  assetId: string
+  fieldType: string
+  date: string
+  impressions: number
+  clicks: number
+  conversions: number
+}
+
 export type FactRows =
+  | { kind: 'assetDaily'; rows: AssetDayRow[] }
   | { kind: 'beacon'; rows: BeaconRow[] }
   | { kind: 'beaconDaily'; rows: DailyBeaconRow[] }
   | { kind: 'spendDaily'; rows: SpendDayRow[] }
@@ -387,6 +399,10 @@ export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros, clicks FRO
  * day with none), but only up to the campaign's latest stored conversion day: the extras pass stores conversions apart from spend, so a spend
  * day newer than that is not yet covered and is a gap, not a false 0. A day the store never synced has no row at all. The action id binds per campaign through one CASE, so a campaign only ever
  * counts its own action; a campaign with no installActionId is not in the IN list and has no rows. */
+/** A campaign's ad assets per ET day: ads_daily_assets summed over its ads and ad groups (the table keeps one row per ad group, ad, asset, field type and day). */
+export const ASSET_DAYS_SQL =
+  'SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date'
+
 export function installsDaysStatement(pairs: readonly { campaignId: string; actionId: string }[]): { sql: string; binds: string[] } {
   if (!pairs.length) return { sql: 'SELECT campaign_id, date, 0 AS installs FROM ads_daily_metrics WHERE 0', binds: [] }
   const sql =
@@ -800,6 +816,20 @@ export const FACTS: Record<FactId, FactDef> = {
       return { db: 'gss_stats_ads', sql: s.sql, binds: s.binds }
     },
     parse: (raw) => ({ kind: 'installsDaily', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), installs: num(r.installs) })) }),
+  },
+
+  // One campaign's ad assets per ET day (migration 0007 ads_daily_assets), one row per asset, field type and day. Read-only; fail soft like
+  // every gss_stats_ads fact (no binding: no statement; a missing table: the metric reads as an error, never a 500).
+  adsAssetDaily: {
+    id: 'adsAssetDaily',
+    db: 'gss_stats_ads',
+    keyParams: ['campaignId'],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build: (p) => ({ db: 'gss_stats_ads', sql: ASSET_DAYS_SQL, binds: [p.campaignId ?? ''] }),
+    parse: (raw) => ({ kind: 'assetDaily', rows: raw.map((r) => ({ assetId: str(r.asset_id), fieldType: str(r.field_type), date: str(r.date), impressions: num(r.impressions), clicks: num(r.clicks), conversions: num(r.conversions) })) }),
   },
 }
 

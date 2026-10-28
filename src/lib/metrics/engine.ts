@@ -31,7 +31,7 @@ import { latestDatedRelease } from '../releases'
 import { addDays as addEtDays } from '../etTime'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
-import { beaconSeries, installsSeries, seriesTwin, spendSeries } from './series'
+import { assetSeries, beaconSeries, installsSeries, seriesTwin, spendSeries } from './series'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -108,6 +108,7 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
       return req.params.campaignId === ORGANIC_ARM_ID ? organicReturnsParams(env) : { campaignId: req.params.campaignId }
     case 'campaignPathVisitor':
     case 'campaignDaily':
+    case 'adsAssetDaily':
     case 'flightPathsSeen':
       return { campaignId: req.params.campaignId }
     case 'bskKpiDays':
@@ -160,7 +161,7 @@ type Static = MeasuredInterval & { needsSeen: boolean }
 
 /** Store facts: a campaign's config-only reads (spend and its freshness), measurable even before
  * its flight has a start date. */
-const STORE_FACTS: ReadonlySet<FactId> = new Set(['adsSpend', 'adsCoverage', 'adsLastSync', 'adsInstallsDaily'])
+const STORE_FACTS: ReadonlySet<FactId> = new Set(['adsSpend', 'adsCoverage', 'adsLastSync', 'adsInstallsDaily', 'adsAssetDaily'])
 
 /** The measured interval from config alone (optimistic about seenInFlightWindow), plus whether
  * the flightPathsSeen evidence is needed. A null window is a release window the batch could not
@@ -242,7 +243,7 @@ export function newSideMemo(): SideMemo {
   return new Map()
 }
 function resolveStatic(memo: SideMemo, def: MetricDef, req: Pick<ResolvedRequest, 'params' | 'window'>, clock: Clock, endMs: number): { ctx: MetricCtx; stat: Static } {
-  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${endMs}`
+  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${endMs}`
   let v = memo.get(key)
   if (!v) {
     const ctx = metricCtx(def, req)
@@ -289,7 +290,7 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
   }
   for (const req of requests) {
     for (const def of sidesOf(req)) {
-      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${req.series ?? ''}`
+      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${req.series ?? ''}`
       if (seenSides.has(sideKey)) continue
       seenSides.add(sideKey)
       const { ctx, stat: side } = resolveStatic(memo, def, req, clock, env.nowMs)
@@ -551,7 +552,7 @@ class Batch {
   /** Resolves (and memoizes) one side. `alignFromMs` restricts the denominator of an aligned
    * proportion to where its numerator is measured. */
   side(def: MetricDef, req: ResolvedRequest, alignFromMs: number | null): SidePlan {
-    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${alignFromMs ?? ''}`
+    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${alignFromMs ?? ''}`
     let plan = this.sides.get(key)
     if (plan) return plan
     const factId = def.windows[req.window]!
@@ -731,6 +732,8 @@ class Batch {
     let points: SeriesPoint[] = []
     if (fact.rows.kind === 'spendDaily') {
       points = spendSeries({ rows: fact.rows.rows, field: def.unit === 'click' ? 'clicks' : 'cost', campaignId: req.params.campaignId ?? '', firstDay: null, capDay: this.env.todayEt })
+    } else if (fact.rows.kind === 'assetDaily') {
+      points = assetSeries({ rows: fact.rows.rows, assetId: req.params.assetId ?? '', field: def.asset!, capDay: this.env.todayEt })
     } else if (fact.rows.kind === 'installsDaily') {
       points = installsSeries({ rows: fact.rows.rows, campaignId: req.params.campaignId ?? '', capDay: this.env.todayEt })
     } else if (fact.rows.kind === 'beaconDaily') {
@@ -920,7 +923,7 @@ export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv, mem
     const r = c.req
     // Everything a result depends on: `wholeDays`, like `deltas`, is a function of the metric id
     // (countsRefused is static per metric), the window and the requested names (r.deltas).
-    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
+    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.params.assetId ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
     let v = same.get(sig)
     if (!v) {
       try {

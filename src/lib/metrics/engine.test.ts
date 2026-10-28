@@ -27,9 +27,11 @@ function everyRequest(): MetricRequest[] {
   const add = (base: { metric?: string; ratio?: string }, params: string[], windows: string[]) => {
     const campaigns = params.includes('campaignId') ? CAMPAIGNS.map((c) => c.id) : [undefined]
     const popups = params.includes('popup') ? POPUPS.map((p) => p.id) : [undefined]
+    const assets = params.includes('assetId') ? ['1'] : [undefined] // an asset metric needs a well-formed asset id
     for (const window of windows)
       for (const campaignId of campaigns)
-        for (const popup of popups) out.push({ ...base, key: `r${out.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}) } })
+        for (const popup of popups)
+          for (const assetId of assets) out.push({ ...base, key: `r${out.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}) } })
   }
   for (const d of METRIC_DEFS) add({ metric: d.id }, d.params, metricWindows(d))
   for (const r of RATIO_DEFS) add({ ratio: r.id }, ratioParamsOf(r), ratioWindowsOf(r))

@@ -197,6 +197,7 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'reading.count.signUpsAtMost', label: 'Sign-ups (upper bound, number)' },
     { value: 'reading.count.signUps', label: 'Sign-ups (exact or at most, text)' },
   ],
+  assets: [{ value: 'asset.label', label: 'Asset (field type and text)' }],
   rules: [
     { value: 'rule.name', label: 'Rule (number and name)' },
     { value: 'rule.number', label: 'Measured number' },

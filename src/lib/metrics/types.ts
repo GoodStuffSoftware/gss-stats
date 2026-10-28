@@ -36,6 +36,9 @@ export type ScopePath =
   | 'campaign.f3Proposal'
   /** One rule of that read (RepeatSpec.over 'rules'): "1 · Placement leak", its measured figure,
    * what it is held to, and its verdict, all as the morning report prints them. */
+  /** One ad asset of a campaign (RepeatSpec.over 'assets'): "Headline: Free daily sudoku", its text
+   * or name behind its field type. */
+  | 'asset.label'
   | 'rule.name'
   | 'rule.number'
   | 'rule.threshold'
@@ -88,12 +91,14 @@ export type Label =
   | { metric: true } // the data binding's own registry label
 
 /** (b) DATA: a registry id plus params. Never SQL, never an endpoint path. */
-export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' }
+export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' | 'assetId' }
 export interface Params {
   campaignId?: ParamValue
   popup?: ParamValue
   /** A country bucket (COUNTRY_BUCKETS): optional wherever a metric declares it. */
   country?: ParamValue
+  /** A Google Ads asset id (digits): the asset metrics' (asset.*) second param. */
+  assetId?: ParamValue
 }
 /** The country buckets the campaign funnel splits by (lib/campaigns.ts countryBucket). */
 export const COUNTRY_BUCKETS = ['US', 'CA', 'other'] as const
@@ -160,10 +165,21 @@ export interface Gating {
 export const DEFAULT_READINGS_LIMIT = 30
 export const MAX_READINGS_LIMIT = 500
 
+/** The totals an assets repeat can be sorted by (RepeatSpec.sortBy): Google's per-asset aggregates. */
+export const ASSET_SORT_FIELDS = ['impressions', 'clicks', 'conversions'] as const
+export type AssetSortField = (typeof ASSET_SORT_FIELDS)[number]
+
 export interface RepeatSpec {
-  /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read). */
-  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules'
-  ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES
+  /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read).
+   * 'assets': the ad assets (headlines, descriptions, images) Google served for one campaign
+   * (ads_daily_assets): the enclosing campaign's, else `campaignId`. */
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets'
+  ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES; assets: Google asset ids
+  /** Assets only: the campaign whose assets to list when the repeat is not inside a campaign repeat. */
+  campaignId?: string
+  /** Assets only: order by this total over the stored days, highest first (a leaderboard); with
+   * `limit` it keeps the top N. Unset: most impressions first. */
+  sortBy?: AssetSortField
   status?: ('closed' | 'active' | 'upcoming')[]
   /** Campaigns only: beacon-tracked ones (not `measurement: 'spend-only'`). */
   tracked?: boolean
@@ -176,8 +192,9 @@ export interface RepeatSpec {
    * stored reading, Ads-API spend, or an active flight — unless the widget selected campaigns
    * itself (narrowToCampaigns). What the ads readings log shows; none until the load answers. */
   withActivity?: boolean
-  /** Readings only: at most this many (newest first; per campaign when nested in a campaign
-   * repeat). A whole number, DEFAULT_READINGS_LIMIT when unset, MAX_READINGS_LIMIT at most. */
+  /** Readings and assets only: at most this many (readings: newest first, per campaign when nested
+   * in a campaign repeat; assets: after `sortBy`). A whole number, DEFAULT_READINGS_LIMIT when
+   * unset, MAX_READINGS_LIMIT at most. */
   limit?: number
   empty?: { label: Label; text: Label } // shown once when the repeat yields nothing
 }
@@ -280,7 +297,7 @@ export interface MetricRequest {
   key: string
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string; country?: string }
+  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string }
   window?: string
   deltas?: DeltaName[]
   /** 'daily': also return the metric's per-ET-day points (MetricValue.series). A count or a

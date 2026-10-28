@@ -229,7 +229,7 @@ const itemRepeatModel = computed({
           <p v-if="whenEmptyNoteInvalid" class="hint">This version doesn't know the note "{{ whenEmptyNote }}", so it shows a dash. It stays saved unless you pick another.</p>
         </template>
 
-        <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries']" label="Repeat this item" />
+        <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'assets']" label="Repeat this item" />
 
         <CardEditorLabel v-model="item.caption" :has-data="hasData" :repeat-over="innermostOver" :allow-metric-own="false" placeholder="Caption text" heading="Caption" />
         <div class="row">

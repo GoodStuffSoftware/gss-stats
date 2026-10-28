@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 //
-// GET /api/ads/readings?campaignId=<id>[&campaignId=<id>…][&campaignIds=a,b][&limit=N]
+// GET /api/ads/readings?campaignId=<id>[&campaignId=<id>…][&campaignIds=a,b][&limit=N][&assets=1]
 //
 // The ads-read routine's readings log, stored spend and fired thresholds, from gss-stats' own
 // D1 store (binding gss_stats_ads — docs/adr/0001-ads-read-store.md). Feeds the
@@ -18,7 +18,7 @@
 import { CAMPAIGNS, CAMPAIGN_SPEND } from '../../../src/lib/campaigns'
 import { resolveCampaignSpend } from '../../../src/lib/adsRules'
 import { freshnessOf } from '../../../src/lib/adsFreshness'
-import { parseCampaignIdsParam, readFreshness, readReadings, readSpendSummaries, readSyncAlerts, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
+import { parseCampaignIdsParam, readCampaignAssets, readFreshness, readReadings, readSpendSummaries, readSyncAlerts, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
 
 interface Env {
   gss_stats_ads?: D1Database
@@ -32,6 +32,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const ids = parseCampaignIdsParam(url.searchParams, CAMPAIGNS.map((c) => c.id))
   const limitRaw = Number(url.searchParams.get('limit'))
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(500, Math.floor(limitRaw)) : 50
+  const wantsAssets = url.searchParams.get('assets') === '1'
   const db = ctx.env.gss_stats_ads
   const nowMs = Date.now()
   const [summaries, freshness, syncAlerts] = await Promise.all([readSpendSummaries(db), readFreshness(db, nowMs), readSyncAlerts(db, nowMs)])
@@ -39,7 +40,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const campaigns = await Promise.all(
     ids.map(async (id) => {
       const c = CAMPAIGNS.find((x) => x.id === id)!
-      const [readings, fired] = await Promise.all([readReadings(db, id, limit), readThresholdState(db, id)])
+      const [readings, fired, assets] = await Promise.all([readReadings(db, id, limit), readThresholdState(db, id), wantsAssets ? readCampaignAssets(db, id) : Promise.resolve(null)])
       return {
         campaignId: id,
         label: c.label,
@@ -48,6 +49,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
         ...(freshness.get(id) ?? freshnessOf(c, null, null, nowMs)),
         thresholdsFired: fired,
         readings: readings ?? [],
+        ...(wantsAssets ? { assets: assets ?? [] } : {}),
       }
     }),
   )

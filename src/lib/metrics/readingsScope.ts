@@ -9,8 +9,8 @@
 import { proposalLabel, type ReadingRecord } from '../adsRules'
 import { rulesSummary } from '../adsRulesSummary'
 import { readingKindLabel } from '../adsReadingsFormat'
-import type { AdsReadingsCampaign, AdsReadingsResponse } from '../adsStore'
-import type { CampaignAdsInfo, CampaignF3Read, ReadingCountKey, ReadingScope } from './scope'
+import type { AdsReadingsAsset, AdsReadingsCampaign, AdsReadingsResponse } from '../adsStore'
+import type { AssetScope, CampaignAdsInfo, CampaignF3Read, ReadingCountKey, ReadingScope } from './scope'
 import { READING_COUNT_FIELDS } from './types'
 
 /** The five allow-listed record fields, as the scope's count keys. */
@@ -44,7 +44,13 @@ export function campaignAdsInfoOf(c: AdsReadingsCampaign, storeBound: boolean, l
   // What the readings log shows: a campaign with a stored reading, Ads-API spend or an active flight.
   const hasActivity = !!c.readings?.length || c.spend?.source === 'google-ads-api' || c.status === 'active'
   const f3 = campaignF3ReadOf(c.readings)
-  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs, hasActivity, ...(f3 ? { f3 } : {}) }
+  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs, hasActivity, ...(f3 ? { f3 } : {}), ...(c.assets ? { assets: c.assets.map((a) => assetScopeOf(c.campaignId, a)) } : {}) }
+}
+
+/** One stored asset as a card scope: its label is the field type, then the text (or image name) of the asset, falling back to its id. */
+export function assetScopeOf(campaignId: string, a: AdsReadingsAsset): AssetScope {
+  const field = a.fieldType.charAt(0) + a.fieldType.slice(1).toLowerCase().replace(/_/g, ' ')
+  return { id: a.assetId, campaignId, label: `${field}: ${a.text ?? a.name ?? a.assetId}`, impressions: a.impressions, clicks: a.clicks, conversions: a.conversions }
 }
 
 /** The newest daily reading's F3 rules block (ads_readings.f3), or undefined when no loaded

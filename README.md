@@ -1278,6 +1278,17 @@ lacks the pin, pin it in the same PR as the registration.
   `campaign.costPerAdsInstall` (stored spend over those installs, a ratio of sums, no data at 0
   installs). `campaign.adsInstalls` also has a daily series, like `campaign.spend` and `campaign.clicks`
   (the latter two now draw ad clicks too); the cost per install has no series by design.
+  Ad assets: registry metrics `asset.impressions`, `asset.clicks` and `asset.conversions` (the stored
+  `ads_daily_assets` rows of one asset in one campaign, summed over ads and days; params `campaignId` and
+  `assetId`, attribution window), each with a daily series (a day the asset has no row is a gap, not
+  a zero). Google's per-asset aggregates do not add up to the campaign totals, and the read is fail
+  soft: with no ads database the cards show no value. The card and chart editors offer a repeat axis
+  `over: 'assets'` ('One per ad asset') wherever they offer the campaign axis: one tile or sparkline
+  per asset of a campaign (the enclosing campaign repeat's, or the repeat's own `campaignId`),
+  labelled `asset.label` (the field type and the asset's text, else its name, else its id, for
+  example "Headline: Free daily sudoku"), ordered by `sortBy` (impressions, clicks or conversions,
+  highest first, impressions by default) and cut to the top `limit` (30 by default). The asset list and
+  totals ride on `GET /api/ads/readings?assets=1`.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),

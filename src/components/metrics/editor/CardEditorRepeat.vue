@@ -10,7 +10,7 @@
 // (RepeatSpec.empty) is remembered the same way when it is switched off and on.
 import { computed, ref, useId } from 'vue'
 import { repeatIdOptions, withField, withRepeatOver } from '../../../lib/metrics/editorModel'
-import type { Label, RepeatSpec } from '../../../lib/metrics/types'
+import { ASSET_SORT_FIELDS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, type AssetSortField, type Label, type RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorLabel from './CardEditorLabel.vue'
 
 const props = defineProps<{
@@ -30,6 +30,7 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   readings: 'One per stored reading',
   countries: 'One per country (US / CA / Other)',
   rules: 'One per Flight 3 rule (newest stored read)',
+  assets: 'One per ad asset (headline, description, image)',
 }
 /** What "none checked" means for each kind's id list. */
 const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: string }>> = {
@@ -95,6 +96,34 @@ const tracked = computed<boolean>({
   set: (v) => {
     if (!repeat.value || v === tracked.value) return
     repeat.value = withField(repeat.value, 'tracked', v || undefined)
+  },
+})
+
+// ── Ad assets (RepeatSpec.over 'assets'): which campaign, what order, how many. ───────────────
+const assetCampaignId = useId()
+const assetSortId = useId()
+const assetLimitId = useId()
+const campaignOptions = repeatIdOptions('campaigns')
+const assetCampaign = computed<string>({
+  get: () => repeat.value?.campaignId ?? '',
+  set: (v) => {
+    if (!repeat.value) return
+    repeat.value = withField(repeat.value, 'campaignId', v || undefined)
+  },
+})
+const assetSort = computed<AssetSortField | ''>({
+  get: () => repeat.value?.sortBy ?? '',
+  set: (v) => {
+    if (!repeat.value) return
+    repeat.value = withField(repeat.value, 'sortBy', v || undefined)
+  },
+})
+const assetLimit = computed<string>({
+  get: () => (repeat.value?.limit === undefined ? '' : String(repeat.value.limit)),
+  set: (v) => {
+    if (!repeat.value) return
+    const n = Math.floor(Number(v))
+    repeat.value = withField(repeat.value, 'limit', String(v).trim() !== '' && Number.isFinite(n) && n >= 1 ? Math.min(n, MAX_READINGS_LIMIT) : undefined)
   },
 })
 
@@ -179,6 +208,26 @@ const emptyText = computed<Label | undefined>({
     </div>
     <div class="field check">
       <label><input type="checkbox" v-model="organic" /> Add an "organic" row (traffic no campaign drove)</label>
+    </div>
+  </div>
+  <div class="row" v-if="overValue === 'assets'">
+    <div class="field">
+      <label :for="assetCampaignId">Campaign <span class="hint">— blank = the campaign this sits in</span></label>
+      <select :id="assetCampaignId" v-model="assetCampaign">
+        <option value="">From the enclosing campaign repeat</option>
+        <option v-for="c in campaignOptions" :key="c.value" :value="c.value">{{ c.label }}</option>
+      </select>
+    </div>
+    <div class="field">
+      <label :for="assetSortId">Order by <span class="hint">— highest first</span></label>
+      <select :id="assetSortId" v-model="assetSort">
+        <option value="">Impressions (default)</option>
+        <option v-for="f in ASSET_SORT_FIELDS" :key="f" :value="f">{{ f.charAt(0).toUpperCase() + f.slice(1) }}</option>
+      </select>
+    </div>
+    <div class="field">
+      <label :for="assetLimitId">Show at most <span class="hint">— blank = {{ DEFAULT_READINGS_LIMIT }}</span></label>
+      <input :id="assetLimitId" type="number" min="1" :max="MAX_READINGS_LIMIT" step="1" v-model="assetLimit" />
     </div>
   </div>
   <p v-if="organicConflict" class="hint organic-conflict" role="alert">

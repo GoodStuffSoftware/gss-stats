@@ -47,10 +47,14 @@ export function prewarmRequests(): MetricRequest[] {
     const add = (base: Omit<MetricRequest, 'key' | 'params'>, params: string[], windows: string[]) => {
       const campaigns = params.includes('campaignId') ? CAMPAIGNS.map((c) => c.id) : [undefined]
       const popups = params.includes('popup') ? POPUPS.map((p) => p.id).slice(0, 2) : [undefined]
+      // An asset metric needs an asset id to be a valid request; its fact is keyed by campaign alone, so any well-formed id warms it.
+      const assets = params.includes('assetId') ? ['1'] : [undefined]
       for (const window of windows) {
         for (const campaignId of campaigns) {
           for (const popup of popups) {
-            requests.push({ ...base, key: `w${requests.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}) }, ...(window === 'todaySoFar' && base.metric ? { deltas: ['yesterday', 'avg7'] } : {}) })
+           for (const assetId of assets) {
+            requests.push({ ...base, key: `w${requests.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}) }, ...(window === 'todaySoFar' && base.metric ? { deltas: ['yesterday', 'avg7'] } : {}) })
+           }
           }
         }
       }
@@ -95,6 +99,8 @@ function warmChunk(requests: MetricRequest[]): boolean {
           ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, cost_micros: 1_000_000, days: 1, first_date: '2026-09-20', last_date: '2026-09-20', fetched_at: '2026-09-20T12:00:00Z' }))
           : f.id === 'adsCoverage'
             ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', fetched_at: '2026-09-21T12:00:00Z' }))
+            : f.id === 'adsAssetDaily'
+              ? [{ asset_id: '1', field_type: 'HEADLINE', date: '2026-09-20', impressions: 10, clicks: 1, conversions: 0 }]
             : f.id === 'adsInstallsDaily'
               ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', installs: 1 }))
               : f.id === 'adsLastSync'

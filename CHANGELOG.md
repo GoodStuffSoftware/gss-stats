@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.66.0] — 2026-10-28
+
+### Added
+- **Ad asset leaderboard in the card editor.** A new "One per ad asset" repeat gives one tile or sparkline per headline, description or image of a campaign, with impressions, clicks and conversions per asset and per day, ordered by the metric you pick and cut to the top few.
+
 ## [0.65.1] — 2026-10-28
 
 ### Added

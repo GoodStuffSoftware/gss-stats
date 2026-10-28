@@ -986,6 +986,17 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
 }
 
 // ── GET /api/ads/readings — shape shared by the Function and the readings log card (MetricCard) ────
+/** One ad asset of a campaign with its totals over the stored days (ads_daily_assets joined to ads_assets). Counts only. */
+export interface AdsReadingsAsset {
+  assetId: string
+  fieldType: string
+  /** The asset's text (headlines, descriptions) or null; name is an image's name or null. */
+  text: string | null
+  name: string | null
+  impressions: number
+  clicks: number
+  conversions: number
+}
 export interface AdsReadingsCampaign extends AdsFreshness {
   campaignId: string
   label: string
@@ -994,6 +1005,8 @@ export interface AdsReadingsCampaign extends AdsFreshness {
   thresholdsFired: { threshold: number; firedAt: string }[] | null
   /** Newest first. Anonymous aggregates only (counts, rule results, proposals). */
   readings: ReadingRecord[]
+  /** Only when asked (`assets=1`): the campaign's ad assets with totals; absent when not asked, empty when the store has none. */
+  assets?: AdsReadingsAsset[]
 }
 export interface AdsReadingsResponse {
   /** false when the gss_stats_ads binding is absent (e.g. plain `vite` dev). */
@@ -1041,6 +1054,29 @@ export async function readReadings(db: D1Reader | undefined | null, campaignId: 
   try {
     const rows = await allRows(db, READINGS_SQL, [campaignId, Math.max(1, Math.min(500, Math.floor(limit)))])
     return rows.map(mapReadingRow).filter((r): r is ReadingRecord => r !== null)
+  } catch {
+    return null
+  }
+}
+
+/** A campaign's ad assets with their totals over the stored days: ads_daily_assets summed per asset (the asset metrics ignore the field type, so a leaderboard row agrees with its tile; the label shows the first field type), with the asset's text or
+ * name from ads_assets (a LEFT JOIN: an asset the catalog lacks still lists, labelled by its id). Null when the store is absent or unreadable. */
+export const CAMPAIGN_ASSETS_SQL =
+  'SELECT d.asset_id AS asset_id, MIN(d.field_type) AS field_type, a.text AS text, a.name AS name, SUM(d.impressions) AS impressions, SUM(d.clicks) AS clicks, SUM(d.conversions) AS conversions ' +
+  'FROM ads_daily_assets AS d LEFT JOIN ads_assets AS a ON a.asset_id = d.asset_id WHERE d.campaign_id = ? GROUP BY d.asset_id ORDER BY MIN(d.field_type), d.asset_id'
+export async function readCampaignAssets(db: D1Reader | undefined | null, campaignId: string): Promise<AdsReadingsAsset[] | null> {
+  if (!db) return null
+  try {
+    const rows = await allRows(db, CAMPAIGN_ASSETS_SQL, [campaignId])
+    return rows.map((r) => ({
+      assetId: String(r.asset_id ?? ''),
+      fieldType: String(r.field_type ?? ''),
+      text: typeof r.text === 'string' && r.text ? r.text : null,
+      name: typeof r.name === 'string' && r.name ? r.name : null,
+      impressions: num(r.impressions),
+      clicks: num(r.clicks),
+      conversions: num(r.conversions),
+    }))
   } catch {
     return null
   }

@@ -1,5 +1,65 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24215315197"} 1`] = `
+{
+  "binds": [
+    "24215315197",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24234347705"} 1`] = `
+{
+  "binds": [
+    "24234347705",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24279250691"} 1`] = `
+{
+  "binds": [
+    "24279250691",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24311309184"} 1`] = `
+{
+  "binds": [
+    "24311309184",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24316608605"} 1`] = `
+{
+  "binds": [
+    "24316608605",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsAssetDaily {"campaignId":"24392866056"} 1`] = `
+{
+  "binds": [
+    "24392866056",
+  ],
+  "db": "gss_stats_ads",
+  "sql": "SELECT asset_id, field_type, date, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(conversions) AS conversions FROM ads_daily_assets WHERE campaign_id = ? GROUP BY asset_id, field_type, date ORDER BY asset_id, field_type, date",
+}
+`;
+
 exports[`fact SQL snapshots > adsCoverage {} 1`] = `
 {
   "binds": [],

@@ -83,7 +83,7 @@ const allowedParams = computed<MetricParam[]>(() => {
   }
   return []
 })
-const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries')
+const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries') || (p === 'assetId' && props.repeatOver === 'assets') || (p === 'campaignId' && props.repeatOver === 'assets')
 /** An optional param (the country split): left unset, the metric counts every country. */
 const optional = (p: MetricParam): boolean => OPTIONAL_PARAMS.has(p)
 const COUNTRY_OPTIONS = [
@@ -91,7 +91,7 @@ const COUNTRY_OPTIONS = [
   { value: 'CA', label: 'CA' },
   { value: 'other', label: 'Other' },
 ]
-const PARAM_LABELS: Record<MetricParam, string> = { campaignId: 'Campaign', popup: 'Pop-up', country: 'Country' }
+const PARAM_LABELS: Record<MetricParam, string> = { campaignId: 'Campaign', popup: 'Pop-up', country: 'Country', assetId: 'Asset' }
 function paramValue(p: MetricParam): ParamValue | undefined {
   return 'params' in data.value ? data.value.params?.[p] : undefined
 }
@@ -216,7 +216,7 @@ const fieldPath = computed<ScopePath>({
     </template>
 
     <template v-if="kind !== 'field' && allowedParams.length">
-      <div class="row" v-for="p in allowedParams" :key="p">
+      <div class="row" v-for="p in allowedParams.filter((q) => q !== 'assetId')" :key="p">
         <div class="field">
           <label :for="`${groupId}-param-${p}`">{{ PARAM_LABELS[p] }}</label>
           <span v-if="!paramIsPinned(paramValue(p)) && scopeProvides(p)" class="chip">from repeat scope</span>
@@ -226,6 +226,7 @@ const fieldPath = computed<ScopePath>({
           </select>
         </div>
       </div>
+      <p v-if="allowedParams.includes('assetId') && !scopeProvides('assetId')" class="hint">Asset metrics read one ad asset at a time: put this under a repeat "One per ad asset".</p>
     </template>
 
     <div class="field" v-if="kind !== 'field' && windowChoices.length > 1">

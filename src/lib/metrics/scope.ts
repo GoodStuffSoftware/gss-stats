@@ -14,7 +14,7 @@ import { etDayText, freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type AssetSortField, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
 /** The count keys a reading scope carries: the record field behind each ReadingCountPath
  * (types.ts READING_COUNT_FIELDS, the allow-list). Nothing else of a record's counts gets here. */
@@ -59,6 +59,19 @@ export interface CampaignAdsInfo {
   /** The newest loaded daily reading that carries an F3 rules block (ads_readings.f3); absent
    * when none does (every non-F3 campaign, and an F3 arm before its first read). */
   f3?: CampaignF3Read
+  /** The campaign's ad assets with their totals (the readings load answers them only when asked, `assets=1`); absent otherwise. */
+  assets?: AssetScope[]
+}
+/** One ad asset of a campaign (RepeatSpec.over 'assets'): what it is and its totals over the days the ads store holds, for the sort.
+ * Google's own per-asset aggregates; no user-level value. */
+export interface AssetScope {
+  id: string
+  campaignId: string
+  /** "Headline: Free daily sudoku": the field type, then the asset's text or, for an image, its name. */
+  label: string
+  impressions: number
+  clicks: number
+  conversions: number
 }
 /** One rule of a stored F3 read, as the report printed it. */
 export interface RuleScope {
@@ -90,6 +103,7 @@ export type ScopeInstance = (
   | { kind: 'country'; country: CountryBucket }
   | { kind: 'reading'; reading: ReadingScope }
   | { kind: 'rule'; rule: RuleScope }
+  | { kind: 'asset'; asset: AssetScope }
 ) & { parent?: ScopeInstance }
 
 export const ROOT_SCOPE: ScopeInstance = { kind: 'root' }
@@ -114,6 +128,7 @@ export function campaignOfScope(scope: ScopeInstance | undefined): CampaignFligh
  * organic instance; undefined when neither is in the chain. */
 export function armIdOfScope(scope: ScopeInstance | undefined): string | undefined {
   for (let s = scope; s; s = s.parent) {
+    if (s.kind === 'asset') return s.asset.campaignId
     if (s.kind === 'campaign') return s.campaign.id
     if (s.kind === 'organic') return ORGANIC_ARM_ID
   }
@@ -179,6 +194,10 @@ function namedScopePaths(node: unknown, out: string[] = []): string[] {
  * `campaign.thresholds`) anywhere. It then needs GET /api/ads/readings even with no readings repeat. */
 export function usesAdsInfoFields(spec: unknown): boolean {
   return namedScopePaths(spec).some((p) => p === 'campaign.freshness' || p === 'campaign.thresholds')
+}
+/** Whether the card repeats over a campaign's ad assets anywhere: it then needs the readings load with the asset list (`assets=1`). */
+export function usesAssets(spec: unknown): boolean {
+  return cardRepeats(spec as RepeatHolder).some((r) => r.over === 'assets')
 }
 /** Whether the card reads a stored reading's own fields (`reading.*`) anywhere. */
 export function usesReadingFields(spec: unknown): boolean {
@@ -253,9 +272,21 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
     case 'rules':
       // Only inside a campaign: that campaign's newest stored F3 read, rule 1 first.
       return (campaignInstanceOf(outer)?.ads?.f3?.rules ?? []).map((rule) => ({ kind: 'rule', rule }))
+    case 'assets': {
+      // The enclosing campaign's assets, else the repeat's own pinned campaign; most of the chosen total first (impressions unless sortBy), then the top N.
+      const campaignId = campaignInstanceOf(outer)?.campaign.id ?? repeat.campaignId
+      const all = (campaignId ? ctx.ads?.[campaignId]?.assets : undefined) ?? []
+      const picked = repeat.ids?.length ? all.filter((a) => repeat.ids!.includes(a.id)) : all
+      return sortAssets(picked, repeat.sortBy).slice(0, readingsLimit(repeat)).map((asset) => ({ kind: 'asset', asset }))
+    }
     default:
       return []
   }
+}
+
+/** Assets highest total first (impressions unless `by`); ties keep their label order, so the order never flips between loads. */
+export function sortAssets(assets: readonly AssetScope[], by: AssetSortField = 'impressions'): AssetScope[] {
+  return [...assets].sort((a, b) => b[by] - a[by] || (a.label < b.label ? -1 : a.label > b.label ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
 /** Today's ET date, once per render pass, from `Date.now()` — a thin seam so tests can pin
@@ -348,6 +379,8 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return scopeOfKind(scope, 'rule')?.rule.threshold ?? null
     case 'rule.verdict':
       return scopeOfKind(scope, 'rule')?.rule.verdict ?? null
+    case 'asset.label':
+      return scopeOfKind(scope, 'asset')?.asset.label ?? null
     case 'popup.id':
       return popup ? popup.id : null
     case 'popup.label':
@@ -421,6 +454,8 @@ export function scopeVars(scope: ScopeInstance, todayEt: string = todayEtFrom(Da
   if (window) vars.window = { label: WINDOW_LABELS[window] }
   const country = scopeOfKind(scope, 'country')?.country
   if (country) vars.country = { label: COUNTRY_LABELS[country] }
+  const asset = scopeOfKind(scope, 'asset')?.asset
+  if (asset) vars.asset = { label: asset.label }
   const reading = scopeOfKind(scope, 'reading')?.reading
   if (reading) vars.reading = { readAt: reading.readAt, kind: reading.kind }
   return vars
@@ -435,7 +470,7 @@ function resolveParamValue(pv: ParamValue | undefined, scopeVal: string | undefi
 export interface ResolvedBinding {
   kind: 'metric' | 'ratio' | 'field'
   def?: MetricDef | RatioDef
-  params: { campaignId?: string; popup?: string; country?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
   window?: string
   fieldValue?: string | null
 }
@@ -452,9 +487,9 @@ export function resolveBinding(binding: DataBinding, scope: ScopeInstance, today
   const def: MetricDef | RatioDef | undefined = isMetric ? METRICS.get(id) : RATIOS.get(id)
   if (!def) return null
   const allowedParams: MetricParam[] = isMetric ? (def as MetricDef).params : ratioParamsOf(def as RatioDef)
-  const params: { campaignId?: string; popup?: string; country?: string } = {}
+  const params: { campaignId?: string; popup?: string; country?: string; assetId?: string } = {}
   for (const p of allowedParams) {
-    const scopeVal = p === 'campaignId' ? armIdOfScope(scope) : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : scopeOfKind(scope, 'country')?.country
+    const scopeVal = p === 'campaignId' ? armIdOfScope(scope) : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : p === 'assetId' ? scopeOfKind(scope, 'asset')?.asset.id : scopeOfKind(scope, 'country')?.country
     const v = resolveParamValue(binding.params?.[p], scopeVal)
     if (v !== undefined) params[p] = v
   }
@@ -535,6 +570,8 @@ export function columnDefaultLabel(scope: ScopeInstance): Label {
       return { bind: 'reading.readAt' }
     case 'rule':
       return { bind: 'rule.name' }
+    case 'asset':
+      return { bind: 'asset.label' }
     default:
       return ''
   }
@@ -550,7 +587,7 @@ function emptyPlaceholderItem(id: string): MetricItem {
 export interface MetricRequestSpec {
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string; country?: string }
+  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string }
   window?: string
   deltas?: DeltaName[]
   /** 'daily': also return the metric's per-ET-day series (a sparkline display). */
@@ -596,7 +633,7 @@ export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt
     const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
     if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return 'spend-only'
     // The ads store's reads (spend and its freshness) need no flight date, only a campaign.
-    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync' && fact !== 'adsInstallsDaily') return 'flight-pending'
+    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync' && fact !== 'adsInstallsDaily' && fact !== 'adsAssetDaily') return 'flight-pending'
   }
   return null
 }

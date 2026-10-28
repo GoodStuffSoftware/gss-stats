@@ -55,12 +55,12 @@ import type { BeaconRow, FactId, FactRows } from './facts'
 import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
 import { retentionBar, retentionVerdict, wilsonBounds, type VerdictCode } from './retention'
 import { addDays } from '../etTime'
-import type { WindowName } from './types'
+import { type AssetSortField, type WindowName } from './types'
 import type { Unit } from './units'
 
 /** `country` (a COUNTRY_BUCKETS value) is OPTIONAL wherever a metric declares it: unset, the
  * metric counts every country; set, only that bucket (the campaign fact's `cb` split). */
-export type MetricParam = 'campaignId' | 'popup' | 'country'
+export type MetricParam = 'campaignId' | 'popup' | 'country' | 'assetId'
 export const OPTIONAL_PARAMS: ReadonlySet<MetricParam> = new Set(['country'])
 
 /** What a store reducer (MetricDef.store) sees besides the fact's rows. */
@@ -89,7 +89,7 @@ export interface StoreResult {
 
 /** What a reducer knows about the request it is serving. */
 export interface MetricCtx {
-  params: { campaignId?: string; popup?: string; country?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
   campaign?: CampaignFlight
   /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
    * site-wide fact (campaign.taggedArrivals over the KPI fact). */
@@ -130,6 +130,8 @@ export interface MetricDef {
   /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
    * value, and the registry notes that travel with it. */
   store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => StoreResult
+  /** Ad-asset metrics: the ads_daily_assets column they total (and draw per day). */
+  asset?: AssetSortField
   instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
   /** Outcome beacons that arrive after the event they describe: [min, max] days. */
   lagDays?: [number, number]
@@ -360,6 +362,16 @@ function adsInstallsOf(rows: FactRows, ctx: MetricCtx): StoreResult {
   return mine.length ? { value: round2(mine.reduce((a, r) => a + r.installs, 0)) } : { value: null }
 }
 
+// ── Ad assets (ads_daily_assets): one asset of one campaign, per day ─────────────────────────
+/** An asset's total of one column over its stored days. No row for the asset is no value (never 0); a stored day counts its own figure. */
+function assetTotalOf(field: AssetSortField) {
+  return (rows: FactRows, ctx: MetricCtx): StoreResult => {
+    if (rows.kind !== 'assetDaily' || !ctx.params.assetId) return { value: null }
+    const mine = rows.rows.filter((r) => r.assetId === ctx.params.assetId)
+    return mine.length ? { value: round2(mine.reduce((a, r) => a + r[field], 0)) } : { value: null }
+  }
+}
+
 // ── Google Play's own per-day totals (R-4; ads_play_daily, synced by `npm run ads:play-sync`) ──
 // Whole-app counts by PLAY day, as Google reports them: never a beacon row, never joined to one.
 // Page-range only. A day's count is null when Play's report had no such figure, and no stored day
@@ -569,6 +581,18 @@ export const METRIC_DEFS: MetricDef[] = [
     caveats: ['ads-installs-google'],
     instrumented: [],
   }),
+
+  // Ad assets: one headline, description or image of a campaign, from Google's per-asset daily aggregates (RepeatSpec.over 'assets'
+  // lists them). Attribution window only; each has a per-day series.
+  ...(
+    [
+      { id: 'asset.impressions', unit: 'impression', asset: 'impressions' },
+      { id: 'asset.clicks', unit: 'click', asset: 'clicks' },
+      { id: 'asset.conversions', unit: 'conversion', asset: 'conversions' },
+    ] as const
+  ).map((a) =>
+    campaignMetric({ id: a.id, unit: a.unit, asset: a.asset, params: ['campaignId', 'assetId'], windows: { attribution: 'adsAssetDaily' }, store: assetTotalOf(a.asset), caveats: ['ads-assets-google'], instrumented: [] }),
+  ),
 
   // ── Google Play (site-wide; the page range only; instrumented: [] since it is not a beacon) ──
   ...(
@@ -785,7 +809,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {

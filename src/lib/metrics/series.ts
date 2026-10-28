@@ -15,7 +15,7 @@
 // Pure and synchronous: engine.ts picks the rows; nothing here sees SQL or a clock.
 
 import { addDays } from '../etTime'
-import type { DailyBeaconRow, FactId, InstallDayRow, SpendDayRow } from './facts'
+import type { AssetDayRow, DailyBeaconRow, FactId, InstallDayRow, SpendDayRow } from './facts'
 import type { MetricDef } from './metrics'
 import { etMidnightMs } from './instrumentation'
 import type { SeriesPoint, WindowName } from './types'
@@ -33,6 +33,7 @@ export const DAILY_TWIN: Readonly<Partial<Record<FactId, FactId>>> = {
   bskRangePath: 'bskRangeDaily',
   popupRangePath: 'popupRangeDaily',
   adsSpend: 'adsSpendDaily',
+  adsAssetDaily: 'adsAssetDaily', // an ad asset's own twin: the fact is already one row per asset per stored day
   adsInstallsDaily: 'adsInstallsDaily', // its own twin: the fact is already one row per campaign per stored day
 }
 
@@ -44,6 +45,7 @@ export function seriesTwin(def: MetricDef, window: WindowName): FactId | null {
   const twin = fact ? DAILY_TWIN[fact] : undefined
   if (!twin) return null
   // Google's installs per stored day: the one store metric with a series (its reducer sums the same rows).
+  if (twin === 'adsAssetDaily') return def.store && def.asset ? twin : null
   if (twin === 'adsInstallsDaily') return def.store && def.unit === 'install' ? twin : null
   if (def.store) return null
   // Dollars or ad clicks per stored day (spendSeries reads the column the unit names).
@@ -132,6 +134,21 @@ export function spendSeries(i: SpendSeriesInput): SeriesPoint[] {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
   const keep = days.length > SERIES_MAX_DAYS ? days.slice(days.length - SERIES_MAX_DAYS) : days
   return keep.map((r) => ({ day: r.date, value: i.field === 'clicks' ? r.clicks : round2(r.costMicros / 1_000_000) }))
+}
+
+export interface AssetSeriesInput {
+  rows: readonly AssetDayRow[]
+  assetId: string
+  field: 'impressions' | 'clicks' | 'conversions'
+  capDay: string
+}
+/** One ad asset's figure per stored day (the fact is already the campaign's). A day with no row for the asset is a gap, not a zero. */
+export function assetSeries(i: AssetSeriesInput): SeriesPoint[] {
+  const byDay = new Map<string, number>()
+  for (const r of i.rows) if (r.assetId === i.assetId && r.date <= i.capDay) byDay.set(r.date, (byDay.get(r.date) ?? 0) + r[i.field])
+  const days = [...byDay.keys()].sort()
+  const keep = days.length > SERIES_MAX_DAYS ? days.slice(days.length - SERIES_MAX_DAYS) : days
+  return keep.map((day) => ({ day, value: round2(byDay.get(day)!) }))
 }
 
 export interface InstallsSeriesInput {

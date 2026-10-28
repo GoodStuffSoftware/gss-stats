@@ -516,6 +516,14 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'caveat',
     scopes: [],
   },
+  // Travels with asset.impressions, asset.clicks and asset.conversions (lib/metrics/metrics.ts).
+  'ads-assets-google': {
+    id: 'ads-assets-google',
+    text: () => "Per-asset figures are Google Ads' own daily aggregates for each headline, description or image. Google shows an asset together with others, so the assets do not add up to the campaign's totals, and it restates recent days.",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
   'first-finish-window': {
     id: 'first-finish-window',
     text: () => `Cost per person who finished divides the spend from ${FIRST_FINISH_START_ET} on, the first whole day the first-finish rows exist (a window ending earlier reads no data), by every first-finish row in the window, which also includes the evening before; Android counts rise as devices update.`,
@@ -573,6 +581,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.f3Asks': 'Sign-in asks (flight 3)',
     'label.campaign.clicks': 'Ad clicks',
     'label.campaign.adsInstalls': 'Installs (Google Ads)',
+    'label.asset.impressions': 'Impressions',
+    'label.asset.clicks': 'Clicks',
+    'label.asset.conversions': 'Conversions',
     'label.campaign.installPrompts': 'Install prompts',
     'label.campaign.installs': 'Installs',
     'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
@@ -688,6 +699,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.signin': 'sign-ins',
     'unit.finish': 'finishes',
     'unit.click': 'clicks',
+    'unit.impression': 'impressions',
+    'unit.conversion': 'conversions',
     'unit.install': 'installs',
     'unit.usd': 'USD',
     'unit.day': 'days',

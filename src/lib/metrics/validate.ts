@@ -17,7 +17,7 @@ import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricPar
 import { seriesTwin } from './series'
 import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, WINDOW_SIDES, type CardAction, type CardNotices, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
+import { ASSET_SORT_FIELDS, COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, WINDOW_SIDES, type CardAction, type CardNotices, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
 export const MAX_BODY_BYTES = 64 * 1024
@@ -42,6 +42,7 @@ const CARD_NOTICES: ReadonlySet<string> = new Set<CardNotices>(['ads-readings'])
 function paramValueOk(name: MetricParam, v: unknown, organicOk: boolean): boolean {
   if (typeof v !== 'string') return false
   if (name === 'campaignId' && v === ORGANIC_ARM_ID) return organicOk
+  if (name === 'assetId') return ASSET_ID_RE.test(v)
   return (name === 'campaignId' ? CAMPAIGN_IDS : name === 'popup' ? POPUP_IDS : COUNTRY_IDS).has(v)
 }
 /** Whether a binding serves the organic arm: a metric that declares it, or a ratio whose BOTH
@@ -99,7 +100,9 @@ export function kindOf(b: DataBinding): DataKind | null {
 
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
 const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES])
-const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null }
+const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId' }
+/** A Google Ads asset id: digits, as the store keeps it. */
+const ASSET_ID_RE = /^[0-9]{1,20}$/
 /** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
  * (captions, `{ note }` labels, `whenEmpty.note`) are checked for this shape only, never for
  * whether this build's registry has them: adding a registry id takes no layout version, so a tab
@@ -136,11 +139,14 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'campaigns' && !CAMPAIGN_IDS.has(id)) errors.push(`${where}.repeat: unknown campaign '${id}'`)
       if (r.over === 'popups' && !POPUP_IDS.has(id)) errors.push(`${where}.repeat: unknown pop-up '${id}'`)
       if (r.over === 'countries' && !COUNTRY_IDS.has(id)) errors.push(`${where}.repeat: unknown country bucket '${id}'`)
+      if (r.over === 'assets' && !ASSET_ID_RE.test(id)) errors.push(`${where}.repeat: '${id}' is not an asset id`)
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
-    if (r.limit !== undefined && (r.over !== 'readings' || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
-      errors.push(`${where}.repeat: limit is for readings, a whole number from 1 to ${MAX_READINGS_LIMIT}`)
+    if (r.limit !== undefined && ((r.over !== 'readings' && r.over !== 'assets') || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
+      errors.push(`${where}.repeat: limit is for readings and assets, a whole number from 1 to ${MAX_READINGS_LIMIT}`)
     }
+    if (r.sortBy !== undefined && (r.over !== 'assets' || !(ASSET_SORT_FIELDS as readonly string[]).includes(r.sortBy))) errors.push(`${where}.repeat: sortBy is for assets, one of ${ASSET_SORT_FIELDS.join(', ')}`)
+    if (r.campaignId !== undefined && (r.over !== 'assets' || !CAMPAIGN_IDS.has(r.campaignId))) errors.push(`${where}.repeat: campaignId is for assets, a configured campaign`)
     if (r.withActivity !== undefined && (r.withActivity !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: withActivity is for campaigns, and only true`)
     if (r.tracked !== undefined && (r.tracked !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: tracked is for campaigns, and only true`)
     // The organic arm rides only on a campaigns repeat; bindings that don't serve it are left out
@@ -210,7 +216,10 @@ export function validateCard(spec: CardSpec): string[] {
     }
   }
   function scopeOf(...repeats: (RepeatSpec | undefined)[]): Set<MetricParam> {
-    return new Set(repeats.map((r) => (r && Object.hasOwn(SCOPE_PARAM, r.over) ? SCOPE_PARAM[r.over] : null)).filter((p): p is MetricParam => !!p))
+    const out = new Set(repeats.map((r) => (r && Object.hasOwn(SCOPE_PARAM, r.over) ? SCOPE_PARAM[r.over] : null)).filter((p): p is MetricParam => !!p))
+    // An assets repeat that pins its campaign provides campaignId too (the card needs no campaign repeat around it).
+    if (repeats.some((r) => r?.over === 'assets' && r.campaignId !== undefined)) out.add('campaignId')
+    return out
   }
 
   if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
@@ -443,7 +452,7 @@ export interface ResolvedRequest {
   key: string
   kind: 'metric' | 'ratio'
   id: string
-  params: { campaignId?: string; popup?: string; country?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
   window: WindowName
   deltas: DeltaName[]
   /** 'daily': the request also wants the metric's per-ET-day series (lib/metrics/series.ts). */
