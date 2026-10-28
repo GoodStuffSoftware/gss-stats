@@ -847,6 +847,9 @@ export interface ExtrasKindState {
   error: string | null
   /** The most rows one day of this kind has returned (plans later runs); null: none yet. */
   rowsPerDay: number | null
+  /** A re-check split over runs (newest days first): the oldest day it has re-pulled so far;
+   * null: none in progress. */
+  rechecking: string | null
 }
 export type ExtrasState = Record<string, Partial<Record<ExtrasKind, ExtrasKindState>>>
 
@@ -938,7 +941,7 @@ const isEtDay = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d
 const isoOrNull = (v: unknown): string | null => (typeof v === 'string' && ISO_TS.test(v) && Number.isFinite(Date.parse(v)) ? v : null)
 const inRange = (range: SyncRange) => (r: { date: string }) => r.date >= range.since && r.date <= range.until
 const datesIn = (rows: readonly { date: string }[]) => [...new Set(rows.map((r) => r.date))].sort()
-export const emptyExtrasKindState = (): ExtrasKindState => ({ covered: [], recheckedAt: null, attemptedAt: null, ok: null, error: null, rowsPerDay: null })
+export const emptyExtrasKindState = (): ExtrasKindState => ({ covered: [], recheckedAt: null, attemptedAt: null, ok: null, error: null, rowsPerDay: null, rechecking: null })
 
 /** Adds a range to sorted, merged [since, until] ranges (overlapping and adjacent ones join). */
 export function addCoveredRange(covered: readonly [string, string][], r: SyncRange): [string, string][] {
@@ -973,6 +976,7 @@ function parseKindState(v: unknown): ExtrasKindState | null {
     ok: typeof v.ok === 'boolean' ? v.ok : null,
     error: typeof v.error === 'string' && v.error ? summarizeError(v.error, 200) : null,
     rowsPerDay: typeof v.rowsPerDay === 'number' && Number.isInteger(v.rowsPerDay) && v.rowsPerDay > 0 && v.rowsPerDay <= 100_000 ? v.rowsPerDay : null,
+    rechecking: typeof v.rechecking === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.rechecking) ? v.rechecking : null,
   }
 }
 /** The pass's carried-forward state from its latest run row's detail (`extras`): configured
@@ -1020,8 +1024,9 @@ function runsOf(days: readonly string[]): SyncRange[] {
 }
 
 /** Pure: what one kind of one campaign needs, newest first: the restatement window (the last
- * RESTATEMENT_DAYS closed days of the extras window) whole when its re-check is due or any of it
- * is missing, then each run of days not yet covered. A covered day outside the restatement window
+ * RESTATEMENT_DAYS closed days of the extras window) when its re-check is due or any of it is
+ * missing (a re-check split over runs resumes below the oldest day it has re-pulled), then each
+ * run of days not yet covered. A covered day outside the restatement window
  * is never pulled again (a full re-pull, the backfill, takes the whole window). */
 export function planExtrasKind(
   c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'>,
@@ -1040,7 +1045,9 @@ export function planExtrasKind(
   const recheckMs = opts.restatementRecheckMs ?? RESTATEMENT_RECHECK_MS
   const last = state.recheckedAt ? Date.parse(state.recheckedAt) : NaN
   const restatementDue = !!recent && (!!opts.full || recheckMs <= 0 || !Number.isFinite(last) || opts.nowMs - last >= recheckMs)
-  const recheck = recent && (restatementDue || missingDays.some((d) => d >= recent.since)) ? recent : null
+  const prog = state.rechecking
+  const resume = !!recent && restatementDue && !opts.full && !!prog && prog > recent.since && prog <= recent.until && !missingDays.some((d) => d >= prog)
+  const recheck = recent && (restatementDue || missingDays.some((d) => d >= recent.since)) ? (resume ? { since: recent.since, until: addDays(prog!, -1) } : recent) : null
   const older = (opts.full ? days : missingDays).filter((d) => !recent || d < recent.since)
   const ranges = [...(recheck ? [recheck] : []), ...runsOf(older).reverse()]
   return { window, ranges, recheck, missingDays, restatementDue, deferred: false }
@@ -1048,7 +1055,7 @@ export function planExtrasKind(
 
 /** Rows a day of each kind is planned at until that kind has returned rows (then the most rows
  * one day has returned, ExtrasKindState.rowsPerDay). */
-export const EXTRAS_DEFAULT_ROWS_PER_DAY: Readonly<Record<ExtrasKind, number>> = { conversions: 6, assets: 40 }
+export const EXTRAS_DEFAULT_ROWS_PER_DAY: Readonly<Record<ExtrasKind, number>> = { conversions: 6, assets: 30 }
 
 /** What pulling `days` days of one kind is planned at: rows fetched, and D1 write statements with
  * every row assumed changed (the asset catalog: at most two days' worth of distinct assets). */
@@ -1064,10 +1071,9 @@ export function extrasCost(kind: ExtrasKind, days: number, rowsPerDay: number): 
 /** Pure: cuts the due plans, campaigns in `due` order, to one run's budget BEFORE anything is
  * fetched, so a run never pulls a campaign or kind it cannot write: `rows` (the Worker's CPU) and
  * `statements` (D1 reads and writes still free). Per kind: one stored read, then each range newest
- * first; the restatement window is taken whole or not at all, an older range is cut to its newest
- * days. The run's first campaign takes its restatement windows even past `rows`, and one older
- * day of a kind that would otherwise take nothing (`statements` always holds), so a campaign
- * denser than the row budget still moves. Sets the plans' ranges and `deferred`; returns who runs
+ * first, each cut to its newest days that fit (a cut re-check stays due and resumes next run).
+ * The run's first campaign takes one day of a kind that would otherwise take nothing, even past
+ * `rows` (`statements` always holds), so a campaign denser than the row budget still moves. Sets the plans' ranges and `deferred`; returns who runs
  * and who waits. */
 export function planExtrasRun(
   due: readonly CampaignFlight[],
@@ -1089,18 +1095,14 @@ export function planExtrasRun(
       const kept: SyncRange[] = []
       for (const r of p.ranges) {
         const len = etDateRange(r.since, r.until).length
-        const recent = !!p.recheck && r.since === p.recheck.since && r.until === p.recheck.until
         const read = kept.length ? 0 : 1
         const fits = (n: number, soft: boolean) => {
           const e = extrasCost(k, n, perDay)
           return (soft || e.rows <= rowsLeft) && e.statements + read <= statementsLeft
         }
-        let n = fits(len, head && recent) ? len : 0
-        if (!n && !recent) {
-          n = len - 1
-          while (n > 0 && !fits(n, false)) n--
-          if (!n && head && !kept.length && fits(1, true)) n = 1
-        }
+        let n = len
+        while (n > 0 && !fits(n, false)) n--
+        if (!n && head && !kept.length && fits(1, true)) n = 1
         if (n < len) p.deferred = true
         if (!n) continue
         const e = extrasCost(k, n, perDay)
@@ -1287,7 +1289,11 @@ async function pullExtrasKind<R extends { date: string }>(
         result.ranges.push(range)
         result.rowsChanged += d.changed.length
         state.covered = addCoveredRange(state.covered, range)
-        if (plan.recheck && range.since === plan.recheck.since && range.until === plan.recheck.until) rechecked = true
+        // the re-check (its newest days when cut): done once its oldest day is in, else resumes
+        if (plan.recheck && range.until === plan.recheck.until && range.since >= plan.recheck.since) {
+          if (range.since === plan.recheck.since) rechecked = true
+          else state.rechecking = range.since
+        }
       }
   }
   result.ok = errors.length ? false : result.ranges.length ? true : null
@@ -1297,7 +1303,10 @@ async function pullExtrasKind<R extends { date: string }>(
     state.ok = result.ok
     state.error = result.ok ? null : summarizeError(errors[0], 200)
   }
-  if (rechecked) state.recheckedAt = startedAt
+  if (rechecked) {
+    state.recheckedAt = startedAt
+    state.rechecking = null
+  }
   return finish()
 }
 

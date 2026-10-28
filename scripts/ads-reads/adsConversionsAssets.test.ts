@@ -616,6 +616,38 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     expect((await store.getLastExtrasRun!())!.finishedAt).toBe(iso(newest))
   })
 
+  it('a re-check too big for one run is split, newest days first, and stays due until all 3 days are in', async () => {
+    const days = etDateRange('2026-10-17', '2026-10-27')
+    const fake = fakeExtras({
+      conversions: { [F3S]: days.map((d) => convDay(d, A, 1)) },
+      assets: { [F3S]: days.flatMap((d) => Array.from({ length: 80 }, (_, i) => assetDay({ date: d, assetId: String(700 + i) }))) },
+    })
+    const { store } = await seededAll()
+    const caps = { campaignIds: [F3S], maxRows: 120, statementBudget: 38 }
+    const drain = async (start: number) => {
+      const runs: Awaited<ReturnType<typeof syncAdsExtras>>[] = []
+      for (let i = 0; i < 40; i++) {
+        const r = await syncAdsExtras({ ads: fake.source, store }, opts(start + i * 60_000, caps))
+        if (r.nothingDue) return runs
+        expect(JSON.stringify(r)).not.toContain('D1 query budget')
+        runs.push(r)
+      }
+      throw new Error('never caught up')
+    }
+    const fill = await drain(t0)
+    // the first run plans with the default 40 asset rows a day; later runs with the 80 learned
+    for (const r of fill.slice(1)) expect(r.conversionRowsFetched + r.assetRowsFetched).toBeLessThanOrEqual(120)
+    expect(fill.at(-1)!.campaigns.find((c) => c.campaignId === F3S)!.assets).toMatchObject({ through: '2026-10-27', stale: false })
+    // 7 h later the re-check is due: a day per run (80 rows each), newest first, each day once
+    const from = fake.calls.length
+    const recheck = await drain(t0 + 7 * 3_600_000)
+    const pulled = fake.calls.slice(from).filter((x) => x.kind === 'assets').flatMap((x) => etDateRange(x.since, x.until))
+    expect(pulled).toEqual(['2026-10-27', '2026-10-26', '2026-10-25'])
+    expect(recheck).toHaveLength(3)
+    for (const r of recheck) expect(r.conversionRowsFetched + r.assetRowsFetched).toBeLessThanOrEqual(120)
+    expect(recheck.at(-1)!.status).toBe('ok')
+  })
+
   it('the backfill (full, no caps) pulls every campaign whole in one run; a rerun changes nothing; --dry-run writes nothing', async () => {
     // scripts/ads-reads/backfill.ts calls the pass with full and no cap
     const src = readFileSync(fileURLToPath(new URL('./backfill.ts', import.meta.url)), 'utf8')

@@ -4,6 +4,7 @@
 // the cron gate, the read-only Ads client (no login-customer-id), build identity, and secret
 // hygiene. The dashboard's "Refresh data" (src/lib/adsRefresh.ts) is exercised end to end
 // through a fake Service Binding that calls the Worker's fetch handler.
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { etDateRange } from '../../src/lib/adsFreshness'
 import { addDays } from '../../src/lib/etTime'
@@ -380,6 +381,12 @@ describe('gss-stats-sync Worker: the conversions-and-assets cron (EXTRAS_CRON)',
       const r = end.campaigns.find((x) => x.campaignId === id)!
       expect([r.conversions.through, r.conversions.stale, r.assets.through, r.assets.stale], id).toEqual([required, false, required, false])
     }
+  })
+
+  it('wrangler.toml schedules EXTRAS_CRON as its own trigger (2 of the Free plan\'s 5)', () => {
+    const crons = JSON.parse(readFileSync(new URL('../../workers/sync/wrangler.toml', import.meta.url), 'utf8').match(/^crons = (\[.*\])$/m)![1]) as string[]
+    expect(crons).toContain(EXTRAS_CRON)
+    expect(crons.length).toBeLessThanOrEqual(5)
   })
 })
 

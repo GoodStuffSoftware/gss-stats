@@ -1750,11 +1750,12 @@ read-only GAQL like the rest, counts only (no user, device or place split):
   never again.
 - **Per-run budget (Workers Free):** each run is planned before it fetches, so it never pulls
   what it cannot write: about 120 rows (each kind estimated from the most rows one day has
-  returned, 6 conversion and 40 asset rows until then) and the 40 D1 statements less the run
+  returned, 6 conversion and 30 asset rows until then) and the 40 D1 statements less the run
   row's reserve, every row assumed changed. Campaigns go least recently tried first, in flight
-  before ended; the newest days first, the 3-day re-check whole or not at all. The run's first
-  campaign takes its re-check even past the row budget (the statement budget still holds), so a
-  dense campaign still moves. The rest continues next tick. Measured locally (parse, diff,
+  before ended; the newest days first. A re-check too big for one run is split, newest days
+  first, and stays due until all 3 days are in. The run's first campaign takes at least one day
+  even past the row budget (the statement budget still holds), so a dense campaign still moves.
+  The rest continues next tick. Measured locally (parse, diff,
   statement build and planning; network and D1 waits are not CPU): about 4.5 ms on a cold
   isolate, about 1.3 ms warm, against the 10 ms limit.
 - **Error isolation:** the pass keeps its state only in its own `ads_sync_runs` rows (`run_key`
