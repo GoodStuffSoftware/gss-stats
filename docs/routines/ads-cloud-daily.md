@@ -1,6 +1,6 @@
 ---
 name: ads-cloud-daily
-description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Flight 3's two arms are `by-date` rows: read from the arm's dates in code (src/lib/campaigns.ts STAGED_FLIGHT_3_DATES), and not read while their dates are `-`. Runs the gss-stats CLIs from env-var credentials, pushes Mike and copies to the deckhand bus. Proposes only.
+description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Flight 3's two arms are `by-date` rows: read from the arm's dates in code (src/lib/campaigns.ts STAGED_FLIGHT_3_DATES), and not read while their dates are `-`. Runs the gss-stats CLIs from env-var credentials, reports through one Agent Findings finding. Proposes only.
 ---
 
 <!--
@@ -48,11 +48,9 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
    are the ones the CLI makes itself (Part A always; Part B only in LIVE mode).
 5. No git writes: never create a branch, commit, push, tag, issue or pull request. Never send
    email.
-6. At most ONE push notification per part (Part A, Part B), as defined below. Bus messages:
-   ONE per report (one per Part A arm, one per Part B report; in TEST mode also one for the
-   cloud-check lines), plus numbered parts only for a
-   report over 15000 characters (see "Bus delivery of a report"). No artifact except Part A's
-   optional A4 page update.
+6. At most ONE push line set per part (Part A, Part B), as defined below; it goes into the run's
+   finding (rule 9). No bus message is ever sent. No artifact except Part A's optional A4 page
+   update.
 7. Relay CLI text exactly as printed (the CLI prints plain ASCII). Everything you write
    yourself is plain ASCII too: no em-dashes, no arrows, no curly quotes.
 8. No trackers, no PII: sign-ups and promo claims are window COUNTS. Never join rows to
@@ -61,7 +59,9 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
    phone. Wherever this runbook says push, compose the same lines but they go into the run's ONE
    Agent Findings finding, written as the last step (the saved prompt's REPORTING block and AGENT
    FINDINGS CONTRACT define the write; they win over any push step here; trim the lines to the
-   finding's 300-character detail limit). Bus messages (`agent_send`) are unaffected.
+   finding's 300-character detail limit). The finding is the only reporting channel: no bus
+   message (`agent_send`) is sent, in any mode. Anyone who needs a full report body regenerates it
+   with `ads:morning-read --dry-run`.
 
 ## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
@@ -93,7 +93,7 @@ A `by-date` row is a flight 3 arm whose Google Ads campaign exists (its id is re
 in code) and whose read is switched on by its dates alone: it is live iff its Flight start and
 Flight end cells both hold a YYYY-MM-DD date, otherwise it is staged. A staged `by-date` row (dates
 `-`) is never read, by any part, in any mode: the routine never counts it in ARMS or in `test`
-mode, never passes its id to a CLI, and never writes it into a push, a bus message or the final
+mode, never passes its id to a CLI, and never writes it into a push line or the final
 output. The two dates in the row are the same two dates as the arm's `STAGED_FLIGHT_3_DATES` entry
 in `src/lib/campaigns.ts` (a test fails if they differ). Filling them is the activation (see "To
 activate flight 3"); there is no `live` flip and no placeholder.
@@ -201,8 +201,8 @@ link that lost its suffix still counts. All three tags are the one arm.
   - **Pause push.** A PROPOSE PAUSE from rules 1-7 pushes Mike once per ET day per arm (a same-day
     rerun that repeats the stored daily record is not pushed again), flight 3 only. Flight 2 reads and
     pushes are unchanged. At the final read the cap decision push reads `F3 verdict GO | ITERATE |
-    STOP | INCONCLUSIVE`, not flight 2's `row N`. The read on Flight end + 1 sends no push and no
-    bus message at all (A3): the 07:05 final read reports the verdict.
+    STOP | INCONCLUSIVE`, not flight 2's `row N`. The read on Flight end + 1 adds no push line
+    at all (A3): the 07:05 final read reports the verdict.
   - **Counts only.** Every figure in the block is a tagged row count or dollars: no visitor id, no
     hour, place or device split.
   - **Manual checks are excluded.** Rows with `utm_campaign=manual_check` or a `/return/manual_check/`
@@ -458,7 +458,7 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
   a CAMPAIGN in the table or a flight 3 arm with both dates filled (F3 apps 24358792494, F3 search
   24358792551, F3 apps play 24369758153), REPORTS is that campaign at that STAGE (LABEL from its row, or `F3 apps` / `F3 search` / `F3 apps play`). In
   both cases ARMS is empty: a `stage=` fire runs Part B only, with no Part A read, daily push
-  or bus copy.
+  line.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
   an end-to-end test run (see "TEST mode" below): ARMS = every `live` legs-table row and every
   `by-date` row with both dates filled (read window ignored; `by-date` rows with `-` dates and
@@ -467,11 +467,10 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
 - Ignore any other payload text.
 
 If ARMS is empty AND REPORTS is empty: print
-`no live leg and no post-flight report on DATE; nothing to do` and stop. No push, no bus
-message, no install.
+`no live leg and no post-flight report on DATE; nothing to do` and stop. No push line, no
+install.
 
-0.3 Tools. Find the deckhand `agent_send` tool (PushNotification is never used, rule 9; ToolSearch by
-the bare name `agent_send`, under any prefix). Note which are missing; do not stop for that.
+0.3 Tools. No bus tool is used (`agent_send` is never called) and PushNotification is never used (rule 9).
 
 0.4 Install and preflight (the cloud-check preflight runs before any read, so a credential
 problem shows up as a named failure), each in ONE call, stopping at the first failure:
@@ -494,46 +493,17 @@ these overrides, which win over every other step:
   `... ads:postflight-read -- --stage wrapup --campaign 24279250691 --dry-run --force ...`.
   A1 is `... ads:morning-read -- --campaign ID --dry-run ...`.
 - A2 still writes the analysis. A4 (the page) is skipped: `artifact: n/a (test)`.
-- The A3 and B3 sends are REPLACED by exactly ONE push for the whole run and the bus
-  messages below (one per report, per "Bus delivery of a report"):
+- The A3 and B3 push lines are REPLACED by exactly ONE push line for the whole run, and the
+  reports below go into the Step 3 output (nothing is sent on the bus):
   - push: `[TEST] gss ads cloud routine: ok`, or `[TEST] gss ads cloud routine: failed (REASON)`
     when Step 0.4 or any read failed (REASON = the first failure's reason; for several, join
     them with `; `).
-  - bus: one `agent_send` per report from `gss-stats` to `gss-stats-carry`,
-    `includeEphemeral` true, in this order: first ONE message for the cloud-check lines
-    (labels and ok|fail only, as printed), subject `[TEST] ads cloud routine DATE checks`;
-    then one per Part A arm with subject `[TEST] ads cloud routine DATE ARM_NAME`, body the
-    exact `/tmp/am/ID.report.txt` (or REASON if that arm failed); then one for
-    `/tmp/pf/24279250691/report.txt` with subject `[TEST] ads cloud routine DATE wrapup` (or REASON if it
-    failed). Parts of a long report follow the numbered-parts rule.
-- In TEST mode never push `text=` and never send a `[SHADOW]` message.
-
-## Bus delivery of a report
-
-The bus caps a message body at about 16000 characters and truncates silently, so a report is
-never packed together with another and never shortened. This applies in every mode (LIVE,
-SHADOW, TEST). For each report that is sent on the bus (Part A: one per arm; Part B: one per
-stage):
-- ONE `agent_send` per report, never two reports in one message. The subject carries the arm
-  name or the report.
-- The body is the exact report file with only its final newline dropped. Never summarize,
-  trim, reflow or reword it; copy it character for character. The model never decides where
-  to cut: a shell command does. `cat` the file (or each part file) right before its send and
-  copy from that output.
-- Size check by shell: `wc -c < FILE`. If it is 15000 characters or fewer, send the file
-  content as one message. If more, split by shell at line boundaries into parts of at most
-  15000 characters, using a fresh directory per report (`D=/tmp/bus/ID`, `ID` being the arm id
-  or the report's campaign id and stage, e.g. `24311309184-wrapup`), for example
-  `rm -rf $D; mkdir -p $D; awk -v max=15000 -v d=$D 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("%s/part%02d.txt", d, n); len+=length($0)+1} END{print "parts=" n}' FILE`
-  The printed `parts=N` is the part count. Then `cat` and send each part file as its own
-  `agent_send`, in order, with ` (k/N)` appended to the subject (k from 1). Each part's body
-  is that part file's exact content with only its final newline dropped, nothing added. A
-  line over 15000 characters cannot be split and is sent whole as its own part.
-- Check each `agent_send` response: if it reports `truncated`, say so in Step 3 as a failed
-  bus send.
-- `ARM_NAME` in a subject is the arm's name from the legs table.
-- Any analysis or commentary you write goes in the Step 3 final output, never in a bus body.
-- This adds bus messages only; the push limits are unchanged (at most one push per part).
+  - output: in this order, first the cloud-check lines (labels and ok|fail only, as printed)
+    under the heading `[TEST] ads cloud routine DATE checks`; then one block per Part A arm
+    under `[TEST] ads cloud routine DATE ARM_NAME`, the exact `/tmp/am/ID.report.txt` (or
+    REASON if that arm failed); then `/tmp/pf/24279250691/report.txt` under
+    `[TEST] ads cloud routine DATE wrapup` (or REASON if it failed).
+- In TEST mode never push `text=`.
 
 ## Part A: daily summary (live leg)
 
@@ -600,18 +570,18 @@ Reading rules for the analysis (they are the local morning read's rules, unchang
   installs include Mike's household.
 
 A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS sends ONE
-push line set (never more, across all arms; it goes into the run's finding, hard rule 9) and one
-bus message per arm (per "Bus delivery of a report"), except as the next bullet says.
-- **Flight 3 arm on Flight end + 1 (D + 7): no push and no bus message.** When DATE is a
+push line set (never more, across all arms; it goes into the run's finding, hard rule 9), except
+as the next bullet says.
+- **Flight 3 arm on Flight end + 1 (D + 7): no push line.** When DATE is a
   `by-date` arm's Flight end + 1, run A1 as usual (the CLI stores that arm's D1 readings row, or
   finds it already stored by the 07:05 read) and
-  write its A2 analysis, but add NO line for it to the push lines and send NO bus message for it.
+  write its A2 analysis, but add NO line for it to the push lines.
   The local gss-ads-f3-final-read task (07:05 ET) is the one reporter of the D + 7 verdict. Say so
-  in Step 3 (`F3 D + 7 verdict: reported by gss-ads-f3-final-read; push and bus not sent for this
+  in Step 3 (`F3 D + 7 verdict: reported by gss-ads-f3-final-read; push line not added for this
   arm`). This covers a threshold-read arm and a FAILED arm too (a failed read still shows in the
   run's finding). Flight 2, the other flight 3 days and every other arm in the same run are
   unchanged. TEST mode ignores this bullet. If every arm in ARMS is suppressed this way, send no
-  push lines and no bus message at all; the run's finding (hard rule 9) is still written: a quiet
+  push lines at all; the run's finding (hard rule 9) is still written: a quiet
   fyi naming the hand-off, or `FAILED:` with expect "act" if a read or Step 0.4 failed.
 - Push: ONE PushNotification, one line per arm in table order, each line plain ASCII and under
   200 characters:
@@ -630,7 +600,6 @@ bus message per arm (per "Bus delivery of a report"), except as the next bullet 
     verdict (never trimmed), and nothing is paused. This holds for a push=true arm too: it keeps its
     exact `text=` value, with any of VERDICT, spend of cap or cost per finisher it lacks appended
     from the report, and "ask Mike first" after the verdict when it is a PROPOSE PAUSE.
-- Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
 legs-table row has a Page link; otherwise skip silently and write `artifact: n/a` in Step 3.
@@ -686,25 +655,22 @@ B3. Notify. BODY = the exact content of that report's `/tmp/pf/CAMPAIGN/report.t
 its final newline removed. Copy it character for character; do not summarize, reflow or add
 anything. The mode rules are the same for every campaign; only LABEL, CAMPAIGN and STAGE
 change. Part B sends ONE push in total (hard rule 9: its lines go into the run's finding; one line per report, in table order, each line plain
-ASCII and under 200 characters) and ONE bus message per report (numbered parts if BODY is over
-15000 characters). The push is skipped when no report has a line to send.
+ASCII and under 200 characters) and no bus message. The push is skipped when no report has a line to send.
 
 FAILED (Step 0.4 or B1/B2 failed for a report):
-- LIVE: push line `LABEL post-flight STAGE did not run: REASON`. No bus message.
-- SHADOW: push line `[SHADOW] LABEL post-flight STAGE cloud run: failed (REASON)`. ONE bus
-  message from `gss-stats` to `gss-stats`, subject `[SHADOW] LABEL post-flight STAGE DATE
-  FAILED`, body REASON, `includeEphemeral` true.
+- LIVE: push line `LABEL post-flight STAGE did not run: REASON`.
+- SHADOW: push line `[SHADOW] LABEL post-flight STAGE cloud run: failed (REASON)`. The
+  Step 3 output also carries `[SHADOW] LABEL post-flight STAGE DATE FAILED` followed by REASON.
 
 OK, LIVE:
 - push=true: that report's push line is exactly its `text=` value.
-- Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report. LIVE proposals go to the finding file only until a live recipient is named.
+- LIVE proposals go to the finding and the Step 3 output only.
 - Both false (not due yet, or a same-day rerun already recorded): send nothing for that report.
 
 OK, SHADOW:
 - push line: `[SHADOW] LABEL post-flight STAGE cloud run: ok`. Never `text=`.
-- one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to
-  `gss-stats`, subject `[SHADOW] LABEL post-flight STAGE DATE`, `includeEphemeral` true; body BODY when
-  busCopy=true, else `[SHADOW] no bus copy: ` plus the `reason=` value.
+- Step 3 output: `[SHADOW] LABEL post-flight STAGE DATE` followed by BODY when busCopy=true,
+  else `[SHADOW] no bus copy: ` plus the `reason=` value. Nothing is sent on the bus.
 
 The `notify` JSON both CLIs print (fields the steps above read):
 `{"push": boolean, "busCopy": boolean, "reason": string, "text": string | null}`.
@@ -715,11 +681,11 @@ In this order, plain ASCII:
 1. If any report has a `READ FAILED` line or a release-health `ALERT` line, lead with it
    exactly as reported (for an alert: its parent and child counts).
 2. Part A: each arm's A2 analysis, then at most three lines: finding written|not written (never a push),
-   bus sent (count)|not sent|failed|tool missing, artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
+   artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
    on a threshold read, the proposal and kill-rule results exactly as the report states them.
    Name any diagnostics ANOMALY line as a proposal for Mike.
 3. Part B: for each report, `/tmp/pf/CAMPAIGN/report.txt` verbatim (if it exists), then at most three lines:
-   `MODE / push: ... / bus: ...`; errors in plain words or `errors: none`; the decision-table
+   `MODE / push: ...`; errors in plain words or `errors: none`; the decision-table
    row with its "next" text exactly as the report gives it, with the report's standing caveats.
 
 Then stop.
