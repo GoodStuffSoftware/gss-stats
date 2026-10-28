@@ -118,16 +118,33 @@ export function costPerFinisher(spend: number | null | undefined, people: number
   return costPerCompleteRow(spend, people)
 }
 
+/** The days a spend-per-first-finish ratio may use: from fromEt (FIRST_FINISH_START_ET, the first whole ET day the rows exist) through
+ * throughEt (the read's last closed spend day, null = none yet). Spend and finishers both cover exactly these days. people is null when
+ * the tagged rows were unavailable; spend is null when the spend read failed or the window is empty. */
+export interface FirstFinishWindow {
+  fromEt: string
+  throughEt: string | null
+  people: number | null
+  spend: number | null
+}
+
 /** The WATCH-only morning-read line for people who finished and cost per person who finished. No rule reads it and no verdict or
- * threshold rides on it. 0 people prints the n/a text: the count is the campaign's tagged first-finish rows, so 0 means the app has not shipped
+ * threshold rides on it. The figure divides spend by finishers over the SAME days only: from the first whole ET day the first-finish
+ * rows exist (w.fromEt) through the read's last closed day; a read that ends before then prints "not available before", never $0 or a
+ * division by zero. 0 people prints the n/a text: the count is the campaign's tagged first-finish rows, so 0 means the app has not shipped
  * first-finish (or no tagged device has finished yet). Counts only: a device remembers its own first finish; no id, no hour, place or device split. */
-export function firstFinishWatchLine(people: number | null | undefined, spend: number | null | undefined): string {
+export function firstFinishWatchLine(w: FirstFinishWindow): string {
   const head = 'WATCH · cost per person who finished'
-  if (people == null) return `${head}: not read (tagged rows unavailable)`
-  if (people === 0) return `${head}: n/a until the app ships first-finish (0 first-finish rows so far)`
-  const cost = costPerFinisher(spend, people)
+  const md = (d: string) => d.slice(5)
+  if (w.people == null) return `${head}: not read (tagged rows unavailable)`
+  if (w.throughEt == null || w.throughEt < w.fromEt) {
+    return `${head}: not available before ${md(w.fromEt)} (first-finish rows start ${md(w.fromEt)}; this read's closed days end ${w.throughEt == null ? 'before any spend day' : md(w.throughEt)}; WATCH only, no rule reads it)`
+  }
+  const days = `${md(w.fromEt)}..${md(w.throughEt)}`
+  if (w.people === 0) return `${head}: n/a until the app ships first-finish (0 first-finish rows ${days})`
+  const cost = costPerFinisher(w.spend, w.people)
   const usd2 = (x: number) => `$${x.toFixed(2)}`
-  return `${head}: ${cost == null ? 'spend not read' : usd2(cost)} (${spend == null ? '—' : usd2(spend)} closed-day spend / ${people} people who finished in those days; first-finish rows, one per device; the per-row figure above includes repeats; WATCH only, no rule reads it)`
+  return `${head}: ${cost == null ? 'spend not read' : usd2(cost)} (${w.spend == null ? '—' : usd2(w.spend)} spend ${days} / ${w.people} first-finishers; first-finish rows start ${md(w.fromEt)}; Android counts rise as devices update; one row per device; the per-row figure above includes repeats; WATCH only, no rule reads it)`
 }
 
 /** Cost per tagged complete row: closed-day spend over the tagged complete rows in the same closed days. null under 1 row. */

@@ -130,7 +130,10 @@ export const RATIO_DEFS: RatioDef[] = [
   ratio('campaign.avgCpc', 'cost', 'campaign.spend', 'campaign.clicks'),
   ratio('campaign.costPerComplete', 'cost', 'campaign.spend', 'campaign.completions'),
   // Cost per PERSON who finished a puzzle: stored spend over first-finish rows (one per device), so repeat finishers count once.
-  ratio('campaign.costPerFinisher', 'cost', 'campaign.spend', 'campaign.firstFinish'),
+  // The rows only exist from the v1.103.0 release (evening of FIRST_FINISH_START_ET minus a day), so the numerator is the spend from
+  // FIRST_FINISH_START_ET (lib/releases.ts) on. The finisher count comes from a fact with no time bucket, so it cannot be trimmed to
+  // that day: the first-finish-window caption says so.
+  ratio('campaign.costPerFinisher', 'cost', 'campaign.spendFromFirstFinish', 'campaign.firstFinish', { caveats: ['first-finish-window'] }),
   // Pairs: counts only — "1,111 game-screen views · 353 arrivals", never 314.7%.
   ratio('campaign.gameViewsVsArrivals', 'pair', 'campaign.gameViews', 'campaign.taggedArrivals'),
   ratio('campaign.taggedHitsVsArrivals', 'pair', 'campaign.taggedHits', 'campaign.taggedArrivals'),

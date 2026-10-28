@@ -48,7 +48,8 @@ import {
 } from '../popupEvents'
 import { isEventPath, isPopupAccept, isPopupShown, isPopupTap, isReturnD1Plus } from '../overview'
 import { isSplitRefusedPath } from '../splitGuard'
-import { resolveCampaignSpend, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
+import { FIRST_FINISH_START_ET } from '../releases'
+import { microsToDollars, resolveCampaignSpend, round2, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
 import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
@@ -516,6 +517,22 @@ export const METRIC_DEFS: MetricDef[] = [
     // Stored Google Ads spend first, else the hand-entered CAMPAIGN_SPEND (lib/adsRules.ts).
     spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
     instrumented: [],
+  }),
+  // The stored Google Ads spend of the days from FIRST_FINISH_START_ET (lib/releases.ts) on: the first whole ET day the
+  // first-finish rows exist. campaign.costPerFinisher divides it, so cost per finisher never spreads the whole flight's
+  // spend over the few days finishers were counted. Only the ads store holds per-day spend: a hand-entered CAMPAIGN_SPEND
+  // has none, so the figure is then absent (never 0). The go-live rule makes a window that ends before the start unmeasured
+  // and a window that spans it partial (measured from that day), which also trims the ratio's denominator (alignDenominator).
+  campaignMetric({
+    id: 'campaign.spendFromFirstFinish',
+    unit: 'usd',
+    params: ['campaignId'],
+    windows: { attribution: 'adsSpend' },
+    spend: (rows, ctx) => {
+      const stored = rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null
+      return stored && resolveCampaignSpend(stored, null).source === 'google-ads-api' ? round2(microsToDollars(stored.costMicrosFromFirstFinish)) : null
+    },
+    instrumented: [{ kind: 'liveOnEtDate', dateEt: FIRST_FINISH_START_ET, against: 'flight', source: 'FIRST_FINISH_START_ET' }],
   }),
   // The Google Ads clicks of the same stored days as the spend above. Only the ads store holds
   // them: a hand-entered CAMPAIGN_SPEND has no click count, so the figure is then absent (never 0)

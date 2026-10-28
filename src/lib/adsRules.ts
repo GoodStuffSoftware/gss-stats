@@ -525,13 +525,14 @@ export interface SpendTotals {
   lastDate: string | null
 }
 /** Sums stored days, optionally only through `throughEt` inclusive (closed days only). */
-export function spendTotals(stored: StoredSpend | null, throughEt?: string | null): SpendTotals {
+export function spendTotals(stored: StoredSpend | null, throughEt?: string | null, fromEt?: string | null): SpendTotals {
   let costMicros = 0
   let impressions = 0
   let clicks = 0
   const dates: string[] = []
   for (const [date, d] of Object.entries(stored?.days ?? {})) {
     if (throughEt != null && date > throughEt) continue
+    if (fromEt != null && date < fromEt) continue
     costMicros += d.costMicros
     impressions += d.impressions
     clicks += d.clicks
@@ -611,6 +612,8 @@ export interface SpendSummary {
   impressions: number
   clicks: number
   days: number
+  /** Cost of the stored days from FIRST_FINISH_START_ET on (lib/releases.ts): the spend a cost-per-finisher ratio divides. */
+  costMicrosFromFirstFinish: number
   firstDate: string | null
   lastDate: string | null
   fetchedAt: string | null // latest fetch among the rows

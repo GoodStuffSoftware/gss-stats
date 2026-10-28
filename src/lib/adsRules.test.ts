@@ -151,7 +151,7 @@ describe('spend: merge, restatement, totals', () => {
 })
 
 describe('resolveCampaignSpend (dashboard: stored beats config, fail soft)', () => {
-  const summary = { campaignId: 'x', costMicros: 124_470_711, impressions: 1, clicks: 1, days: 8, firstDate: '2026-09-02', lastDate: '2026-09-09', fetchedAt: '2026-09-26T15:51:43Z' }
+  const summary = { campaignId: 'x', costMicros: 124_470_711, impressions: 1, clicks: 1, days: 8, costMicrosFromFirstFinish: 0, firstDate: '2026-09-02', lastDate: '2026-09-09', fetchedAt: '2026-09-26T15:51:43Z' }
   it('uses stored Google Ads spend when at least one day is stored', () => {
     expect(resolveCampaignSpend(summary, 999)).toEqual({ spend: 124.47, source: 'google-ads-api', fetchedAt: summary.fetchedAt, lastDate: '2026-09-09' })
   })

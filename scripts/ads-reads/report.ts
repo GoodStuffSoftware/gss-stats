@@ -31,6 +31,7 @@ import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL
 import { RAW_INSTALL_SIGNALS_LABEL, campaignAttributionStartMs, campaignById, type StagedArm } from '../../src/lib/campaigns'
 import { appsPlayCaveatApplies, coachMeasurementNote, measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
+import { FIRST_FINISH_START_ET } from '../../src/lib/releases'
 import { F3_ARM_BASELINES, firstFinishWatchLine, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
 import { playDirectLines } from './playDirect'
@@ -344,7 +345,7 @@ export function formatMorningReport(r: MorningResult): string {
         : `Tagged: NOT READ (${t.error})`,
     )
     if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts(), coachMeasurementNote(etDateFromMs(Date.parse(r.readAt))))}`)
-    if (r.flight3 && t.ok) out.push(firstFinishWatchLine(t.cumulative!.firstFinishClosed ?? t.cumulative!.firstFinish ?? 0, r.spend.ok ? r.spend.cumulative.cost : null))
+    if (r.flight3 && t.ok) out.push(firstFinishWatchLine(t.cumulative!.firstFinishWindow ?? { fromEt: FIRST_FINISH_START_ET, throughEt: null, people: 0, spend: null }))
     out.push(...tagSplitLines(r.tagSplit, readStartOf(r.campaign.id)))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))

@@ -31,6 +31,7 @@ import {
   type StoredSpend,
 } from './adsRules'
 import type { ReadoutVerdict } from './flight3Rules'
+import { FIRST_FINISH_START_ET } from './releases'
 import { freshnessOf, isClosedFetch, spendThroughFromRows, unfinishedSyncAlert, UNFINISHED_SYNC_AFTER_MS, UNFINISHED_SYNC_LOOKBACK_MS, type AdsFreshness, type SyncAlert } from './adsFreshness'
 
 export const ADS_DB_NAME = 'gss-stats-ads'
@@ -348,7 +349,7 @@ export function syncClaimStatement(source: SyncSource, nowMs: number, windowMs: 
 
 // ── Reads ─────────────────────────────────────────────────────────────────────────────────
 export const SPEND_SUMMARY_SQL =
-  'SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id'
+  `SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(CASE WHEN date >= '${FIRST_FINISH_START_ET}' THEN cost_micros ELSE 0 END) AS cost_micros_from_first_finish, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id`
 export const DAILY_ROWS_SQL = 'SELECT date, cost_micros, impressions, clicks, fetched_at, placements_fetched_at FROM ads_daily_metrics WHERE campaign_id = ? ORDER BY date'
 /** Every campaign's day rows in ONE query (the sync's plan; a few hundred rows at most). */
 export const ALL_DAILY_ROWS_SQL = 'SELECT campaign_id, date, cost_micros, impressions, clicks, fetched_at, placements_fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
@@ -395,6 +396,7 @@ export function mapSpendSummary(row: Record<string, unknown>): SpendSummary {
     impressions: num(row.impressions),
     clicks: num(row.clicks),
     days: num(row.days),
+    costMicrosFromFirstFinish: num(row.cost_micros_from_first_finish),
     firstDate: str(row.first_date),
     lastDate: str(row.last_date),
     fetchedAt: str(row.fetched_at),

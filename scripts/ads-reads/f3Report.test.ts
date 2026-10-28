@@ -84,22 +84,39 @@ describe('the flight 3 rules block (Search, flight day 3)', () => {
     // cumulative $17.50 / 14 rows; yesterday (10-18) $9.50 / 8 rows
     expect(tagged).toContain('; cost per complete row, includes repeats $1.25 (yesterday $1.19)')
   })
-  it('the first-finish WATCH line is n/a while no first-finish row exists', async () => {
-    const out = await lines(day3())
-    expect(out).toContain('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows so far)')
-  })
-  it('the first-finish WATCH line divides closed-day spend by first-finish rows of the same closed days (a today row is left out)', async () => {
+  it('a read ending before 10-27 prints "not available before 10-27", not $0 or a division by zero, even with early first-finish rows', async () => {
     const fx = day3()
+    ;(fx.beacon as { tagged: { hour: string; path: string; visitor: string; count: number }[] }).tagged.push({ hour: '2026-10-18T20:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 2 })
+    const line = (await lines(fx)).find((l) => l.startsWith('WATCH · cost per person who finished'))!
+    expect(line).toBe("WATCH · cost per person who finished: not available before 10-27 (first-finish rows start 10-27; this read's closed days end 10-18; WATCH only, no rule reads it)")
+  })
+  /** The 10-28 morning read: closed days 10-17..10-27, $1.00 a day except 10-26 ($2.00) and 10-27 ($10.80), so the whole flight is $23.80 but 10-27 alone is $10.80. */
+  const day12 = (finish: { hour: string; count: number }[]): Fixture => {
+    const fx = day3()
+    fx.now = '2026-10-28T12:05:00Z'
+    const daily: Record<string, { costMicros: number; impressions: number; clicks: number }> = {}
+    for (let d = 17; d <= 27; d++) daily[`2026-10-${d}`] = { costMicros: d === 26 ? 2_000_000 : d === 27 ? 10_800_000 : 1_000_000, impressions: 100, clicks: 2 }
+    daily['2026-10-28'] = { costMicros: 0, impressions: 0, clicks: 0 }
+    ;(fx.ads as { daily: unknown }).daily = daily
     ;(fx.beacon as { tagged: { hour: string; path: string; visitor: string; count: number }[] }).tagged.push(
-      { hour: '2026-10-17T20:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 3 },
-      { hour: '2026-10-18T20:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 1 },
-      { hour: '2026-10-19T14:00:00Z', path: '/game/first-finish', visitor: 'returning', count: 4 }, // today: spend not closed yet
+      ...finish.map((r) => ({ hour: r.hour, path: '/game/first-finish', visitor: 'returning', count: r.count })),
     )
-    const out = await lines(fx)
-    const line = out.find((l) => l.startsWith('WATCH · cost per person who finished'))!
-    // closed-day spend $17.50 / 4 people = $4.38 ($2.19 if today's rows were wrongly included)
-    expect(line).toContain('$4.38 ($17.50 closed-day spend / 4 people who finished')
-    expect(out.find((l) => l.startsWith('Tagged so far'))).toContain('cost per complete row, includes repeats')
+    return fx
+  }
+  it('a read spanning 10-17..10-27 divides only the 10-27 spend by only the 10-27 first-finishers (earlier rows and today are left out)', async () => {
+    const fx = day12([
+      { hour: '2026-10-27T01:00:00Z', count: 2 }, // 10-26 evening ET: before the first whole day
+      { hour: '2026-10-27T20:00:00Z', count: 2 },
+      { hour: '2026-10-28T02:00:00Z', count: 1 }, // 10-27 ET 22:00
+      { hour: '2026-10-28T14:00:00Z', count: 5 }, // today: not a closed day
+    ])
+    const line = (await lines(fx)).find((l) => l.startsWith('WATCH · cost per person who finished'))!
+    // $10.80 / 3 = $3.60 ($23.80 / 8 = $2.98 if the whole flight's spend and the 10-26 rows were used)
+    expect(line).toBe('WATCH · cost per person who finished: $3.60 ($10.80 spend 10-27..10-27 / 3 first-finishers; first-finish rows start 10-27; Android counts rise as devices update; one row per device; the per-row figure above includes repeats; WATCH only, no rule reads it)')
+  })
+  it('a read ending after 10-27 with no first-finish rows in the window is n/a, not a division by zero', async () => {
+    const line = (await lines(day12([{ hour: '2026-10-27T01:00:00Z', count: 2 }]))).find((l) => l.startsWith('WATCH · cost per person who finished'))!
+    expect(line).toBe('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows 10-27..10-27)')
   })
   it('a tripped rule is listed in the proposal', async () => {
     const fx = day3()

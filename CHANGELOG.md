@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.62.2] — 2026-10-28
+
+### Fixed
+- **Cost per person who finished counts like for like.** The ads morning read and the `campaign.costPerFinisher` metric divided the whole flight's spend by first-finish rows that only exist from the first whole day after Best Sudoku 1.103.0 went live (10-27), which overstated the cost; the morning read now uses 10-27 onward for both spend and finishers and names the days, a read ending before 10-27 prints "not available before 10-27", and the dashboard ratio uses spend from 10-27 with a caption that says so.
+
 ## [0.62.1] — 2026-10-27
 
 ### Added

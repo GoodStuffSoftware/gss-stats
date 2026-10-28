@@ -28,7 +28,7 @@ exports[`fact SQL snapshots > adsSpend {} 1`] = `
 {
   "binds": [],
   "db": "gss_stats_ads",
-  "sql": "SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id",
+  "sql": "SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(CASE WHEN date >= '2026-10-27' THEN cost_micros ELSE 0 END) AS cost_micros_from_first_finish, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id",
 }
 `;
 

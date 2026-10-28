@@ -257,6 +257,18 @@ export const RELEASES: ReleaseMarker[] = [
   },
 ]
 
+/** The first WHOLE ET day the once-per-device first-finish rows (FIRST_FINISH_PATH, lib/popupEvents.ts) exist: the day after the
+ * v1.103.0 web marker above (web live 18:19 ET on the marker's day, so that day is partial). Every spend-per-first-finish
+ * ratio (the ads morning read's cost per person who finished, the dashboard's campaign.costPerFinisher) counts spend and
+ * finishers only from this day on, so numerator and denominator cover the same days. Derived from the marker, never typed. */
+export const FIRST_FINISH_START_ET: string = (() => {
+  const live = RELEASES.find((r) => r.version === 'v1.103.0 web')?.dateEt
+  if (!live) throw new Error('releases.ts: the v1.103.0 web marker is missing or undated')
+  const d = new Date(`${live}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+})()
+
 export type DatedRelease = ReleaseMarker & { dateEt: string }
 
 export function datedReleases(): DatedRelease[] {

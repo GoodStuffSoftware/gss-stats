@@ -212,13 +212,19 @@ describe('rule 6: cost per complete row', () => {
     expect(costPerFinisher(30, 0)).toBeNull()
     expect(costPerFinisher(null, 5)).toBeNull()
   })
-  it('the first-finish WATCH line: n/a before the app ships it, the figure after, per-row figure labelled as repeats', () => {
-    expect(firstFinishWatchLine(0, 40)).toBe('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows so far)')
-    const line = firstFinishWatchLine(8, 40)
-    expect(line).toContain('WATCH · cost per person who finished: $5.00 ($40.00 closed-day spend / 8 people who finished')
-    expect(line).toContain('includes repeats')
-    expect(firstFinishWatchLine(8, null)).toContain('spend not read')
-    expect(firstFinishWatchLine(null, 40)).toContain('not read')
+  it('the first-finish WATCH line: n/a before the app ships it, the windowed figure after, per-row figure labelled as repeats', () => {
+    const w = (people: number | null, spend: number | null, throughEt: string | null = '2026-10-30') => ({ fromEt: '2026-10-27', throughEt, people, spend })
+    expect(firstFinishWatchLine(w(0, 40))).toBe('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows 10-27..10-30)')
+    // a window wholly after the start: the figure is the given spend over the given people, with the window named
+    expect(firstFinishWatchLine(w(8, 40))).toBe('WATCH · cost per person who finished: $5.00 ($40.00 spend 10-27..10-30 / 8 first-finishers; first-finish rows start 10-27; Android counts rise as devices update; one row per device; the per-row figure above includes repeats; WATCH only, no rule reads it)')
+    expect(firstFinishWatchLine(w(8, null))).toContain('spend not read')
+    expect(firstFinishWatchLine(w(null, 40))).toContain('not read')
+  })
+  it('the first-finish WATCH line: a window that ends before the first whole day prints "not available before", never $0 or a division by zero', () => {
+    const w = (throughEt: string | null) => ({ fromEt: '2026-10-27', throughEt, people: 3, spend: 12 })
+    expect(firstFinishWatchLine(w('2026-10-26'))).toBe("WATCH · cost per person who finished: not available before 10-27 (first-finish rows start 10-27; this read's closed days end 10-26; WATCH only, no rule reads it)")
+    expect(firstFinishWatchLine(w(null))).toContain('not available before 10-27')
+    expect(firstFinishWatchLine(w('2026-10-27'))).toContain('$4.00 ($12.00 spend 10-27..10-27 / 3 first-finishers')
   })
 })
 

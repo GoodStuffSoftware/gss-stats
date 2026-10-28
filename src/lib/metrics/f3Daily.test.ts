@@ -288,3 +288,26 @@ describe('Cost card additions: average CPC and cost per completed game', () => {
     expect(results.cpc).toMatchObject({ status: 'no-data', value: null })
   })
 })
+
+describe('cost per finisher counts like for like from the first whole day the first-finish rows exist', () => {
+  const SEARCH = STAGED_FLIGHT_3.search.ids.campaignId
+  const SEARCH_TAG = 'sudoku_funnel_f3_search'
+  const spend: Spend[] = Array.from({ length: 11 }, (_, i) => ({ campaign_id: SEARCH, date: `2026-10-${17 + i}`, cost_micros: i === 10 ? 10_800_000 : 1_000_000 })) // 10-17..10-27: $10 + $10.80
+  const finishes = (iso: string, n: number): Hit[] => Array.from({ length: n }, () => at(iso, '/game/first-finish', { campaign: SEARCH_TAG }))
+  const hits: Hit[] = [...finishes('2026-10-26T23:00:00Z', 5), ...finishes('2026-10-27T15:00:00Z', 12)] // 19:00 ET on 10-26 (before the first whole day), then 10-27
+  const now = ms('2026-10-28T16:00:00Z')
+  const ctx = { since: '2026-10-17', until: '2026-10-28', sites: ['bestsudoku-web'] }
+  const ratio = { key: 'cpf', ratio: 'campaign.costPerFinisher', window: 'attribution', params: { campaignId: SEARCH } }
+  it('registers spend from the first-finish day over first-finish rows, with the window caption', () => {
+    expect(RATIOS.get('campaign.costPerFinisher')).toMatchObject({ kind: 'cost', num: 'campaign.spendFromFirstFinish', den: 'campaign.firstFinish', caveats: ['first-finish-window'] })
+  })
+  it('a read spanning 10-17..10-28 uses only the 10-27 spend (the finisher count cannot be trimmed by day)', () => {
+    const { results } = run(fixture(hits, spend), [ratio, { key: 'sp', metric: 'campaign.spendFromFirstFinish', window: 'attribution', params: { campaignId: SEARCH } }], ctx, now)
+    expect((results.sp as MetricValue).value).toBe(10.8) // not the flight's $20.80
+    const v = results.cpf as MetricValue
+    expect(v.numerator).toBe(10.8)
+    expect(v.denominator).toBe(17) // the fact has no time bucket, so the 5 evening-of-10-26 rows stay in; the caption says so
+    expect(v.value).toBeCloseTo(10.8 / 17, 6)
+    expect(v.noteIds).toContain('first-finish-window')
+  })
+})

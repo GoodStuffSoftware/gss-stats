@@ -309,9 +309,11 @@ link that lost its suffix still counts. All three tags are the one arm.
     verdict. The `WATCH · cost per tagged first open` line (spend over tagged first opens, beside
     the September twin's ~$9.50 per net install, hand-derived in the September review) is relayed
     as printed, and `no tagged first opens yet` is the 0-opens text.
-  - On every Flight 3 read the `WATCH · cost per person who finished` line (closed-day spend over
-    the campaign's `/game/first-finish` rows, one per device) is relayed as printed; it reads `n/a until
-    the app ships first-finish` while no such row exists, no rule reads it, and the per-row cost beside it is
+  - On every Flight 3 read the `WATCH · cost per person who finished` line (spend over
+    the campaign's `/game/first-finish` rows, one per device, both from 10-27, the first whole ET day the rows
+    exist, through the last closed day; the line names the days) is relayed as printed; it reads `not available
+    before 10-27` while the read's closed days end earlier and `n/a until
+    the app ships first-finish` while no such row exists in the window, no rule reads it, and the per-row cost beside it is
     labelled "includes repeats".
   - The thresholds are minimums: a quiet day reads "too few rows", not a false alarm.
   - If the whole tagged read failed, the line reads "Tagged: NOT READ": the check is then not

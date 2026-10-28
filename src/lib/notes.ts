@@ -59,6 +59,7 @@ import type { CardSpec } from './metrics/types'
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, markedChanges } from './measurementChanges'
+import { FIRST_FINISH_START_ET } from './releases'
 import { etOffsetHours } from './etTime'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
@@ -504,6 +505,16 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'caveat',
     scopes: [], // not automatic: the Cost card names it in its own captions (presets.ts CAMPAIGN_COST)
   },
+  // Travels with the campaign.costPerFinisher ratio (lib/metrics/ratios.ts): the first-finish rows only exist from the day after
+  // the v1.103.0 web release (lib/releases.ts FIRST_FINISH_START_ET), so spend and finishers both count from that day. The date
+  // comes from that constant, never typed here.
+  'first-finish-window': {
+    id: 'first-finish-window',
+    text: () => `Cost per person who finished divides the spend from ${FIRST_FINISH_START_ET} on, the first whole day the first-finish rows exist (a window ending earlier reads no data), by every first-finish row in the window, which also includes the evening before; Android counts rise as devices update.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
   'release-before-partial': {
@@ -567,6 +578,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.returnD2to7Upper': 'Came back d2-7 (90% upper)',
     'label.campaign.retentionVerdict': 'Retention verdict',
     'label.campaign.spend': 'Spend',
+    'label.campaign.spendFromFirstFinish': 'Spend from the first-finish day',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
     'label.bsk.carryOverCompletions': 'Carry-over completions',
