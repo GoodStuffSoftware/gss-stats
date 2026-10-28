@@ -506,8 +506,7 @@ these overrides, which win over every other step:
     exact `/tmp/am/ID.report.txt` (or REASON if that arm failed); then one for
     `/tmp/pf/24279250691/report.txt` with subject `[TEST] ads cloud routine DATE wrapup` (or REASON if it
     failed). Parts of a long report follow the numbered-parts rule.
-- In TEST mode never message `best-sudoku-ads-retest-followup`, never push `text=`, and
-  never send a `[SHADOW]` message.
+- In TEST mode never push `text=` and never send a `[SHADOW]` message.
 
 ## Bus delivery of a report
 
@@ -622,14 +621,7 @@ bus message per arm (per "Bus delivery of a report"), except as the next bullet 
     tagged arrivals, <installs> installs; <proposal or no change>`, every figure copied from
     that arm's report (write `?` for one the report does not give; never invent one). The
     proposal is the A2 "So what" proposal in a few words, or `no change`.
-- Bus: for each arm, in table order, ONE `agent_send` from `gss-stats` to
-  `best-sudoku-ads-retest-followup`, `includeEphemeral` true, subject
-  `BSK ads daily read DATE ARM_NAME` with ` (threshold read)` appended when that arm has
-  busCopy=true. Body = the exact content of `/tmp/am/ID.report.txt`, with only its final
-  newline dropped (numbered parts if over 15000 characters). A FAILED arm sends one message
-  with body `<arm name> daily read did not run: REASON`. The A2 analysis is not in the bus
-  body; it goes in Step 3.
-- If `agent_send` is missing, skip that send and say so in Step 3.
+- Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
 legs-table row has a Page link; otherwise skip silently and write `artifact: n/a` in Step 3.
@@ -696,8 +688,7 @@ FAILED (Step 0.4 or B1/B2 failed for a report):
 
 OK, LIVE:
 - push=true: that report's push line is exactly its `text=` value.
-- busCopy=true: one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to `best-sudoku-ads-retest-followup`,
-  subject `LABEL post-flight STAGE DATE`, body BODY, `includeEphemeral` true.
+- Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report. LIVE proposals go to the finding file only until a live recipient is named.
 - Both false (not due yet, or a same-day rerun already recorded): send nothing for that report.
 
 OK, SHADOW:
