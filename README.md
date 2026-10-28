@@ -1768,6 +1768,20 @@ read-only GAQL like the rest, counts only (no user, device or place split):
   `--dry-run`: after the cost backfill it runs this pass with `full` and no cap, every
   campaign's whole window (above) re-pulled in one run, whatever the cost sync's outcome.
 
+### Spend-only arm daily line (`ads_readings`, flight 4)
+
+A spend-only arm (no read plan, no rules) still gets one daily line in `ads_readings`, built only
+from the stored cost and conversion rows (no Google Ads call): date, spend, impressions, clicks,
+installs (the conversions of the campaign's `installActionId` in the registry, never a hardcoded
+id), cost per install (`null` with no installs) and cumulative spend against the `hardCapUsd`
+cap. It is labelled "spend-only, Google-reported installs" and reads `INFO`: no rule, verdict or
+proposal, and spend at or over the cap is information only. `npm run ads:morning-read -- --campaign
+24392866056` stores every closed day since the flight start that is not yet stored (so the first
+run backfills; a rerun stores nothing, one row per campaign and day) and prints the line as the
+push text; a day whose spend or install conversions are not synced yet is left for the next run
+instead of being stored as zero. The cloud routine runs it daily 2026-10-27 to 11-03
+([runbook](docs/routines/ads-cloud-daily.md)).
+
 ## Live updates
 
 An open dashboard tab refreshes its numbers by itself shortly after new traffic is counted, with no

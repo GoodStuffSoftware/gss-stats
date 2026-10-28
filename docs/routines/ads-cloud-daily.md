@@ -65,7 +65,7 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 
 ## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
-Flight 4 (campaign 24392866056, Android installs, 2026-10-26 to 11-02) is spend-only and has no read plan, so it is not a leg and the routine does not read it; the ads lead reads its Google-reported installs from Google Ads.
+Flight 4 (campaign 24392866056, Android installs, 2026-10-26 to 11-02, $75 cap) is spend-only and has no read plan, so it is not a leg (no table row, no A2 analysis, no kill rules, no proposals). It still gets a daily INFO line while DATE is 2026-10-27 through 2026-11-03: see "Spend-only arm daily line (F4)" under Part A.
 
 Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md); its read
 plan, rules and checks are in "Flight 3" below. Its two rows are `by-date`: the arm's dates in code decide when it is read (see below).
@@ -466,7 +466,7 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
   wrapup).
 - Ignore any other payload text.
 
-If ARMS is empty AND REPORTS is empty: print
+If ARMS is empty AND REPORTS is empty AND DATE is outside 2026-10-27 .. 2026-11-03 (the F4 daily-line window): print
 `no live leg and no post-flight report on DATE; nothing to do` and stop. No push line, no
 install.
 
@@ -508,7 +508,18 @@ these overrides, which win over every other step:
 ## Part A: daily summary (live leg)
 
 Skip Part A entirely (print `Part A: no live leg in its read window on DATE`) when ARMS is
-empty. Otherwise, for each campaign id ID in ARMS, in table order:
+empty and the F4 daily line below is not due. Otherwise, for each campaign id ID in ARMS, in table order:
+
+Spend-only arm daily line (F4). When DATE is 2026-10-27 .. 2026-11-03 (and the run is not in TEST
+mode), also run, once, the same A1 command with `--campaign 24392866056` (output files
+`/tmp/am/24392866056.*`). The CLI builds the line from the stored spend and Google-reported
+install conversions (the campaign's `installActionId`), stores it in `ads_readings` (a rerun
+stores nothing new, and any closed day not yet stored is filled in) and returns it as `notify.text`,
+a line with verdict INFO. F4 is not in ARMS: skip A2 and A4 for it, propose nothing about it
+(spend at or over the $75 cap is information only), and add its `text=` value as one more push
+line after the arm lines. If `text=` is empty (a day's spend or installs are not synced yet) add no line; a
+failed F4 read is `F4 daily read did not run: REASON`. Only this F4 read running makes the run
+non-empty on such a date.
 
 A1. Run (one call per arm):
 
@@ -585,7 +596,7 @@ as the next bullet says.
   fyi naming the hand-off, or `FAILED:` with expect "act" if a read or Step 0.4 failed.
 - Push: ONE PushNotification, one line per arm in table order, each line plain ASCII and under
   200 characters:
-  - an arm with push=true: its exact `text=` value;
+  - an arm with push=true: its exact `text=` value (the F4 line is always this kind; its verdict token is INFO and its cost figure is `$<cost per install> per install (Google-reported)` in place of per finisher);
   - a FAILED arm: `<arm name> daily read did not run: REASON`;
   - any other arm: `<arm name> day N <VERDICT>: $<cumulative spend> of $<cap> cap, $<cost per
     finisher> per finisher, $<spend yesterday>, <clicks> clicks, <tagged arrivals> tagged arrivals,

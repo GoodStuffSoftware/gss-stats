@@ -25,6 +25,8 @@ import {
   allDevicesOf,
   channelOf,
   SEARCH_NA,
+  SPEND_ONLY_LABEL,
+  spendOnlyLineText,
   type CampaignChannel,
 } from '../../src/lib/adsRules'
 import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
@@ -35,7 +37,7 @@ import { FIRST_FINISH_START_ET } from '../../src/lib/releases'
 import { F3_ARM_BASELINES, firstFinishWatchLine, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
 import { playDirectLines } from './playDirect'
-import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
+import { armShortName, type DiagnosticsSection, type FullRead, type MorningResult, type PostflightResult, type SpendOnlyResult, type SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
 import { IMPRESSIONS_UNEVEN_GAP, type ImpressionsBalance, type TagSplit } from '../../src/lib/tagSplit'
 
@@ -627,4 +629,17 @@ export function withJson(text: string, result: unknown): string {
 /** The --json-only output, ASCII like withJson. */
 export function jsonOnly(result: unknown): string {
   return JSON.stringify(asciiResult(result), null, 2) + '\n'
+}
+
+/** The report of a spend-only arm's daily line (read.ts runSpendOnlyDailyRead): the label, one INFO line per
+ * closed day (newest last), what this run stored, and any day still waiting on the sync. No proposal exists. */
+export function formatSpendOnlyReport(r: SpendOnlyResult): string {
+  const out = [`${r.campaign.label}: daily line (${SPEND_ONLY_LABEL}); read ${r.etDate}${r.dryRun ? ' (dry run: nothing stored)' : ''}`]
+  out.push('INFO only: no rule, no verdict, no proposal; spend over the cap is information.')
+  for (const l of r.lines) out.push(`  ${l.date} ${spendOnlyLineText(l, armShortName(r.campaign.label))}`)
+  if (!r.lines.length) out.push('  no closed day stored yet')
+  out.push(r.dryRun ? `Would store: ${r.stored.join(', ') || 'none'}` : `Stored this run: ${r.stored.join(', ') || 'none (already recorded)'}`)
+  for (const g of r.gaps) out.push(`Waiting: ${g.date} ${g.reason}`)
+  for (const e of r.errors) out.push(`READ FAILED: ${e}`)
+  return out.join('\n') + '\n'
 }

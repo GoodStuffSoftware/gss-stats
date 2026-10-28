@@ -18,6 +18,13 @@
 
 import {
   buildHealthPairs,
+  buildSpendOnlyLine,
+  spendOnlyLineText,
+  spendOnlyReading,
+  SPEND_ONLY_LABEL,
+  CLOSED_CAMPAIGN_IDS,
+  type SpendOnlyDay,
+  type SpendOnlyLine,
   decideAt100,
   evaluateHealthPairs,
   evaluateKillRules,
@@ -90,11 +97,11 @@ import {
   reportLabelFor,
 } from '../../src/lib/adsRules'
 import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
-import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey, type StagedArm } from '../../src/lib/campaigns'
+import { ARRIVALS_CAVEAT, campaignById, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey, type StagedArm } from '../../src/lib/campaigns'
 import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
 import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, type GeoRow, type HourlyRow, type RecommendationRow, type TargetingRow } from '../../src/lib/adsApi'
-import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
+import { parseExtrasState, syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
 import { buildTagSplit, isMultiTag, type TagSplit } from '../../src/lib/tagSplit'
 import { FIRST_FINISH_START_ET } from '../../src/lib/releases'
@@ -897,6 +904,128 @@ async function appendReadings(
   }
   const appended = new Set(plan.append.map((r) => r.id).filter((id) => !outcome.ignored.includes(id)))
   return { written: outcome.written && !error, error, dedup, isNew: (id) => appended.has(id) }
+}
+
+// ── spend-only arm daily line (flight 4) ──────────────────────────────────────────────────
+export interface SpendOnlyOptions {
+  campaignId: string
+}
+export interface SpendOnlyResult {
+  tool: 'morning-read'
+  version: 1
+  mode: 'spend-only'
+  dryRun: boolean
+  readAt: string
+  etDate: string
+  campaign: CampaignHeader & { hardCapUsd: number; installActionId: string }
+  /** Every closed day the stored rows cover, flight start through min(yesterday, flight end). */
+  lines: SpendOnlyLine[]
+  /** The days (spendThroughEt) stored by THIS run: a backfill stores several, a rerun none. */
+  stored: string[]
+  /** Days that could not be stored yet, with the reason (spend row or install conversions not synced). */
+  gaps: { date: string; reason: string }[]
+  /** No rules, no verdict, no proposal and no thresholds for a spend-only arm. */
+  thresholds: null
+  proposal: null
+  notify: Notify
+  errors: string[]
+  notes: string[]
+}
+/** The short arm name in the finding line: "F4" from "Flight 4 — Android installs". */
+export function armShortName(label: string): string {
+  const m = /^Flight (\d+)\b/.exec(label)
+  return m ? `F${m[1]}` : label
+}
+
+/** The daily line of a SPEND-ONLY campaign with an installActionId (flight 4), from the stored rows
+ * only: ads_daily_metrics (spend, impressions, clicks) and ads_daily_conversions (the install
+ * action). It makes NO Google Ads call and NO beacon or Firestore read. For each closed ET day from
+ * the flight start through yesterday (not past the flight end) that has no stored daily reading, it
+ * appends one (etDate = that day + 1, the read that sees it closed): the first run backfills, and a
+ * rerun stores nothing (the append is de-duplicated per campaign and ET day, and the reading id is
+ * per day). A day whose spend row, or whose install conversions, are not stored yet is a gap: it is
+ * not stored (an absent conversions row would read as a false zero) and neither is any later day,
+ * which would need its cumulative. INFO only: no rule, verdict or proposal exists here. */
+export async function runSpendOnlyDailyRead(deps: ReadDeps, opts: SpendOnlyOptions): Promise<SpendOnlyResult> {
+  const campaign = campaignById(opts.campaignId)
+  if (!campaign || campaign.measurement !== 'spend-only' || !campaign.installActionId || campaign.hardCapUsd == null || !campaign.flightStart) {
+    throw new Error(`campaign ${opts.campaignId} is not a spend-only campaign with an installActionId and a hardCapUsd in lib/campaigns.ts`)
+  }
+  if (CLOSED_CAMPAIGN_IDS.includes(campaign.id)) throw new Error(`campaign ${campaign.id} is closed; the routine never reads or touches it`)
+  const actionId = campaign.installActionId
+  const readAt = new Date(deps.nowMs).toISOString()
+  const todayEt = etDateFromMs(deps.nowMs)
+  const yesterdayEt = addEtDays(todayEt, -1)
+  const lastEt = yesterdayEt < campaign.flightEnd ? yesterdayEt : campaign.flightEnd
+  const arm = armShortName(campaign.label)
+  const errors: string[] = []
+  const gaps: SpendOnlyResult['gaps'] = []
+  const lines: SpendOnlyLine[] = []
+  const stored: string[] = []
+  const store = deps.store
+  const head = { ...header(campaign), hardCapUsd: campaign.hardCapUsd, installActionId: actionId }
+  const result = (notifyText: string | null, reason: string): SpendOnlyResult => ({
+    tool: 'morning-read',
+    version: 1,
+    mode: 'spend-only',
+    dryRun: deps.dryRun,
+    readAt,
+    etDate: todayEt,
+    campaign: head,
+    lines,
+    stored,
+    gaps,
+    thresholds: null,
+    proposal: null,
+    notify: { push: notifyText != null, busCopy: false, reason, text: notifyText },
+    errors,
+    notes: [SPEND_ONLY_LABEL, 'No rules, no verdict and no proposal for a spend-only arm; spend over the cap is information only.'],
+  })
+  if (lastEt < campaign.flightStart) return result(null, 'no closed flight day yet')
+  if (!store.getConversionRows || !store.getLastExtrasRun) {
+    errors.push('store: no conversions table in this store')
+    return result(null, 'store has no conversions')
+  }
+
+  const rows = await attempt('store read (daily rows)', async () => (await store.getAllDailyRows()).get(campaign.id) ?? [])
+  const conv = await attempt('store read (conversions)', () => store.getConversionRows!(campaign.id, campaign.flightStart!, lastEt))
+  const extras = await attempt('store read (conversions sync state)', () => store.getLastExtrasRun!())
+  const existing = await attempt('store read (readings)', () => store.getReadings(campaign.id, 200))
+  if (!rows.ok) errors.push(rows.error)
+  if (!conv.ok) errors.push(conv.error)
+  if (!extras.ok) errors.push(extras.error)
+  if (!existing.ok) errors.push(existing.error)
+  if (!rows.ok || !conv.ok || !extras.ok || !existing.ok) return result(null, 'a store read failed')
+
+  const covered = parseExtrasState(extras.value?.detail)[campaign.id]?.conversions?.covered ?? []
+  const isCovered = (d: string) => covered.some(([a, b]) => a <= d && d <= b)
+  const have = new Set(existing.value.filter((r) => r.kind === 'daily').map((r) => r.etDate))
+  const spendBy = new Map(rows.value.map((r) => [r.date, r]))
+  const days: SpendOnlyDay[] = []
+  const toStore: ReadingRecord[] = []
+  for (let d = campaign.flightStart; d <= lastEt; d = addEtDays(d, 1)) {
+    const sp = spendBy.get(d)
+    if (!sp) {
+      gaps.push({ date: d, reason: 'daily spend not stored yet' })
+      break
+    }
+    if (!isCovered(d)) {
+      gaps.push({ date: d, reason: 'install conversions not stored yet' })
+      break
+    }
+    const installs = conv.value.filter((c) => c.date === d && c.conversionActionId === actionId).reduce((t, c) => t + c.conversions, 0)
+    days.push({ date: d, costMicros: sp.costMicros, impressions: sp.impressions, clicks: sp.clicks, installs })
+    const line = buildSpendOnlyLine(days, d, campaign.flightStart, campaign.hardCapUsd)
+    lines.push(line)
+    if (!have.has(addEtDays(d, 1))) toStore.push(spendOnlyReading(campaign.id, line, readAt, arm))
+  }
+  if (toStore.length) {
+    const put = await attempt('store write (readings)', () => store.appendReadings(toStore))
+    if (put.ok) stored.push(...toStore.filter((r) => put.value.inserted.includes(r.id) || (deps.dryRun && !put.value.written)).map((r) => r.spendThroughEt!))
+    else errors.push(put.error)
+  }
+  const newest = lines.at(-1)
+  return result(newest ? spendOnlyLineText(newest, arm) : null, newest ? 'INFO line (spend-only arm; nothing to decide)' : 'no closed day stored yet')
 }
 
 // ── morning-read ─────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Daily line for the Android install arm.** The spend-only flight 4 now gets one stored line a day with spend, impressions, clicks, Google-reported installs, cost per install and spend so far against its $75 cap, labelled "spend-only, Google-reported installs"; it reports information only and never proposes a pause.
+
 ## [0.63.0] — 2026-10-28
 
 ### Added

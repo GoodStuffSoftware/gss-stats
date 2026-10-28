@@ -2231,6 +2231,105 @@ export function readingId(kind: ReadingKind, readAt: string, stage?: string, cam
   return [kind, campaignId, stage, readAt].filter(Boolean).join(':')
 }
 
+// ── Spend-only arm daily line (flight 4, 2026-10-28) ──────────────────────────────────────
+/** The label every spend-only daily line carries. */
+export const SPEND_ONLY_LABEL = 'spend-only, Google-reported installs'
+/** One closed ET day of a spend-only campaign, from the stored rows (ads_daily_metrics and the
+ * install conversion action's ads_daily_conversions rows). Counts and dollars only. */
+export interface SpendOnlyDay {
+  date: string
+  costMicros: number
+  impressions: number
+  clicks: number
+  /** Conversions of the campaign's installActionId on that day (Google restates them, and a
+   * data-driven split can make them fractional). */
+  installs: number
+}
+/** The F4 daily line: one closed ET day and the running total. INFO only, by design: there is no
+ * rule, no verdict, no proposal and no first-party arrival count here. */
+export interface SpendOnlyLine {
+  /** The closed ET day the figures are for. */
+  date: string
+  /** 1 = the flight start. */
+  flightDay: number
+  spend: number
+  impressions: number
+  clicks: number
+  installs: number
+  /** spend / installs; null when there are no installs (never Infinity or NaN). */
+  costPerInstall: number | null
+  /** Spend from the flight start through `date`. */
+  cumulativeSpend: number
+  hardCap: number
+  /** cumulativeSpend >= hardCap. Information only: never a proposal. */
+  atOrOverCap: boolean
+  label: typeof SPEND_ONLY_LABEL
+}
+const cents = (x: number) => Math.round(x * 100) / 100
+const usdText = (x: number) => `$${x.toFixed(2)}`
+/** Builds the line for `date` from the campaign's closed days (flight start through at least
+ * `date`, in any order). Throws when `date` has no row, so a gap can never read as a zero day. */
+export function buildSpendOnlyLine(days: readonly SpendOnlyDay[], date: string, flightStart: string, hardCap: number): SpendOnlyLine {
+  const day = days.find((d) => d.date === date)
+  if (!day) throw new Error(`buildSpendOnlyLine: no row for ${date}`)
+  const microsThrough = days.filter((d) => d.date >= flightStart && d.date <= date).reduce((t, d) => t + d.costMicros, 0)
+  const spend = cents(day.costMicros / 1e6)
+  const installs = cents(day.installs)
+  const cumulativeSpend = cents(microsThrough / 1e6)
+  return {
+    date,
+    flightDay: Math.round((Date.parse(date + 'T00:00:00Z') - Date.parse(flightStart + 'T00:00:00Z')) / 86_400_000) + 1,
+    spend,
+    impressions: day.impressions,
+    clicks: day.clicks,
+    installs,
+    costPerInstall: installs > 0 ? cents(day.costMicros / 1e6 / day.installs) : null,
+    cumulativeSpend,
+    hardCap,
+    atOrOverCap: cumulativeSpend >= hardCap,
+    label: SPEND_ONLY_LABEL,
+  }
+}
+/** The one-line text of the daily line, plain ASCII, for the finding: VERDICT is always INFO.
+ * `arm` is the short arm name (for example F4). */
+export function spendOnlyLineText(l: SpendOnlyLine, arm: string): string {
+  const cpi = l.costPerInstall == null ? 'n/a per install (no installs yet)' : `${usdText(l.costPerInstall)} per install (Google-reported)`
+  const cap = l.atOrOverCap ? `; over cap (info only)` : ''
+  return `${arm} day ${l.flightDay} INFO: ${usdText(l.cumulativeSpend)} of ${usdText(l.hardCap)} cap, ${cpi}, ${usdText(l.spend)} that day, ${l.clicks} clicks, ${l.impressions} impr, ${l.installs} installs; ${l.label}${cap}`
+}
+/** The ads_readings record of a daily line. The reading is the NEXT ET day's (the read that sees
+ * `date` as its closed day), like every daily reading: etDate = date + 1, spendThroughEt = date.
+ * rules, decision and proposal are null on purpose (no rule exists for a spend-only arm). The id is
+ * per campaign and day, so storing it twice is the same row. */
+export function spendOnlyReading(campaignId: string, l: SpendOnlyLine, readAt: string, arm: string): ReadingRecord {
+  return {
+    v: 1,
+    id: `daily:${campaignId}:spend-only:${l.date}`,
+    campaignId,
+    kind: 'daily',
+    readAt,
+    etDate: addDays(l.date, 1),
+    spendThroughEt: l.date,
+    cumulativeSpend: l.cumulativeSpend,
+    thresholds: [],
+    complete: true,
+    rules: null,
+    proposal: null,
+    decision: null,
+    counts: {
+      flightDay: l.flightDay,
+      spend: l.spend,
+      impressions: l.impressions,
+      clicks: l.clicks,
+      installs: l.installs,
+      costPerInstall: l.costPerInstall,
+      cumulativeSpend: l.cumulativeSpend,
+      hardCap: l.hardCap,
+    },
+    notes: [l.label, spendOnlyLineText(l, arm)],
+  }
+}
+
 // ── Post-flight schedule ─────────────────────────────────────────────────────────────────
 export type PostflightStage = 'wrapup' | 'day15' | 'day30' | 'day60' | 'december'
 export const POSTFLIGHT_STAGES: readonly PostflightStage[] = ['wrapup', 'day15', 'day30', 'day60', 'december']

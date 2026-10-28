@@ -91,6 +91,11 @@ export interface CampaignFlight {
   dailyBudgetUsd?: number
   /** Cumulative-spend hard stop in USD, when the build spec set one. */
   hardCapUsd?: number
+  /** The Google Ads conversion action id (digits only, not a secret) whose conversions are this
+   * campaign's Google-reported installs. Set only on an install campaign (F4). The daily spend-only
+   * line (adsRules.ts buildSpendOnlyLine) and the metrics read their installs from this field and
+   * from no hardcoded id. Unset = the campaign has no install count. */
+  installActionId?: string
   /** Flight days 1..N (day 1 = flightStart) are "directional" figures, per the brief —
    * see isDirectionalDay. Omit for a campaign whose whole flight is read as normal. */
   directionalThroughDay?: number
@@ -429,11 +434,12 @@ export const CAMPAIGNS: CampaignFlight[] = [
     kind: 'play-direct',
     dailyBudgetUsd: 10,
     hardCapUsd: 75,
+    installActionId: '7756366796',
     measurement: 'spend-only',
     noPlacements: true, // an App campaign has no placement report
     measurabilityNote: 'App install campaign: Google counts the Play installs; it sends no visits to the site, so none of the site\'s own counts include it.',
     notes:
-      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796): no SDK, no utm tag, no install referrer, so no beacon rows. The tag in ucValues is a placeholder no row carries (it exists only because an empty ucValues breaks the beacon SQL). Spend-only, no read plan: the ads lead reads installs from Google Ads.',
+      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796): no SDK, no utm tag, no install referrer, so no beacon rows. The tag in ucValues is a placeholder no row carries (it exists only because an empty ucValues breaks the beacon SQL). Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
   // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged.
   ...liveStagedCampaigns(),
