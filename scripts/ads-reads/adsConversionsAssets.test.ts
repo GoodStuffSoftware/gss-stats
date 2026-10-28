@@ -3,6 +3,8 @@
 // (lib/adsStore.ts). Real migrated SQLite and a fake Ads client: no network, no credential, never
 // the production database. Every customer, conversion-action, ad group, ad and asset id here is
 // made up; the response rows have the probe's shape (REST JSON, camelCase), not its values.
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   conversionActionIdOf,
@@ -15,6 +17,7 @@ import {
   type AdsClient,
   type FetchLike,
 } from '../../src/lib/adsApi'
+import { etDateRange } from '../../src/lib/adsFreshness'
 import { ADS_CUSTOMER_ID } from '../../src/lib/adsRules'
 import {
   ASSET_NAME_MAX,
@@ -25,15 +28,29 @@ import {
   assetDailyUpserts,
   conversionDailyUpserts,
   createSqlAdsStore,
+  LAST_EXTRAS_RUN_SQL,
+  LAST_RUN_SQL,
+  LAST_SYNC_SQL,
   MAX_BINDS,
   mergeAssetRows,
   mergeConversionRows,
+  readLastSyncRun,
   type AssetDayRow,
   type AssetRecord,
   type ConversionDayRow,
+  type SyncRunRecord,
 } from '../../src/lib/adsStore'
+import {
+  RESTATEMENT_RECHECK_MS,
+  syncableCampaigns,
+  syncAdsExtras,
+  syncWindow,
+  type AdsExtrasSource,
+  type ExtrasKind,
+  type ExtrasOptions,
+} from '../../src/lib/adsSync'
 import { campaignById } from '../../src/lib/campaigns'
-import { count, migrationFiles, openMigratedSqlite, sqliteAdsDb } from './sqliteDb'
+import { count, migrationFiles, openMigratedSqlite, sqliteAdsDb, sqliteD1 } from './sqliteDb'
 
 const F4 = '24392866056' // F4 Android (app campaign)
 const F3S = '24358792551' // F3 Search
@@ -463,5 +480,185 @@ describe('store upserts (migration 0007)', () => {
     expect(daily).toHaveLength(Math.ceil(280 / 9))
     expect(count(sqlite, 'ads_daily_assets')).toBe(280)
     expect(count(sqlite, 'ads_assets')).toBe(Math.ceil(280 / 11))
+  })
+})
+
+// ── The pass itself (lib/adsSync.ts syncAdsExtras) over a fake AdsExtrasSource ───────────
+describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backfill', () => {
+  const t0 = Date.parse('2026-10-28T13:00:00Z') // 09:00 EDT: closed days through 10-27
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const A = '9000000001'
+  const B = '9000000002'
+  const F4_ACTION = '9000000003'
+  const opts = (now: number, o: Partial<ExtrasOptions> = {}): ExtrasOptions => ({ now, dryRun: false, source: 'worker-cron', ...o })
+  /** A fake source over mutable per-campaign rows; it records every pull. */
+  function fakeExtras(data: { conversions: Record<string, ConversionDayRow[]>; assets: Record<string, AssetDayRow[]> }) {
+    const calls: { kind: ExtrasKind; id: string; since: string; until: string }[] = []
+    const pick = <T extends { date: string }>(rows: T[] | undefined, since: string, until: string) => (rows ?? []).filter((r) => r.date >= since && r.date <= until).map((r) => ({ ...r }))
+    const source: AdsExtrasSource = {
+      conversions: async (id, since, until) => (calls.push({ kind: 'conversions', id, since, until }), pick(data.conversions[id], since, until)),
+      assets: async (id, since, until) => (calls.push({ kind: 'assets', id, since, until }), pick(data.assets[id], since, until)),
+    }
+    const pulls = (from = 0, id?: string) => fake.calls.slice(from).filter((c) => !id || c.id === id).map((c) => `${c.kind} ${c.since}..${c.until}`).sort()
+    const fake = { source, calls, data, pulls }
+    return fake
+  }
+  /** Every syncable campaign in ads_campaigns (the default campaign set). */
+  async function seededAll(o: { dryRun?: boolean } = {}) {
+    const s = setup()
+    await s.store.syncCampaigns(syncableCampaigns(), '2026-10-28T00:00:00Z')
+    return o.dryRun ? { ...s, store: createSqlAdsStore(s.adapter, { dryRun: true, kind: 'sqlite' }) } : s
+  }
+  const rows = (sqlite: ReturnType<typeof openMigratedSqlite>, sql: string, ...binds: string[]) => sqlite.prepare(sql).all(...binds).map((r) => ({ ...r }))
+
+  it('after the 6 h re-check it re-pulls only the restatement window: a restated count updates in place, a dropped action zero-fills, older days stay', async () => {
+    const { sqlite, store } = await seeded()
+    const f3sDays = etDateRange('2026-10-17', '2026-10-27')
+    const fake = fakeExtras({
+      conversions: { [F3S]: [...f3sDays.map((d) => convDay(d, A, 1)), convDay('2026-10-27', B, 2)] },
+      assets: { [F3S]: f3sDays.map((d) => assetDay({ date: d, impressions: 100, clicks: 2 })) },
+    })
+    const run = (now: number) => syncAdsExtras({ ads: fake.source, store }, opts(now, { campaignIds: [F3S] }))
+    const conv = (date: string, actionId: string) => ({ ...sqlite.prepare('SELECT conversions, all_conversions, fetched_at FROM ads_daily_conversions WHERE campaign_id = ? AND date = ? AND conversion_action_id = ?').get(F3S, date, actionId) })
+    const asset = (date: string) => ({ ...sqlite.prepare('SELECT impressions, fetched_at FROM ads_daily_assets WHERE campaign_id = ? AND date = ?').get(F3S, date) })
+
+    const r1 = await run(t0)
+    expect(r1.status).toBe('ok')
+    expect(fake.pulls()).toEqual(['assets 2026-10-17..2026-10-24', 'assets 2026-10-25..2026-10-27', 'conversions 2026-10-17..2026-10-24', 'conversions 2026-10-25..2026-10-27'])
+    expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets')]).toEqual([12, 11])
+
+    // an hour later: everything stored, the re-check not due -> one state read, no pull
+    let from = fake.calls.length
+    const r2 = await run(t0 + 3_600_000)
+    expect([r2.nothingDue, fake.calls.length - from]).toEqual([true, 0])
+
+    // Google restates 10-26 and drops action B from 10-27 (A stays); 10-20 changes too, outside the window
+    const convs = fake.data.conversions[F3S]
+    convs[convs.findIndex((r) => r.date === '2026-10-26')] = convDay('2026-10-26', A, 3)
+    convs.splice(convs.findIndex((r) => r.conversionActionId === B), 1)
+    convs[convs.findIndex((r) => r.date === '2026-10-20')] = convDay('2026-10-20', A, 9)
+    const assets = fake.data.assets[F3S]
+    assets[assets.findIndex((r) => r.date === '2026-10-25')] = assetDay({ date: '2026-10-25', impressions: 150, clicks: 2 })
+    assets[assets.findIndex((r) => r.date === '2026-10-20')] = assetDay({ date: '2026-10-20', impressions: 999, clicks: 2 })
+
+    from = fake.calls.length
+    const r3 = await run(t0 + RESTATEMENT_RECHECK_MS)
+    expect(r3.status).toBe('ok')
+    expect(fake.pulls(from)).toEqual(['assets 2026-10-25..2026-10-27', 'conversions 2026-10-25..2026-10-27'])
+    expect(conv('2026-10-26', A)).toEqual({ conversions: 3, all_conversions: 3, fetched_at: r3.startedAt })
+    expect(conv('2026-10-27', B)).toEqual({ conversions: 0, all_conversions: 0, fetched_at: r3.startedAt }) // zero-filled, kept
+    expect(conv('2026-10-27', A)).toEqual({ conversions: 1, all_conversions: 1, fetched_at: r1.startedAt }) // unchanged: not rewritten
+    expect(conv('2026-10-20', A)).toEqual({ conversions: 1, all_conversions: 1, fetched_at: r1.startedAt }) // outside the window
+    expect(asset('2026-10-25')).toEqual({ impressions: 150, fetched_at: r3.startedAt })
+    expect(asset('2026-10-20')).toEqual({ impressions: 100, fetched_at: r1.startedAt })
+    expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets')]).toEqual([12, 11])
+    const f3s3 = r3.campaigns.find((c) => c.campaignId === F3S)!
+    expect([f3s3.conversions.rowsChanged, f3s3.assets.rowsChanged]).toEqual([2, 1])
+
+    // six hours on, Google answers no conversion rows over stored days: an error, nothing deleted
+    fake.data.conversions[F3S] = []
+    const before = all(sqlite, 'ads_daily_conversions', 'date, conversion_action_id').map((r) => ({ ...r }))
+    const r4 = await run(t0 + 2 * RESTATEMENT_RECHECK_MS)
+    const f3s4 = r4.campaigns.find((c) => c.campaignId === F3S)!
+    expect(r4.status).toBe('partial')
+    expect(f3s4.conversions).toMatchObject({ ok: false, stale: true })
+    expect(f3s4.conversions.error).toBeTruthy()
+    expect(f3s4.assets).toMatchObject({ ok: true, stale: false, rowsChanged: 0 })
+    expect(all(sqlite, 'ads_daily_conversions', 'date, conversion_action_id').map((r) => ({ ...r }))).toEqual(before)
+  })
+
+  it('includes the spend-only arm (F4): both kinds are pulled for it and its rows stored', async () => {
+    expect(campaignById(F4)!.measurement).toBe('spend-only')
+    const { sqlite, store } = await seededAll()
+    const fake = fakeExtras({
+      conversions: { [F4]: [convDay('2026-10-26', F4_ACTION, 4), convDay('2026-10-27', F4_ACTION, 20)] },
+      assets: { [F4]: [assetDay({ date: '2026-10-27', impressions: 40, clicks: 1 })] },
+    })
+    const r = await syncAdsExtras({ ads: fake.source, store }, opts(t0)) // the default campaign set, no caps
+    expect(fake.pulls(0, F4)).toEqual(['assets 2026-10-26..2026-10-27', 'conversions 2026-10-26..2026-10-27'])
+    const f4 = r.campaigns.find((c) => c.campaignId === F4)!
+    expect([f4.conversions.ok, f4.conversions.through, f4.assets.ok, f4.assets.through]).toEqual([true, '2026-10-27', true, '2026-10-27'])
+    expect(rows(sqlite, 'SELECT date, conversion_action_id, conversions FROM ads_daily_conversions WHERE campaign_id = ? ORDER BY date', F4)).toEqual([
+      { date: '2026-10-26', conversion_action_id: F4_ACTION, conversions: 4 },
+      { date: '2026-10-27', conversion_action_id: F4_ACTION, conversions: 20 },
+    ])
+    expect(count(sqlite, 'ads_daily_assets', 'campaign_id = ?', F4)).toBe(1)
+  })
+
+  it('extras run rows never count as a cost sync (LAST_SYNC_SQL, LAST_RUN_SQL, the claim); LAST_EXTRAS_RUN_SQL reads only them', async () => {
+    const { sqlite, store } = await seeded()
+    const fake = fakeExtras({ conversions: { [F4]: [convDay('2026-10-27', F4_ACTION, 1)] }, assets: {} })
+    const r = await syncAdsExtras({ ads: fake.source, store }, opts(t0, { campaignIds: [F4] }))
+    expect(r.runRecorded).toBe(true)
+    const extrasRows = rows(sqlite, "SELECT * FROM ads_sync_runs WHERE run_key LIKE 'extras:%'")
+    expect(extrasRows).toHaveLength(1)
+    expect(extrasRows[0]).toMatchObject({ campaigns_ok: '[]', campaigns_pulled: '[]', days_fetched: 0, days_changed: 0, placement_rows_fetched: 0, placement_rows_changed: 0 })
+
+    // one cost run at T1, then 60 newer extras rows (more than LAST_SYNC_SQL's 50-run scan) that,
+    // read as cost runs, would claim a sync of F3S
+    const T1 = t0 + 60_000
+    const record = (runKey: string, at: number, campaignsOk: string[]): SyncRunRecord => ({
+      runKey, source: 'worker-cron', startedAt: iso(at - 1000), finishedAt: iso(at), campaigns: campaignsOk, campaignsOk, campaignsPulled: campaignsOk,
+      daysFetched: 1, daysChanged: 1, placementRowsFetched: 0, placementRowsChanged: 0, status: 'ok', error: null, detail: {},
+    })
+    await store.appendSyncRun(record(`sync:worker-cron:${iso(T1)}:${F4}`, T1, [F4]))
+    const newest = T1 + 60 * 60_000
+    for (let i = 1; i <= 60; i++) await store.appendSyncRun(record(`extras:worker-cron:${iso(T1 + i * 60_000)}:${F3S}`, T1 + i * 60_000, [F3S]))
+    expect(rows(sqlite, LAST_SYNC_SQL)).toEqual([{ campaign_id: F4, last_sync: iso(T1) }])
+    expect(rows(sqlite, LAST_RUN_SQL)).toEqual([{ last: iso(T1) }])
+    expect(await readLastSyncRun(sqliteD1(sqlite))).toBe(iso(T1))
+    // a claim a minute after the newest extras row: the cost window only sees T1, an hour back
+    expect(await store.claimSync('worker-cron', newest + 60_000, 15 * 60_000)).toBe(true)
+    expect(await store.claimSync('worker-cron', newest + 120_000, 15 * 60_000)).toBe(false) // its own claim does block
+    // and the pass's own state read skips a newer cost row
+    await store.appendSyncRun(record(`sync:worker-cron:${iso(newest + 180_000)}:${F4}`, newest + 180_000, [F4]))
+    expect(rows(sqlite, LAST_EXTRAS_RUN_SQL)[0].finished_at).toBe(iso(newest))
+    expect((await store.getLastExtrasRun!())!.finishedAt).toBe(iso(newest))
+  })
+
+  it('the backfill (full, no caps) pulls every campaign whole in one run; a rerun changes nothing; --dry-run writes nothing', async () => {
+    // scripts/ads-reads/backfill.ts calls the pass with full and no cap
+    const src = readFileSync(fileURLToPath(new URL('./backfill.ts', import.meta.url)), 'utf8')
+    const call = src.match(/syncAdsExtras\(([^\n]*)\)/)![1]
+    expect(call).toContain('full: true')
+    expect(call).toContain("source: 'backfill'")
+    expect(call).not.toMatch(/maxDays|maxCampaigns/)
+
+    const f3sDays = etDateRange('2026-10-17', '2026-10-27')
+    const data = () => ({
+      conversions: { [F3S]: f3sDays.map((d) => convDay(d, A, 1)), [F4]: [convDay('2026-10-26', F4_ACTION, 4), convDay('2026-10-27', F4_ACTION, 20)] },
+      assets: { [F3S]: f3sDays.flatMap((d) => Array.from({ length: 25 }, (_, i) => assetDay({ date: d, assetId: String(700 + i) }))) },
+    })
+    const backfill = { source: 'backfill' as const, full: true }
+    const { sqlite, store } = await seededAll()
+    const fake = fakeExtras(data())
+    const r = await syncAdsExtras({ ads: fake.source, store }, opts(t0, backfill))
+    expect(r.status).toBe('ok')
+    expect(r.waiting).toEqual([])
+    expect(r.campaigns.filter((c) => c.conversions.deferred || c.assets.deferred)).toEqual([])
+    for (const c of syncableCampaigns()) {
+      const w = syncWindow(c, '2026-10-28')
+      if (!w) continue
+      for (const kind of ['conversions', 'assets'] as const) {
+        const pulled = new Set(fake.calls.filter((x) => x.id === c.id && x.kind === kind).flatMap((x) => etDateRange(x.since, x.until)))
+        expect([...pulled].sort(), `${c.id} ${kind}`).toEqual(etDateRange(w.since, w.until))
+      }
+    }
+    expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets', 'campaign_id = ?', F3S), count(sqlite, 'ads_assets')]).toEqual([13, 275, 25])
+
+    // a rerun re-pulls everything and changes nothing
+    const first = fake.calls.length
+    const again = await syncAdsExtras({ ads: fake.source, store }, opts(t0 + 60_000, backfill))
+    expect(fake.calls.length - first).toBe(first)
+    expect([again.conversionRowsFetched, again.assetRowsFetched]).toEqual([r.conversionRowsFetched, r.assetRowsFetched])
+    expect([again.conversionRowsChanged, again.assetRowsChanged]).toEqual([0, 0])
+
+    // --dry-run: the same pulls, no row and no run row written
+    const dry = await seededAll({ dryRun: true })
+    const runsBefore = count(dry.sqlite, 'ads_sync_runs')
+    const dr = await syncAdsExtras({ ads: fakeExtras(data()).source, store: dry.store }, opts(t0, { ...backfill, dryRun: true }))
+    expect(dr.runRecorded).toBe(false)
+    expect(NEW_TABLES.map((t) => count(dry.sqlite, t))).toEqual([0, 0, 0])
+    expect(count(dry.sqlite, 'ads_sync_runs')).toBe(runsBefore)
   })
 })

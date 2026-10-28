@@ -4,16 +4,30 @@
 // the cron gate, the read-only Ads client (no login-customer-id), build identity, and secret
 // hygiene. The dashboard's "Refresh data" (src/lib/adsRefresh.ts) is exercised end to end
 // through a fake Service Binding that calls the Worker's fetch handler.
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { etDateRange } from '../../src/lib/adsFreshness'
 import { clearRegisteredSecrets } from '../../src/lib/adsRedact'
 import { refreshAds } from '../../src/lib/adsRefresh'
-import { campaignsConfigHash, cronShouldSync, liveFlightCampaigns } from '../../src/lib/adsSync'
+import { LAST_SYNC_SQL, readFreshness, readLastSyncRun } from '../../src/lib/adsStore'
+import { campaignsConfigHash, cronShouldSync, liveFlightCampaigns, syncableCampaigns, syncWindow, type ExtrasResult } from '../../src/lib/adsSync'
 import { CAMPAIGNS } from '../../src/lib/campaigns'
 import type { FetchLike } from '../../src/lib/adsApi'
-import worker, { handleFetch, handleScheduled, resetClientCache, WORKER_MAX_DAYS, type Env } from '../../workers/sync/src/index'
+import worker, {
+  EXTRAS_CRON,
+  handleExtrasScheduled,
+  handleFetch,
+  handleScheduled,
+  resetClientCache,
+  WORKER_EXTRAS_MAX_CAMPAIGNS,
+  WORKER_EXTRAS_MAX_DAYS,
+  WORKER_MAX_DAYS,
+  type Env,
+} from '../../workers/sync/src/index'
 import { count, openMigratedSqlite, sqliteD1 } from './sqliteDb'
 
 const RETEST = '24279250691'
+const F3S = '24358792551' // F3 Search
+const FAKE_CUSTOMER = '1234567890' // made up: never the account's id
 const SECRETS = { ADS_CLIENT_ID: 'cid-value-123456', ADS_CLIENT_SECRET: 'csecret-value-xyz', ADS_REFRESH_TOKEN: 'rtoken-value-xyz', ADS_DEVELOPER_TOKEN: 'devtoken-value-xyz' }
 
 function setup(opts: { tokenStatus?: number } = {}) {
@@ -29,6 +43,9 @@ function setup(opts: { tokenStatus?: number } = {}) {
     GIT_SHA: 'abc1234',
   }
   const calls: { url: string; headers: Record<string, string>; body?: string }[] = []
+  // The conversions-and-assets queries: response rows per campaign id (none by default); a
+  // failing kind answers HTTP 500 with a customers/<id> path in Google's message.
+  const extras = { conversions: {} as Record<string, ExtrasRow[]>, assets: {} as Record<string, ExtrasRow[]>, fail: { conversions: false, assets: false } }
   // A fake Google Ads API: two closed retest days, one placement row; nothing for the closed campaigns.
   const fetchImpl: FetchLike = async (url, init) => {
     calls.push({ url, headers: init.headers, body: init.body })
@@ -39,6 +56,12 @@ function setup(opts: { tokenStatus?: number } = {}) {
     const q = JSON.parse(init.body!).query as string
     const since = q.match(/BETWEEN '([\d-]+)'/)![1]
     const until = q.match(/AND '([\d-]+)'/)![1]
+    const kind = extrasKindOf(q)
+    if (kind) {
+      if (extras.fail[kind]) return { ok: false, status: 500, text: async () => JSON.stringify({ error: { message: `backend error reading customers/${FAKE_CUSTOMER}/campaigns/${RETEST}` } }) }
+      const rows = extras[kind][q.match(/campaign\.id = (\d+)/)![1]] ?? []
+      return { ok: true, status: 200, text: async () => JSON.stringify({ results: rows.filter((r) => r.segments.date >= since && r.segments.date <= until) }) }
+    }
     const results = !q.includes(`campaign.id = ${RETEST}`)
       ? []
       : q.includes('group_placement_view')
@@ -49,8 +72,27 @@ function setup(opts: { tokenStatus?: number } = {}) {
           ]
     return { ok: true, status: 200, text: async () => JSON.stringify({ results: results.filter((r) => r.segments.date >= since && r.segments.date <= until) }) }
   }
-  return { sqlite, env, calls, fetchImpl, secretReads }
+  return { sqlite, env, calls, fetchImpl, secretReads, extras }
 }
+type ExtrasRow = { segments: { date: string } & Record<string, unknown> } & Record<string, unknown>
+/** Which extras query a GAQL string is (null: a cost query). */
+const extrasKindOf = (q: string): 'conversions' | 'assets' | null => (q.includes('ad_group_ad_asset_view') ? 'assets' : q.includes('segments.conversion_action') ? 'conversions' : null)
+// Probe-shaped extras rows (REST JSON, camelCase); every id but the campaign's is made up.
+const convRow = (date: string, conversions: number, actionId = '9000000001'): ExtrasRow => ({
+  segments: { date, conversionAction: `customers/${FAKE_CUSTOMER}/conversionActions/${actionId}`, conversionActionName: 'Sign-ups (test)' },
+  metrics: { conversions, allConversions: conversions },
+})
+const assetRow = (date: string, impressions: number, clicks: number): ExtrasRow => ({
+  segments: { date },
+  campaign: { id: RETEST },
+  adGroup: { id: '501' },
+  adGroupAd: { ad: { id: '601' } },
+  asset: { id: '701', type: 'TEXT', textAsset: { text: 'Sudoku with no ads' } },
+  adGroupAdAssetView: { fieldType: 'HEADLINE', performanceLabel: 'PENDING' },
+  metrics: { impressions: String(impressions), clicks: String(clicks), conversions: 0 },
+})
+/** The GAQL bodies of the search calls from index `from` on. */
+const queriesOf = (calls: { url: string; body?: string }[], from = 0) => calls.slice(from).filter((c) => c.url.includes('googleAds:search')).map((c) => JSON.parse(c.body!).query as string)
 const at = (iso: string) => Date.parse(iso)
 const post = (body?: unknown) => new Request('https://gss-stats-sync/sync', { method: 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
 const searches = (calls: { url: string }[]) => calls.filter((c) => c.url.includes('googleAds:search')).length
@@ -59,6 +101,8 @@ const RETEST_ONLY = { campaignIds: [RETEST] }
 afterEach(() => {
   clearRegisteredSecrets()
   resetClientCache()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 describe('gss-stats-sync Worker: on-demand sync (Service Binding only)', () => {
@@ -202,6 +246,129 @@ describe('gss-stats-sync Worker: the cron', () => {
     const closing = at('2026-09-29T07:05:00Z')
     const closed = await handleScheduled({ scheduledTime: closing, cron: '5 * * * *' }, env, { fetchImpl, nowMs: closing })
     expect(closed!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-28' })
+  })
+})
+
+describe('gss-stats-sync Worker: the conversions-and-assets cron (EXTRAS_CRON)', () => {
+  const EXTRAS_RUNS = "run_key LIKE 'extras:%'"
+  /** Everything the cost sync owns: its rows, its placement rows, its claims and run rows. */
+  const costState = (sqlite: ReturnType<typeof setup>['sqlite']) => ({
+    metrics: sqlite.prepare('SELECT * FROM ads_daily_metrics ORDER BY campaign_id, date').all(),
+    placements: sqlite.prepare('SELECT * FROM ads_placement_daily ORDER BY campaign_id, date, placement').all(),
+    costRuns: sqlite.prepare(`SELECT * FROM ads_sync_runs WHERE NOT (${EXTRAS_RUNS}) ORDER BY id`).all(),
+  })
+  const campaignOf = (q: string) => q.match(/campaign\.id = (\d+)/)![1]
+
+  it('scheduled() dispatches on event.cron: a cost tick does no extras work, an EXTRAS_CRON tick no cost work', async () => {
+    const { sqlite, env, fetchImpl, calls, extras } = setup()
+    extras.conversions[RETEST] = [convRow('2026-09-27', 2)]
+    extras.assets[RETEST] = [assetRow('2026-09-27', 120, 3)]
+    // the default export takes no test hooks: fake its clock and its global fetch
+    vi.stubGlobal('fetch', (url: string, init: Parameters<FetchLike>[1]) => fetchImpl(url, init))
+    vi.useFakeTimers({ now: at('2026-09-28T14:05:00Z'), toFake: ['Date'] })
+    await worker.scheduled({ scheduledTime: Date.now(), cron: '5 * * * *' }, env)
+    const costQueries = queriesOf(calls)
+    expect(costQueries.length).toBeGreaterThan(0)
+    expect(costQueries.filter((q) => extrasKindOf(q))).toEqual([])
+    expect(count(sqlite, 'ads_daily_metrics', 'campaign_id = ?', RETEST)).toBe(2)
+    for (const t of ['ads_daily_conversions', 'ads_daily_assets', 'ads_assets']) expect(count(sqlite, t)).toBe(0)
+    expect(count(sqlite, 'ads_sync_runs', EXTRAS_RUNS)).toBe(0)
+
+    const before = costState(sqlite)
+    const from = calls.length
+    vi.setSystemTime(at('2026-09-29T09:35:00Z')) // 05:35 EDT, an EXTRAS_CRON tick
+    await worker.scheduled({ scheduledTime: Date.now(), cron: EXTRAS_CRON }, env)
+    const extrasQueries = queriesOf(calls, from)
+    expect(new Set(extrasQueries.map(extrasKindOf))).toEqual(new Set(['conversions', 'assets'])) // and no cost query (null)
+    expect(costState(sqlite)).toEqual(before) // no cost row, no claim, no cost run row
+    expect(count(sqlite, 'ads_sync_runs', EXTRAS_RUNS)).toBe(1)
+    expect([count(sqlite, 'ads_daily_conversions', 'campaign_id = ?', RETEST), count(sqlite, 'ads_daily_assets', 'campaign_id = ?', RETEST)]).toEqual([1, 1])
+  })
+
+  it('a failed extras query leaves the cost rows, freshness, rate limit and claim untouched; only that kind goes stale', async () => {
+    const { sqlite, env, fetchImpl, extras } = setup()
+    for (let i = 0; i < 4; i++) await handleFetch(post(), env, at('2026-09-28T10:00:00Z') + i * 11 * 60_000, { fetchImpl })
+    const now = at('2026-09-29T09:35:00Z')
+    const freshness = async () => ({
+      ...costState(sqlite),
+      lastSync: sqlite.prepare(LAST_SYNC_SQL).all(),
+      lastRun: await readLastSyncRun(env.gss_stats_ads),
+      byCampaign: [...(await readFreshness(env.gss_stats_ads, now)).entries()],
+    })
+    const before = await freshness()
+    expect(before.lastSync.length).toBeGreaterThan(0)
+    extras.fail.conversions = true
+    extras.assets[RETEST] = [assetRow('2026-09-26', 90, 1), assetRow('2026-09-27', 120, 3)]
+    const r = await handleExtrasScheduled({ scheduledTime: now, cron: EXTRAS_CRON }, env, { fetchImpl, nowMs: now })
+    expect(r.status).toBe('partial')
+    const retest = r.campaigns.find((c) => c.campaignId === RETEST)!
+    expect(retest.conversions).toMatchObject({ ok: false, stale: true })
+    expect(retest.conversions.error).toMatch(/HTTP 500/)
+    expect(retest.assets).toMatchObject({ ok: true, stale: false, through: '2026-09-28', rowsChanged: 2 })
+    expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets')]).toEqual([0, 2])
+    expect(await freshness()).toEqual(before)
+    const row = sqlite.prepare(`SELECT status, error, detail FROM ads_sync_runs WHERE ${EXTRAS_RUNS}`).get() as Record<string, string>
+    expect(row.status).toBe('partial')
+    expect(JSON.stringify([row, r])).not.toContain(FAKE_CUSTOMER)
+    // the extras run finished inside the claim window, yet a forced cost re-pull a minute later
+    // claims and runs (no 429): the claim and the rate limit skip extras rows
+    const res = await handleFetch(post({ full: true, campaignIds: [RETEST] }), env, now + 60_000, { fetchImpl })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ran: true })
+  })
+
+  it(`a run pulls at most ${WORKER_EXTRAS_MAX_DAYS} closed days per campaign and kind (newest first) and ${WORKER_EXTRAS_MAX_CAMPAIGNS} campaigns; later ticks finish`, async () => {
+    const { env, fetchImpl, calls } = setup()
+    const t0 = at('2026-10-28T08:35:00Z') // 04:35 EDT: closed days through 10-27
+    const todayEt = '2026-10-28'
+    const results: ExtrasResult[] = []
+    const pulls: Map<string, string[]>[] = [] // per run: "<campaign> <kind>" -> the days pulled
+    for (let i = 0; i < 15; i++) {
+      const now = t0 + i * 15 * 60_000 // well inside the 6 h restatement re-check
+      const from = calls.length
+      const r = await handleExtrasScheduled({ scheduledTime: now, cron: EXTRAS_CRON }, env, { fetchImpl, nowMs: now })
+      results.push(r)
+      if (r.nothingDue) break
+      const run = new Map<string, string[]>()
+      for (const q of queriesOf(calls, from)) {
+        const key = `${campaignOf(q)} ${extrasKindOf(q)}`
+        run.set(key, [...(run.get(key) ?? []), ...etDateRange(q.match(/BETWEEN '([\d-]+)'/)![1], q.match(/AND '([\d-]+)'/)![1])])
+      }
+      pulls.push(run)
+    }
+    const campaignsIn = (run: Map<string, string[]>) => new Set([...run.keys()].map((k) => k.split(' ')[0]))
+    expect(results.at(-1)!.nothingDue).toBe(true)
+    expect(pulls.length).toBeGreaterThan(2)
+    for (const run of pulls) {
+      expect(campaignsIn(run).size).toBeLessThanOrEqual(WORKER_EXTRAS_MAX_CAMPAIGNS)
+      for (const [key, days] of run) {
+        expect(days.length, key).toBeLessThanOrEqual(WORKER_EXTRAS_MAX_DAYS)
+        expect(new Set(days).size, key).toBe(days.length)
+      }
+      // both kinds of every campaign a run takes
+      for (const id of campaignsIn(run)) expect([run.has(`${id} conversions`), run.has(`${id} assets`)]).toEqual([true, true])
+    }
+    // the first run: four campaigns, live ones before closed; every other due campaign waits
+    const withWindow = syncableCampaigns().filter((c) => syncWindow(c, todayEt))
+    expect(campaignsIn(pulls[0]).size).toBe(WORKER_EXTRAS_MAX_CAMPAIGNS)
+    expect([...campaignsIn(pulls[0])].filter((id) => CAMPAIGNS.find((c) => c.id === id)!.status === 'closed')).toEqual([])
+    expect(results[0].waiting).toHaveLength(withWindow.length - WORKER_EXTRAS_MAX_CAMPAIGNS)
+    // F3 Search (closed days 10-17 .. 10-27): its newest seven first, the oldest four on a later
+    // run (the cost planner's older span runs on toward the recent window up to the cap, so that
+    // run re-pulls a few stored days too; only changed rows are written)
+    const f3s = pulls.map((run) => [...(run.get(`${F3S} conversions`) ?? [])].sort()).filter((d) => d.length)
+    expect(f3s).toHaveLength(2)
+    expect(f3s[0]).toEqual(etDateRange('2026-10-21', '2026-10-27'))
+    expect(f3s[1].slice(0, 4)).toEqual(etDateRange('2026-10-17', '2026-10-20'))
+    // the end: every campaign stored through its required days, nothing stale, nobody waiting
+    const end = results.at(-1)!
+    expect(end.waiting).toEqual([])
+    for (const c of withWindow) {
+      const w = syncWindow(c, todayEt)!
+      const required = w.until < c.flightEnd ? w.until : c.flightEnd
+      const r = end.campaigns.find((x) => x.campaignId === c.id)!
+      expect([r.conversions.through, r.conversions.stale, r.assets.through, r.assets.stale], c.id).toEqual([required, false, required, false])
+    }
   })
 })
 

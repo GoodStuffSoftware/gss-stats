@@ -185,11 +185,11 @@ const HANDLERS: Record<string, (ctx: any) => Response | Promise<Response>> = {
 function adsDb(): DatabaseSync {
   const a = new DatabaseSync(':memory:')
   a.exec('CREATE TABLE ads_daily_metrics (campaign_id TEXT, date TEXT, cost_micros INTEGER, impressions INTEGER, clicks INTEGER, source TEXT, fetched_at TEXT, placements_fetched_at TEXT)')
-  a.exec('CREATE TABLE ads_sync_runs (campaigns_ok TEXT, campaigns_pulled TEXT, finished_at TEXT, status TEXT)')
+  a.exec('CREATE TABLE ads_sync_runs (run_key TEXT, campaigns_ok TEXT, campaigns_pulled TEXT, finished_at TEXT, status TEXT)')
   const ins = a.prepare("INSERT INTO ads_daily_metrics VALUES (?, ?, ?, 100, 10, 'google-ads-api', ?, NULL)")
   for (let d = 2; d <= 9; d++) ins.run('24215315197', `2026-09-0${d}`, 15_000_000, '2026-09-10T12:00:00Z')
   ins.run('24279250691', '2026-09-26', 5_000_000, '2026-09-26T20:00:00Z')
-  a.prepare('INSERT INTO ads_sync_runs VALUES (?, ?, ?, ?)').run('["24215315197","24279250691"]', '["24215315197","24279250691"]', '2026-09-26T19:30:00Z', 'ok')
+  a.prepare('INSERT INTO ads_sync_runs VALUES (?, ?, ?, ?, ?)').run('sync:worker-cron:2026-09-26T19:30:00Z', '["24215315197","24279250691"]', '["24215315197","24279250691"]', '2026-09-26T19:30:00Z', 'ok')
   return a
 }
 let ads: DatabaseSync
