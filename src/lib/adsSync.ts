@@ -35,6 +35,10 @@
 import { CAMPAIGNS, campaignById, type CampaignFlight } from './campaigns'
 import { channelOf, microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import {
+  ASSET_CATALOG_ROWS_PER_STATEMENT,
+  ASSET_ROWS_PER_STATEMENT,
+  campaignSyncStatements,
+  CONVERSION_ROWS_PER_STATEMENT,
   EXTRAS_RUN_KEY_PREFIX,
   mergeAssetRows,
   mergeConversionRows,
@@ -802,8 +806,10 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
 // syncAdsExtras() pulls two more READ-ONLY queries per campaign (lib/adsApi.ts
 // fetchDailyConversions, fetchDailyAssets): conversions per ET day and conversion action, and
 // per-asset delivery per ET day. Every syncable campaign gets both, spend-only arms included.
-// The window, the close rule and the restatement window are the cost sync's (planCampaignSync
-// with placements off). It runs in its OWN invocation (the Worker's EXTRAS_CRON; npm run
+// The window is the flight (flight start through flight end + RESTATEMENT_DAYS, by the registry's
+// dates), with the cost sync's close rule and restatement window; days already stored outside
+// that window are never pulled again. Each run is planned to its row and D1 statement budget
+// BEFORE anything is fetched (planExtrasRun). It runs in its OWN invocation (the Worker's EXTRAS_CRON; npm run
 // ads:backfill after the cost backfill), never inside syncAdsData, so it adds no work to a
 // cost-sync invocation and cannot fail, delay or stale the cost data:
 //  - It never writes a cost row, a claim or a 'running' row. Its state (the closed days each
@@ -839,6 +845,8 @@ export interface ExtrasKindState {
   /** The last attempt worked (null: never attempted). */
   ok: boolean | null
   error: string | null
+  /** The most rows one day of this kind has returned (plans later runs); null: none yet. */
+  rowsPerDay: number | null
 }
 export type ExtrasState = Record<string, Partial<Record<ExtrasKind, ExtrasKindState>>>
 
@@ -850,10 +858,10 @@ export interface ExtrasOptions {
   source: SyncSource
   /** Re-pull every day in the window (the backfill). */
   full?: boolean
-  /** Most closed days one campaign pulls per kind per run, newest first. Default: no cap. */
-  maxDays?: number
-  /** Most campaigns one run pulls; the rest wait (least recently attempted first). Default: no cap. */
-  maxCampaigns?: number
+  /** Rows one run plans to fetch, estimated per kind before any fetch (the Worker's CPU). Default: no cap. */
+  maxRows?: number
+  /** D1 statements one run may send besides its run row (the store's reserve). Default: no cap. */
+  statementBudget?: number
   /** Default RESTATEMENT_RECHECK_MS. */
   restatementRecheckMs?: number
 }
@@ -930,7 +938,7 @@ const isEtDay = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d
 const isoOrNull = (v: unknown): string | null => (typeof v === 'string' && ISO_TS.test(v) && Number.isFinite(Date.parse(v)) ? v : null)
 const inRange = (range: SyncRange) => (r: { date: string }) => r.date >= range.since && r.date <= range.until
 const datesIn = (rows: readonly { date: string }[]) => [...new Set(rows.map((r) => r.date))].sort()
-export const emptyExtrasKindState = (): ExtrasKindState => ({ covered: [], recheckedAt: null, attemptedAt: null, ok: null, error: null })
+export const emptyExtrasKindState = (): ExtrasKindState => ({ covered: [], recheckedAt: null, attemptedAt: null, ok: null, error: null, rowsPerDay: null })
 
 /** Adds a range to sorted, merged [since, until] ranges (overlapping and adjacent ones join). */
 export function addCoveredRange(covered: readonly [string, string][], r: SyncRange): [string, string][] {
@@ -964,6 +972,7 @@ function parseKindState(v: unknown): ExtrasKindState | null {
     attemptedAt: isoOrNull(v.attemptedAt),
     ok: typeof v.ok === 'boolean' ? v.ok : null,
     error: typeof v.error === 'string' && v.error ? summarizeError(v.error, 200) : null,
+    rowsPerDay: typeof v.rowsPerDay === 'number' && Number.isInteger(v.rowsPerDay) && v.rowsPerDay > 0 && v.rowsPerDay <= 100_000 ? v.rowsPerDay : null,
   }
 }
 /** The pass's carried-forward state from its latest run row's detail (`extras`): configured
@@ -987,19 +996,125 @@ export function parseExtrasState(detail: unknown): ExtrasState {
 }
 const kindStateOf = (state: ExtrasState, id: string, kind: ExtrasKind): ExtrasKindState => state[id]?.[kind] ?? emptyExtrasKindState()
 
-/** Pure: what one kind of one campaign needs, through the cost sync's own planner (the covered
- * days stand in for stored closed rows; the last re-check for the last pull). */
+/** The closed ET days the pass pulls for a campaign: flight start through flight end plus
+ * RESTATEMENT_DAYS, never past the last closed day. The registry's DATES decide, not its status
+ * (a status can be stale: an ended flight marked active would otherwise be pulled to yesterday). */
+export function extrasWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string, nowMs: number): SyncRange | null {
+  if (!c.flightStart) return null
+  const beforeClose = etDateFast(nowMs) === todayEt && nowMs < etWallTimeMs(todayEt, CLOSED_AFTER_ET)
+  const lastClosed = addDays(todayEt, beforeClose ? -2 : -1)
+  const end = addDays(c.flightEnd, RESTATEMENT_DAYS)
+  const until = end < lastClosed ? end : lastClosed
+  return c.flightStart <= until ? { since: c.flightStart, until } : null
+}
+
+/** Sorted days as contiguous ranges, oldest first. */
+function runsOf(days: readonly string[]): SyncRange[] {
+  const out: SyncRange[] = []
+  for (const d of days) {
+    const last = out[out.length - 1]
+    if (last && addDays(last.until, 1) === d) last.until = d
+    else out.push({ since: d, until: d })
+  }
+  return out
+}
+
+/** Pure: what one kind of one campaign needs, newest first: the restatement window (the last
+ * RESTATEMENT_DAYS closed days of the extras window) whole when its re-check is due or any of it
+ * is missing, then each run of days not yet covered. A covered day outside the restatement window
+ * is never pulled again (a full re-pull, the backfill, takes the whole window). */
 export function planExtrasKind(
-  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd' | 'status'>,
+  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'>,
   state: ExtrasKindState,
   todayEt: string,
-  opts: { nowMs: number; full?: boolean; maxDays?: number; restatementRecheckMs?: number },
+  opts: { nowMs: number; full?: boolean; restatementRecheckMs?: number },
 ): ExtrasKindPlan {
-  const nowIso = new Date(opts.nowMs).toISOString()
-  const rows: StoredDayRow[] = [...coveredDaysIn(state.covered, syncWindow(c, todayEt))].map((date) => ({ date, costMicros: 0, impressions: 0, clicks: 0, fetchedAt: nowIso, placementsFetchedAt: null }))
-  const plan = planCampaignSync(c, rows, todayEt, { full: opts.full, placements: false, nowMs: opts.nowMs, lastPullAt: state.recheckedAt, restatementRecheckMs: opts.restatementRecheckMs })
-  if (opts.maxDays != null && opts.maxDays > 0 && plan.ranges.length) capPlan(plan, Math.floor(opts.maxDays))
-  return { window: plan.window, ranges: plan.ranges, recheck: plan.recheck, missingDays: plan.missingDays, restatementDue: plan.restatementDue, deferred: plan.deferred }
+  const window = extrasWindow(c, todayEt, opts.nowMs)
+  if (!window) return { window: null, ranges: [], recheck: null, missingDays: [], restatementDue: false, deferred: false }
+  const covered = coveredDaysIn(state.covered, window)
+  const days = etDateRange(window.since, window.until)
+  const missingDays = days.filter((d) => !covered.has(d))
+  const restateFrom = addDays(todayEt, -RESTATEMENT_DAYS)
+  const recentSince = restateFrom > window.since ? restateFrom : window.since
+  const recent = recentSince <= window.until ? { since: recentSince, until: window.until } : null
+  const recheckMs = opts.restatementRecheckMs ?? RESTATEMENT_RECHECK_MS
+  const last = state.recheckedAt ? Date.parse(state.recheckedAt) : NaN
+  const restatementDue = !!recent && (!!opts.full || recheckMs <= 0 || !Number.isFinite(last) || opts.nowMs - last >= recheckMs)
+  const recheck = recent && (restatementDue || missingDays.some((d) => d >= recent.since)) ? recent : null
+  const older = (opts.full ? days : missingDays).filter((d) => !recent || d < recent.since)
+  const ranges = [...(recheck ? [recheck] : []), ...runsOf(older).reverse()]
+  return { window, ranges, recheck, missingDays, restatementDue, deferred: false }
+}
+
+/** Rows a day of each kind is planned at until that kind has returned rows (then the most rows
+ * one day has returned, ExtrasKindState.rowsPerDay). */
+export const EXTRAS_DEFAULT_ROWS_PER_DAY: Readonly<Record<ExtrasKind, number>> = { conversions: 6, assets: 40 }
+
+/** What pulling `days` days of one kind is planned at: rows fetched, and D1 write statements with
+ * every row assumed changed (the asset catalog: at most two days' worth of distinct assets). */
+export function extrasCost(kind: ExtrasKind, days: number, rowsPerDay: number): { rows: number; statements: number } {
+  const rows = days * rowsPerDay
+  const statements =
+    kind === 'conversions'
+      ? Math.ceil(rows / CONVERSION_ROWS_PER_STATEMENT)
+      : Math.ceil(rows / ASSET_ROWS_PER_STATEMENT) + Math.ceil(Math.min(rows, 2 * rowsPerDay) / ASSET_CATALOG_ROWS_PER_STATEMENT)
+  return { rows, statements }
+}
+
+/** Pure: cuts the due plans, campaigns in `due` order, to one run's budget BEFORE anything is
+ * fetched, so a run never pulls a campaign or kind it cannot write: `rows` (the Worker's CPU) and
+ * `statements` (D1 reads and writes still free). Per kind: one stored read, then each range newest
+ * first; the restatement window is taken whole or not at all, an older range is cut to its newest
+ * days. The run's first campaign takes its restatement windows even past `rows`, and one older
+ * day of a kind that would otherwise take nothing (`statements` always holds), so a campaign
+ * denser than the row budget still moves. Sets the plans' ranges and `deferred`; returns who runs
+ * and who waits. */
+export function planExtrasRun(
+  due: readonly CampaignFlight[],
+  plans: Map<string, Record<ExtrasKind, ExtrasKindPlan>>,
+  rowsPerDay: (campaignId: string, kind: ExtrasKind) => number,
+  budget: { rows: number; statements: number },
+): { toRun: CampaignFlight[]; waiting: string[] } {
+  let rowsLeft = budget.rows
+  let statementsLeft = budget.statements
+  const toRun: CampaignFlight[] = []
+  const waiting: string[] = []
+  for (const c of due) {
+    const head = toRun.length === 0
+    let took = false
+    for (const k of EXTRAS_KINDS) {
+      const p = plans.get(c.id)![k]
+      if (!p.ranges.length) continue
+      const perDay = rowsPerDay(c.id, k)
+      const kept: SyncRange[] = []
+      for (const r of p.ranges) {
+        const len = etDateRange(r.since, r.until).length
+        const recent = !!p.recheck && r.since === p.recheck.since && r.until === p.recheck.until
+        const read = kept.length ? 0 : 1
+        const fits = (n: number, soft: boolean) => {
+          const e = extrasCost(k, n, perDay)
+          return (soft || e.rows <= rowsLeft) && e.statements + read <= statementsLeft
+        }
+        let n = fits(len, head && recent) ? len : 0
+        if (!n && !recent) {
+          n = len - 1
+          while (n > 0 && !fits(n, false)) n--
+          if (!n && head && !kept.length && fits(1, true)) n = 1
+        }
+        if (n < len) p.deferred = true
+        if (!n) continue
+        const e = extrasCost(k, n, perDay)
+        rowsLeft -= e.rows
+        statementsLeft -= e.statements + read
+        kept.push(n === len ? r : { since: addDays(r.until, -(n - 1)), until: r.until })
+      }
+      p.ranges = kept
+      if (kept.length) took = true
+    }
+    if (took) toRun.push(c)
+    else waiting.push(c.id)
+  }
+  return { toRun, waiting }
 }
 
 /** Where one kind stands: stored through which day, and whether only its data is stale. */
@@ -1142,6 +1257,10 @@ async function pullExtrasKind<R extends { date: string }>(
           continue
         }
         result.rowsFetched += fetched.value.length
+        const perDay = new Map<string, number>()
+        for (const r of fetched.value) perDay.set(r.date, (perDay.get(r.date) ?? 0) + 1)
+        const peak = Math.max(0, ...perDay.values())
+        if (peak > 0) state.rowsPerDay = Math.max(state.rowsPerDay ?? 0, peak)
         const d = ops.diff(old.value, fetched.value, range)
         if (d.error) {
           errors.push(d.error)
@@ -1220,20 +1339,26 @@ export async function syncAdsExtras(deps: ExtrasDeps, opts: ExtrasOptions): Prom
   const state = parseExtrasState(last.value?.detail)
 
   const plans = new Map<string, Record<ExtrasKind, ExtrasKindPlan>>()
-  const planOpts = { nowMs: opts.now, full: opts.full, maxDays: opts.maxDays, restatementRecheckMs: opts.restatementRecheckMs }
+  const planOpts = { nowMs: opts.now, full: opts.full, restatementRecheckMs: opts.restatementRecheckMs }
   for (const c of campaigns)
     plans.set(c.id, { conversions: planExtrasKind(c, kindStateOf(state, c.id, 'conversions'), todayEt, planOpts), assets: planExtrasKind(c, kindStateOf(state, c.id, 'assets'), todayEt, planOpts) })
   const dueKinds = (id: string) => EXTRAS_KINDS.filter((k) => plans.get(id)![k].ranges.length > 0)
-  // Least recently attempted first (never attempted before all), then live before closed, then
-  // config order: a campaign that keeps failing never holds the others back.
+  // Least recently attempted first (never attempted before all), then in flight before ended (the
+  // registry's dates: a status can be stale), then config order: a campaign that keeps failing
+  // never holds the others back.
   const turn = (id: string) => dueKinds(id).map((k) => kindStateOf(state, id, k).attemptedAt ?? '').sort()[0] ?? ''
   const order = new Map(campaigns.map((c, i) => [c.id, i]))
+  const ended = (c: CampaignFlight) => Number(c.flightEnd < addDays(todayEt, -1))
   const due = campaigns
     .filter((c) => dueKinds(c.id).length > 0)
-    .sort((a, b) => (turn(a.id) !== turn(b.id) ? (turn(a.id) < turn(b.id) ? -1 : 1) : Number(a.status === 'closed') - Number(b.status === 'closed') || order.get(a.id)! - order.get(b.id)!))
-  const cap = opts.maxCampaigns != null && opts.maxCampaigns > 0 ? Math.floor(opts.maxCampaigns) : due.length
-  const toRun = due.slice(0, cap)
-  result.waiting = due.slice(cap).map((c) => c.id)
+    .sort((a, b) => (turn(a.id) !== turn(b.id) ? (turn(a.id) < turn(b.id) ? -1 : 1) : ended(a) - ended(b) || order.get(a.id)! - order.get(b.id)!))
+  const budgetOf = (v: number | undefined) => (v != null && v > 0 ? Math.floor(v) : Infinity)
+  // The state read is spent; the campaign definitions go first once anything is written.
+  const statements = budgetOf(opts.statementBudget) - 1 - (opts.dryRun ? 0 : campaignSyncStatements(syncableCampaigns(), startedAt).length)
+  const rowsPerDay = (id: string, k: ExtrasKind) => kindStateOf(state, id, k).rowsPerDay ?? EXTRAS_DEFAULT_ROWS_PER_DAY[k]
+  const planned = planExtrasRun(due, plans, rowsPerDay, { rows: budgetOf(opts.maxRows), statements })
+  const toRun = planned.toRun
+  result.waiting = planned.waiting
   const waiting = new Set(result.waiting)
   const standing = (c: CampaignFlight, k: ExtrasKind): ExtrasKindResult => {
     const st = kindStateOf(state, c.id, k)
@@ -1241,7 +1366,12 @@ export async function syncAdsExtras(deps: ExtrasDeps, opts: ExtrasOptions): Prom
     return { ok: null, ranges: [], rowsFetched: 0, rowsChanged: 0, deferred: p.deferred || (waiting.has(c.id) && p.ranges.length > 0), ...extrasStanding(c, st, p), warnings: [], error: st.ok === false ? st.error : null }
   }
   if (!toRun.length) {
-    result.nothingDue = true
+    // Nothing due; or (a budget too small for even one day) nothing that fits: that waits.
+    result.nothingDue = !due.length
+    if (due.length) {
+      result.status = 'partial'
+      result.error = `work cap: ${result.waiting.join(', ')} continue next run`
+    }
     result.campaigns = campaigns.map((c) => ({ campaignId: c.id, label: c.label, conversions: standing(c, 'conversions'), assets: standing(c, 'assets') }))
     result.finishedAt = finished()
     return result

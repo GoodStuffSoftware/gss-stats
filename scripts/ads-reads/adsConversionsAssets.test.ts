@@ -41,10 +41,10 @@ import {
   type SyncRunRecord,
 } from '../../src/lib/adsStore'
 import {
+  extrasWindow,
   RESTATEMENT_RECHECK_MS,
   syncableCampaigns,
   syncAdsExtras,
-  syncWindow,
   type AdsExtrasSource,
   type ExtrasKind,
   type ExtrasOptions,
@@ -622,7 +622,7 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     const call = src.match(/syncAdsExtras\(([^\n]*)\)/)![1]
     expect(call).toContain('full: true')
     expect(call).toContain("source: 'backfill'")
-    expect(call).not.toMatch(/maxDays|maxCampaigns/)
+    expect(call).not.toMatch(/maxRows|statementBudget/)
 
     const f3sDays = etDateRange('2026-10-17', '2026-10-27')
     const data = () => ({
@@ -637,7 +637,7 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     expect(r.waiting).toEqual([])
     expect(r.campaigns.filter((c) => c.conversions.deferred || c.assets.deferred)).toEqual([])
     for (const c of syncableCampaigns()) {
-      const w = syncWindow(c, '2026-10-28')
+      const w = extrasWindow(c, '2026-10-28', t0)
       if (!w) continue
       for (const kind of ['conversions', 'assets'] as const) {
         const pulled = new Set(fake.calls.filter((x) => x.id === c.id && x.kind === kind).flatMap((x) => etDateRange(x.since, x.until)))

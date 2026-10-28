@@ -6,10 +6,11 @@
 // through a fake Service Binding that calls the Worker's fetch handler.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { etDateRange } from '../../src/lib/adsFreshness'
+import { addDays } from '../../src/lib/etTime'
 import { clearRegisteredSecrets } from '../../src/lib/adsRedact'
 import { refreshAds } from '../../src/lib/adsRefresh'
 import { LAST_SYNC_SQL, readFreshness, readLastSyncRun } from '../../src/lib/adsStore'
-import { campaignsConfigHash, cronShouldSync, liveFlightCampaigns, syncableCampaigns, syncWindow, type ExtrasResult } from '../../src/lib/adsSync'
+import { campaignsConfigHash, cronShouldSync, extrasWindow, liveFlightCampaigns, syncableCampaigns, syncWindow, type ExtrasResult } from '../../src/lib/adsSync'
 import { CAMPAIGNS } from '../../src/lib/campaigns'
 import type { FetchLike } from '../../src/lib/adsApi'
 import worker, {
@@ -18,8 +19,7 @@ import worker, {
   handleFetch,
   handleScheduled,
   resetClientCache,
-  WORKER_EXTRAS_MAX_CAMPAIGNS,
-  WORKER_EXTRAS_MAX_DAYS,
+  WORKER_EXTRAS_MAX_ROWS,
   WORKER_MAX_DAYS,
   type Env,
 } from '../../workers/sync/src/index'
@@ -317,14 +317,23 @@ describe('gss-stats-sync Worker: the conversions-and-assets cron (EXTRAS_CRON)',
     expect(await res.json()).toMatchObject({ ran: true })
   })
 
-  it(`a run pulls at most ${WORKER_EXTRAS_MAX_DAYS} closed days per campaign and kind (newest first) and ${WORKER_EXTRAS_MAX_CAMPAIGNS} campaigns; later ticks finish`, async () => {
-    const { env, fetchImpl, calls } = setup()
-    const t0 = at('2026-10-28T08:35:00Z') // 04:35 EDT: closed days through 10-27
+  it(`each run is planned to ${WORKER_EXTRAS_MAX_ROWS} rows and the D1 budget before it fetches; no stored day is pulled twice; ended flights stop at flight end + 3`, async () => {
+    const { env, fetchImpl, calls, extras } = setup()
+    const t0 = at('2026-10-28T08:20:00Z') // 04:20 EDT: closed days through 10-27
     const todayEt = '2026-10-28'
+    const windows = new Map(syncableCampaigns().flatMap((c) => { const w = extrasWindow(c, todayEt, t0); return w ? [[c.id, w] as const] : [] }))
+    // every campaign: one conversion row and 30 asset rows a day, every day of its flight and a
+    // week either side (more than the window: the pass must not ask for them)
+    for (const c of syncableCampaigns()) {
+      if (!c.flightStart) continue
+      const days = etDateRange(addDays(c.flightStart, -7), addDays(c.flightEnd < todayEt ? c.flightEnd : todayEt, 7))
+      extras.conversions[c.id] = days.map((d) => convRow(d, 2))
+      extras.assets[c.id] = days.flatMap((d) => Array.from({ length: 30 }, (_, i) => ({ ...assetRow(d, 50, 1), campaign: { id: c.id }, asset: { id: String(7000 + i), type: 'TEXT', textAsset: { text: `Headline ${i} (test)` } } })))
+    }
     const results: ExtrasResult[] = []
     const pulls: Map<string, string[]>[] = [] // per run: "<campaign> <kind>" -> the days pulled
-    for (let i = 0; i < 15; i++) {
-      const now = t0 + i * 15 * 60_000 // well inside the 6 h restatement re-check
+    for (let i = 0; i < 60; i++) {
+      const now = t0 + i * 5 * 60_000 // inside the 6 h restatement re-check
       const from = calls.length
       const r = await handleExtrasScheduled({ scheduledTime: now, cron: EXTRAS_CRON }, env, { fetchImpl, nowMs: now })
       results.push(r)
@@ -336,38 +345,40 @@ describe('gss-stats-sync Worker: the conversions-and-assets cron (EXTRAS_CRON)',
       }
       pulls.push(run)
     }
-    const campaignsIn = (run: Map<string, string[]>) => new Set([...run.keys()].map((k) => k.split(' ')[0]))
     expect(results.at(-1)!.nothingDue).toBe(true)
-    expect(pulls.length).toBeGreaterThan(2)
-    for (const run of pulls) {
-      expect(campaignsIn(run).size).toBeLessThanOrEqual(WORKER_EXTRAS_MAX_CAMPAIGNS)
+    expect(pulls.length).toBeGreaterThan(5) // the caps split the work
+    const seen = new Set<string>()
+    pulls.forEach((run, i) => {
+      const r = results[i]
+      expect(r.conversionRowsFetched + r.assetRowsFetched, `run ${i}`).toBeLessThanOrEqual(WORKER_EXTRAS_MAX_ROWS)
+      expect(JSON.stringify(r), `run ${i}`).not.toContain('D1 query budget')
+      expect(r.runRecorded, `run ${i}`).toBe(true)
       for (const [key, days] of run) {
-        expect(days.length, key).toBeLessThanOrEqual(WORKER_EXTRAS_MAX_DAYS)
-        expect(new Set(days).size, key).toBe(days.length)
+        const [id, kind] = key.split(' ') as [string, 'conversions' | 'assets']
+        // everything fetched is stored by the same run
+        const stored = r.campaigns.find((c) => c.campaignId === id)![kind].ranges.flatMap((x) => etDateRange(x.since, x.until))
+        expect(stored.sort(), `run ${i} ${key}`).toEqual([...days].sort())
+        const w = windows.get(id)!
+        for (const d of days) {
+          expect(d >= w.since && d <= w.until, `run ${i} ${key} ${d}`).toBe(true)
+          expect(seen.has(`${key} ${d}`), `run ${i} ${key} ${d} pulled again`).toBe(false)
+          seen.add(`${key} ${d}`)
+        }
       }
-      // both kinds of every campaign a run takes
-      for (const id of campaignsIn(run)) expect([run.has(`${id} conversions`), run.has(`${id} assets`)]).toEqual([true, true])
-    }
-    // the first run: four campaigns, live ones before closed; every other due campaign waits
-    const withWindow = syncableCampaigns().filter((c) => syncWindow(c, todayEt))
-    expect(campaignsIn(pulls[0]).size).toBe(WORKER_EXTRAS_MAX_CAMPAIGNS)
-    expect([...campaignsIn(pulls[0])].filter((id) => CAMPAIGNS.find((c) => c.id === id)!.status === 'closed')).toEqual([])
-    expect(results[0].waiting).toHaveLength(withWindow.length - WORKER_EXTRAS_MAX_CAMPAIGNS)
-    // F3 Search (closed days 10-17 .. 10-27): its newest seven first, the oldest four on a later
-    // run (the cost planner's older span runs on toward the recent window up to the cap, so that
-    // run re-pulls a few stored days too; only changed rows are written)
-    const f3s = pulls.map((run) => [...(run.get(`${F3S} conversions`) ?? [])].sort()).filter((d) => d.length)
-    expect(f3s).toHaveLength(2)
-    expect(f3s[0]).toEqual(etDateRange('2026-10-21', '2026-10-27'))
-    expect(f3s[1].slice(0, 4)).toEqual(etDateRange('2026-10-17', '2026-10-20'))
-    // the end: every campaign stored through its required days, nothing stale, nobody waiting
+    })
+    // the first run starts with a campaign in flight (the registry's dates, not its status)
+    expect(CAMPAIGNS.find((c) => c.id === campaignOf(queriesOf(calls)[0]))!.flightEnd >= '2026-10-27').toBe(true)
+    // the stale 'active' retest (flight 09-26 .. 10-02) is pulled through 10-05 only
+    expect(windows.get(RETEST)).toEqual({ since: '2026-09-26', until: '2026-10-05' })
+    // the end: every window pulled once, stored through its required days, nothing stale or waiting
     const end = results.at(-1)!
     expect(end.waiting).toEqual([])
-    for (const c of withWindow) {
-      const w = syncWindow(c, todayEt)!
+    for (const [id, w] of windows) {
+      const c = CAMPAIGNS.find((x) => x.id === id)!
+      for (const kind of ['conversions', 'assets']) expect([...seen].filter((k) => k.startsWith(`${id} ${kind} `)).length, `${id} ${kind}`).toBe(etDateRange(w.since, w.until).length)
       const required = w.until < c.flightEnd ? w.until : c.flightEnd
-      const r = end.campaigns.find((x) => x.campaignId === c.id)!
-      expect([r.conversions.through, r.conversions.stale, r.assets.through, r.assets.stale], c.id).toEqual([required, false, required, false])
+      const r = end.campaigns.find((x) => x.campaignId === id)!
+      expect([r.conversions.through, r.conversions.stale, r.assets.through, r.assets.stale], id).toEqual([required, false, required, false])
     }
   })
 })

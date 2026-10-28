@@ -15,10 +15,10 @@ preview_urls = false
 
 # Hourly at :05 UTC: the cost sync. The code decides what a tick does (src/lib/adsSync.ts
 # cronShouldSync): every tick while a flight is live, one daily pass at 03:xx ET otherwise.
-# 08:35-11:35 UTC: the conversions-and-assets pass (syncAdsExtras), its own invocation; the
+# 08:20-11:50 UTC, every 30 min: the conversions-and-assets pass (syncAdsExtras), its own invocation; the
 # string must match EXTRAS_CRON in src/index.ts, which scheduled() dispatches on.
 [triggers]
-crons = ["5 * * * *", "35 8-11 * * *"]
+crons = ["5 * * * *", "20,50 8-11 * * *"]
 
 [observability]
 enabled = true

@@ -50,6 +50,11 @@ export interface SqlStatement {
 const dollarsToMicros = (usd: number | null | undefined): number | null => (usd == null ? null : Math.round(usd * 1_000_000))
 const chunk = <T>(xs: readonly T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const rowsPerStatement = (bindsPerRow: number) => Math.max(1, Math.floor(MAX_BINDS / bindsPerRow))
+/** Rows per upsert statement for conversions, daily asset rows and the asset catalog (7, 11 and 6
+ * binds a row): lib/adsSync.ts plans an extras run's D1 statements with them before it fetches. */
+export const CONVERSION_ROWS_PER_STATEMENT = rowsPerStatement(7)
+export const ASSET_ROWS_PER_STATEMENT = rowsPerStatement(11)
+export const ASSET_CATALOG_ROWS_PER_STATEMENT = rowsPerStatement(6)
 
 // ── Write guard (every adapter) ───────────────────────────────────────────────────────────
 /** SQL with every quoted literal blanked, so keyword checks never trip on a campaign tag. */
@@ -332,7 +337,7 @@ export function assetCatalogFrom(rows: readonly AssetDayRow[]): AssetRecord[] {
  * overwrites a restated day, and an unchanged one changes nothing (the WHERE clause), so
  * fetched_at records the last real change. A name the re-pull leaves blank keeps its stored value. */
 export function conversionDailyUpserts(campaignId: string, rows: readonly ConversionDayRow[], fetchedAt: string): SqlStatement[] {
-  return chunk(mergeConversionRows(rows), rowsPerStatement(7)).map((part) => ({
+  return chunk(mergeConversionRows(rows), CONVERSION_ROWS_PER_STATEMENT).map((part) => ({
     sql:
       `INSERT INTO ads_daily_conversions (campaign_id, date, conversion_action_id, conversion_action_name, conversions, all_conversions, source, fetched_at) VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, 'google-ads-api', ?)").join(', ')} ` +
       `ON CONFLICT (campaign_id, date, conversion_action_id) DO UPDATE SET conversion_action_name = COALESCE(excluded.conversion_action_name, ads_daily_conversions.conversion_action_name), conversions = excluded.conversions, all_conversions = excluded.all_conversions, source = excluded.source, fetched_at = excluded.fetched_at ` +
@@ -346,7 +351,7 @@ export function conversionDailyUpserts(campaignId: string, rows: readonly Conver
  * performance label is Google's label at fetch time, not a daily metric, so the first label
  * stored for a day is kept (a blank one is filled in). */
 export function assetDailyUpserts(campaignId: string, rows: readonly AssetDayRow[], fetchedAt: string): SqlStatement[] {
-  return chunk(mergeAssetRows(rows), rowsPerStatement(11)).map((part) => ({
+  return chunk(mergeAssetRows(rows), ASSET_ROWS_PER_STATEMENT).map((part) => ({
     sql:
       `INSERT INTO ads_daily_assets (campaign_id, ad_group_id, ad_id, asset_id, field_type, date, impressions, clicks, conversions, performance_label, source, fetched_at) VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google-ads-api', ?)").join(', ')} ` +
       `ON CONFLICT (campaign_id, date, ad_group_id, ad_id, asset_id, field_type) DO UPDATE SET impressions = excluded.impressions, clicks = excluded.clicks, conversions = excluded.conversions, performance_label = COALESCE(ads_daily_assets.performance_label, excluded.performance_label), source = excluded.source, fetched_at = excluded.fetched_at ` +
@@ -359,7 +364,7 @@ export function assetDailyUpserts(campaignId: string, rows: readonly AssetDayRow
  * only later, a blank text or name keeps the stored one, and an unchanged asset changes nothing. */
 export function assetCatalogUpserts(assets: readonly AssetRecord[]): SqlStatement[] {
   const usable = assets.filter((a) => ADS_ID.test(a.assetId) && ADS_ENUM.test(a.type) && ADS_DATE.test(a.firstSeen) && ADS_DATE.test(a.lastSeen) && a.firstSeen <= a.lastSeen)
-  return chunk(usable, rowsPerStatement(6)).map((part) => ({
+  return chunk(usable, ASSET_CATALOG_ROWS_PER_STATEMENT).map((part) => ({
     sql:
       `INSERT INTO ads_assets (asset_id, type, text, name, first_seen, last_seen) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')} ` +
       `ON CONFLICT (asset_id) DO UPDATE SET type = excluded.type, text = COALESCE(excluded.text, ads_assets.text), name = COALESCE(excluded.name, ads_assets.name), first_seen = min(ads_assets.first_seen, excluded.first_seen), last_seen = max(ads_assets.last_seen, excluded.last_seen) ` +
@@ -829,6 +834,9 @@ export interface AdsStore extends AdsSyncStore {
   ensureThresholdState(records: readonly ReadingRecord[]): Promise<boolean>
 }
 
+/** Statements createSqlAdsStore keeps back under `maxStatements` for the run row. */
+export const STATEMENT_RESERVE = 2
+
 export class QueryBudgetError extends Error {
   constructor(used: number) {
     super(`D1 query budget reached (${used} statements this run); the rest continues next run`)
@@ -842,7 +850,7 @@ export class QueryBudgetError extends Error {
  * row, so a capped run still records itself. */
 export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: string; maxStatements?: number }): AdsStore & { statementsUsed(): number } {
   let used = 0
-  const RESERVE = 2
+  const RESERVE = STATEMENT_RESERVE
   const budget = (final = false) => {
     if (opts.maxStatements == null) return
     if (used >= opts.maxStatements - (final ? 0 : RESERVE)) throw new QueryBudgetError(used)

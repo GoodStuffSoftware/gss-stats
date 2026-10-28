@@ -15,9 +15,9 @@
 //  - Conversions and per-asset results (src/lib/adsSync.ts syncAdsExtras) run on a cron trigger
 //    of their OWN, EXTRAS_CRON, a few ticks after the 03:00 ET close: scheduled() dispatches on
 //    event.cron, so a cost tick never does extras work and an extras tick never touches cost
-//    rows, claims or the cost run rows. One state read decides; nothing due → return. A run pulls
-//    at most WORKER_EXTRAS_MAX_DAYS closed days per campaign and kind, WORKER_EXTRAS_MAX_CAMPAIGNS
-//    campaigns and WORKER_MAX_STATEMENTS D1 statements; the rest continues next tick.
+//    rows, claims or the cost run rows. One state read decides; nothing due → return. Each run is
+//    planned BEFORE it fetches to about WORKER_EXTRAS_MAX_ROWS rows (CPU) and the D1 statements
+//    WORKER_MAX_STATEMENTS leaves; the rest continues next tick.
 //
 // Google Ads credentials come from Cloudflare Secrets Store bindings (Bitwarden stays the source
 // of truth; rotation: README "The sync Worker"). They live in memory only, are registered with
@@ -39,7 +39,7 @@ import {
   type FetchLike,
 } from '../../../src/lib/adsApi'
 import { redact, registerSecret } from '../../../src/lib/adsRedact'
-import { createSqlAdsStore, d1BindingAdsDb, readLastSyncRun, type D1Like, type SyncSource } from '../../../src/lib/adsStore'
+import { createSqlAdsStore, d1BindingAdsDb, readLastSyncRun, STATEMENT_RESERVE, type D1Like, type SyncSource } from '../../../src/lib/adsStore'
 import {
   cronShouldSync,
   ON_DEMAND_MIN_INTERVAL_MS,
@@ -63,13 +63,15 @@ import {
 export const WORKER_MAX_DAYS = 7
 /** D1 statements one run may send (the Free limit is 50 per invocation). */
 export const WORKER_MAX_STATEMENTS = 40
-/** The conversions-and-assets pass's own trigger (UTC): hourly 08:35-11:35, after the 03:00 ET
- * close in both EDT and EST. Must match workers/sync/wrangler.toml [triggers] exactly. */
-export const EXTRAS_CRON = '35 8-11 * * *'
-/** Closed days one extras run pulls per campaign and kind (newest first). */
-export const WORKER_EXTRAS_MAX_DAYS = 7
-/** Campaigns one extras run pulls; the rest take their turn next tick. */
-export const WORKER_EXTRAS_MAX_CAMPAIGNS = 4
+/** The conversions-and-assets pass's own trigger (UTC): eight ticks, 08:20-11:50, after the 03:00
+ * ET close in both EDT and EST, and inside 6 h, so each restatement window is re-checked once a
+ * day. One trigger (2 of the Free plan's 5). Must match workers/sync/wrangler.toml [triggers]. */
+export const EXTRAS_CRON = '20,50 8-11 * * *'
+/** Rows one extras run plans to fetch (estimated per kind from the most rows one day has
+ * returned). It bounds the run's CPU against the Free plan's 10 ms: 120 rows parse, diff and
+ * build in about 3 ms on a cold isolate, planning adds about 1.5 ms (README, "Daily conversions
+ * and per-asset results"). */
+export const WORKER_EXTRAS_MAX_ROWS = 120
 /** Reuse an access token this long (Google's last an hour). */
 const TOKEN_REUSE_MS = 45 * 60_000
 
@@ -227,7 +229,7 @@ export async function handleExtrasScheduled(event: ScheduledEventLike, env: Env,
   const nowMs = opts.nowMs ?? Date.now()
   const result = await syncAdsExtras(
     { adsFactory: extrasAdsFactory(env, nowMs, opts.fetchImpl), store: storeFor(env) },
-    { now: nowMs, dryRun: false, source: 'worker-cron', maxDays: WORKER_EXTRAS_MAX_DAYS, maxCampaigns: WORKER_EXTRAS_MAX_CAMPAIGNS },
+    { now: nowMs, dryRun: false, source: 'worker-cron', maxRows: WORKER_EXTRAS_MAX_ROWS, statementBudget: WORKER_MAX_STATEMENTS - STATEMENT_RESERVE },
   )
   const head = result.nothingDue ? { event: 'skip', cron: event.cron, reason: 'nothing due' } : { event: 'extras', cron: event.cron, worker: workerInfo() }
   console.log(JSON.stringify({ ...head, ...extrasResultSummary(result) }))
