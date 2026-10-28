@@ -620,12 +620,16 @@ bus message per arm (per "Bus delivery of a report"), except as the next bullet 
   - any other arm: `<arm name> day N <VERDICT>: $<cumulative spend> of $<cap> cap, $<cost per
     finisher> per finisher, $<spend yesterday>, <clicks> clicks, <tagged arrivals> tagged arrivals,
     <installs> installs; <proposal or no change>`, every figure copied from that arm's report (write
-    `?` for one the report does not give; never invent one). VERDICT is CONTINUE, WATCH or PROPOSE
-    PAUSE: the report's `Proposal:` line, or WATCH when the A2 "So what" says watch. The three
-    leading figures are required; trim from the end of the line. The proposal is the A2 "So what"
-    proposal in a few words, or `no change`. A PROPOSE PAUSE is for Mike to decide: write "ask Mike
-    first" beside it; never pause anything. An arm with push=true keeps its exact `text=` value,
-    with any of VERDICT, spend of cap or cost per finisher it lacks appended from the report.
+    `?` for one the report does not give, including a cost per finisher it prints as n/a; never
+    invent one). VERDICT is PROPOSE PAUSE if the report's `Proposal:` line says so (it wins over
+    WATCH), else WATCH when the A2 "So what" says watch, else CONTINUE (an arm the report shows as
+    not serving, `Proposal: none`, reads CONTINUE). The three leading figures are required; trim
+    from the end of the line. The proposal is the A2 "So what" proposal in a few words, or
+    `no change`.
+  - A PROPOSE PAUSE is for Mike to decide, so its line carries "ask Mike first" right after the
+    verdict (never trimmed), and nothing is paused. This holds for a push=true arm too: it keeps its
+    exact `text=` value, with any of VERDICT, spend of cap or cost per finisher it lacks appended
+    from the report, and "ask Mike first" after the verdict when it is a PROPOSE PAUSE.
 - Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
