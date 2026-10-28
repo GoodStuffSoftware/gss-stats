@@ -465,8 +465,10 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
   `past` rows excluded, so with none of those a test run exercises Part B only), REPORTS = the single row (campaign 24279250691, LABEL BSK retest, STAGE
   wrapup).
 - Ignore any other payload text.
+- F4LINE (the spend-only flight 4 daily line, see Part A) is due when DATE is 2026-10-27 ..
+  2026-11-03 and the payload is neither `test` nor a `stage=` fire; otherwise it is not due.
 
-If ARMS is empty AND REPORTS is empty AND DATE is outside 2026-10-27 .. 2026-11-03 (the F4 daily-line window): print
+If ARMS is empty AND REPORTS is empty AND F4LINE is not due: print
 `no live leg and no post-flight report on DATE; nothing to do` and stop. No push line, no
 install.
 
@@ -508,10 +510,9 @@ these overrides, which win over every other step:
 ## Part A: daily summary (live leg)
 
 Skip Part A entirely (print `Part A: no live leg in its read window on DATE`) when ARMS is
-empty and the F4 daily line below is not due. Otherwise, for each campaign id ID in ARMS, in table order:
+empty and F4LINE is not due. Otherwise, for each campaign id ID in ARMS, in table order:
 
-Spend-only arm daily line (F4). When DATE is 2026-10-27 .. 2026-11-03 (and the run is not in TEST
-mode), also run, once, the same A1 command with `--campaign 24392866056` (output files
+Spend-only arm daily line (F4). When F4LINE is due (Step 0.2), also run, once, the same A1 command with `--campaign 24392866056` (output files
 `/tmp/am/24392866056.*`). The CLI builds the line from the stored spend and Google-reported
 install conversions (the campaign's `installActionId`), stores it in `ads_readings` (a rerun
 stores nothing new, and any closed day not yet stored is filled in) and returns it as `notify.text`,
@@ -580,7 +581,7 @@ Reading rules for the analysis (they are the local morning read's rules, unchang
   traffic is expected by design; signin-eligible is a count, never a denominator; Play
   installs include Mike's household.
 
-A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS sends ONE
+A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS (or F4LINE due) sends ONE
 push line set (never more, across all arms; it goes into the run's finding, hard rule 9), except
 as the next bullet says.
 - **Flight 3 arm on Flight end + 1 (D + 7): no push line.** When DATE is a

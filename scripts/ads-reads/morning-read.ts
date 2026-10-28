@@ -54,7 +54,6 @@ async function main() {
     return
   }
 
-
   const result = await runMorningRead(deps, {
     campaignId,
     releaseHealth: rh,

@@ -110,6 +110,7 @@ import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
 import { buildPlayDirectBlock, closedPlayDirectCampaigns, playDirectBaseline, type PlayDirectBlock } from './playDirect'
+import { isClosedFetch } from '../../src/lib/adsFreshness'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
 import { buildSearchAdsSide, type SearchAdsSideBlock, type SearchSideRaw } from '../../src/lib/searchAdsSide'
 
@@ -1007,6 +1008,10 @@ export async function runSpendOnlyDailyRead(deps: ReadDeps, opts: SpendOnlyOptio
     const sp = spendBy.get(d)
     if (!sp) {
       gaps.push({ date: d, reason: 'daily spend not stored yet' })
+      break
+    }
+    if (!isClosedFetch(d, sp.fetchedAt)) {
+      gaps.push({ date: d, reason: 'daily spend fetched before the day closed' })
       break
     }
     if (!isCovered(d)) {

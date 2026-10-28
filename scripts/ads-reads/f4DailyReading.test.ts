@@ -165,6 +165,14 @@ describe('runSpendOnlyDailyRead', () => {
     expect(first.costPerInstall).toBeNull()
     expect(rows()[0].counts).not.toMatch(/Infinity|NaN/)
   })
+  it('treats a spend row fetched before its day closed (03:00 ET next day) as a gap, never stores it', async () => {
+    const early = { ...day('2026-10-27', 10.04, 1500, 30), fetchedAt: '2026-10-28T05:00:00Z' } // 01:00 ET on 10-28
+    const { deps, rows } = await seeded({ days: [day('2026-10-26', 9.95, 800, 12), early] })
+    const r = await runSpendOnlyDailyRead(deps, { campaignId: ID })
+    expect(r.stored).toEqual(['2026-10-26'])
+    expect(r.gaps).toEqual([{ date: '2026-10-27', reason: 'daily spend fetched before the day closed' }])
+    expect(rows()).toHaveLength(1)
+  })
   it('waits (stores nothing for it or later) while a day\'s install conversions are not synced yet, instead of storing a false zero', async () => {
     const { deps, rows } = await seeded({ coveredThrough: '2026-10-26' })
     const r = await runSpendOnlyDailyRead(deps, { campaignId: ID })
