@@ -15,7 +15,7 @@
 // (buildHeaders asserts it).
 
 import { ADS_API_VERSION, ADS_CUSTOMER_ID, approvedPlacementsFor, assertKnownCampaign, isApprovedPlacement, readPlanFor, round2, microsToDollars, type SpendDay } from './adsRules'
-import type { PlacementDayRow } from './adsStore'
+import { mergeAssetRows, mergeConversionRows, type AssetDayRow, type ConversionDayRow, type PlacementDayRow } from './adsStore'
 import { redact, registerSecret } from './adsRedact'
 import type { KeywordRaw, SearchDayRaw, SearchMetricsRaw } from './searchAdsSide'
 
@@ -290,6 +290,107 @@ export async function fetchAdDaily(client: AdsClient, campaignId: string, since:
     })
   }
   return out
+}
+
+// ── The ads trajectory (migration 0007): conversions by action, delivery per asset ────────
+// Two READ-ONLY SELECTs, exactly the shape the 2026-10-28 live probe ran, mapped to counts per
+// ET day. The account's customer id never leaves these functions: a conversion action keeps only
+// the trailing id of its resource name, and a failed search's message is masked before it is
+// rethrown (redact() does not mask customer ids).
+
+/** The trailing numeric id of a conversion action's resource name
+ * (`customers/<customer id>/conversionActions/<id>`), or null when the value is not one. Only
+ * this id is ever kept; the customer part is never stored, returned or logged. */
+export function conversionActionIdOf(resourceName: unknown): string | null {
+  if (typeof resourceName !== 'string') return null
+  const m = /(?:^|\/)conversionActions\/(\d{1,20})$/.exec(resourceName)
+  return m ? m[1] : null
+}
+
+/** Masks the account's customer id in free text: every `customers/<digits>` path, and the
+ * configured id itself with or without dashes. */
+export function maskCustomerId(text: string, customerId: string = ADS_CUSTOMER_ID): string {
+  let s = text.replace(/customers\/\d+/g, 'customers/<customer>')
+  if (/^\d{10}$/.test(customerId)) {
+    const dashed = `${customerId.slice(0, 3)}-${customerId.slice(3, 6)}-${customerId.slice(6)}`
+    s = s.split(customerId).join('<customer>').split(dashed).join('<customer>')
+  }
+  return s
+}
+
+async function searchMaskingCustomer(client: AdsClient, query: string): Promise<any[]> {
+  try {
+    return await client.search(query)
+  } catch (e) {
+    throw new Error(maskCustomerId(e instanceof Error ? e.message : String(e)))
+  }
+}
+
+/** A metric value: absent = 0 (proto3 JSON leaves zero fields out), a number or numeric string
+ * as itself, anything else NaN (the merge then drops the row). */
+const metricOf = (v: unknown): number => (v == null ? 0 : typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : Number.NaN)
+const idOf = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '')
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+
+/** Campaign level, one row per ET day per conversion action that has any. Conversion segments
+ * only allow conversion metrics, so no cost, impressions or clicks here. */
+export const dailyConversionsQuery = (campaignId: string, since: string, until: string): string =>
+  `SELECT segments.date, segments.conversion_action, segments.conversion_action_name, metrics.conversions, metrics.all_conversions FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
+/** One row per (ET day, ad group, ad, asset, field type). */
+export const dailyAssetsQuery = (campaignId: string, since: string, until: string): string =>
+  `SELECT segments.date, campaign.id, ad_group.id, ad_group_ad.ad.id, asset.id, asset.type, asset.name, asset.text_asset.text, ad_group_ad_asset_view.field_type, ad_group_ad_asset_view.performance_label, metrics.impressions, metrics.clicks, metrics.conversions FROM ad_group_ad_asset_view WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
+
+/** Conversions per ET day per conversion action. A READ: closed campaigns allowed for the
+ * backfill, never changed. Malformed rows are dropped; two rows for one (day, action) are summed. */
+export async function fetchDailyConversions(client: AdsClient, campaignId: string, since: string, until: string): Promise<ConversionDayRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await searchMaskingCustomer(client, dailyConversionsQuery(campaignId, since, until))
+  const out: ConversionDayRow[] = []
+  for (const r of rows) {
+    const date = r.segments?.date
+    const conversionActionId = conversionActionIdOf(r.segments?.conversionAction)
+    if (typeof date !== 'string' || !DATE_RE.test(date) || !conversionActionId) continue
+    out.push({
+      date,
+      conversionActionId,
+      conversionActionName: strOrNull(r.segments?.conversionActionName),
+      conversions: metricOf(r.metrics?.conversions),
+      allConversions: metricOf(r.metrics?.allConversions),
+    })
+  }
+  return mergeConversionRows(out)
+}
+
+/** Per-asset delivery per ET day (ad_group_ad_asset_view). A READ, like every query here.
+ * Malformed rows (a missing id, a bad date or field type, a bad count) are dropped, a row for
+ * another campaign is ignored, and two rows for one key are summed. */
+export async function fetchDailyAssets(client: AdsClient, campaignId: string, since: string, until: string): Promise<AssetDayRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await searchMaskingCustomer(client, dailyAssetsQuery(campaignId, since, until))
+  const out: AssetDayRow[] = []
+  for (const r of rows) {
+    const date = r.segments?.date
+    if (typeof date !== 'string' || !DATE_RE.test(date)) continue
+    if (r.campaign?.id != null && String(r.campaign.id) !== campaignId) continue
+    const view = r.adGroupAdAssetView ?? {}
+    out.push({
+      date,
+      adGroupId: idOf(r.adGroup?.id),
+      adId: idOf(r.adGroupAd?.ad?.id),
+      assetId: idOf(r.asset?.id),
+      fieldType: idOf(view.fieldType),
+      impressions: metricOf(r.metrics?.impressions),
+      clicks: metricOf(r.metrics?.clicks),
+      conversions: metricOf(r.metrics?.conversions),
+      performanceLabel: strOrNull(view.performanceLabel),
+      assetType: strOrNull(r.asset?.type),
+      text: strOrNull(r.asset?.textAsset?.text),
+      name: strOrNull(r.asset?.name),
+    })
+  }
+  return mergeAssetRows(out)
 }
 
 // ── Search campaign, Ads side (flight 3 Search; src/lib/searchAdsSide.ts) ─────────────────
