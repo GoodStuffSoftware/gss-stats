@@ -617,10 +617,15 @@ bus message per arm (per "Bus delivery of a report"), except as the next bullet 
   200 characters:
   - an arm with push=true: its exact `text=` value;
   - a FAILED arm: `<arm name> daily read did not run: REASON`;
-  - any other arm: `<arm name> day N: $<spend yesterday>, <clicks> clicks, <tagged arrivals>
-    tagged arrivals, <installs> installs; <proposal or no change>`, every figure copied from
-    that arm's report (write `?` for one the report does not give; never invent one). The
-    proposal is the A2 "So what" proposal in a few words, or `no change`.
+  - any other arm: `<arm name> day N <VERDICT>: $<cumulative spend> of $<cap> cap, $<cost per
+    finisher> per finisher, $<spend yesterday>, <clicks> clicks, <tagged arrivals> tagged arrivals,
+    <installs> installs; <proposal or no change>`, every figure copied from that arm's report (write
+    `?` for one the report does not give; never invent one). VERDICT is CONTINUE, WATCH or PROPOSE
+    PAUSE: the report's `Proposal:` line, or WATCH when the A2 "So what" says watch. The three
+    leading figures are required; trim from the end of the line. The proposal is the A2 "So what"
+    proposal in a few words, or `no change`. A PROPOSE PAUSE is for Mike to decide: write "ask Mike
+    first" beside it; never pause anything. An arm with push=true keeps its exact `text=` value,
+    with any of VERDICT, spend of cap or cost per finisher it lacks appended from the report.
 - Bus: none. The former recipient best-sudoku-ads-retest-followup is retired (last seen 2026-09-27). Skip the bus send; the finding file and Step 3 output carry the report.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
