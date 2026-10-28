@@ -14,11 +14,14 @@ import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type 
 import { campaignById } from '../../src/lib/campaigns'
 import type { SearchSideRaw } from '../../src/lib/searchAdsSide'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
+import type { AdsExtrasSource } from '../../src/lib/adsSync'
 import { etDateFromMs, type HourPathCount } from '../../src/lib/popupEvents'
 import {
   createAdsClient,
   fetchCampaignStatus,
   fetchAdDaily,
+  fetchDailyAssets,
+  fetchDailyConversions,
   fetchDailySpend,
   fetchDevices,
   fetchGeo,
@@ -144,6 +147,14 @@ export function adsSource(client: AdsClient): AdsSource {
       }
       return { daily, cumulative, keywords, keywordsError }
     },
+  }
+}
+
+/** The conversions-and-assets pass's source (src/lib/adsSync.ts syncAdsExtras): two read-only SELECTs. */
+export function adsExtrasSource(client: AdsClient): AdsExtrasSource {
+  return {
+    conversions: (id, since, until) => fetchDailyConversions(client, id, since, until),
+    assets: (id, since, until) => fetchDailyAssets(client, id, since, until),
   }
 }
 

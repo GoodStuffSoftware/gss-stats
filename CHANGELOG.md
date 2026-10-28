@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-10-28
+
+### Added
+- **Daily conversions and per-asset results in the ads store.** Each campaign's conversions per day and conversion action, and each ad asset's daily impressions, clicks and conversions, are now stored as counts for every campaign, the spend-only arm included.
+- **Their own early-morning sync.** A separate run eight times each early morning pulls each flight through 3 days after it ends, in steps sized to fit before anything is fetched, and pulls a stored day again only to re-check the last 3 days for Google's restatements. A failure there leaves the spend data and its "synced" time untouched, and the ads backfill fills every campaign in one uncapped pass.
+
 ## [0.62.2] — 2026-10-28
 
 ### Fixed

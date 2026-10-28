@@ -50,6 +50,11 @@ export interface SqlStatement {
 const dollarsToMicros = (usd: number | null | undefined): number | null => (usd == null ? null : Math.round(usd * 1_000_000))
 const chunk = <T>(xs: readonly T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 const rowsPerStatement = (bindsPerRow: number) => Math.max(1, Math.floor(MAX_BINDS / bindsPerRow))
+/** Rows per upsert statement for conversions, daily asset rows and the asset catalog (7, 11 and 6
+ * binds a row): lib/adsSync.ts plans an extras run's D1 statements with them before it fetches. */
+export const CONVERSION_ROWS_PER_STATEMENT = rowsPerStatement(7)
+export const ASSET_ROWS_PER_STATEMENT = rowsPerStatement(11)
+export const ASSET_CATALOG_ROWS_PER_STATEMENT = rowsPerStatement(6)
 
 // ── Write guard (every adapter) ───────────────────────────────────────────────────────────
 /** SQL with every quoted literal blanked, so keyword checks never trip on a campaign tag. */
@@ -188,6 +193,183 @@ export function placementDailyUpserts(campaignId: string, rows: readonly Placeme
       r.clicks,
       fetchedAt,
     ]),
+  }))
+}
+
+// ── Conversions and per-asset results per ET day (migration 0007) ─────────────────────────
+// Counts only: Google's aggregates per campaign, day, conversion action or asset. A conversion
+// action is kept as its trailing numeric id (lib/adsApi.ts conversionActionIdOf), never as its
+// resource name, which carries the account's customer id.
+
+/** One campaign's conversions for one ET day and one conversion action (ads_daily_conversions). */
+export interface ConversionDayRow {
+  date: string
+  /** Digits only: the trailing id of the action's resource name. */
+  conversionActionId: string
+  conversionActionName: string | null
+  conversions: number
+  allConversions: number
+}
+/** One asset's delivery for one ET day in one ad (ads_daily_assets). assetType, text and name
+ * describe the asset itself and feed the ads_assets catalog (assetCatalogFrom). */
+export interface AssetDayRow {
+  date: string
+  adGroupId: string
+  adId: string
+  assetId: string
+  fieldType: string
+  impressions: number
+  clicks: number
+  conversions: number
+  performanceLabel: string | null
+  assetType: string | null
+  text: string | null
+  name: string | null
+}
+/** One ads_assets row: what an asset is, and the first and last ET day it had a daily row. */
+export interface AssetRecord {
+  assetId: string
+  type: string
+  text: string | null
+  name: string | null
+  firstSeen: string
+  lastSeen: string
+}
+
+const ADS_DATE = /^\d{4}-\d{2}-\d{2}$/
+const ADS_ID = /^\d{1,20}$/
+const ADS_ENUM = /^[A-Z0-9_]{1,40}$/
+/** The column caps migration 0007 checks (a longer value is clipped, so no row trips a CHECK). */
+export const CONVERSION_ACTION_NAME_MAX = 200
+export const ASSET_TEXT_MAX = 2000
+export const ASSET_NAME_MAX = 500
+/** A count the 0007 CHECKs accept: finite, >= 0, at most 1e12. */
+const okCount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1e12
+/** Trimmed and clipped to `max`; null when empty or not a string. */
+export const clipText = (s: unknown, max: number): string | null => {
+  if (typeof s !== 'string') return null
+  const t = s.trim()
+  return t ? t.slice(0, max) : null
+}
+const enumOrNull = (s: unknown): string | null => (typeof s === 'string' && ADS_ENUM.test(s) ? s : null)
+
+/** Usable conversion rows, one per (date, action): a malformed row is dropped, and two rows for
+ * the same key are summed (the first non-null name is kept). Sorted by date, then action id. */
+export function mergeConversionRows(rows: readonly ConversionDayRow[]): ConversionDayRow[] {
+  const byKey = new Map<string, ConversionDayRow>()
+  for (const r of rows) {
+    if (!ADS_DATE.test(r.date) || !ADS_ID.test(r.conversionActionId) || !okCount(r.conversions) || !okCount(r.allConversions)) continue
+    const k = `${r.date}\u0000${r.conversionActionId}`
+    const prev = byKey.get(k)
+    const name = clipText(r.conversionActionName, CONVERSION_ACTION_NAME_MAX)
+    if (!prev) {
+      byKey.set(k, { date: r.date, conversionActionId: r.conversionActionId, conversionActionName: name, conversions: r.conversions, allConversions: r.allConversions })
+      continue
+    }
+    prev.conversions += r.conversions
+    prev.allConversions += r.allConversions
+    prev.conversionActionName ??= name
+  }
+  return [...byKey.values()].sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.conversionActionId < b.conversionActionId ? -1 : a.conversionActionId > b.conversionActionId ? 1 : 0))
+}
+
+const assetKey = (r: Pick<AssetDayRow, 'date' | 'adGroupId' | 'adId' | 'assetId' | 'fieldType'>) => [r.date, r.adGroupId, r.adId, r.assetId, r.fieldType].join('\u0000')
+/** Usable asset rows, one per (date, ad group, ad, asset, field type): a malformed row is dropped,
+ * two rows for the same key are summed, and the first non-null label and description are kept.
+ * Impressions and clicks are whole numbers. Sorted by key. */
+export function mergeAssetRows(rows: readonly AssetDayRow[]): AssetDayRow[] {
+  const byKey = new Map<string, AssetDayRow>()
+  for (const r of rows) {
+    if (!ADS_DATE.test(r.date) || !ADS_ID.test(r.adGroupId) || !ADS_ID.test(r.adId) || !ADS_ID.test(r.assetId) || !ADS_ENUM.test(r.fieldType)) continue
+    if (!okCount(r.impressions) || !okCount(r.clicks) || !okCount(r.conversions)) continue
+    const k = assetKey(r)
+    const prev = byKey.get(k)
+    const clean: AssetDayRow = {
+      date: r.date,
+      adGroupId: r.adGroupId,
+      adId: r.adId,
+      assetId: r.assetId,
+      fieldType: r.fieldType,
+      impressions: Math.round(r.impressions),
+      clicks: Math.round(r.clicks),
+      conversions: r.conversions,
+      performanceLabel: enumOrNull(r.performanceLabel),
+      assetType: enumOrNull(r.assetType),
+      text: clipText(r.text, ASSET_TEXT_MAX),
+      name: clipText(r.name, ASSET_NAME_MAX),
+    }
+    if (!prev) {
+      byKey.set(k, clean)
+      continue
+    }
+    prev.impressions += clean.impressions
+    prev.clicks += clean.clicks
+    prev.conversions += clean.conversions
+    prev.performanceLabel ??= clean.performanceLabel
+    prev.assetType ??= clean.assetType
+    prev.text ??= clean.text
+    prev.name ??= clean.name
+  }
+  return [...byKey.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, r]) => r)
+}
+
+/** The ads_assets rows a set of daily asset rows names: one per asset with a known type, its
+ * first and last day across the rows, and the first non-null text and name. A row with no asset
+ * type still stores its daily numbers; it just adds nothing to the catalog. */
+export function assetCatalogFrom(rows: readonly AssetDayRow[]): AssetRecord[] {
+  const byId = new Map<string, AssetRecord>()
+  for (const r of mergeAssetRows(rows)) {
+    if (!r.assetType) continue
+    const prev = byId.get(r.assetId)
+    if (!prev) {
+      byId.set(r.assetId, { assetId: r.assetId, type: r.assetType, text: r.text, name: r.name, firstSeen: r.date, lastSeen: r.date })
+      continue
+    }
+    if (r.date < prev.firstSeen) prev.firstSeen = r.date
+    if (r.date > prev.lastSeen) prev.lastSeen = r.date
+    prev.text ??= r.text
+    prev.name ??= r.name
+  }
+  return [...byId.values()].sort((a, b) => (a.assetId < b.assetId ? -1 : a.assetId > b.assetId ? 1 : 0))
+}
+
+/** Upserts conversion rows, idempotent on (campaign_id, date, conversion_action_id): a re-pull
+ * overwrites a restated day, and an unchanged one changes nothing (the WHERE clause), so
+ * fetched_at records the last real change. A name the re-pull leaves blank keeps its stored value. */
+export function conversionDailyUpserts(campaignId: string, rows: readonly ConversionDayRow[], fetchedAt: string): SqlStatement[] {
+  return chunk(mergeConversionRows(rows), CONVERSION_ROWS_PER_STATEMENT).map((part) => ({
+    sql:
+      `INSERT INTO ads_daily_conversions (campaign_id, date, conversion_action_id, conversion_action_name, conversions, all_conversions, source, fetched_at) VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, 'google-ads-api', ?)").join(', ')} ` +
+      `ON CONFLICT (campaign_id, date, conversion_action_id) DO UPDATE SET conversion_action_name = COALESCE(excluded.conversion_action_name, ads_daily_conversions.conversion_action_name), conversions = excluded.conversions, all_conversions = excluded.all_conversions, source = excluded.source, fetched_at = excluded.fetched_at ` +
+      `WHERE ads_daily_conversions.conversions IS NOT excluded.conversions OR ads_daily_conversions.all_conversions IS NOT excluded.all_conversions OR (excluded.conversion_action_name IS NOT NULL AND ads_daily_conversions.conversion_action_name IS NOT excluded.conversion_action_name)`,
+    binds: part.flatMap((r) => [campaignId, r.date, r.conversionActionId, r.conversionActionName, r.conversions, r.allConversions, fetchedAt]),
+  }))
+}
+
+/** Upserts daily asset rows, idempotent on (campaign_id, date, ad_group_id, ad_id, asset_id,
+ * field_type): a re-pull overwrites changed numbers, an unchanged one changes nothing. The
+ * performance label is Google's label at fetch time, not a daily metric, so the first label
+ * stored for a day is kept (a blank one is filled in). */
+export function assetDailyUpserts(campaignId: string, rows: readonly AssetDayRow[], fetchedAt: string): SqlStatement[] {
+  return chunk(mergeAssetRows(rows), ASSET_ROWS_PER_STATEMENT).map((part) => ({
+    sql:
+      `INSERT INTO ads_daily_assets (campaign_id, ad_group_id, ad_id, asset_id, field_type, date, impressions, clicks, conversions, performance_label, source, fetched_at) VALUES ${part.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google-ads-api', ?)").join(', ')} ` +
+      `ON CONFLICT (campaign_id, date, ad_group_id, ad_id, asset_id, field_type) DO UPDATE SET impressions = excluded.impressions, clicks = excluded.clicks, conversions = excluded.conversions, performance_label = COALESCE(ads_daily_assets.performance_label, excluded.performance_label), source = excluded.source, fetched_at = excluded.fetched_at ` +
+      `WHERE ads_daily_assets.impressions IS NOT excluded.impressions OR ads_daily_assets.clicks IS NOT excluded.clicks OR ads_daily_assets.conversions IS NOT excluded.conversions OR (ads_daily_assets.performance_label IS NULL AND excluded.performance_label IS NOT NULL)`,
+    binds: part.flatMap((r) => [campaignId, r.adGroupId, r.adId, r.assetId, r.fieldType, r.date, r.impressions, r.clicks, r.conversions, r.performanceLabel, fetchedAt]),
+  }))
+}
+
+/** Upserts the asset catalog, idempotent on asset_id: first_seen only moves earlier, last_seen
+ * only later, a blank text or name keeps the stored one, and an unchanged asset changes nothing. */
+export function assetCatalogUpserts(assets: readonly AssetRecord[]): SqlStatement[] {
+  const usable = assets.filter((a) => ADS_ID.test(a.assetId) && ADS_ENUM.test(a.type) && ADS_DATE.test(a.firstSeen) && ADS_DATE.test(a.lastSeen) && a.firstSeen <= a.lastSeen)
+  return chunk(usable, ASSET_CATALOG_ROWS_PER_STATEMENT).map((part) => ({
+    sql:
+      `INSERT INTO ads_assets (asset_id, type, text, name, first_seen, last_seen) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')} ` +
+      `ON CONFLICT (asset_id) DO UPDATE SET type = excluded.type, text = COALESCE(excluded.text, ads_assets.text), name = COALESCE(excluded.name, ads_assets.name), first_seen = min(ads_assets.first_seen, excluded.first_seen), last_seen = max(ads_assets.last_seen, excluded.last_seen) ` +
+      `WHERE ads_assets.type IS NOT excluded.type OR (excluded.text IS NOT NULL AND ads_assets.text IS NOT excluded.text) OR (excluded.name IS NOT NULL AND ads_assets.name IS NOT excluded.name) OR excluded.first_seen < ads_assets.first_seen OR excluded.last_seen > ads_assets.last_seen`,
+    binds: part.flatMap((a) => [a.assetId, a.type, clipText(a.text, ASSET_TEXT_MAX), clipText(a.name, ASSET_NAME_MAX), a.firstSeen, a.lastSeen]),
   }))
 }
 
@@ -332,8 +514,16 @@ export function syncRunInsert(r: SyncRunRecord): SqlStatement {
   }
 }
 
+/** The conversions-and-assets pass (lib/adsSync.ts syncAdsExtras) keeps its own rows in
+ * ads_sync_runs, keyed with this prefix. Every reader of the COST sync's runs below (the claim,
+ * the rate limit, lastSync) skips them, so that pass can never delay, block or stale the cost
+ * sync; LAST_PULLS_SQL needs no filter (those rows always have campaigns_pulled '[]'). */
+export const EXTRAS_RUN_KEY_PREFIX = 'extras:'
+const NOT_EXTRAS_RUN = `run_key NOT LIKE '${EXTRAS_RUN_KEY_PREFIX}%'`
+
 /** The atomic claim a Worker sync makes BEFORE it syncs (migration 0004): a 'running' row,
- * inserted only when no sync run (claim or finished) ended inside the last `windowMs`. One
+ * inserted only when no sync run (claim or finished; never a conversions-and-assets row) ended
+ * inside the last `windowMs`. One
  * statement, so of two concurrent requests exactly one inserts (changes = 1) and the other gets
  * changes = 0. A claim that is never followed by a finished row is a run that died (e.g. out of
  * CPU) — visible in the table, and it only blocks for one window. */
@@ -342,7 +532,7 @@ export function syncClaimStatement(source: SyncSource, nowMs: number, windowMs: 
   return {
     sql:
       "INSERT INTO ads_sync_runs (run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error, detail, campaigns_pulled) " +
-      "SELECT ?, ?, ?, ?, '[]', '[]', 0, 0, 0, 0, 'running', NULL, '{}', '[]' WHERE NOT EXISTS (SELECT 1 FROM ads_sync_runs WHERE finished_at > ?) ON CONFLICT DO NOTHING",
+      `SELECT ?, ?, ?, ?, '[]', '[]', 0, 0, 0, 0, 'running', NULL, '{}', '[]' WHERE NOT EXISTS (SELECT 1 FROM ads_sync_runs WHERE finished_at > ? AND ${NOT_EXTRAS_RUN}) ON CONFLICT DO NOTHING`,
     binds: [`claim:${source}:${now}`, source, now, now, new Date(nowMs - windowMs).toISOString()],
   }
 }
@@ -360,6 +550,12 @@ export const LAST_PULLS_SQL = "SELECT campaigns_pulled, finished_at FROM ads_syn
 export const CONSUMED_FROM_READINGS_SQL = "SELECT thresholds FROM ads_readings WHERE campaign_id = ? AND kind = 'threshold' AND complete = 1"
 export const PLACEMENT_ROWS_SQL =
   'SELECT date, placement, display_name, placement_type, target_url, approved, cost_micros, impressions, clicks FROM ads_placement_daily WHERE campaign_id = ? AND date >= ? AND date <= ? ORDER BY date, placement'
+/** One campaign's stored conversion rows over an ET date range (migration 0007). */
+export const CONVERSION_ROWS_SQL =
+  'SELECT date, conversion_action_id, conversion_action_name, conversions, all_conversions FROM ads_daily_conversions WHERE campaign_id = ? AND date >= ? AND date <= ? ORDER BY date, conversion_action_id'
+/** One campaign's stored daily asset rows over an ET date range (migration 0007). */
+export const ASSET_ROWS_SQL =
+  'SELECT date, ad_group_id, ad_id, asset_id, field_type, impressions, clicks, conversions, performance_label FROM ads_daily_assets WHERE campaign_id = ? AND date >= ? AND date <= ? ORDER BY date, ad_group_id, ad_id, asset_id, field_type'
 export const THRESHOLD_STATE_SQL = 'SELECT threshold_usd, fired_at FROM ads_threshold_state WHERE campaign_id = ? ORDER BY threshold_usd'
 const READING_COLS = 'reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind, f3'
 export const READINGS_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? ORDER BY read_at DESC, id DESC LIMIT ?`
@@ -368,12 +564,15 @@ export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHE
 export const PLAY_DAILY_SQL = 'SELECT date, device_installs, user_installs, device_uninstalls, active_device_installs FROM ads_play_daily ORDER BY date'
 /** Coverage rows for spendThrough (every campaign; a few hundred rows at most). */
 export const COVERAGE_ROWS_SQL = 'SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
-/** Latest successful sync per campaign, from the 50 newest finished runs only (index on
+/** Latest successful sync per campaign, from the 50 newest finished cost runs only (index on
  * finished_at), so the cost stays flat as the log grows. */
 export const LAST_SYNC_SQL =
-  "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value"
-/** When the latest sync run (any source) finished — the on-demand rate limit. */
-export const LAST_RUN_SQL = 'SELECT MAX(finished_at) AS last FROM ads_sync_runs'
+  `SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' AND ${NOT_EXTRAS_RUN} ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value`
+/** When the latest cost sync run (any source) finished — the on-demand rate limit. */
+export const LAST_RUN_SQL = `SELECT finished_at AS last FROM ads_sync_runs WHERE ${NOT_EXTRAS_RUN} ORDER BY finished_at DESC LIMIT 1`
+/** The latest conversions-and-assets run: its detail carries that pass's state forward
+ * (lib/adsSync.ts syncAdsExtras). Those runs never write a 'running' row. */
+export const LAST_EXTRAS_RUN_SQL = `SELECT detail, finished_at FROM ads_sync_runs WHERE run_key LIKE '${EXTRAS_RUN_KEY_PREFIX}%' ORDER BY finished_at DESC, id DESC LIMIT 1`
 /** Sync claims with no finished run after them (review I2): a 'running' row started between the
  * two bounds whose source and start have no non-running row. The Worker's finished row reuses
  * its claim's source and started_at. */
@@ -425,6 +624,35 @@ export function mapPlacementRow(r: Record<string, unknown>): PlacementDayRow {
     costMicros: num(r.cost_micros),
     impressions: num(r.impressions),
     clicks: num(r.clicks),
+  }
+}
+
+export function mapConversionRow(r: Record<string, unknown>): ConversionDayRow {
+  return {
+    date: String(r.date),
+    conversionActionId: String(r.conversion_action_id),
+    conversionActionName: str(r.conversion_action_name),
+    conversions: num(r.conversions),
+    allConversions: num(r.all_conversions),
+  }
+}
+
+/** A stored daily asset row. What the asset is (type, text, name) lives in ads_assets, so those
+ * read back null here. */
+export function mapAssetRow(r: Record<string, unknown>): AssetDayRow {
+  return {
+    date: String(r.date),
+    adGroupId: String(r.ad_group_id),
+    adId: String(r.ad_id),
+    assetId: String(r.asset_id),
+    fieldType: String(r.field_type),
+    impressions: num(r.impressions),
+    clicks: num(r.clicks),
+    conversions: num(r.conversions),
+    performanceLabel: str(r.performance_label),
+    assetType: null,
+    text: null,
+    name: null,
   }
 }
 
@@ -571,6 +799,16 @@ export interface AdsSyncStore {
   putDailyRows(campaignId: string, rows: readonly StoredDayRow[]): Promise<boolean>
   getPlacementRows(campaignId: string, since: string, until: string): Promise<PlacementDayRow[]>
   putPlacements(campaignId: string, rows: readonly PlacementDayRow[], fetchedAt: string): Promise<boolean>
+  // Migration 0007, optional: a store without these never syncs conversions or assets.
+  getConversionRows?(campaignId: string, since: string, until: string): Promise<ConversionDayRow[]>
+  /** Upserts exactly these rows (false in --dry-run: nothing sent). */
+  putConversions?(campaignId: string, rows: readonly ConversionDayRow[], fetchedAt: string): Promise<boolean>
+  getAssetRows?(campaignId: string, since: string, until: string): Promise<AssetDayRow[]>
+  /** Upserts the catalog rows these name FIRST, then the daily rows: a run cut short leaves the
+   * daily rows unwritten, so the next run sees them as new and sends both again. */
+  putAssets?(campaignId: string, rows: readonly AssetDayRow[], fetchedAt: string): Promise<boolean>
+  /** The latest conversions-and-assets run's detail (parsed JSON), or null when there is none. */
+  getLastExtrasRun?(): Promise<{ detail: unknown; finishedAt: string } | null>
   appendSyncRun(run: SyncRunRecord): Promise<boolean>
   /** The atomic claim (syncClaimStatement): true only for the one caller that inserted it. */
   claimSync(source: SyncSource, nowMs: number, windowMs: number): Promise<boolean>
@@ -596,6 +834,9 @@ export interface AdsStore extends AdsSyncStore {
   ensureThresholdState(records: readonly ReadingRecord[]): Promise<boolean>
 }
 
+/** Statements createSqlAdsStore keeps back under `maxStatements` for the run row. */
+export const STATEMENT_RESERVE = 2
+
 export class QueryBudgetError extends Error {
   constructor(used: number) {
     super(`D1 query budget reached (${used} statements this run); the rest continues next run`)
@@ -609,7 +850,7 @@ export class QueryBudgetError extends Error {
  * row, so a capped run still records itself. */
 export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: string; maxStatements?: number }): AdsStore & { statementsUsed(): number } {
   let used = 0
-  const RESERVE = 2
+  const RESERVE = STATEMENT_RESERVE
   const budget = (final = false) => {
     if (opts.maxStatements == null) return
     if (used >= opts.maxStatements - (final ? 0 : RESERVE)) throw new QueryBudgetError(used)
@@ -672,6 +913,21 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
     putDailyRows: (campaignId, rows) => writeAll(dailyRowUpserts(campaignId, rows)),
     getPlacementRows: async (campaignId, since, until) => (await select(PLACEMENT_ROWS_SQL, [campaignId, since, until])).map(mapPlacementRow),
     putPlacements: (campaignId, rows, fetchedAt) => writeAll(placementDailyUpserts(campaignId, rows, fetchedAt)),
+    getConversionRows: async (campaignId, since, until) => (await select(CONVERSION_ROWS_SQL, [campaignId, since, until])).map(mapConversionRow),
+    putConversions: (campaignId, rows, fetchedAt) => writeAll(conversionDailyUpserts(campaignId, rows, fetchedAt)),
+    getAssetRows: async (campaignId, since, until) => (await select(ASSET_ROWS_SQL, [campaignId, since, until])).map(mapAssetRow),
+    putAssets: (campaignId, rows, fetchedAt) => writeAll([...assetCatalogUpserts(assetCatalogFrom(rows)), ...assetDailyUpserts(campaignId, rows, fetchedAt)]),
+    async getLastExtrasRun() {
+      const r = (await select(LAST_EXTRAS_RUN_SQL, []))[0]
+      if (!r) return null
+      let detail: unknown = null
+      try {
+        detail = JSON.parse(String(r.detail ?? '{}'))
+      } catch {
+        detail = null // unreadable: the pass starts over (its upserts are idempotent)
+      }
+      return { detail, finishedAt: String(r.finished_at) }
+    },
     async appendSyncRun(run) {
       if (opts.dryRun) return false
       await exec(syncRunInsert(run), true)

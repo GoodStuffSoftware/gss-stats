@@ -12,7 +12,7 @@ exports[`fact SQL snapshots > adsLastSync {} 1`] = `
 {
   "binds": [],
   "db": "gss_stats_ads",
-  "sql": "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value",
+  "sql": "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' AND run_key NOT LIKE 'extras:%' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value",
 }
 `;
 

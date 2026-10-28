@@ -272,7 +272,7 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
       "CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT '', path TEXT DEFAULT '', referrer TEXT DEFAULT '', country TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', source TEXT DEFAULT '', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')",
     )
     db.exec('CREATE TABLE ads_daily_metrics (campaign_id TEXT, date TEXT, cost_micros INTEGER, impressions INTEGER, clicks INTEGER, fetched_at TEXT)')
-    db.exec('CREATE TABLE ads_sync_runs (campaigns_ok TEXT, finished_at TEXT, status TEXT)')
+    db.exec('CREATE TABLE ads_sync_runs (run_key TEXT, campaigns_ok TEXT, finished_at TEXT, status TEXT)')
     db.exec('CREATE TABLE ads_play_daily (date TEXT, device_installs INTEGER, user_installs INTEGER, device_uninstalls INTEGER, active_device_installs INTEGER, fetched_at TEXT)')
     return db
   }

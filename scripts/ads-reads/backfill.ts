@@ -1,7 +1,10 @@
 // backfill — a FULL re-pull of Google Ads daily metrics (and placement-day cost) for every
 // configured campaign into gss-stats-ads, through the shared sync (src/lib/adsSync.ts
 // syncAdsData with `full`), then checked against the hand-entered figures in lib/campaigns.ts
-// (CAMPAIGN_DAILY_SPEND / CAMPAIGN_SPEND).
+// (CAMPAIGN_DAILY_SPEND / CAMPAIGN_SPEND). After the cost sync, the conversions-and-assets pass
+// (syncAdsExtras with `full`, no day or campaign cap) re-pulls every campaign from its
+// flightStart through yesterday into ads_daily_conversions / ads_daily_assets / ads_assets. It
+// runs whatever the cost sync's outcome, and its failure never touches the cost rows.
 //
 //   npm run ads:backfill -- [--dry-run] [--cf-token-file <path>] [--only <campaignId>] [--no-placements]
 //
@@ -14,8 +17,9 @@
 import { parseArgs } from 'node:util'
 import { compareSpendToConfig, type SpendComparison } from '../../src/lib/adsRules'
 import { CAMPAIGN_DAILY_SPEND, CAMPAIGN_SPEND, campaignById } from '../../src/lib/campaigns'
-import { syncAdsData, syncableCampaigns, syncSummaryLines } from '../../src/lib/adsSync'
-import { adsSource, fail, liveAdsClient, loadCfToken } from './cli'
+import { maskCustomerId } from '../../src/lib/adsApi'
+import { extrasResultSummary, extrasSummaryLines, syncAdsData, syncAdsExtras, syncableCampaigns, syncSummaryLines } from '../../src/lib/adsSync'
+import { adsExtrasSource, adsSource, fail, liveAdsClient, loadCfToken } from './cli'
 import { createD1Store } from './d1Store'
 import { createWranglerRunner } from './wrangler'
 
@@ -41,6 +45,8 @@ async function main() {
     { ads: adsSource(ads), store },
     { campaignIds, now: Date.now(), dryRun, source: 'backfill', full: true, placements: !opts['no-placements'] },
   )
+  // Conversions and assets: full and uncapped (no maxDays, no maxCampaigns), after the cost sync.
+  const extras = await syncAdsExtras({ ads: adsExtrasSource(ads), store }, { campaignIds, now: Date.now(), dryRun, source: 'backfill', full: true })
   const results = sync.campaigns.map((r) => {
     const c = campaignById(r.campaignId)!
     const comparison: SpendComparison | null = r.spend ? compareSpendToConfig(c, r.spend.days, CAMPAIGN_DAILY_SPEND[c.id], CAMPAIGN_SPEND[c.id] ?? null) : null
@@ -48,7 +54,7 @@ async function main() {
     return { ...rest, comparison }
   })
 
-  const lines = [`Ads backfill into gss-stats-ads (full re-pull through the shared sync)`, ...syncSummaryLines(sync)]
+  const lines = [`Ads backfill into gss-stats-ads (full re-pull through the shared sync)`, ...syncSummaryLines(sync), ...extrasSummaryLines(extras)]
   for (const r of results) {
     const cmp = r.comparison
     if (!cmp) continue
@@ -58,8 +64,10 @@ async function main() {
     if (cmp.outsideFlight.length) lines.push(`    spend outside the flight window: ${cmp.outsideFlight.map((d) => `${d.date} $${d.api.toFixed(2)}`).join('; ')}`)
   }
   const { campaigns: _c, ...syncMeta } = sync
-  process.stdout.write(`${lines.join('\n')}\n\n----- JSON -----\n${JSON.stringify({ tool: 'ads-backfill', ...syncMeta, results }, null, 2)}\n`)
-  if (sync.status === 'failed') process.exitCode = 1
+  const out = `${lines.join('\n')}\n\n----- JSON -----\n${JSON.stringify({ tool: 'ads-backfill', ...syncMeta, results, extras: extrasResultSummary(extras) }, null, 2)}\n`
+  // Counts, ranges and redacted errors only; the customer id (which redact() does not cover) is masked too.
+  process.stdout.write(maskCustomerId(out))
+  if (sync.status === 'failed' || extras.status === 'failed') process.exitCode = 1
 }
 
 main().catch(fail)

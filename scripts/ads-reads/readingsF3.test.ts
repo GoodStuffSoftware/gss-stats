@@ -61,8 +61,8 @@ async function seeded(records: ReadingRecord[]) {
 }
 
 describe('migration 0006 (ads_readings.f3)', () => {
-  it('is the newest migration and adds one nullable TEXT column that only takes JSON', async () => {
-    expect(migrationFiles().at(-1)).toBe('0006_readings_f3.sql')
+  it('is applied in order and adds one nullable TEXT column that only takes JSON', async () => {
+    expect(migrationFiles()).toContain('0006_readings_f3.sql')
     const sqlite = await seeded([])
     const col = (sqlite.prepare('PRAGMA table_info(ads_readings)').all() as { name: string; type: string; notnull: number; dflt_value: unknown }[]).find((c) => c.name === 'f3')
     expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null })
