@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.65.1] — 2026-10-28
+
+### Added
+- **v1.105.0 web and Play release markers.** The release timeline and panel now date v1.105.0 at 2026-10-28 (Play promoted 21:55:45Z, web live 21:58:36Z, web the newest); from these times a single transient sw.js update failure no longer counts as an error row (it goes to `/app/error/sw-update-transient`), so sw-update error rows fall.
+
 ## [0.65.0] — 2026-10-28
 
 ### Added

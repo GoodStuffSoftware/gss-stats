@@ -28,18 +28,22 @@ const V1993_PLAY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 Play')!
 const V1993_PLAY_DATE = V1993_PLAY.dateEt
 const ANDROID_1103 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.103.0 Android')!
 const ANDROID_1103_DATE = ANDROID_1103.dateEt
+const V1105 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.105.0')!
+const V1105_DATE = V1105.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
   V1993_WEB.dateEt = null
   V1993_PLAY.dateEt = null
   ANDROID_1103.dateEt = null
+  V1105.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
 
 afterEach(() => {
   ANDROID_1103.dateEt = ANDROID_1103_DATE
+  V1105.dateEt = V1105_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -286,5 +290,28 @@ describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(cardShowsAuthErrors(undefined)).toBe(false)
     expect(cardShowsAuthErrors({ preset: 'no-such-preset' })).toBe(false)
     expect(autoCaveatIds(widget({ type: 'line' }))).not.toContain(AE_NOTE_ID)
+  })
+})
+
+describe('1.105.0 sw-update error-row change (errorRowsOnly entry)', () => {
+  it('is flagged errorRowsOnly, dated 2026-10-28, and names the transient failure, the beacon path and the second-failure rule in plain words', () => {
+    expect(V1105_DATE).toBe('2026-10-28')
+    expect(V1105.errorRowsOnly).toBe(true)
+    expect(V1105.note).toContain('single transient sw.js update-check failure no longer counts as an error row')
+    expect(V1105.note).toContain('second consecutive failure still files a row')
+    expect(V1105.note).toContain('21:58:36Z')
+    expect(V1105.note).toContain('21:55:45Z')
+  })
+
+  it('dated: marked, but in no auth, coach or report-line consumer and with no timeline marker of its own', () => {
+    V1105.dateEt = V1105_DATE
+    expect(markedChanges().some((c) => c.id === 'v1.105.0')).toBe(true)
+    expect(authMarkedChanges().some((c) => c.id === 'v1.105.0')).toBe(false)
+    expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.105.0')
+    expect(coachMeasurementNote('2099-03-01') ?? '').not.toContain('v1.105.0')
+    expect(noteRawText('measurement-change-note')).not.toContain('v1.105.0') // v1.99.2 keeps that caveat active; this entry adds nothing to it
+    expect(isNoteActive('auth-error-measurement-note')).toBe(false) // the sign-in failure caveat has only authErrorOnly entries
+    expect(RELEASES.some((r) => r.version === 'v1.105.0')).toBe(false)
+    expect(RELEASES.filter((r) => r.version.startsWith('v1.105.0')).map((r) => r.version)).toEqual(['v1.105.0 Play', 'v1.105.0 web'])
   })
 })

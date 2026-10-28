@@ -23,6 +23,11 @@
 // timeline marker of its own (lib/releases.ts skips authErrorOnly): the plain v1.103.0 Play marker already
 // marks that release, so the timeline shows one marker, not two. The dates must match (a test checks it).
 //
+// v1.105.0 (errorRowsOnly): one transient sw.js update-check failure goes to the beacon path
+// /app/error/sw-update-transient instead of an obs_errors row. Like the v1.103.0 Android entry it mints no
+// timeline marker (the plain v1.105.0 web and Play markers already mark the release) and stays out of the
+// auth-success caveat, the sign-in failure caveat, the coach readouts and the generic report lines.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -39,6 +44,8 @@ export interface MeasurementChange {
   coachOnly?: boolean
   /** True when the whole entry only moves the sign-in failure rows (/auth/error/<code>): it feeds the sign-in failure cards' caveat (and mints no timeline marker: the plain release marker of the same release already marks it), and is kept out of the auth-success caveat, the coach readouts and the generic report lines. */
   authErrorOnly?: boolean
+  /** True when the whole entry only moves obs_errors row counts (v1.105.0: a single transient sw.js update failure no longer files a row): it mints no timeline marker and is kept out of every auth, coach and report-line consumer. */
+  errorRowsOnly?: boolean
 }
 
 export type MarkedChange = MeasurementChange & { dateEt: string }
@@ -72,6 +79,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     note: 'native Google sign-in cancels on Android move from the no-code row to the user-cancelled row, while other native Google failures stay in no-code; older Android installs keep sending cancels as no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
     authErrorOnly: true,
   },
+  {
+    id: 'v1.105.0',
+    dateEt: '2026-10-28', // web live 2026-10-28T21:58:36Z = 17:58:36 ET; Play production 21:55:45Z = 17:55:45 ET (full rollout, versionCode 1105000). Same day as the plain v1.105.0 markers in lib/releases.ts
+    note: 'from web 21:58:36Z and Play 21:55:45Z on 10-28, a single transient sw.js update-check failure no longer counts as an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still files a row, so sw-update error rows fall while older clients keep filing them until they update',
+    errorRowsOnly: true,
+  },
 ]
 
 /** The Apps-arm Play-install read caveat ends here: v1.99.3 (19903) went public on Google Play between 06:31:47Z and 06:34:32Z on 2026-10-17 (the listing first showed its "What's new" at 06:34:32Z), before flight 3's first serve (12:00 ET 10-17). */
@@ -84,7 +97,7 @@ export function appsPlayCaveatApplies(readStartMs: number | null | undefined): b
 
 /** The marked changes that move the auth-success counts (everything but the coach-only and sign-in-failure-only entries): the caveat under the tagged cards and the generic report lines use these. */
 export function authMarkedChanges(): MarkedChange[] {
-  return markedChanges().filter((c) => !c.coachOnly && !c.authErrorOnly)
+  return markedChanges().filter((c) => !c.coachOnly && !c.authErrorOnly && !c.errorRowsOnly)
 }
 
 /** The marked sign-in-failure-only changes (the no-code to user-cancelled move): the caveat under the sign-in failure cards uses these. */

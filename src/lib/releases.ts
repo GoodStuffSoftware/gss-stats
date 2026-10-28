@@ -199,9 +199,9 @@ export const RELEASES: ReleaseMarker[] = [
   // Measurement changes, not features: each one's date and note come from lib/measurementChanges.ts
   // (the one place the date is entered; the web and the Play release of v1.99.2). Getters, so an entry
   // follows that config: while its date is null it is undated and datedReleases() drops it, so nothing
-  // shows on the timeline. An authErrorOnly entry (v1.103.0 Android) mints no marker: it is the same
+  // shows on the timeline. An authErrorOnly or errorRowsOnly entry (v1.103.0 Android, v1.105.0) mints no marker: it is the same
   // release as the plain v1.103.0 Play marker below, and the timeline shows that release once.
-  ...MEASUREMENT_CHANGES.filter((c) => !c.authErrorOnly).map(
+  ...MEASUREMENT_CHANGES.filter((c) => !c.authErrorOnly && !c.errorRowsOnly).map(
     (c): ReleaseMarker => ({
       version: c.id,
       get dateEt() {
@@ -254,6 +254,19 @@ export const RELEASES: ReleaseMarker[] = [
     version: 'v1.104.0 Play',
     dateEt: '2026-10-27', // promoted to Play production ~2026-10-27T17:18:40Z = 13:18:40 ET (full rollout, versionCode 1104000)
     note: 'Play production 17:18:40Z 10-27 (1104000); old and new Android builds mix until updates spread. Guests now see the paywall with prices; a guest tapping a pass counts as "Pass tapped, sign-in first", and Paywall shown rises from this release because guests now see it.',
+  },
+  // v1.105.0: nothing changes for players. One counting change (v1.105.0 in lib/measurementChanges.ts, errorRowsOnly, so it
+  // mints no marker of its own): a single transient sw.js update failure goes to /app/error/sw-update-transient, not an obs_errors row.
+  // Play production (21:55:45Z) came 2m51s BEFORE web went live (21:58:36Z), so Play is listed first and the later-timed web entry wins the same-day tie.
+  {
+    version: 'v1.105.0 Play',
+    dateEt: '2026-10-28', // promoted to Play production 2026-10-28T21:55:45Z = 17:55:45 ET (full rollout, versionCode 1105000)
+    note: 'Play production 21:55:45Z 10-28 (1105000); old and new Android builds mix until updates spread. A single transient sw.js update failure no longer files an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still does.',
+  },
+  {
+    version: 'v1.105.0 web',
+    dateEt: '2026-10-28', // web live 2026-10-28T21:58:36Z = 17:58:36 ET (deploy started 21:57:18Z)
+    note: 'Web live 21:58:36Z 10-28. A single transient sw.js update failure no longer files an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still does.',
   },
 ]
 
