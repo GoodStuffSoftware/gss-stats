@@ -9,6 +9,7 @@
 // - site tags that pass the server's tag rule, at most its maximum;
 // - "hide my own visits" only when it is on with a browser and an OS the server's sanitizer
 //   keeps unchanged (it refuses any other value); the pop-up facts honour it, as /api/popups does.
+import type { InjectionKey, Ref } from 'vue'
 import { SITE_TAG_RE } from '../range'
 import { safeUA } from '../ownExclusion'
 import { MAX_RANGE_DAYS } from './validate'
@@ -63,3 +64,7 @@ export function metricsContextFor(range: PageRange, siteTags: readonly string[],
   }
   return out
 }
+
+/** The widget frame's header slot (ChartCard), where a card with CardSpec.notesInHeader puts its Notes toggle
+ * (MetricCardInstance teleports it), so the toggle takes no row of its own in the card body. */
+export const CARD_FRAME_HEAD: InjectionKey<Ref<HTMLElement | null>> = Symbol('cardFrameHead')

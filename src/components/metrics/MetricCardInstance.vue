@@ -12,9 +12,10 @@
 // The click-through (`link`) is the title, a real button — never a role="button" wrapper
 // around other controls. The rest of the box stays clickable for a pointer only (no role, not
 // focusable), matching the old scorecard card.
-import { computed, ref, useId, watch } from 'vue'
+import { computed, inject, ref, useId, watch } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
+import { CARD_FRAME_HEAD } from '../../lib/metrics/pageContext'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import { buildRequestSpec, scopeField, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardSpec, MetricsContext } from '../../lib/metrics/types'
@@ -91,7 +92,12 @@ const openLabel = noteRawText('label.card.openCampaigns')
 // The header's own content; a slotted status (MetricCard's freshness or error line) also shows
 // it, checked in the template through $slots, which is reactive — useSlots() read inside a
 // computed is not, and an untitled card would never show its error line.
-const hasOwnHead = computed(() => titleTokens.value.length > 0 || !!badge.value || notes.value.length > 0)
+// CardSpec.notesInHeader: the toggle goes to the widget frame's header row (ChartCard), on the plain card only.
+const frameHead = inject(CARD_FRAME_HEAD, null)
+const frameHeadEl = computed(() => frameHead?.value ?? null)
+const notesInFrame = computed(() => props.spec.notesInHeader === true && !props.boxed && !!frameHeadEl.value)
+const notesInHead = computed(() => notes.value.length > 0 && !notesInFrame.value)
+const hasOwnHead = computed(() => titleTokens.value.length > 0 || !!badge.value || notesInHead.value)
 const notesId = `mc-notes-${useId()}`
 const plainTitle = computed(() => titleTokens.value.map((t) => t.value).join('') || props.fallbackTitle || '')
 /** "Notes: US+CA web retest" — which card's notes, for a screen reader moving between cards. */
@@ -111,10 +117,13 @@ function onBoxClick() {
       </span>
       <span class="mc-head-right">
         <span v-if="badge" class="mc-badge" :class="`tone-${badge.tone}`">{{ badge.primary }}</span>
-        <button v-if="notes.length" type="button" class="mc-notes-toggle" :aria-label="notesAria" :aria-expanded="notesOpen" :aria-controls="notesId" @click.stop="notesOpen = !notesOpen">{{ notesLabel }}</button>
+        <button v-if="notesInHead" type="button" class="mc-notes-toggle" :aria-label="notesAria" :aria-expanded="notesOpen" :aria-controls="notesId" @click.stop="notesOpen = !notesOpen">{{ notesLabel }}</button>
         <slot name="status" />
       </span>
     </div>
+    <Teleport v-if="notesInFrame && notes.length && frameHeadEl" :to="frameHeadEl">
+      <button type="button" class="mc-notes-toggle" :aria-label="notesAria" :aria-expanded="notesOpen" :aria-controls="notesId" @click.stop="notesOpen = !notesOpen">{{ notesLabel }}</button>
+    </Teleport>
     <ul v-if="notes.length" v-show="notesOpen" :id="notesId" class="mc-notes" @click.stop>
       <li v-for="n in notes" :key="n.key"><MetricLabel :tokens="n.labelTokens" />: <MetricLabel :tokens="n.captionTokens" /></li>
     </ul>

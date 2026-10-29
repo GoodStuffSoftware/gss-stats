@@ -244,6 +244,7 @@ export function validateCard(spec: CardSpec): string[] {
   if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
   if (spec.dayPicker !== undefined && typeof spec.dayPicker !== 'boolean') errors.push('card: dayPicker must be a boolean')
   if (spec.pinCaptions !== undefined && typeof spec.pinCaptions !== 'boolean') errors.push('card: pinCaptions must be a boolean')
+  if (spec.notesInHeader !== undefined && typeof spec.notesInHeader !== 'boolean') errors.push('card: notesInHeader must be a boolean')
   if (spec.actions !== undefined && (!Array.isArray(spec.actions) || !spec.actions.every((a) => CARD_ACTIONS.has(a)))) errors.push(`card: actions must be a list of ${[...CARD_ACTIONS].join(', ')}`)
   if (spec.notices !== undefined && !CARD_NOTICES.has(spec.notices)) errors.push(`card: notices must be one of ${[...CARD_NOTICES].join(', ')}`)
   checkRepeat('card', spec.repeat)

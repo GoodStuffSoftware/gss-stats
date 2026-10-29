@@ -721,6 +721,7 @@ export const ASK_ORDER: CardSpec = {
   minWidth: 360,
   captions: ['ask-order-caption'],
   pinCaptions: true,
+  notesInHeader: true,
   sections: [
     {
       layout: 'lines',

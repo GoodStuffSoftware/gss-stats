@@ -398,6 +398,15 @@ const pinCaptionsValue = computed<boolean>({
     else delete spec.pinCaptions
   },
 })
+// The Notes toggle in the widget frame's header row (CardSpec.notesInHeader): no row of its own in the body.
+const notesInHeaderValue = computed<boolean>({
+  get: () => spec.notesInHeader === true,
+  set: (v) => {
+    if (v === notesInHeaderValue.value) return
+    if (v) spec.notesInHeader = true
+    else delete spec.notesInHeader
+  },
+})
 const TONE_OPTIONS = BADGE_TONE_OPTIONS
 const tonesGroupId = useId()
 const actionsGroupId = useId()
@@ -500,6 +509,9 @@ function removeSection(i: number) {
           </div>
           <div class="field">
             <label><input type="checkbox" v-model="pinCaptionsValue" /> Keep the captions in view (the body scrolls above them)</label>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="notesInHeaderValue" /> Notes toggle in the header row (no row of its own)</label>
           </div>
           <div class="field">
             <label :for="showUpdatedId">"Updated Xs ago"</label>

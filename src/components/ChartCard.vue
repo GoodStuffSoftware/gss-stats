@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId, provide } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
@@ -21,11 +21,9 @@ import FilterPopover from './FilterPopover.vue'
 import MetricCard from './metrics/MetricCard.vue'
 import StatTile from './metrics/StatTile.vue'
 import BarTable from './metrics/BarTable.vue'
-import { metricsContextFor } from '../lib/metrics/pageContext'
+import { CARD_FRAME_HEAD, metricsContextFor } from '../lib/metrics/pageContext'
 import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
-import FeatureHealthCard from './FeatureHealthCard.vue'
-import { ASK_ORDER_VIEW } from '../lib/askOrder'
 import NoteBlock from './NoteBlock.vue'
 import CaptionCollapse from './CaptionCollapse.vue'
 import { noteRawText } from '../lib/notes'
@@ -40,8 +38,8 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 // and type 'note' render their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
 // 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
 // retired); one without a card — a panel the migration does not know — says so.
-// The 'features' dataset draws only the Ask-order A/B now (FeatureHealthCard.vue); its other saved views are mapped
-// to ordinary charts and cards before they get here (lib/defaults.ts), and one no mapping covers says the same.
+// The 'features' dataset has no body of its own since editor tools T4: its saved views are mapped to ordinary charts
+// and cards before they get here (lib/defaults.ts), and one no mapping covers says the same.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const retiredPanelText = noteRawText('label.card.retiredPanel')
 const isBespokeBody = computed(() => rendersOwnBody(props.widget))
@@ -218,6 +216,9 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
 const zoomed = ref(false)
 const aspect = ref(1.6)
 const cardEl = ref<HTMLElement | null>(null)
+// Where a metric card with CardSpec.notesInHeader puts its Notes toggle (MetricCardInstance).
+const frameHeadEl = ref<HTMLElement | null>(null)
+provide(CARD_FRAME_HEAD, frameHeadEl)
 
 // Fit-to-content height (Widget.fit, lib/fit.ts): while on, the card's body is content-sized
 // (see `.fit` below) and its content height is reported for Dashboard.vue to turn into grid rows.
@@ -604,6 +605,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           >· {{ overrideSummary }}</span
         >
       </div>
+      <div ref="frameHeadEl" class="head-card-slot"></div>
       <div class="head-actions">
         <!-- Revealed controls (owner clarification, 2026-09-26): filter/reload/options-menu
              stay hidden until this card's own reveal is toggled on, the page's edit mode is on
@@ -681,7 +683,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :caption-display="widget.captionDisplay" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
-      <FeatureHealthCard v-else-if="widget.dataset === 'features' && widget.view === ASK_ORDER_VIEW" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'features'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
@@ -801,6 +802,15 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   .chart-card.view-only .card-head {
     cursor: default;
   }
+}
+/* A metric card's Notes toggle (CardSpec.notesInHeader), right-aligned before the frame's own icons. */
+.head-card-slot {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+.head-card-slot:empty {
+  display: none;
 }
 .title-wrap {
   display: flex;

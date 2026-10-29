@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The Ask-order A/B is a card-editor card.** It shows the same numbers as before and can be edited or rebuilt in the card editor; saved layouts keep it in place.
+- **Card editor look options.** Cards can use large lines, roomy table rows, a status line dimmed for chosen verdicts, captions kept in view while the body scrolls, and a Notes toggle in the header row.
+
+### Removed
+- **The old Features-page panel code.** A saved Ask-order card that shows known traffic now shows the "replaced by a card or a chart" note.
+
 ## [0.74.1] — 2026-10-29
 
 ### Fixed

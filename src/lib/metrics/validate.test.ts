@@ -196,6 +196,74 @@ describe('card.dayPicker', () => {
   })
 })
 
+// The card-editor look options (editor tools T3 and T4): each is accepted where it applies, and named anywhere else.
+// Only the option's own message is checked, so a binding the test does not care about cannot mask it.
+describe('card look options', () => {
+  const item = (extra: Record<string, unknown> = {}) => ({ id: 'x', label: 'X', data: { metric: 'bsk.pageviews' }, display: { as: 'number' }, ...extra })
+  const errs = (spec: unknown, needle: string) => validateCard(spec as CardSpec).filter((e) => e.includes(needle))
+  const one = (section: Record<string, unknown>, top: Record<string, unknown> = {}) => ({ v: 1, ...top, sections: [{ layout: 'lines', items: [item()], ...section }] })
+
+  it('pinCaptions and notesInHeader: a boolean is accepted; anything else is named', () => {
+    for (const k of ['pinCaptions', 'notesInHeader']) {
+      expect(errs(one({}, { [k]: true }), k), k).toEqual([])
+      expect(errs(one({}, { [k]: false }), k), k).toEqual([])
+      expect(errs(one({}, { [k]: 'yes' }), k), k).toEqual([`card: ${k} must be a boolean`])
+    }
+  })
+
+  it("joined and large: true on a 'lines' section only", () => {
+    for (const k of ['joined', 'large']) {
+      expect(errs(one({ [k]: true }), k), k).toEqual([])
+      expect(errs(one({ [k]: 1 }), k).length, k).toBe(1)
+      expect(errs(one({ layout: 'pills', [k]: true }), k), k).toEqual([`sections[0]: ${k} is true, on a 'lines' section only`])
+    }
+  })
+
+  it("roomy: true on a 'table' section only", () => {
+    expect(errs(one({ layout: 'table', roomy: true }), 'roomy')).toEqual([])
+    expect(errs(one({ roomy: true }), 'roomy')).toEqual(["sections[0]: roomy is true, on a 'table' section only"])
+  })
+
+  it('panels: true, over a repeat, never on a table', () => {
+    const rep = { over: 'campaigns' }
+    expect(errs(one({ layout: 'pills', repeat: rep, panels: true }), 'panel')).toEqual([])
+    expect(errs(one({ layout: 'pills', panels: true }), 'panel')).toEqual(["sections[0]: panels show a repeat's instances; it needs a repeat"])
+    expect(errs(one({ layout: 'table', repeat: rep, panels: true }), 'panel')).toEqual(['sections[0]: a table is not shown in panels'])
+    expect(errs(one({ layout: 'pills', repeat: rep, panels: 'yes' }), 'panel')).toEqual(['sections[0]: panels must be true'])
+  })
+
+  it("mono, dim and hideLabel: true on a 'line' item only", () => {
+    for (const k of ['mono', 'dim', 'hideLabel']) {
+      expect(errs(one({ items: [item({ [k]: true })] }), k), k).toEqual([])
+      expect(errs(one({ layout: 'pills', items: [item({ [k]: true, frame: 'line' })] }), k), k).toEqual([])
+      expect(errs(one({ layout: 'pills', items: [item({ [k]: true })] }), k), k).toEqual([`sections[0].x: ${k} is true, on a 'line' item only`])
+      expect(errs(one({ items: [item({ [k]: false })] }), k).length, k).toBe(1)
+    }
+  })
+
+  it('dimWhen: one to eight codes 0-99, on a line item with a status display', () => {
+    const status = { display: { as: 'status' } }
+    expect(errs(one({ items: [item({ ...status, dimWhen: [0, 3] })] }), 'dimWhen')).toEqual([])
+    for (const bad of [[], [100], [1.5], Array.from({ length: 9 }, (_, i) => i), 'x']) expect(errs(one({ items: [item({ ...status, dimWhen: bad })] }), 'dimWhen').length, JSON.stringify(bad)).toBe(1)
+    expect(errs(one({ items: [item({ dimWhen: [0] })] }), 'dimWhen').length).toBe(1) // a number display
+    expect(errs(one({ layout: 'pills', items: [item({ ...status, dimWhen: [0] })] }), 'dimWhen').length).toBe(1) // not a line
+  })
+
+  it("after: up to 8 plain characters on a line item, a label on a table cell, nowhere else", () => {
+    expect(errs(one({ items: [item({ after: ' /day' })] }), 'after')).toEqual([])
+    for (const bad of ['', '123456789', '{n}', 3]) expect(errs(one({ items: [item({ after: bad })] }), 'after').length, String(bad)).toBe(1)
+    expect(errs(one({ layout: 'table', items: [item({ after: 'per day' })] }), 'after')).toEqual([])
+    expect(errs(one({ layout: 'pills', items: [item({ after: 'x' })] }), 'after')).toEqual(["sections[0].x: after is for a 'table' cell or a 'line' item"])
+  })
+
+  it("ruleAbove: true on a column table's row only", () => {
+    const cols = { layout: 'table', columns: { over: 'campaigns' } }
+    expect(errs(one({ ...cols, items: [item({ ruleAbove: true })] }), 'ruleAbove')).toEqual([])
+    expect(errs(one({ layout: 'table', items: [item({ ruleAbove: true })] }), 'ruleAbove')).toEqual(["sections[0].x: ruleAbove is true, on a column table's row only"])
+    expect(errs(one({ ...cols, items: [item({ ruleAbove: 1 })] }), 'ruleAbove').length).toBe(1)
+  })
+})
+
 describe('note ids are own keys only (review #1)', () => {
   it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])('%s is not a note: validateCard judges it by shape only, and the note helpers never throw', (id) => {
     const spec: CardSpec = { v: 1, captions: [id], sections: [{ layout: 'rows', items: [{ id: 'x', label: { note: id }, data: { metric: 'bsk.pageviews' }, display: { as: 'number' }, gating: { whenEmpty: { note: id } } }] }] }

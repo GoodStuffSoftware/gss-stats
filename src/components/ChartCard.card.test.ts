@@ -139,26 +139,20 @@ describe('ChartCard × metric card', () => {
   })
 })
 
-// Editor tools T7: ChartCard mounts FeatureHealthCard for the Ask-order A/B only; any other 'features' widget that no
-// render-time mapping turned into a card or chart gets the retired-panel note, never an old body.
-describe('ChartCard × features dataset after T7', () => {
+// Editor tools T7 and T4: the 'features' dataset has no body of its own; a 'features' widget that no render-time mapping
+// turned into a card or chart (one that shows known traffic, or names an unknown feature) gets the retired-panel note.
+describe('ChartCard × features dataset after T4', () => {
   const feat = (view: string, extra: Partial<Widget> = {}) =>
     ({ id: 'fw-x', i: 'fw-x', title: 'Old panel', type: 'table', dataset: 'features', view, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 8, ...extra }) as Widget
 
-  it('an unmapped health, steps or Coach tips widget shows the retired-panel note and no FeatureHealthCard', async () => {
-    for (const w of [feat('health', { excludeKnownTraffic: false }), feat('coach-tips', { excludeKnownTraffic: false }), feat('steps:no-such-feature', { excludeKnownTraffic: true })]) {
+  it('an unmapped health, steps, Coach tips or Ask-order widget shows the retired-panel note and asks no endpoint', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    for (const w of [feat('health', { excludeKnownTraffic: false }), feat('coach-tips', { excludeKnownTraffic: false }), feat('ask-order', { excludeKnownTraffic: false }), feat('steps:no-such-feature', { excludeKnownTraffic: true })]) {
       const c = mountCard(w)
       await settle()
       expect(c.text(), w.view).toContain('This panel has been replaced by a card or a chart.')
-      expect(c.findComponent({ name: 'FeatureHealthCard' }).exists(), w.view).toBe(false)
     }
-  })
-
-  it('the Ask-order widget still mounts FeatureHealthCard', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })))
-    const c = mountCard(feat('ask-order', { excludeKnownTraffic: true }))
-    await settle()
-    expect(c.findComponent({ name: 'FeatureHealthCard' }).exists()).toBe(true)
-    expect(c.text()).not.toContain('This panel has been replaced by a card or a chart.')
+    expect(fetchSpy.mock.calls.map((c) => String((c as unknown[])[0])).filter((u) => u.includes('/api/features'))).toEqual([])
   })
 })

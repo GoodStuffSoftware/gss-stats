@@ -425,6 +425,19 @@ and `src/lib/featureHealthChart.ts` stay: Ask-order reads the endpoint, and the 
 chart config are the parity tests' reference (decision 3). Left: T4 (Ask-order), then the dataset's
 removal, the exit criterion.
 
+T4 built (2026-10-29): the Ask-order A/B is the `ask-order` preset. A group (organic and tagged, or
+one tag) is a feature of the `featureDays` fact with `set: 'ask-order'`; an `allTime` window reads
+the `featureAllTime` fact (COUNT(*) per path and campaign tag, every row so far) for the progress
+and the 1.5x rule; `askOrder.*` metrics carry the progress, verdict and primary, whose wording stays
+in `src/lib/askOrder.ts`. The look needed only general card-editor options (large lines, roomy
+tables, `dimWhen`, `pinCaptions`, `notesInHeader`), no Ask-order-only code. A saved ask-order widget
+that hides known traffic is mapped at render time (`askOrderCardFor`, decision 2), no
+`CONFIG_VERSION` change; one that shows known traffic gets the retired-panel note, as in T3 and T7.
+Parity is `functions/api/askOrder.parity.test.ts` (decision 3). `FeatureHealthCard` is removed and
+the `features` dataset has no body of its own: every saved `features` widget reaches the screen
+through a mapping or the retired-panel note. `/api/features` and `src/lib/featureHealthChart.ts`
+stay as the parity tests' reference only. The exit criterion (no bespoke `features` body) is met.
+
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
 styles noted above.

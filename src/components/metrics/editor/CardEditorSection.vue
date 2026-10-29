@@ -38,7 +38,7 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
 type OptionalLabel = 'title' | 'columnLabel' | 'rowsLabel'
 const remembered: Partial<Record<OptionalLabel, Label>> = {}
 /** The column headings that were set when the columns were cleared (restored with them). */
-const setAside: Partial<Record<'columnLabel' | 'rowsLabel', Label>> = {}
+const setAside: Partial<Record<'columnLabel' | 'rowsLabel', Label>> & { columnGroups?: Section['columnGroups'] } = {}
 function labelModel(key: OptionalLabel) {
   return computed<Label | undefined>({
     get: () => section.value[key],
@@ -77,20 +77,23 @@ const rowGroupsModel = computed({
   },
 })
 /** A table's column repeat (Section.columns): items become rows, these instances columns. The
- * column and row-label headings only apply with columns (validateCard), so clearing the columns
- * sets them aside and choosing columns again brings them back. */
+ * column groups and the column and row-label headings only apply with columns (validateCard), so clearing the
+ * columns sets them aside and choosing columns again brings them back. */
 const columnsModel = computed({
   get: () => section.value.columns,
   set: (v) => {
     if (v === section.value.columns) return
     let next = withField(section.value, 'columns', v)
     if (!v) {
+      if (next.columnGroups !== undefined) setAside.columnGroups = next.columnGroups
       next = withField(next, 'columnGroups', undefined)
       for (const k of ['columnLabel', 'rowsLabel'] as const) {
         if (next[k] !== undefined) setAside[k] = next[k]
         next = withField(next, k, undefined)
       }
     } else if (!section.value.columns) {
+      if (next.columnGroups === undefined && setAside.columnGroups !== undefined) next = { ...next, columnGroups: setAside.columnGroups }
+      delete setAside.columnGroups
       for (const k of ['columnLabel', 'rowsLabel'] as const) {
         if (next[k] === undefined && setAside[k] !== undefined) next = { ...next, [k]: setAside[k] }
         delete setAside[k]

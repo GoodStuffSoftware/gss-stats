@@ -356,6 +356,9 @@ export interface CardSpec {
   /** In a fixed-height grid slot, the sections scroll in their own box and the card's captions stay pinned under it,
    * always in view (the old bespoke cards' look). A fit-to-content card, or a phone, shows everything anyway. */
   pinCaptions?: boolean
+  /** The card's Notes toggle sits in the widget frame's header row (next to its title) instead of a row of its own
+   * above the sections, so it takes no height from the body. A repeated (boxed) card keeps it in each box. */
+  notesInHeader?: boolean
 }
 
 /** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts.

@@ -296,4 +296,22 @@ describe('counts only', () => {
       expect(select).not.toMatch(new RegExp(`\\b${col}\\b`))
     }
   })
+
+  // The split guard (src/lib/splitGuard.ts refuses the whole /ab/ask-order/% family for any hour, place or device
+  // split): the card's other two statements carry no such column either. The day read keys a row by its ET day only,
+  // and the ever read is one whole COUNT(*).
+  it('the day and ever reads: no visitor, hour, place or device column, no JOIN; the day read cuts by ET day only', () => {
+    const p = { since: addDays(TODAY, -6), until: TODAY, sites: [], todayEt: TODAY, set: 'ask-order' }
+    const reads = { day: (FACTS as any).featureDays.build(p, Date.now()).sql as string, ever: (FACTS as any).coachEver.build(p, Date.now()).sql as string }
+    for (const [name, sql] of Object.entries(reads)) {
+      expect(sql, name).not.toMatch(/\bJOIN\b/i)
+      const select = sql.slice(0, sql.indexOf(' FROM hits '))
+      for (const col of ['visitor', 'country', 'region', 'city', 'device', 'browser', 'os', 'colo', 'lat', 'lon', 'postal', 'timezone', 'hour', 'hr']) {
+        expect(select, `${name}: ${col}`).not.toMatch(new RegExp(`\\b${col}\\b`))
+      }
+      expect(sql, name).not.toMatch(/strftime\('%H'/)
+    }
+    expect(reads.ever).toMatch(/COUNT\(\*\)/)
+    expect(reads.ever).not.toMatch(/GROUP BY/i)
+  })
 })

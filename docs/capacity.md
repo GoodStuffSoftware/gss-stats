@@ -479,7 +479,7 @@ for a closed range). Estimate, not a measurement: about 7 times the rows read fo
 per uncached load, since each statement reads the same window the old pair read. Batching the
 steps keeps it at 14 rather than 44 (one per step). The step charts with no counts-only rows are
 now `liveSafe`, so a live ping can refetch them (at most hourly per chart, §10); the old step
-charts never refetched. Ask-order still reads `/api/features`, unchanged; Coach tips: §12.
+charts never refetched. Coach tips and Ask-order: §12.
 
 ## 12. Feature health as a metric card (editor tools T2, 2026-10-29) — D1 rows read and CPU
 
@@ -509,6 +509,16 @@ scanned the range plus the whole history once: about one extra full-history scan
 at most once per 300 s per range and filter set. Accepted: Best Sudoku's history is well under 400
 days and the warm cache serves repeat loads; bounding the coach read at the range start would
 change `feature.status` for a tip, which reads the older rows.
+
+Ask-order (editor tools T4, 2026-10-29). The old Ask-order card read one `/api/features` POST with
+3 statements (the range by ET day, the rows before it, and every row so far per step). The
+Ask-order card sends one `/api/metrics` POST (at most 200 requests) and plans 3 statements on a
+cold cache: `featureDays` with `set: 'ask-order'`, bounded to the range (it needs no status, so no
+older rows), `featureAllTime` (one `COUNT(*)` per path and campaign tag before tomorrow) and
+`coachEver` with `set: 'ask-order'` (one whole `COUNT(*)`). The last two are keyed by the ET day
+(and own-visit filter) only, so one entry serves every range and site selection for 300 s. Same
+statement count; the ever count is one extra full-history scan of the `/ab/ask-order/` rows per
+cold day key, where the old card had a before-range scan per range. Accepted for the same reasons.
 
 ## 13. Flight charts: count first, attribute after (2026-10-29) — D1 rows read
 

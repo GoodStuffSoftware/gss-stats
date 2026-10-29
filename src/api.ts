@@ -2,8 +2,6 @@ import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } f
 import type { AdsReadingsResponse } from './lib/adsStore'
 import type { RefreshResult } from './lib/adsRefresh'
 import type { FeatureHealthModel } from './lib/featureHealth'
-import { COACH_TIPS_VIEW } from './lib/coachTips'
-import { ASK_ORDER_VIEW } from './lib/askOrder'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -211,8 +209,9 @@ export type FeatureHealthResponse = FeatureHealthModel & {
 const FEATURE_HEALTH_SHARE_MS = 30_000
 const featureHealthInflight = new Map<string, { at: number; promise: Promise<FeatureHealthResponse> }>()
 
-/** Fetch the feature-health model (POST /api/features). The Overview card and every step chart on
- * the Features page ask the same question, so one request is shared by identical bodies for
+/** Fetch the feature-health model (POST /api/features, the default view). No widget body calls it since editor tools
+ * T4 (every saved features widget is a chart or a card); it stays as the old request the T1 step-chart parity test
+ * (functions/api/featureStep.parity.test.ts) compares against. Identical bodies share one request for
  * FEATURE_HEALTH_SHARE_MS; a failed request is never kept. `fresh` skips the shared copy. */
 export function fetchFeatureHealth(widget: Widget, filters: GlobalFilters, fresh = false): Promise<FeatureHealthResponse> {
   const { tags } = resolveSelection(widget.siteSel ?? filters.siteSel)
@@ -224,7 +223,6 @@ export function fetchFeatureHealth(widget: Widget, filters: GlobalFilters, fresh
     ownBrowser: filters.ownBrowser,
     ownOS: filters.ownOS,
     excludeKnownTraffic: widget.excludeKnownTraffic === true,
-    ...(widget.view === COACH_TIPS_VIEW || widget.view === ASK_ORDER_VIEW ? { view: widget.view } : {}),
   })
   const hit = featureHealthInflight.get(body)
   if (!fresh && hit && Date.now() - hit.at < FEATURE_HEALTH_SHARE_MS) return hit.promise
