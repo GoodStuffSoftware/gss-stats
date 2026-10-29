@@ -16,12 +16,25 @@ the Cloudflare REST API, the GraphQL Analytics API, and read-only `wrangler d1 e
 
 | Scope | Plan | Evidence |
 |---|---|---|
-| Workers/Pages (account) | **Free** — no Workers Paid subscription exists | `GET /accounts/:id/subscriptions` returns only a `teams_free` (Zero Trust) line item; no `workers.*` rate plan present |
+| Workers/Pages (account) | **Workers Paid** since 2026-10-29 (~09:00 ET; Free before) | Moved by Mike on 10-29 after the account hit D1's Free daily read cap (§13). Before that, `GET /accounts/:id/subscriptions` returned only a `teams_free` (Zero Trust) line item |
 | Zone `goodstuff.software` | **Free Website** | `GET /zones?name=goodstuff.software` → `plan.legacy_id: "free"` |
 | Zero Trust / Access | Teams Free (50 users) | Same subscriptions call |
 | Secrets Store | Beta, 1 store/account, 100 secrets/account | `default_secrets_store` exists with 4 secrets (Stripe keys, unrelated to gss-stats) |
 
-Everything below is scoped to the **Workers Free** plan's limits unless noted.
+Sections 2-12 were measured against the **Workers Free** plan's limits and keep those figures as history. The Workers Paid
+limits that replace them (Cloudflare docs, read 2026-10-29: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/),
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/)):
+
+| Limit | Workers Free | Workers Paid |
+|---|---|---|
+| D1 rows read | 5 million / day | first 25 billion / month included, then $0.001 / million rows |
+| D1 rows written | 100,000 / day | first 50 million / month included, then $1.00 / million rows |
+| D1 storage | 5 GB total | first 5 GB included, then $0.75 / GB-month |
+| Worker CPU per HTTP request | 10 ms | 30 s default, up to 5 min |
+| Worker CPU per Cron Trigger | 10 ms | 30 s (interval under 1 h), 15 min (interval 1 h or more) |
+| Subrequests per invocation | 50 | 10,000 (can be raised) |
+
+D1 reads no longer fail hard at a daily cap; past the monthly allowance they cost money, so rows read per call still matter (§13).
 
 ## 2. Cloudflare resource usage vs. limits
 
@@ -77,7 +90,11 @@ No standalone `workersInvocationsAdaptive` rows at all — the account's only st
 | CPU time/invocation | 10 ms | not directly measured (no errors observed; D1/GraphQL waits don't count as CPU) | a GAQL fetch + a couple of D1 upserts is unlikely to approach 10ms CPU, but not directly measured this session |
 | Subrequests/invocation | 50 | n/a | an hourly sync doing OAuth refresh + a few GAQL calls + a few D1 writes stays well under 50 |
 
-#### Sync Worker CPU over the Free 10 ms limit (decision 2026-10-29)
+#### Sync Worker CPU over the Free 10 ms limit (decision 2026-10-29) — resolved
+
+**Resolved 2026-10-29:** the account is on Workers Paid (§1), whose Cron Trigger CPU limit is 30 s, so the
+extras ticks' 26-32 ms is well within the plan. The "over the Free limit, accepted" status below no longer applies;
+it is kept as the record of the decision.
 
 The `gss-stats-sync` extras pass (cap 120 rows, cron `20,50 8-11 * * *` UTC) is kept as is, and its CPU is accepted as over the Workers Free plan's 10 ms/invocation limit. Not cut further.
 
@@ -492,3 +509,33 @@ scanned the range plus the whole history once: about one extra full-history scan
 at most once per 300 s per range and filter set. Accepted: Best Sudoku's history is well under 400
 days and the warm cache serves repeat loads; bounding the coach read at the range start would
 change `feature.status` for a tip, which reads the older rows.
+
+## 13. Flight charts: count first, attribute after (2026-10-29) — D1 rows read
+
+On 2026-10-29 the account passed the Free plan's 5M rows/day D1 read cap (8.9M by 12:40 UTC). Almost all of it was the
+Campaigns page's flight charts (`campaignFlight`, `flightDay`): each ran the `flight_reg` lookup (lib/campaigns.ts
+`flightLookupSql`) once per hits row, and D1 counts every registry row a lookup scans, so a call read about
+(rows in range) x 14 on the 13-row registry: about 289k per flight-day chart, 183k per flight x device x os and 124k per
+flight x hour, for a window of about 20k rows.
+
+Grouped `/api/geo` statements that use a flight dimension (`campaignFlight`, `flightDay`, `arrival`, `landingTag`, as a
+key, a blank test or a drill) now count first and attribute after (functions/api/geo.ts `groupedCountsSql`): stage 1
+scans the window once, grouping on the other keys plus each flight expression's per-row inputs (the row's campaign
+unless an exclusion drops it, the registry boundary the row's `ts` has reached, the ET date, the arrival and landing-tag
+flags), with no table read; stage 2 runs the lookup once per group and re-sums. The answer is the same, row for row
+(`geo.lateFlight.test.ts` compares both forms through the handler on every flight dimension combination, drill and
+window). Points mode keeps the per-row form.
+
+Cost per call is about rows in range + groups x 13 per flight-expression use (a lookup scans the 13-row registry; a flight x flight-day ring has about 4 lookups per group). Measured with a probe that counts every hits and `flight_reg` row
+SQLite visits, on a 19,680-row fixture across all 13 registry rows:
+
+| Chart | Per-row form | Count first |
+|---|---:|---:|
+| flight day x flight | 374,502 | 21,630 |
+| flight x device x os | 175,251 | 22,527 |
+| hour of day x flight | 175,576 | 21,851 |
+
+That is a 8-17x cut; a cold Campaigns load drops from about 0.6-1M rows to about 0.1M. Statement size is no larger than before
+(the worst-case ring measured 0.5 KB smaller; each registered campaign adds its registry row plus up to three boundaries that
+fall inside the window).
+
