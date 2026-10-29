@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 //
-// A fit card (Widget.fit) passes through a placeholder height while its data loads, so the layout
-// is mutated even when it ends where it started. The save step must not PUT a layout that equals
-// the one last loaded or saved (otherwise every page load writes the layout), and must still PUT a
-// real change. Geometry is stubbed (happy-dom has no layout); real timers, because the debounces
+// A fit card (Widget.fit) takes a height from its content, which is a fact of the screen it is drawn
+// on: the height (and the positions of the cards below it) is held in memory only and never saved
+// (lib/fitPersist.ts). So a page load, at any width, writes nothing; and a real edit saves exactly
+// the edit, with each fit card at the height it was loaded with. Geometry is stubbed (happy-dom has no layout); real timers, because the debounces
 // (settle 300ms, save 700ms) are the thing under test.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -121,17 +121,51 @@ describe('App: saving a fit card layout', () => {
     expect(saveConfig).not.toHaveBeenCalled()
   }, 15000)
 
-  it('still PUTs a layout whose fitted h really changed', async () => {
+  it('a fitted height alone is never saved: the card refits on screen, nothing is PUT', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
     contentBottom = 520
     fireResize()
     await sleep(FIT_SETTLE_MS + 100)
     await sleep(900)
+    expect(liveCard().h).toBe(fitRows(520)) // on screen it follows its content
+    expect(saveConfig).not.toHaveBeenCalled() // but the shared layout is untouched
+  }, 15000)
+
+  it('a load at a narrow-but-not-phone width (740 px) saves nothing, although every fit card refits', async () => {
+    vi.stubGlobal('innerWidth', 740)
+    contentBottom = 700 // wrapped text: much taller than the stored rows
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await sleep(900)
+    expect(liveCard().h).toBe(fitRows(700))
+    expect(saveConfig).not.toHaveBeenCalled()
+  }, 15000)
+
+  it('an edit saves the edit with the fit card at its stored height, not the fitted one', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    await retitle('Renamed')
+    await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(sentCard(0).title).toBe('Renamed')
+    expect(sentCard(0).h).toBe(fitRows(300)) // as loaded, whatever the screen measured
+    expect(liveCard().h).toBe(fitRows(520)) // still fitted on screen
+  }, 15000)
+
+  it('the cards below a fit card are saved where the stored heights put them, not where the fitted height pushed them', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    const ws = () => wrapper!.findComponent(Dashboard).props('widgets') as Widget[]
+    const bottomOf = (list: Widget[]) => Math.max(...list.map((w) => w.y + w.h))
+    const storedBottom = bottomOf(ws().map((w) => ({ ...w })))
+    await refit(900)
+    await retitle('Renamed')
+    await sleep(900)
     const saved = vi.mocked(saveConfig).mock.calls[0][0]
-    const card = saved.pages.find((p) => p.id === saved.activePageId)!.widgets.find((w) => w.fit === 'content')!
-    expect(card.h).toBe(fitRows(520))
+    const page = saved.pages.find((p) => p.id === saved.activePageId)!
+    expect(bottomOf(page.widgets)).toBeLessThanOrEqual(storedBottom)
   }, 15000)
 })
 
@@ -145,6 +179,11 @@ const refit = async (bottom: number) => {
   contentBottom = bottom
   fireResize()
   await sleep(FIT_SETTLE_MS + 100)
+}
+/** A real edit of the fit card (its title): the one thing these tests save. */
+const retitle = async (title: string) => {
+  liveCard().title = title
+  await flushPromises()
 }
 /** A PUT the test resolves by hand. */
 function deferPut() {
@@ -169,8 +208,7 @@ describe('App: the editor and a refit while it is open', () => {
     await flushPromises()
     expect(liveCard().h).toBe(fitRows(520)) // not the snapshot's 6
     await sleep(900)
-    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1)
-    expect(sentCard(0).h).toBe(fitRows(520))
+    expect(saveConfig).not.toHaveBeenCalled() // the editor changed nothing that is saved
   }, 15000)
 })
 
@@ -178,46 +216,49 @@ describe('App: a PUT in flight when the layout changes back', () => {
   it('A -> B (slow PUT) -> back to A: A is still sent after B lands, so the server ends on the latest layout', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    const a = liveCard().title
     const resolveB = deferPut()
-    await refit(520) // B
+    await retitle('B')
     await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(1)
-    expect(sentCard(0).h).toBe(fitRows(520))
-    await refit(300) // back to A while B is still in flight
+    expect(sentCard(0).title).toBe('B')
+    await retitle(a) // back to A while B is still in flight
     await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(1) // serialised: waits for B
     resolveB(true)
     await sleep(100)
     expect(saveConfig).toHaveBeenCalledTimes(2)
-    expect(sentCard(1).h).toBe(fitRows(300)) // the server ends on A, the latest
+    expect(sentCard(1).title).toBe(a) // the server ends on A, the latest
   }, 20000)
 
   it('a failed PUT leaves the skip state on what the server still holds', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    const a = liveCard().title
     const failB = deferPut()
-    await refit(520) // B
+    await retitle('B')
     await sleep(900)
-    await refit(300) // back to A while B is in flight
+    await retitle(a) // back to A while B is in flight
     await sleep(900)
     failB(false)
     await sleep(100)
     // B never landed, the server still holds A, and the tab is on A: nothing to send.
     expect(saveConfig).toHaveBeenCalledTimes(1)
-    await refit(520) // B again: must be sent, because the server does NOT hold B
+    await retitle('B') // B again: must be sent, because the server does NOT hold B
     await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(2)
-    expect(sentCard(1).h).toBe(fitRows(520))
+    expect(sentCard(1).title).toBe('B')
   }, 25000)
 
   it('a skipped save does not clear a standing "stale" label', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    const a = liveCard().title
     vi.mocked(saveConfig).mockResolvedValueOnce('stale')
-    await refit(520)
+    await retitle('B')
     await sleep(900)
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
-    await refit(300) // back to the loaded layout: the save is skipped
+    await retitle(a) // back to the loaded layout: the save is skipped
     await sleep(900)
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
   }, 20000)
@@ -226,14 +267,12 @@ describe('App: a PUT in flight when the layout changes back', () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
     vi.mocked(saveConfig).mockResolvedValue('stale')
-    await refit(520)
+    await retitle('B')
     await sleep(900)
     expect(vi.mocked(saveConfig).mock.calls.length).toBe(1)
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
     // A new edit starts a fresh debounce; the label must not flip to "Saving…" before the timer fires.
-    contentBottom = 700
-    fireResize()
-    await sleep(FIT_SETTLE_MS + 100) // the edit has landed; its save timer is still pending
+    await retitle('C') // the edit has landed; its save timer is still pending
     expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // not yet sent
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
     expect(wrapper!.find('.save-state').text()).not.toContain('Saving')
@@ -243,11 +282,12 @@ describe('App: a PUT in flight when the layout changes back', () => {
   it('"Save failed" clears once the tab is back on exactly what the server holds', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    const a = liveCard().title
     vi.mocked(saveConfig).mockResolvedValueOnce(false)
-    await refit(520)
+    await retitle('B')
     await sleep(900)
     expect(wrapper!.find('.save-state').text()).toContain('Save failed')
-    await refit(300) // back to the loaded layout, which is what the server still holds
+    await retitle(a) // back to the loaded layout, which is what the server still holds
     await sleep(900)
     expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // nothing to send
     expect(wrapper!.find('.save-state').exists() ? wrapper!.find('.save-state').text() : '').not.toContain('Save failed')
@@ -258,12 +298,12 @@ describe('App: leaving the page with an edit still in the debounce', () => {
   it('pagehide sends the pending edit now instead of waiting out the 700 ms', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
-    await refit(520) // the edit has landed; the save timer is pending
+    await retitle('B') // the edit has landed; the save timer is pending
     expect(saveConfig).not.toHaveBeenCalled()
     window.dispatchEvent(new Event('pagehide'))
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
-    expect(sentCard(0).h).toBe(fitRows(520))
+    expect(sentCard(0).title).toBe('B')
     await sleep(900) // the cleared timer does not fire a second PUT
     expect(saveConfig).toHaveBeenCalledTimes(1)
   }, 20000)
@@ -280,7 +320,7 @@ describe('App: leaving the page with an edit still in the debounce', () => {
       if (ms === 700) saveTimerIds.push(id)
       return id
     }) as typeof window.setTimeout)
-    await refit(520)
+    await retitle('B')
     expect(saveConfig).not.toHaveBeenCalled()
     expect(saveTimerIds).toHaveLength(1)
     const clearSpy = vi.spyOn(window, 'clearTimeout')
@@ -296,7 +336,7 @@ describe('App: leaving the page with an edit still in the debounce', () => {
   it('the pagehide flush is a keepalive PUT, so the browser lets it finish after the page is gone', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
-    await refit(520)
+    await retitle('B')
     window.dispatchEvent(new Event('pagehide'))
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
@@ -329,7 +369,7 @@ describe('App: leaving the page with an edit still in the debounce', () => {
   it('an ordinary debounced save is never keepalive', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
-    await refit(520)
+    await retitle('B')
     await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(1)
     expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
@@ -338,16 +378,17 @@ describe('App: leaving the page with an edit still in the debounce', () => {
   it('an edit queued behind an in-flight PUT is sent when that PUT resolves (documented limit: a closing page may not live to see it)', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    const a = liveCard().title
     const resolveB = deferPut()
-    await refit(520)
+    await retitle('B')
     await sleep(900) // B is in flight
-    await refit(300)
+    await retitle(a)
     window.dispatchEvent(new Event('pagehide')) // leaving: the second edit can only queue
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
     resolveB(true)
     await sleep(100)
     expect(saveConfig).toHaveBeenCalledTimes(2)
-    expect(sentCard(1).h).toBe(fitRows(300))
+    expect(sentCard(1).title).toBe(a)
   }, 20000)
 })

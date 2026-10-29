@@ -544,7 +544,7 @@ describe('an upcoming flight: its funnel and country cards show, as the old pane
       const scorecard = byTitle(await mountCard('campaign-scorecard', FIXTURE_NOW))
       expect(text(scorecard.get(pending.label)!.element)).not.toMatch(/not started|Arrivals/)
       const asked = (vi.mocked(fetch).mock.calls as [string, RequestInit][]).flatMap(([, init]) => JSON.parse(String(init.body ?? '{}')).requests ?? [])
-      expect(asked.filter((r: { params?: { campaignId?: string } }) => r.params?.campaignId === pending.id).map((r: { metric?: string; ratio?: string }) => r.metric ?? r.ratio ?? '').filter((m) => !m.startsWith('campaign.spend') && m !== 'campaign.lastSync')).toEqual([])
+      expect(asked.filter((r: { params?: { campaignId?: string } }) => r.params?.campaignId === pending.id).map((r: { metric?: string; ratio?: string }) => r.metric ?? r.ratio ?? '').filter((m) => !m.startsWith('campaign.spend') && m !== 'campaign.clicks' && m !== 'campaign.lastSync')).toEqual([])
     } finally {
       CAMPAIGNS.splice(CAMPAIGNS.indexOf(pending), 1)
     }

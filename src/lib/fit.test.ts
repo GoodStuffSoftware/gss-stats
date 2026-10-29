@@ -115,10 +115,15 @@ describe('a layout without fit loads exactly as before', () => {
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(13)
   })
 
-  it('the production layout and the factory layout get no fit key, and the same geometry', () => {
-    for (const cfg of [normalizeConfig(clone(PROD_V9)), defaultConfig(), normalizeConfig(clone(defaultConfig()))]) {
-      for (const p of cfg.pages) for (const w of p.widgets) expect(w.fit, `${p.id}/${w.id}`).toBeUndefined()
-      expect(JSON.stringify(cfg)).not.toContain('"fit"')
+  it('the production layout gets no fit key; the factory layout fits only "Today at a glance"; the same geometry', () => {
+    const prod = normalizeConfig(clone(PROD_V9))
+    for (const p of prod.pages) for (const w of p.widgets) expect(w.fit, `${p.id}/${w.id}`).toBeUndefined()
+    expect(JSON.stringify(prod)).not.toContain('"fit"')
+    for (const cfg of [defaultConfig(), normalizeConfig(clone(defaultConfig()))]) {
+      for (const p of cfg.pages) for (const w of p.widgets) {
+        if (w.id === 'ow-kpis') expect(w.fit, `${p.id}/${w.id}`).toBe('content')
+        else expect(w.fit, `${p.id}/${w.id}`).toBeUndefined()
+      }
     }
     // The geometry is the stored one, widget for widget (the v12 migration aside, which has already
     // run on this fixture's later pages): normalising twice changes nothing.
@@ -131,7 +136,7 @@ describe('a layout without fit loads exactly as before', () => {
     for (const p of stored.pages) for (const w of p.widgets) delete (w as Partial<Widget>).fit
     const reloaded = normalizeConfig(JSON.parse(JSON.stringify(stored)))
     expect(geometry(reloaded)).toEqual(geometry(stored))
-    expect(JSON.stringify(reloaded)).not.toContain('"fit"')
+    expect(JSON.stringify(reloaded).match(/"fit"/g)?.length ?? 0).toBeLessThanOrEqual(1) // only "Today at a glance" in the factory layout
   })
 })
 
@@ -174,6 +179,6 @@ describe('persistence: save and reload keeps fit', () => {
     const w0 = cfg.pages[0].widgets[0]
     w0.fit = 'content'
     setFit(w0, false)
-    expect(JSON.stringify(cfg)).not.toContain('"fit"')
+    expect(w0).not.toHaveProperty('fit')
   })
 })

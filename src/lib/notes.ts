@@ -644,6 +644,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.f3Asks': 'Sign-in asks (flight 3)',
     'label.campaign.clicks': 'Ad clicks',
     'label.campaign.adsInstalls': 'Installs (Google Ads)',
+    'label.campaign.adsSpend': 'Spend (Google Ads)',
+    'label.campaign.adsClicks': 'Clicks (Google Ads)',
     'label.asset.impressions': 'Impressions',
     'label.asset.clicks': 'Clicks',
     'label.asset.conversions': 'Conversions',

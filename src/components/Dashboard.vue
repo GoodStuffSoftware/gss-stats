@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { isTouchDevice } from '../lib/responsive'
@@ -67,18 +67,25 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable && !viewOnly
 // Fit-to-content (Widget.fit, lib/fit.ts): a fit card reports its content height and its grid
 // height follows, to the smallest whole number of rows that holds it. Phones stack every card to
 // its content already (the CSS below), so a phone's measurement must never overwrite the desktop
-// layout's `h`. A height the grid already has is not rewritten, so an unchanged card does not
-// fire a layout save.
+// layout's `h`. A height the grid already has is not rewritten.
+// The grid only compacts when its layout array changes, not when one item's `h` does: after a card's
+// height changes the grid is asked to compact, so the cards below move with it (up as well as down)
+// instead of being overlapped. The fitted heights, and the positions that follow from them, are
+// held in memory only; App.vue never saves them (lib/fitPersist.ts).
+const gridRef = ref<{ layoutUpdate: () => void } | null>(null)
 function onFitHeight(item: Widget, px: number) {
   if (isMobile.value || !isFit(item)) return
   const rows = fitRows(px, GRID_ROW_HEIGHT, GRID_MARGIN)
-  if (item.h !== rows) item.h = rows
+  if (item.h === rows) return
+  item.h = rows
+  void nextTick(() => gridRef.value?.layoutUpdate())
 }
 </script>
 
 <template>
   <div class="stats-grid" :class="{ 'controls-revealed': controlsVisible }">
     <GridLayout
+      ref="gridRef"
       v-model:layout="widgets"
       :col-num="12"
       :row-height="GRID_ROW_HEIGHT"

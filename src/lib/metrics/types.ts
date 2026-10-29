@@ -179,6 +179,10 @@ export interface Gating {
   /** Shown only where this scope field has a value: elsewhere the cell is left blank and the
    * value is never requested (a feature step with no ratio of counts: `step.ratioLabel`). */
   onlyWith?: ScopePath
+  /** true: only a campaign that names a Google Ads install action (installActionId) has this item;
+   * every other campaign omits it, and it is never requested. For a figure that is shared by all
+   * campaigns in the store (spend, clicks) but belongs on a card only next to the install rows. */
+  needsInstallAction?: true
 }
 
 /** RepeatSpec.limit for a readings repeat: the default and the cap (the readings endpoint's own). */

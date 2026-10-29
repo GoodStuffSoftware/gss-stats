@@ -1172,7 +1172,9 @@ Registry and component additions (all generic):
   flight's item as "not started", even with no start date, where it would be omitted; `'zero'`
   shows a count that cannot have happened yet as 0): the funnel and country cards show an
   upcoming flight as the old panels did (Arrivals 0, every other step "not started"), while the
-  scorecard keeps omitting a pending flight's steps.
+  scorecard keeps omitting a pending flight's steps. `Gating.needsInstallAction` omits an item for
+  every campaign without an `installActionId` (never requested), so the scorecard's Spend and Clicks
+  rows sit only on cards that already show Google-reported installs.
 - Nested scopes (a repeat keeps the instance it sits in), repeats over countries and over
   beacon-tracked campaigns only, a column repeat on `table` sections (`columns`, `columnLabel`,
   `rowsLabel`), a `columns` section layout, card `actions` and rendered card `captions`; a

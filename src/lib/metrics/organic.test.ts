@@ -7,7 +7,7 @@ import { METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
 import { measuredInterval } from './instrumentation'
 import { ORGANIC_TRACKING_LIVE_AT, TOUR_TRACKING_LIVE_AT } from '../popupEvents'
 import { RATIOS, ratioSupportsOrganic } from './ratios'
-import { CAMPAIGN_RETURNS } from './presets'
+import { CAMPAIGN_RETURNS, CAMPAIGN_SCORECARD } from './presets'
 import {
   armIdOfScope,
   buildRequestSpec,
@@ -239,8 +239,7 @@ describe('Google-reported installs (campaign.adsInstalls) on a scorecard', () =>
 })
 
 describe('the Campaign scorecard preset carries the Google-reported install rows', () => {
-  it('lists installs and cost per install, each omitted when empty', async () => {
-    const { CAMPAIGN_SCORECARD } = await import('./presets')
+  it('lists installs and cost per install, each omitted when empty', () => {
     const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
     const ads = items.find((i) => i.id === 'adsInstalls')!
     const cpai = items.find((i) => i.id === 'cpai')!
@@ -248,5 +247,25 @@ describe('the Campaign scorecard preset carries the Google-reported install rows
     expect(cpai.data).toEqual({ ratio: 'campaign.costPerAdsInstall' })
     expect(ads.gating?.whenEmpty).toBe('omit')
     expect(cpai.gating?.whenEmpty).toBe('omit')
+  })
+
+  it('adds Spend and Clicks (Google Ads) rows, only for a campaign with an install action', () => {
+    const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
+    const spend = items.find((i) => i.id === 'adsSpend')!
+    const clicks = items.find((i) => i.id === 'adsClicks')!
+    expect(spend.data).toEqual({ metric: 'campaign.spend' })
+    expect(clicks.data).toEqual({ metric: 'campaign.clicks' })
+    expect(spend.gating?.needsInstallAction).toBe(true)
+    expect(clicks.gating?.needsInstallAction).toBe(true)
+    expect(noteRawText('label.campaign.adsSpend')).toBe('Spend (Google Ads)')
+    expect(noteRawText('label.campaign.adsClicks')).toBe('Clicks (Google Ads)')
+    const withAction = CAMPAIGNS.find((c) => c.installActionId)!
+    const without = CAMPAIGNS.find((c) => !c.installActionId && c.measurement !== 'spend-only')!
+    const scope = (campaign: typeof withAction): ScopeInstance => ({ kind: 'campaign', campaign }) as unknown as ScopeInstance
+    for (const it of [spend, clicks]) {
+      expect(unmeasuredByConfig(it.data, scope(withAction), it.gating, TODAY)).toBe(false)
+      // Spend alone would otherwise show for any campaign with a hand-entered spend; here it follows the install rows.
+      expect(unmeasuredByConfig(it.data, scope(without), it.gating, TODAY)).toBe(true)
+    }
   })
 })

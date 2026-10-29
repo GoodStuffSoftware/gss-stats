@@ -6,6 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.74.1] — 2026-10-29
+
+### Fixed
+- **Fit-to-content cards push the cards below them down.** A card that fits its content no longer overlaps the next one at any width, and pulls it back up when it shrinks.
+- **A page load never changes the saved layout.** Heights measured on screen are not saved, whatever the window width; a save holds each fit-to-content card at the height it was loaded with.
+- **"Today at a glance" shows all its tiles.** The card fits its content in the factory layout, so a third row of tiles is no longer hidden behind the notes.
+
+### Changed
+- **Campaign scorecard shows Spend and Clicks (Google Ads).** Campaigns with Google-reported installs (Flight 4) show both beside installs and cost per install; other campaigns are unchanged.
+
 ## [0.74.0] — 2026-10-29
 
 ### Changed

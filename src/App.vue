@@ -30,6 +30,7 @@ import AccountMenu from './components/AccountMenu.vue'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
+import { storedForm, syncFitBase, type FitBase } from './lib/fitPersist'
 import { RELOAD_BANNER_TEXT, reloadBannerWarning, hasUnsavedWork } from './composables/buildCheck'
 
 // Live push (composables/useLiveChanges.ts): ONE fail-soft socket for the whole app, open only while
@@ -127,6 +128,7 @@ async function readStoredLayout(): Promise<DashboardConfig | typeof LOAD_FAILED>
 /** Put an already-normalized layout on screen. Chart responses from the layout it replaces (the
  * stand-in defaults, on a retry) are dropped: each card re-emits its own once it has data. */
 function applyLayout(norm: DashboardConfig) {
+  fitBase.clear() // re-recorded from this layout by the next configJson
   for (const key of Object.keys(chartData)) delete chartData[key]
   config.version = norm.version
   config.activePageId = norm.activePageId
@@ -220,8 +222,12 @@ let labelBeforeEdit: typeof saveState.value = 'idle'
 // The config as saved. grid-layout-plus writes its own bookkeeping (`moved`) onto every widget it
 // lays out — the first time each page is shown, so on every page switch — which is not part of the
 // layout (normWidget drops it on load): it never counts as a change and is never saved.
+// A fit-to-content card's height is a fact of this screen, not of the shared layout, so it is never
+// saved: the body holds each fit card at the height it had when loaded (lib/fitPersist.ts).
+const fitBase: FitBase = new Map()
 function configJson(c: DashboardConfig): string {
-  return JSON.stringify(c, function (this: unknown, key: string, value: unknown) {
+  syncFitBase(fitBase, c)
+  return JSON.stringify(storedForm(c, fitBase), function (this: unknown, key: string, value: unknown) {
     return key === 'moved' && this && typeof this === 'object' && 'i' in this && 'x' in this ? undefined : value
   })
 }

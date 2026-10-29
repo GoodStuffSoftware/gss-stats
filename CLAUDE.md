@@ -55,6 +55,11 @@ git branch backup/<branch>-YYYY-MM-DD origin/<branch>
 git push origin backup/<branch>-YYYY-MM-DD
 ```
 
+## Render check
+
+Before landing any change that alters what a page shows (code or the prod layout), render it per
+[docs/render-check.md](docs/render-check.md) at desktop and phone widths and compare before and after screenshots.
+
 ## Documentation discipline
 
 Each fact lives in **one** file; cross-reference rather than duplicate. Update

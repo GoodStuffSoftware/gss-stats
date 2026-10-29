@@ -1061,7 +1061,10 @@ export function defaultOverviewWidgets(): Widget[] {
     // compactSmallSampleNoteV12): a one-line caption in a 148px cell left an empty band between
     // the filter bar and the first card that the pre-v0.6 page never had.
     w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 1 }),
-    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 1, w: 12, h: 8 }),
+    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, fit: 'content', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 1, w: 12, h: 8 }),
+    // The day's numbers fit their content (h 8 is the placeholder until it measures): their tile rows wrap with the
+    // width, so no fixed height shows them all (a third row sat under the notes). No CONFIG_VERSION bump: a stored
+    // layout keeps its own h and fit setting, and the prod layout gets Fit to content on this card by hand.
     // Feature health sits right under the day's numbers (no CONFIG_VERSION bump: a stored layout gets it
     // from Restore default charts, and the prod layout is edited by hand, like the web-vs-app card).
     featureHealthWidget({ x: 0, y: 9, w: 12, h: 20 }),

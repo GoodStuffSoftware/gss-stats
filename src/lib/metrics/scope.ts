@@ -676,6 +676,7 @@ export interface MetricRequestSpec {
  * "not yet tracking" (it never will be tracked). */
 export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating, todayEt?: string): boolean {
   const ruling = configRuling(binding, scope, todayEt)
+  if (gating?.needsInstallAction && !campaignOfScope(scope)?.installActionId) return true
   // A flight with no start date keeps an item whose gating says how to show "not started".
   return ruling === 'spend-only' || ruling === 'organic-unsupported' || ruling === 'no-install-action' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
 }
@@ -722,6 +723,7 @@ export function buildRequestSpec(item: MetricItem, scope: ScopeInstance, todayEt
   if (!resolved || resolved.kind === 'field') return null
   if (configRuling(item.data, scope, todayEt)) return null // never asked: the answer is known
   if (lacksRequiredField(item, scope, todayEt)) return null // a blank cell asks nothing
+  if (item.gating?.needsInstallAction && !campaignOfScope(scope)?.installActionId) return null // an Ads-only row of a campaign with no Ads link
   const spec: MetricRequestSpec = {}
   if (resolved.kind === 'metric') spec.metric = (item.data as { metric: string }).metric
   else spec.ratio = (item.data as { ratio: string }).ratio

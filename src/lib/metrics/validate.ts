@@ -296,6 +296,7 @@ export function validateCard(spec: CardSpec): string[] {
       const empty = it.gating?.whenEmpty
       if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, (empty as { note?: unknown }).note)
       if (it.gating?.whenZero !== undefined && it.gating.whenZero !== 'omit') errors.push(`${w}: whenZero must be 'omit'`)
+      if (it.gating?.needsInstallAction !== undefined && it.gating.needsInstallAction !== true) errors.push(`${w}: needsInstallAction must be true`)
       const ns = it.gating?.whenNotStarted
       if (ns !== undefined && ns !== 'label' && ns !== 'zero') errors.push(`${w}: whenNotStarted must be 'label' or 'zero'`)
       if (it.frame !== undefined && !['row', 'pill', 'tile', 'column'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
