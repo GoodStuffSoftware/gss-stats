@@ -35,7 +35,7 @@ describe('featureHealthCardFor: the saved Feature health table is drawn as the f
 
   it('keeps what a user set: caption, site override, filters, fit, hidden caveats', () => {
     const extra = { caption: 'my own words', siteSel: ['bestsudoku-app'], filters: { excludeOwnVisits: true }, fit: true, hiddenCaveats: ['refused-whole-days'] }
-    expect(featureHealthCardFor({ ...SAVED_HEALTH, ...extra } as Widget)).toMatchObject({ ...extra, card: { preset: 'feature-health' } })
+    expect(featureHealthCardFor({ ...SAVED_HEALTH, ...extra } as unknown as Widget)).toMatchObject({ ...extra, card: { preset: 'feature-health' } })
   })
 
   it('leaves alone a health table that SHOWS known traffic (the card always hides it), Coach tips, Ask-order and a card', () => {
