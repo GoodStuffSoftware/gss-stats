@@ -389,6 +389,24 @@ const dayPickerValue = computed<boolean>({
     else delete spec.dayPicker
   },
 })
+// Captions pinned under a scrolling body (CardSpec.pinCaptions): for a long card in a fixed slot.
+const pinCaptionsValue = computed<boolean>({
+  get: () => spec.pinCaptions === true,
+  set: (v) => {
+    if (v === pinCaptionsValue.value) return
+    if (v) spec.pinCaptions = true
+    else delete spec.pinCaptions
+  },
+})
+// The Notes toggle in the widget frame's header row (CardSpec.notesInHeader): no row of its own in the body.
+const notesInHeaderValue = computed<boolean>({
+  get: () => spec.notesInHeader === true,
+  set: (v) => {
+    if (v === notesInHeaderValue.value) return
+    if (v) spec.notesInHeader = true
+    else delete spec.notesInHeader
+  },
+})
 const TONE_OPTIONS = BADGE_TONE_OPTIONS
 const tonesGroupId = useId()
 const actionsGroupId = useId()
@@ -488,6 +506,12 @@ function removeSection(i: number) {
           </div>
           <div class="field">
             <label><input type="checkbox" v-model="dayPickerValue" /> Day selector (read a past day)</label>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="pinCaptionsValue" /> Keep the captions in view (the body scrolls above them)</label>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="notesInHeaderValue" /> Notes toggle in the header row (no row of its own)</label>
           </div>
           <div class="field">
             <label :for="showUpdatedId">"Updated Xs ago"</label>

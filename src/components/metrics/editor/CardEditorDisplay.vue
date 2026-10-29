@@ -8,12 +8,14 @@
 import { computed, useId } from 'vue'
 import { dataKindOf, displayAsLabel, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
 import type { DataBinding, Display, DisplayAs } from '../../../lib/metrics/types'
+import { isProgressTarget, PROGRESS_TARGET_MAX } from '../../../lib/metrics/validate'
 
 const props = defineProps<{ binding: DataBinding }>()
 const display = defineModel<Display>({ required: true })
 
 const groupId = useId()
 const decimalsId = useId()
+const targetId = useId()
 
 const options = computed(() => displayOptionsFor(props.binding))
 const kind = computed(() => dataKindOf(props.binding))
@@ -65,6 +67,13 @@ const statusPill = computed<boolean>({
   get: () => display.value.as === 'status' && !!display.value.pill,
   set: (v) => {
     if (display.value.as === 'status') display.value = v ? { as: 'status', pill: true } : { as: 'status' }
+  },
+})
+// Progress: the whole-number target the bar fills toward (validate.ts isProgressTarget); a value it refuses is not stored.
+const target = computed<number>({
+  get: () => (display.value.as === 'progress' ? display.value.target : 100),
+  set: (v) => {
+    if (display.value.as === 'progress' && isProgressTarget(v)) display.value = { as: 'progress', target: v }
   },
 })
 const dateRangeDays = computed<boolean>({
@@ -131,6 +140,14 @@ const dateRangeDays = computed<boolean>({
       <div class="field check">
         <label><input type="checkbox" v-model="sparklineDays" /> List the days, e.g. "Oct 17 12 · Oct 18 9"</label>
       </div>
+    </template>
+
+    <template v-else-if="display.as === 'progress'">
+      <div class="field">
+        <label :for="targetId">Target</label>
+        <input :id="targetId" v-model.number="target" type="number" min="1" :max="PROGRESS_TARGET_MAX" step="1" />
+      </div>
+      <p class="hint">Shows the count against the target, e.g. "40 / 150", with a bar that fills to the target and turns green once it is reached.</p>
     </template>
 
     <template v-else-if="display.as === 'counts'">

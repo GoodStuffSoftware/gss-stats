@@ -18,6 +18,11 @@ import {
   type FeatureDef,
 } from './featureHealth'
 import { etWallTimeMs } from './etTime'
+import { defaultFeaturesWidgets } from './defaults'
+import { buildStepChartConfig } from './featureHealthChart'
+import { featureStepKey, stepsViewFor, featureIdOfView, type FeatureHealth, type FeatureHealthModel } from './featureHealth'
+import { COACH_TIPS_VIEW } from './coachTips'
+import { ASK_ORDER_VIEW } from './askOrder'
 
 // Made-up data only. "Now" is noon ET on 2026-10-15: the latest complete ET day is 10-14, the day
 // before 10-13, the baseline 10-07..10-13, and rows before 10-08 00:00 ET make a feature not new.
@@ -308,5 +313,63 @@ describe('assembleHealth', () => {
     expect(m.features.map((f) => f.id)).toEqual(FEATURES.map((f) => f.id))
     expect(m.features.map((f) => f.steps.length)).toEqual(FEATURES.map((f) => f.steps.length))
     expect(m.features.every((f) => f.latest === f.steps.length)).toBe(true)
+  })
+})
+
+// The step chart config kept as the T1 parity oracle, and the Features page defaults (moved here from the retired
+// FeatureHealthCard test, editor tools T4). Made-up data.
+const stepFeature: FeatureHealth = {
+  id: 'made-up',
+  label: 'Made-up feature',
+  blurb: 'A made-up blurb.',
+  status: 'silent',
+  statusNote: 'averaged 9 a day, none yesterday',
+  latest: 0,
+  prev: 9,
+  range: 20,
+  steps: [
+    { id: 'shown', label: 'Shown', latest: 0, prev: 9, range: 20, perDay: [5, 6, 9, 0] },
+    { id: 'tapped', label: 'Tapped', latest: 0, prev: 3, range: 8, perDay: [1, 2, 3, 0], ratio: { label: 'tapped per shown', latest: null, prev: 0.33, range: 0.4 } },
+  ],
+}
+const stepModel: FeatureHealthModel & { meta: Record<string, string> } = {
+  days: ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14'],
+  latestDay: '2026-10-14',
+  prevDay: '2026-10-13',
+  features: [stepFeature],
+  meta: { since: '2026-10-11', until: '2026-10-14', rangeFrom: '2026-10-11', rangeTo: '2026-10-14', sites: '', today: '2026-10-15' },
+}
+
+describe('step chart and defaults', () => {
+  it('builds one dataset per step and one label per day', () => {
+    const cfg = buildStepChartConfig(stepModel, stepFeature)
+    expect(cfg.data.datasets.map((d) => d.label)).toEqual(['Shown', 'Tapped'])
+    expect(cfg.data.labels).toHaveLength(4)
+    expect(cfg.data.datasets[0].data).toEqual([5, 6, 9, 0])
+  })
+
+  it('maps feature ids to step views and back; the Features page has a chart per feature', () => {
+    expect(featureIdOfView(stepsViewFor('abc'))).toBe('abc')
+    expect(featureIdOfView('health')).toBeNull()
+    const widgets = defaultFeaturesWidgets()
+    // Since T1 a step chart is an ordinary geo date line: one series per step, each a featureStep filter (no features dataset).
+    const stepCharts = widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)
+    expect(stepCharts.map((w) => w.id)).toEqual(FEATURES.map((f) => `fw-${f.id}`))
+    for (const [i, w] of stepCharts.entries()) {
+      expect(w).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', metric: 'pageviews', excludeKnownTraffic: true })
+      expect(w.view).toBeUndefined()
+      expect(w.series!.map((s) => s.filter![0].value)).toEqual(FEATURES[i].steps.map((s) => featureStepKey(FEATURES[i].id, s.id)))
+    }
+    // The Coach tips card (the card-editor preset since T7) sits under the charts, full width, and appears once.
+    const tips = widgets.filter((x) => x.view === COACH_TIPS_VIEW)
+    expect(tips).toHaveLength(1)
+    expect(tips[0]).toMatchObject({ dataset: 'features', card: { preset: 'coach-tips' }, x: 0, w: 12, excludeKnownTraffic: true })
+    const charts = widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)
+    expect(tips[0].y).toBeGreaterThanOrEqual(Math.max(...charts.map((x) => x.y + x.h)))
+    // The Ask-order card sits under the Coach tips, full width, and appears once.
+    const ask = widgets.filter((x) => x.view === ASK_ORDER_VIEW)
+    expect(ask).toHaveLength(1)
+    expect(ask[0]).toMatchObject({ id: 'fw-ask-order', dataset: 'features', card: { preset: 'ask-order' }, x: 0, w: 12, excludeKnownTraffic: true })
+    expect(ask[0].y).toBeGreaterThanOrEqual(tips[0].y + tips[0].h)
   })
 })

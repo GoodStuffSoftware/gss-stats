@@ -141,6 +141,13 @@ const noteChoices = computed(() => {
 })
 const noteInvalid = computed(() => !!noteId.value && !isKnownNote(noteId.value))
 
+/** The fields a bound label may read: the repeat's own, plus its current path when that is outside
+ * them (as varOptions), so the select never blanks a stored binding. */
+const bindOptions = computed<{ value: ScopePath; label: string }[]>(() => {
+  const cur = label.value && typeof label.value === 'object' && 'bind' in label.value ? label.value.bind : undefined
+  const opts = scopeOptions.value
+  return cur && !opts.some((o) => o.value === cur) ? [...opts, { value: cur, label: scopePathLabel(cur) }] : opts
+})
 const bindPath = computed<ScopePath>({
   get: () => (label.value && typeof label.value === 'object' && 'bind' in label.value ? label.value.bind : fallbackPath.value),
   set: (v) => {
@@ -210,7 +217,7 @@ const bindPath = computed<ScopePath>({
     <template v-else-if="kind === 'bind'">
       <label class="visually-hidden" :for="bindSelectId">Bound field</label>
       <select :id="bindSelectId" v-model="bindPath">
-        <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        <option v-for="o in bindOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
       </select>
     </template>
   </div>

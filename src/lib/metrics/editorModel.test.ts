@@ -412,7 +412,7 @@ describe('template settings survive a re-pick', () => {
   })
 
   it('repeatIdOptions lists window sides and country buckets too', () => {
-    expect(repeatIdOptions('windows').map((o) => o.value)).toEqual(['before', 'after', 'upsellPre', 'upsellPost'])
+    expect(repeatIdOptions('windows').map((o) => o.value)).toEqual(['before', 'after', 'upsellPre', 'upsellPost', 'latestDay', 'previousDay', 'page'])
     expect(repeatIdOptions('countries').map((o) => o.value)).toEqual(['US', 'CA', 'other'])
     expect(repeatIdOptions('readings')).toEqual([])
   })

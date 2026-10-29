@@ -879,11 +879,43 @@ why (`ASK_ORDER_PRIMARY_MODE` in [`src/lib/askOrder.ts`](src/lib/askOrder.ts) is
 primary switches everyone to it (compared as integers, so exactly 1.5x counts), otherwise sign-in
 first stays. If sign-ins and installs point opposite ways between the groups, the sign-ins
 decide: the same 1.5x test is then run on the signed-in (or responded sign-in) rows. The read uses
-every day so far whatever range or site is picked. It is the same `/api/features` endpoint with
-`view: 'ask-order'`. Caveat it states: tagged-cell ratios are approximate because organic and
+every day so far whatever range or site is picked. Caveat it states: tagged-cell ratios are approximate because organic and
 tagged are per-event counts. The whole `/ab/ask-order/%` family
 is counts only: read as per-ET-day totals, never split by hour, place or device, and never added
 into any other total. Purchases cannot be split by group, so they are not shown.
+
+### Ask-order in the card editor
+
+The Ask-order readout is an ordinary metric card, the **Ask-order A/B** preset: the progress and
+verdict lines, a table of the two groups by organic and tagged, and the response rows. The same
+card can be built or changed in the card editor like any other.
+
+- **Building blocks.** The `feature.step` and `feature.stepRatio` metrics of Feature health with a
+  group (organic and tagged, or one tag) as the feature, read by the `featureDays` fact over the
+  `/ab/ask-order/` paths only; an `allTime` window (every row so far, one `COUNT(*)` per path and
+  tag, the `featureAllTime` fact) for the progress and the 1.5x read; and `askOrder.*` reads for the
+  progress, verdict and primary (their wording lives in [`src/lib/askOrder.ts`](src/lib/askOrder.ts)).
+  `askOrder.everSeen` says whether any ask-order row has ever arrived, as the old "no ask-order data
+  yet" note did.
+- **Look options it uses**, each a card-editor setting any card can take: large lines, roomy table
+  rows, a status line dimmed while its code is listed (`dimWhen`), captions kept in view while the
+  body scrolls (`pinCaptions`), and the Notes toggle in the widget's header row instead of a row of
+  its own (`notesInHeader`, *Notes toggle in the header row*), so every table row shows at the
+  saved height.
+- **Same numbers as the old card.** `functions/api/askOrder.parity.test.ts` runs the real
+  `/api/metrics` and `/api/features` handlers over one fixture (every verdict, both primaries,
+  organic and tagged, four windows, four filter sets, two clocks) and compares every number.
+- **What reads differently.** No trailing "." after the multiples, no rule above the response rows,
+  no column-header tooltips, and the row labels are not monospaced. A range over 400 days is
+  refused (the metrics endpoint's cap); the all-time read is not limited by it.
+- **Cost.** One `/api/metrics` POST and three statements on a cold cache, as the old card (see
+  [docs/capacity.md §12](docs/capacity.md)).
+- **Saved layouts are not rewritten.** An Ask-order card saved by an older build (dataset
+  `features`, view `ask-order`) that hides known traffic is drawn as this card at render time
+  (`askOrderCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place, title and
+  settings. One that shows known traffic, which the card does not draw, shows the "replaced by a
+  card or a chart" note instead (the old card is gone); edit it or restore the default charts. The
+  layout version does not change.
 
 ## Page links
 
@@ -909,7 +941,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
-   │  - /api/features → the Ask-order A/B (and the parity reference for Feature health, Coach tips and the step charts) from the same D1 (web and app combined)
+   │  - /api/features → the parity reference for Feature health, Coach tips, the Ask-order A/B and the step charts (no card reads it) from the same D1 (web and app combined)
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
    │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)

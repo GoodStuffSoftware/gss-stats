@@ -13,6 +13,7 @@
 // items' own captions use captionMode 'compact': no caption line on the item; the card lists
 // them behind its one collapsed "Notes" toggle (MetricCardInstance), the owner's clean look.
 
+import { ASK_ORDER_CALL_ASKS } from '../askOrder'
 import { STAGED_FLIGHT_3 } from '../campaigns'
 import { FEATURES } from '../featureHealth'
 import { featureRowCaptionId } from '../notes'
@@ -705,6 +706,99 @@ export const COACH_TIPS: CardSpec = {
   ],
 }
 
+/** The Ask-order A/B readout (Features page; editor-tools T4, ADR 0005), in the old card's arrangement: a note until any
+ * ask-order row has arrived; a panel per group (asks shown toward the call point with its bar, the assigned rows and the
+ * primary per assigned row, then the display-only figures, dimmer); which primary the rule reads; the pre-registered
+ * 1.5x rule, its multiple and verdict; each kind's multiple; then one table of every step for the latest day and the
+ * range, by group, organic vs tagged. The panels and the rule read every day so far (allTime); the table its windows. */
+const AO_STEP = (step: string) => ({ metric: 'feature.step', params: { step }, window: 'allTime' }) as const
+const AO_RATIO = (step: string) => ({ metric: 'feature.stepRatio', params: { step }, window: 'allTime' }) as const
+const AO_LINE = { mono: true } as const satisfies Partial<MetricItem>
+const AO_DIM = { mono: true, dim: true } as const satisfies Partial<MetricItem>
+const AO_COUNT_ROWS = ['assigned', 'shown-signin', 'shown-install', 'signin-signed-in', 'signin-installed', 'signin-returned', 'signin-still-playing', 'install-signed-in', 'install-installed', 'install-returned', 'install-still-playing', 'responded-signin', 'responded-install', 'response']
+const AO_RATIO_ROWS = ['signed-in', 'installed', 'response', 'responded', 'returned', 'still-playing']
+export const ASK_ORDER: CardSpec = {
+  v: 1,
+  minWidth: 360,
+  captions: ['ask-order-caption'],
+  pinCaptions: true,
+  notesInHeader: true,
+  sections: [
+    {
+      layout: 'lines',
+      items: [{ id: 'everSeen', label: { metric: true }, data: { metric: 'askOrder.everSeen' }, display: { as: 'status' }, gating: { whenZero: 'omit', whenEmpty: { note: 'ask-order-empty' } }, ...COMPACT }],
+    },
+    {
+      layout: 'lines',
+      repeat: { over: 'features', ids: ['ao-signin-first', 'ao-install-first'] },
+      panels: true,
+      title: { bind: 'feature.label' },
+      items: [
+        { id: 'asksShown', label: { note: 'label.askOrder.line.asksShown' }, data: AO_STEP('shown'), display: { as: 'progress', target: ASK_ORDER_CALL_ASKS }, ...AO_LINE, ...COMPACT },
+        { id: 'assigned', label: { note: 'label.askOrder.line.assigned' }, data: AO_STEP('assigned'), display: { as: 'number' }, ...AO_LINE, ...COMPACT },
+        { id: 'combined', label: { metric: true }, data: { metric: 'askOrder.combinedPerAssigned', window: 'allTime' }, display: { as: 'perRows' }, gating: { whenUnmeasured: 'omit' }, ...AO_LINE, ...COMPACT },
+        { id: 'responded', label: { metric: true }, data: { metric: 'askOrder.respondedPerAssigned', window: 'allTime' }, display: { as: 'perRows' }, gating: { whenUnmeasured: 'omit' }, ...AO_LINE, ...COMPACT },
+        { id: 'signedIn', label: { note: 'label.askOrder.line.signedIn' }, data: AO_RATIO('signed-in'), display: { as: 'perRows' }, lineBreak: true, ...AO_DIM, ...COMPACT },
+        { id: 'installed', label: { note: 'label.askOrder.line.installed' }, data: AO_RATIO('installed'), display: { as: 'perRows' }, ...AO_DIM, ...COMPACT },
+        { id: 'respondedPer', label: { note: 'label.askOrder.line.responded' }, data: AO_RATIO('responded'), display: { as: 'perRows' }, lineBreak: true, ...AO_DIM, ...COMPACT },
+        { id: 'responsePer', label: { note: 'label.askOrder.line.response' }, data: AO_RATIO('response'), display: { as: 'number' }, ...AO_DIM, ...COMPACT },
+        { id: 'returnedPer', label: { note: 'label.askOrder.line.returned' }, data: AO_RATIO('returned'), display: { as: 'number' }, ...AO_DIM, ...COMPACT },
+        { id: 'stillPlayingPer', label: { note: 'label.askOrder.line.stillPlaying' }, data: AO_RATIO('still-playing'), display: { as: 'number' }, ...AO_DIM, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'lines',
+      large: true,
+      items: [{ id: 'primary', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.primary', window: 'allTime' }, display: { as: 'status' }, ...COMPACT }],
+    },
+    {
+      layout: 'lines',
+      joined: true,
+      items: [
+        { id: 'ruleBasis', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.ruleBasis', window: 'allTime' }, display: { as: 'status' }, mono: true, ...COMPACT },
+        { id: 'ruleMultiple', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.ruleMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
+        { id: 'verdict', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.verdict', window: 'allTime' }, display: { as: 'status' }, dimWhen: [0], ...COMPACT },
+      ],
+    },
+    {
+      layout: 'lines',
+      joined: true,
+      large: true,
+      items: [
+        { id: 'signedInMultiple', label: { metric: true }, data: { metric: 'askOrder.signedInMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
+        { id: 'installedMultiple', label: { metric: true }, data: { metric: 'askOrder.installedMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
+      ],
+    },
+    {
+      layout: 'table',
+      columnGroups: [
+        { over: 'windows', ids: ['latestDay', 'page'] },
+        { over: 'features', ids: ['ao-signin-first', 'ao-install-first'] },
+      ],
+      columns: { over: 'tags' },
+      roomy: true,
+      rowsLabel: { note: 'label.askOrder.col.measure' },
+      items: [
+        ...AO_COUNT_ROWS.map((step): MetricItem => ({
+          id: `n-${step}`,
+          label: { note: `label.askOrder.row.${step}` },
+          data: { metric: 'feature.step', params: { step }, window: { scope: 'window' } },
+          display: { as: 'number' },
+          ...(step === 'response' ? { ruleAbove: true as const } : {}),
+          ...COMPACT,
+        })),
+        ...AO_RATIO_ROWS.map((step): MetricItem => ({
+          id: `r-${step}`,
+          label: { note: `label.askOrder.row.${step}-per` },
+          data: { metric: 'feature.stepRatio', params: { step }, window: { scope: 'window' } },
+          display: { as: 'number' },
+          ...COMPACT,
+        })),
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -727,6 +821,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-f3-daily': CAMPAIGN_F3_DAILY,
     'feature-health': FEATURE_HEALTH,
     'coach-tips': COACH_TIPS,
+    'ask-order': ASK_ORDER,
   }),
 )
 

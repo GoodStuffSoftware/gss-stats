@@ -12,6 +12,7 @@
 // same reason.
 import { FEATURES } from '../featureHealth'
 import { COACH_TIP_ROWS } from '../coachTips'
+import { ASK_ORDER_CARD_FEATURES, ASK_ORDER_FEATURE_IDS } from '../askOrder'
 import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText, type AutoCaveatWidget } from '../notes'
 import { POPUPS } from '../popupEvents'
@@ -19,8 +20,8 @@ import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metr
 import { seriesTwin } from './series'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
 import { CARD_LIMITS, DISPLAYS_FOR, kindOf, type DataKind } from './validate'
-import { COUNTRY_BUCKETS, WINDOW_SIDES } from './types'
-import type { CardAction, CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, ScopePath, Section, WindowName, WindowSide, WindowSpec } from './types'
+import { COUNTRY_BUCKETS, REPEAT_WINDOWS } from './types'
+import type { CardAction, CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, RepeatWindow, ScopePath, Section, WindowName, WindowSpec } from './types'
 import { PRESETS, presetById } from './presets'
 
 // ── Ids: generated, never typed ───────────────────────────────────────────────────────────
@@ -165,6 +166,10 @@ export function withNoteVar(current: Label | undefined, name: string, path: Scop
 // ── Scope paths (for a `bind` label or a `field` data binding) — a fixed, curated list per
 // repeat kind, never derived from user text. ──────────────────────────────────────────────
 export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; label: string }[]> = {
+  tags: [
+    { value: 'feature.tag', label: 'Tag (organic or tagged)' },
+    { value: 'feature.label', label: 'Group and tag' },
+  ],
   campaigns: [
     { value: 'campaign.id', label: 'Campaign id' },
     { value: 'campaign.label', label: 'Campaign name' },
@@ -335,7 +340,7 @@ export function rebindData(current: DataBinding, next: { metric: string } | { ra
   for (const [k, v] of Object.entries(current.params ?? {})) if (acc.params.includes(k as MetricParam)) params[k as MetricParam] = v
   if (Object.keys(params).length) out.params = params
   const w = current.window
-  if (typeof w === 'string' ? acc.windows.includes(w as WindowName) : w !== undefined && acc.windows.some((x) => (WINDOW_SIDES as readonly string[]).includes(x))) out.window = w
+  if (typeof w === 'string' ? acc.windows.includes(w as WindowName) : w !== undefined && acc.windows.some((x) => (REPEAT_WINDOWS as readonly string[]).includes(x))) out.window = w
   return out as DataBinding
 }
 
@@ -433,6 +438,8 @@ export function paramIsPinned(v: ParamValue | undefined): v is string {
 const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   number: 'Number',
   currency: 'Currency',
+  multiple: 'Multiple (1.67x)',
+  perRows: 'Ratio with its rows',
   percent: 'Percent',
   counts: 'Counts',
   dateRange: 'Date range',
@@ -440,6 +447,7 @@ const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   'datetime-et': 'Date & time (ET)',
   badge: 'Badge',
   bar: 'Bar',
+  progress: 'Progress to a target',
   sparkline: 'Sparkline',
   text: 'Text',
   date: 'Date',
@@ -517,6 +525,8 @@ export function makeDisplay(as: DisplayAs, current: Display): Display {
       return current.as === 'sparkline' ? { ...current } : { as: 'sparkline', series: 'daily' }
     case 'status':
       return current.as === 'status' && current.pill ? { as: 'status', pill: true } : { as: 'status' }
+    case 'progress':
+      return { as: 'progress', target: current.as === 'progress' ? current.target : 100 }
     default:
       return { as }
   }
@@ -535,7 +545,7 @@ export function withRepeatOver(current: RepeatSpec | undefined, over: RepeatSpec
 /** The ids a repeat over `over` can be narrowed to (RepeatSpec.ids), plain names only; [] for a
  * kind with no id list (readings). Windows: the before/after and upsell sides validateCard
  * accepts (WINDOW_SIDES); countries: the COUNTRY_BUCKETS. */
-const WINDOW_SIDE_LABELS: Record<WindowSide, string> = { before: 'Release: before', after: 'Release: after', upsellPre: 'Before the upsell fix', upsellPost: 'After the upsell fix' }
+const WINDOW_SIDE_LABELS: Record<RepeatWindow, string> = { before: 'Release: before', after: 'Release: after', upsellPre: 'Before the upsell fix', upsellPost: 'After the upsell fix', latestDay: 'Latest complete ET day', previousDay: 'Previous complete ET day', page: "The page's date range" }
 const COUNTRY_LABELS: Record<string, string> = { US: 'US', CA: 'CA', other: 'Other' }
 export function repeatIdOptions(over: RepeatSpec['over'] | '' | undefined): { value: string; label: string }[] {
   switch (over) {
@@ -544,11 +554,11 @@ export function repeatIdOptions(over: RepeatSpec['over'] | '' | undefined): { va
     case 'popups':
       return POPUP_ID_OPTIONS
     case 'windows':
-      return WINDOW_SIDES.map((w) => ({ value: w, label: WINDOW_SIDE_LABELS[w] }))
+      return REPEAT_WINDOWS.map((w) => ({ value: w, label: WINDOW_SIDE_LABELS[w] }))
     case 'countries':
       return COUNTRY_BUCKETS.map((c) => ({ value: c, label: COUNTRY_LABELS[c] ?? c }))
     case 'features':
-      return FEATURES.map((f) => ({ value: f.id, label: f.label }))
+      return [...FEATURES, ...ASK_ORDER_CARD_FEATURES].map((f) => ({ value: f.id, label: ASK_ORDER_FEATURE_IDS.has(f.id) ? `Ask-order: ${f.label}` : f.label }))
     case 'tips':
       return COACH_TIP_ROWS.map((f) => ({ value: f.id, label: f.label }))
     default:

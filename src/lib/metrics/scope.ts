@@ -7,16 +7,18 @@
 // without mounting a component.
 import { FEATURES, stepRatioLabel, type FeatureDef, type StepDef } from '../featureHealth'
 import { COACH_TIP_ROWS } from '../coachTips'
+import { ASK_ORDER_CARD_FEATURES, ASK_ORDER_TAGS } from '../askOrder'
 import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
+import { addDays } from '../etTime'
 import { etDayText, freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type AssetSortField, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, REPEAT_WINDOWS, type AssetSortField, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type RepeatWindow, type ScopePath, type Section } from './types'
 
 /** The count keys a reading scope carries: the record field behind each ReadingCountPath
  * (types.ts READING_COUNT_FIELDS, the allow-list). Nothing else of a record's counts gets here. */
@@ -101,13 +103,14 @@ export type ScopeInstance = (
    * extra instance (RepeatSpec.organic). Not a campaign: campaignOfScope never returns it. */
   | { kind: 'organic' }
   | { kind: 'popup'; popup: PopupDef }
-  | { kind: 'window'; window: WindowSide }
+  | { kind: 'window'; window: RepeatWindow }
   | { kind: 'country'; country: CountryBucket }
   | { kind: 'reading'; reading: ReadingScope }
   | { kind: 'rule'; rule: RuleScope }
   | { kind: 'asset'; asset: AssetScope }
   /** Feature health: a feature (FEATURES), and one of its steps (a steps repeat inside a features repeat). */
-  | { kind: 'feature'; feature: FeatureDef }
+  /** `tag`: an Ask-order tag column (a tags repeat), the tag's name ("Organic"). */
+  | { kind: 'feature'; feature: FeatureDef; tag?: string }
   | { kind: 'step'; step: StepDef; feature: FeatureDef }
 ) & { parent?: ScopeInstance }
 
@@ -149,7 +152,7 @@ export function nestScope(inner: ScopeInstance, outer: ScopeInstance): ScopeInst
 }
 
 const COUNTRY_LABELS: Record<CountryBucket, string> = { US: 'US', CA: 'CA', other: 'Other' }
-const WINDOW_LABELS: Record<WindowSide, string> = { before: 'Before', after: 'After', upsellPre: 'pre-fix', upsellPost: 'post-fix' }
+const WINDOW_LABELS: Record<RepeatWindow, string> = { before: 'Before', after: 'After', upsellPre: 'pre-fix', upsellPost: 'post-fix', latestDay: 'Latest day', previousDay: 'Previous day', page: 'Range' }
 
 export interface RepeatContext {
   todayEt: string
@@ -165,13 +168,14 @@ export function readingsLimit(repeat: Pick<RepeatSpec, 'limit'> | undefined): nu
   const n = repeat?.limit
   return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), MAX_READINGS_LIMIT) : DEFAULT_READINGS_LIMIT
 }
-type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; items?: { repeat?: RepeatSpec }[] }[] }
+type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; columnGroups?: RepeatSpec[]; items?: { repeat?: RepeatSpec }[] }[] }
 /** Every repeat of a card (the card's, its sections', their columns' and items'). */
 export function cardRepeats(spec: RepeatHolder): RepeatSpec[] {
   const out: RepeatSpec[] = []
   if (spec.repeat) out.push(spec.repeat)
   for (const s of spec.sections ?? []) {
     if (s.repeat) out.push(s.repeat)
+    if (s.columnGroups) out.push(...s.columnGroups)
     if (s.columns) out.push(s.columns)
     for (const it of s.items ?? []) if (it.repeat) out.push(it.repeat)
   }
@@ -265,8 +269,8 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       return list.map((popup) => ({ kind: 'popup', popup }))
     }
     case 'windows': {
-      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as WindowSide[]
-      return ids.filter((w) => WINDOW_SIDES.includes(w)).map((window) => ({ kind: 'window', window }))
+      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as RepeatWindow[]
+      return ids.filter((w) => REPEAT_WINDOWS.includes(w)).map((window) => ({ kind: 'window', window }))
     }
     case 'readings': {
       const arm = armIdOfScope(outer)
@@ -290,8 +294,21 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       return list.map((feature) => ({ kind: 'feature', feature }))
     }
     case 'features': {
-      const list = repeat.ids?.length ? FEATURES.filter((f) => repeat.ids!.includes(f.id)) : FEATURES
+      // Pinned ids may also name the Ask-order groups (lib/askOrder.ts ASK_ORDER_CARD_FEATURES), in
+      // config order; unpinned it is Feature health's own FEATURES.
+      const list = repeat.ids?.length ? [...FEATURES, ...ASK_ORDER_CARD_FEATURES].filter((f) => repeat.ids!.includes(f.id)) : FEATURES
       return list.map((feature) => ({ kind: 'feature', feature }))
+    }
+    case 'tags': {
+      // Only inside an Ask-order group (a features repeat over ao-<group>): its organic and tagged rows, each as the
+      // feature ao-<group>-<tag> (lib/askOrder.ts ASK_ORDER_CARD_FEATURES).
+      const group = scopeOfKind(outer, 'feature')?.feature
+      if (!group) return []
+      const tags = repeat.ids?.length ? ASK_ORDER_TAGS.filter((t) => repeat.ids!.includes(t.id)) : ASK_ORDER_TAGS
+      return tags.flatMap((t) => {
+        const feature = ASK_ORDER_CARD_FEATURES.find((f) => f.id === `${group.id}-${t.id}`)
+        return feature ? [{ kind: 'feature' as const, feature, tag: t.label }] : []
+      })
     }
     case 'steps': {
       // Only inside a features repeat: that feature's steps, in config order.
@@ -406,6 +423,8 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return scopeOfKind(scope, 'feature')?.feature.id ?? null
     case 'feature.label':
       return scopeOfKind(scope, 'feature')?.feature.label ?? null
+    case 'feature.tag':
+      return scopeOfKind(scope, 'feature')?.tag ?? null
     case 'feature.caption':
       return scopeOfKind(scope, 'feature')?.feature.caption ?? null
     case 'step.label':
@@ -420,6 +439,13 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return popup ? popup.label : null
     case 'window.label':
       return window ? WINDOW_LABELS[window] : null
+    case 'window.dated': {
+      if (!window) return null
+      const back = window === 'latestDay' ? -1 : window === 'previousDay' ? -2 : 0
+      if (!back) return WINDOW_LABELS[window]
+      const day = new Date(`${addDays(todayEt, back)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+      return `${WINDOW_LABELS[window]} (${day})`
+    }
     case 'country.label':
       return country ? COUNTRY_LABELS[country] : null
     case 'release.label': {
@@ -541,6 +567,8 @@ export interface FlatItem {
   item: MetricItem
   scope: ScopeInstance
   emptyOf?: { label: Label; text: Label }
+  /** Which of the section repeat's instances the item belongs to (0 without a section repeat): a panels section draws one panel each. */
+  instance?: number
 }
 
 export function flattenSectionItems(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
@@ -549,10 +577,10 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
     return section.repeat.empty ? [{ item: emptyPlaceholderItem(section.items[0]?.id ?? 'empty'), scope: outerScope, emptyOf: section.repeat.empty }] : []
   }
   const out: FlatItem[] = []
-  for (const sScope of sectionScopes) {
+  for (const [instance, sScope] of sectionScopes.entries()) {
     for (const item of section.items) {
       if (!item.repeat) {
-        out.push({ item, scope: sScope })
+        out.push({ item, scope: sScope, instance })
         continue
       }
       const allScopes = resolveRepeat(item.repeat, ctx, sScope).map((s) => nestScope(s, sScope))
@@ -564,11 +592,11 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
         if (item.repeat.empty) {
           // Only campaign instances say "a campaign is flighting"; the organic baseline never does.
           const untracked = allScopes.some((s) => s.kind === 'campaign') && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
-          out.push({ item, scope: sScope, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
+          out.push({ item, scope: sScope, instance, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
         }
         continue
       }
-      for (const iScope of itemScopes) out.push({ item, scope: iScope })
+      for (const iScope of itemScopes) out.push({ item, scope: iScope, instance })
     }
   }
   return out
@@ -581,7 +609,7 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
 export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
   if (section.layout !== 'table') return flattenSectionItems(section, outerScope, ctx).filter((fi) => !fi.emptyOf)
   if (section.columns) {
-    const cols = resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope))
+    const cols = columnTableColumns(section, outerScope, ctx).columns
     return section.items.flatMap((item) => cols.map((scope) => ({ item, scope })))
   }
   return tableRows(section, outerScope, ctx).flatMap((row) => section.items.flatMap((item) => (item.perGroup && !row.first ? [] : windowParts(item).map((part) => ({ item: part, scope: row.scope })))))
@@ -623,6 +651,38 @@ export function lacksRequiredField(item: MetricItem, scope: ScopeInstance, today
   return !!path && !scopeField(scope, path, todayEt)
 }
 
+/** A column table's columns, left to right, and its column groups (Section.columnGroups), one heading row per
+ * level, outermost first, each group with the number of columns under it; without groups, `groups` is empty. Each
+ * column's scope is the column inside its groups inside the outer instance; a group with no columns is left out. */
+export function columnTableColumns(section: Pick<Section, 'columns' | 'columnGroups'>, outerScope: ScopeInstance, ctx: RepeatContext): { columns: ScopeInstance[]; groups: { scope: ScopeInstance; span: number }[][] } {
+  if (!section.columns) return { columns: [], groups: [] }
+  const levels = section.columnGroups ?? []
+  const groups: { scope: ScopeInstance; span: number }[][] = levels.map(() => [])
+  const walk = (level: number, scope: ScopeInstance): ScopeInstance[] => {
+    if (level === levels.length) return resolveRepeat(section.columns, ctx, scope).map((c) => nestScope(c, scope))
+    const out: ScopeInstance[] = []
+    for (const g of resolveRepeat(levels[level], ctx, scope)) {
+      const gScope = nestScope(g, scope)
+      const at = groups[level].length
+      groups[level].push({ scope: gScope, span: 0 })
+      const cols = walk(level + 1, gScope)
+      if (!cols.length) {
+        groups[level].splice(at, 1)
+        continue
+      }
+      groups[level][at].span = cols.length
+      out.push(...cols)
+    }
+    return out
+  }
+  return { columns: walk(0, outerScope), groups }
+}
+
+/** The default heading of a column group: as a column's, but a single-day window carries its date ("Latest day (Oct 28)"). */
+export function columnGroupDefaultLabel(scope: ScopeInstance): Label {
+  return scope.kind === 'window' ? { bind: 'window.dated' } : columnDefaultLabel(scope)
+}
+
 /** The default heading of a table column: the column instance's own name. */
 export function columnDefaultLabel(scope: ScopeInstance): Label {
   switch (scope.kind) {
@@ -642,7 +702,7 @@ export function columnDefaultLabel(scope: ScopeInstance): Label {
     case 'asset':
       return { bind: 'asset.label' }
     case 'feature':
-      return { bind: 'feature.label' }
+      return scope.tag !== undefined ? { bind: 'feature.tag' } : { bind: 'feature.label' }
     case 'step':
       return { bind: 'step.label' }
     default:

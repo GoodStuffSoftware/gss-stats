@@ -49,8 +49,13 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: [], todayEt: '2026-09-26' },
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], ownBrowser: 'Chrome', ownOS: 'Android', todayEt: '2026-09-26' },
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], todayEt: '2026-09-26', set: 'coach-tips' },
+    { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], todayEt: '2026-09-26', set: 'ask-order' },
   ],
-  coachEver: [{ todayEt: '2026-09-26' }],
+  coachEver: [{ todayEt: '2026-09-26' }, { todayEt: '2026-09-26', set: 'ask-order' }],
+  featureAllTime: [
+    { todayEt: '2026-09-26', set: 'ask-order' },
+    { todayEt: '2026-09-26', set: 'ask-order', ownBrowser: 'Chrome', ownOS: 'Android' },
+  ],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 restoreFlight3()

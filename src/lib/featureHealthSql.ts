@@ -210,6 +210,42 @@ export function foldFeatureDays(
   return { rows, before }
 }
 
+/** Every row so far per path (and campaign tag, when some step matches on it): the all-time counts a cumulative read
+ * needs (the Ask-order A/B's progress and rule). COUNT(*) per path only, never per day, hour, place, device or visitor. */
+export function featureTotalsSql(whereTerms: readonly string[], features: readonly FeatureDef[]): string {
+  const tagged = flatSteps(features).some((f) => !!f.step.match.tag)
+  const cols = tagged ? 'path, campaign' : 'path'
+  return `SELECT ${cols}, COUNT(*) AS n FROM hits WHERE ${whereTerms.join(' AND ')} GROUP BY ${cols}`
+}
+
+/** featureTotalsSql's rows (or any rows with path, campaign and n) folded into one count per step, keyed
+ * `<featureId>.<stepId>` (what /api/features answers as `allTime`), and one per feature (a row counted once in its feature
+ * however many of its steps match it). The step matches are worked out once per distinct (path, campaign). */
+export function foldStepTotals(raw: readonly Record<string, unknown>[], features: readonly FeatureDef[]): { steps: Record<string, number>; features: number[] } {
+  const flat = flatSteps(features)
+  const stepTotals = flat.map(() => 0)
+  const featureTotals = features.map(() => 0)
+  const matched = new Map<string, { stepIdx: number[]; featureIdx: number[] }>()
+  for (const r of raw) {
+    const path = String(r.path ?? '')
+    const campaign = r.campaign == null ? null : String(r.campaign)
+    const n = Number(r.n) || 0
+    if (!n) continue
+    const key = campaign === null ? `0${path}` : `1${campaign} ${path}`
+    let m = matched.get(key)
+    if (!m) {
+      const stepIdx = flat.flatMap((f, i) => (stepMatches(f.step.match, path, campaign) ? [i] : []))
+      m = { stepIdx, featureIdx: [...new Set(stepIdx.map((i) => flat[i]!.featureIndex))] }
+      matched.set(key, m)
+    }
+    for (const i of m.stepIdx) stepTotals[i]! += n
+    for (const j of m.featureIdx) featureTotals[j]! += n
+  }
+  const steps: Record<string, number> = {}
+  flat.forEach((f, i) => (steps[`${f.feature.id}.${f.step.id}`] = stepTotals[i]!))
+  return { steps, features: featureTotals }
+}
+
 /** The longest range read, as /api/features MAX_RANGE_DAYS: a longer range is cut to its newest days. */
 export const FEATURE_DAYS_MAX_RANGE_DAYS = 731
 
@@ -227,11 +263,14 @@ export function featureDaysStatement(input: {
   ownBrowser?: unknown
   ownOS?: unknown
   features?: readonly FeatureDef[]
+  /** Read only the window's own rows (`ts >= fromMs` too): no '' rows, so no "before the cutoff" counts. For a feature
+   * list that needs no status (the Ask-order A/B: its latest day and range), the old daily statement's window exactly. */
+  windowed?: boolean
 }): { sql: string; binds: unknown[]; rangeFrom: string; rangeTo: string; newCutoffDay: string } {
   const features = input.features ?? FEATURES
   const { fromMs, toMs, rangeFrom, rangeTo, newCutoffDay } = featureDaysWindow(input.sinceMs, input.untilMs, input.nowMs)
-  const w: string[] = ['ts < ?', anyStepWhere(features)]
-  const b: unknown[] = [toMs]
+  const w: string[] = input.windowed ? ['ts >= ?', 'ts < ?', anyStepWhere(features)] : ['ts < ?', anyStepWhere(features)]
+  const b: unknown[] = input.windowed ? [fromMs, toMs] : [toMs]
   const sites = input.sites ?? []
   if (sites.length) {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)

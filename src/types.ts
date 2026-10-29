@@ -32,9 +32,9 @@ export type Metric = 'pageviews' | 'visits'
 // 'completions' is an ordinary GENERIC dataset (dimension/breakdown, same pipeline as
 // 'geo'/'popup') — NOT bespoke — see functions/api/completions.ts + lib/catalog.ts
 // COMPLETIONS_DIMENSIONS.
-// 'features' is bespoke: since editor tools T7 components/FeatureHealthCard.vue draws only the Ask-order A/B (view
-// 'ask-order', from functions/api/features.ts). Saved 'health', 'steps:<featureId>' and 'coach-tips' widgets are drawn as
-// editor cards and charts by the render-time mappings in lib/defaults.ts. No dimension/breakdown.
+// 'features' has no body of its own since editor tools T4: saved 'health', 'steps:<featureId>', 'coach-tips' and
+// 'ask-order' widgets are drawn as editor cards and charts by the render-time mappings in lib/defaults.ts, and one no
+// mapping covers shows the retired-panel note. No dimension/breakdown.
 export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings' | 'completions' | 'features'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
