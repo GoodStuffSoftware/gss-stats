@@ -29,11 +29,10 @@ import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../pop
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { addDays as addEtDays } from '../etTime'
-import { COACH_TIP_FEATURE_IDS } from '../coachTips'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
 import { assetSeries, beaconSeries, installsSeries, seriesTwin, spendSeries } from './series'
-import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
+import { FACTS, factKey, featureSetOf, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { deltasAllowed, etDateOfMs, etMidnightMs, isProvisional, laterEtDate, measuredInterval, seenInFlightRequired, servingEndMs, type InstrumentationRule, type MeasuredInterval } from './instrumentation'
@@ -102,7 +101,10 @@ function organicReturnsParams(env: Pick<BatchEnv, 'todayEt'>): FactParams {
 }
 
 /** The fact params one side of a request reads, from its window and the batch context. */
-function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env: BatchEnv): FactParams {
+function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env: BatchEnv, def?: Pick<MetricDef, 'featureSet'>): FactParams {
+  // A feature fact's list: the request's feature id names it (featureSetOf), else the metric's own (MetricDef.featureSet).
+  const featureSet = featureSetOf(req.params.feature) ?? def?.featureSet
+  const set = featureSet ? { set: featureSet } : {}
   switch (factId) {
     case 'campaignReturns':
       // todayEt (the organic maturity band) ONLY for the organic arm: a campaign's key is unchanged.
@@ -125,12 +127,16 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     }
     case 'featureDays': {
       const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
-      // A Coach tips feature id reads the coach-tips set (editor-tools T3); every other request keeps Feature health's key.
-      const set = req.params.feature !== undefined && COACH_TIP_FEATURE_IDS.has(req.params.feature) ? { set: 'coach-tips' as const } : {}
+      // A Coach tips or Ask-order feature id reads its set (editor-tools T3, T4); every other request keeps Feature health's key.
       return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own, todayEt: env.todayEt, ...set }
     }
+    case 'featureAllTime': {
+      // Every day so far: no range and no sites in the key (the cumulative read ignores both), own visits yes.
+      const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
+      return { todayEt: env.todayEt, ...set, ...own }
+    }
     case 'coachEver':
-      return { todayEt: env.todayEt }
+      return { todayEt: env.todayEt, ...set }
     case 'bskReleaseSides':
       return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
     case 'bskFirstHit':
@@ -242,6 +248,9 @@ function windowOf(ctx: MetricCtx, clock: Clock, endMs: number): [number, number]
       return [etMidnightMs(addEtDays(clock.todayEt, -1)), etMidnightMs(clock.todayEt)]
     case 'previousDay':
       return [etMidnightMs(addEtDays(clock.todayEt, -2)), etMidnightMs(addEtDays(clock.todayEt, -1))]
+    case 'allTime':
+      // Every day so far, through today: the cumulative read's rows (featureAllTime) start with the first one.
+      return [0, etMidnightMs(addEtDays(clock.todayEt, 1))]
     case 'upsellPre':
       return [attrStart(), UPSELL_SIGNEDOUT_FIX_AT ?? endMs]
     case 'upsellPost':
@@ -309,10 +318,10 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
       const { ctx, stat: side } = resolveStatic(memo, def, req, clock, env.nowMs)
       if (side.status === 'unmeasured') continue
       const factId = def.windows[req.window]!
-      add(factId, factParamsFor(factId, req, env))
+      add(factId, factParamsFor(factId, req, env, def))
       // A series reads the metric's daily twin: one more statement, counted against the budget.
       const twin = req.series ? seriesTwin(def, req.window) : null
-      if (twin) add(twin, factParamsFor(twin, req, env))
+      if (twin) add(twin, factParamsFor(twin, req, env, def))
       if (side.needsSeen) add('flightPathsSeen', { campaignId: ctx.campaign!.id })
       // A metric judged against the organic baseline (MetricDef.withOrganic) reads its rows too.
       if (def.withOrganic) add('campaignReturns', organicReturnsParams(env))
@@ -569,7 +578,7 @@ class Batch {
     let plan = this.sides.get(key)
     if (plan) return plan
     const factId = def.windows[req.window]!
-    const factKey = factKeyString(factId, factParamsFor(factId, req, this.env))
+    const factKey = factKeyString(factId, factParamsFor(factId, req, this.env, def))
     const fact = this.env.facts.get(factKey)
     // A closed day's data ends with the day: its as-of instant is the day's end, not the fetch time.
     const closedEnd = req.window === 'todaySoFar' ? this.clock.dayEndMs : null
@@ -743,7 +752,7 @@ class Batch {
   series(def: MetricDef, req: ResolvedRequest, side: Side): SeriesPoint[] | undefined {
     const twin = seriesTwin(def, req.window)
     if (!twin) return undefined
-    const fact = this.env.facts.get(factKeyString(twin, factParamsFor(twin, req, this.env)))
+    const fact = this.env.facts.get(factKeyString(twin, factParamsFor(twin, req, this.env, def)))
     if (!fact || !fact.ok) return undefined
     const plan = this.side(def, req, null)
     let points: SeriesPoint[] = []

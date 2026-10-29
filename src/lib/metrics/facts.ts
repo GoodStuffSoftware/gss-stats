@@ -74,8 +74,10 @@
 // which they count over whole ET days the same way (by segment and ET day only, never by hour).
 // facts.test.ts checks every statement.
 
-import { anyStepWhere, featureDaysStatement } from '../featureHealthSql'
-import { COACH_TIP_FEATURES } from '../coachTips'
+import { anyStepWhere, featureDaysStatement, featureTotalsSql } from '../featureHealthSql'
+import { COACH_TIP_FEATURE_IDS, COACH_TIP_FEATURES } from '../coachTips'
+import { ASK_ORDER_CARD_FEATURES, ASK_ORDER_FEATURE_IDS, ASK_ORDER_FEATURES } from '../askOrder'
+import { FEATURES, type FeatureDef } from '../featureHealth'
 import { applyAlwaysExclusions, applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, sqlInt } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
@@ -110,6 +112,7 @@ export type FactId =
   | 'adsAssetDaily'
   | 'featureDays'
   | 'coachEver'
+  | 'featureAllTime'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -131,8 +134,27 @@ export interface FactParams {
    * browser and an OS: rows from that browser on that OS are left out. */
   ownBrowser?: string
   ownOS?: string
-  /** featureDays only: which feature list it counts. Unset = FEATURES (Feature health); 'coach-tips' = COACH_TIP_FEATURES. */
-  set?: 'coach-tips'
+  /** The feature facts (featureDays, featureAllTime, coachEver): which feature list they count (FeatureSet). Unset =
+   * the fact's own default (FEATURES; coachEver: the Coach tips). */
+  set?: FeatureSet
+}
+
+/** A feature list the feature facts can count besides Feature health's FEATURES: the Coach tips (editor-tools T3) and the
+ * Ask-order A/B groups (T4). A feature id names its set (featureSetOf), so a card never names one. */
+export type FeatureSet = 'coach-tips' | 'ask-order'
+/** The set a feature id belongs to; undefined for a Feature health feature (FEATURES) or no feature. */
+export function featureSetOf(id: string | undefined): FeatureSet | undefined {
+  if (id === undefined) return undefined
+  return COACH_TIP_FEATURE_IDS.has(id) ? 'coach-tips' : ASK_ORDER_FEATURE_IDS.has(id) ? 'ask-order' : undefined
+}
+/** The features a set's statements read (their paths). */
+export function statementFeaturesOf(set: FeatureSet | undefined): readonly FeatureDef[] {
+  return set === 'coach-tips' ? COACH_TIP_FEATURES : set === 'ask-order' ? ASK_ORDER_FEATURES : FEATURES
+}
+/** The features a set's rows are folded into (the metric stores): the statement's, plus the Ask-order card's summed
+ * measures (ASK_ORDER_CARD_FEATURES: steps over the same paths, so the statement is unchanged). */
+export function modelFeaturesOf(set: FeatureSet | undefined): readonly FeatureDef[] {
+  return set === 'ask-order' ? ASK_ORDER_CARD_FEATURES : statementFeaturesOf(set)
 }
 
 export interface FactStatement {
@@ -652,7 +674,8 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: { seconds: 300 },
     build(p, nowMs) {
       const [sinceMs, untilMs] = p.since !== undefined && p.until !== undefined ? rangeMs(p.since, p.until) : [NaN, NaN]
-      const s = featureDaysStatement({ sinceMs, untilMs, nowMs: p.todayEt ? etMidnightMs(p.todayEt) : nowMs, sites: p.sites, excludeKnownTraffic: true, excludeOwn: !!(p.ownBrowser && p.ownOS), ownBrowser: p.ownBrowser, ownOS: p.ownOS, ...(p.set === 'coach-tips' ? { features: COACH_TIP_FEATURES } : {}) })
+      // The Ask-order set (editor-tools T4) needs no status, so it reads only its window: the old daily statement's rows.
+      const s = featureDaysStatement({ sinceMs, untilMs, nowMs: p.todayEt ? etMidnightMs(p.todayEt) : nowMs, sites: p.sites, excludeKnownTraffic: true, excludeOwn: !!(p.ownBrowser && p.ownOS), ownBrowser: p.ownBrowser, ownOS: p.ownOS, ...(p.set ? { features: statementFeaturesOf(p.set) } : {}), ...(p.set === 'ask-order' ? { windowed: true } : {}) })
       return { db: 'gss_geo', sql: s.sql, binds: s.binds }
     },
     parse: (raw) => ({ kind: 'featureDays', rows: raw }),
@@ -665,19 +688,45 @@ export const FACTS: Record<FactId, FactDef> = {
   coachEver: {
     id: 'coachEver',
     db: 'gss_geo',
-    keyParams: ['todayEt'],
+    // `set` (editor-tools T4): 'ask-order' asks the same of the Ask-order A/B rows. Unset for the Coach tips, so their key is unchanged.
+    keyParams: ['todayEt', 'set'],
     honors: [],
     bucketMs: null,
     splitAt: null,
     ttl: { seconds: 300 },
     build(p) {
       if (!p.todayEt) throw new Error('coachEver needs todayEt')
-      const w: string[] = ['ts < ?', anyStepWhere(COACH_TIP_FEATURES)]
+      const w: string[] = ['ts < ?', anyStepWhere(p.set ? statementFeaturesOf(p.set) : COACH_TIP_FEATURES)]
       const b: unknown[] = [etMidnightMs(addEtDays(p.todayEt, 1))]
       applyAlwaysExclusions(w, b)
       return { db: 'gss_geo', sql: `SELECT COUNT(*) AS n FROM hits WHERE ${w.join(' AND ')}`, binds: b }
     },
     parse: (raw) => ({ kind: 'scalar', value: Number(raw[0]?.n) || 0 }),
+  },
+
+  // The Ask-order A/B (editor-tools T4): every row so far per step, /api/features' third statement for view 'ask-order'
+  // (the 'allTime' window). Cumulative, so not the selected range and not the site selection (the A/B is read over all
+  // traffic); known traffic and own visits are hidden (the card stands in only for a widget that hides known traffic,
+  // lib/defaults.ts askOrderCardFor). COUNT(*) per path and campaign tag only: no day, visitor, hour, place or device
+  // column, no join. Keyed by today's ET date, so every range and site selection shares one cached read.
+  featureAllTime: {
+    id: 'featureAllTime',
+    db: 'gss_geo',
+    keyParams: ['todayEt', 'set', 'ownBrowser', 'ownOS'],
+    honors: ['excludeOwn'],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build(p) {
+      if (!p.todayEt) throw new Error('featureAllTime needs todayEt')
+      const features = statementFeaturesOf(p.set)
+      const w: string[] = ['ts < ?', anyStepWhere(features)]
+      const b: unknown[] = [etMidnightMs(addEtDays(p.todayEt, 1))]
+      applyExclusions(w, b)
+      excludeOwnClause(w, b, !!(p.ownBrowser && p.ownOS), p.ownBrowser, p.ownOS)
+      return { db: 'gss_geo', sql: featureTotalsSql(w, features), binds: b }
+    },
+    parse: (raw) => ({ kind: 'featureDays', rows: raw }),
   },
 
   bskFirstHit: {
