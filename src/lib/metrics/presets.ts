@@ -296,7 +296,8 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
   repeat: { over: 'campaigns', tracked: true },
   minWidth: 230,
   title: { bind: 'campaign.label' },
-  badge: { data: { field: 'campaign.status' }, display: { as: 'badge' } },
+  // Same badge as the scorecard: "flighting today" while the flight runs, otherwise the status.
+  badge: { data: { field: 'campaign.statusToday' }, display: { as: 'badge', tones: { 'flighting today': 'live' } } },
   sections: [
     {
       layout: 'rows',

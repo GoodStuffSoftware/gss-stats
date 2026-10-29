@@ -85,9 +85,18 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
       }
     })
   })
-  it('the scorecard badge says "flighting today" exactly while a flight runs, else the status (10-29)', () => {
-    const today = statusOf(CAMPAIGN_SCORECARD, '2026-10-29', 'campaign.statusToday')
-    for (const id of ORDER) expect(today[id], id).toBe(EXPECTED[id][3] === 'active' ? 'flighting today' : EXPECTED[id][3])
+  it('both badges read campaign.statusToday: "flighting today" exactly while a flight runs, else the status', () => {
+    expect(CAMPAIGN_SCORECARD.badge).toEqual(CAMPAIGN_FUNNEL.badge)
+    expect(CAMPAIGN_FUNNEL.badge?.data).toEqual({ field: 'campaign.statusToday' })
+    DATES.forEach((d, i) => {
+      const score = statusOf(CAMPAIGN_SCORECARD, d, 'campaign.statusToday')
+      const funnel = statusOf(CAMPAIGN_FUNNEL, d, 'campaign.statusToday')
+      for (const id of ORDER) {
+        const want = EXPECTED[id][i] === 'active' ? 'flighting today' : EXPECTED[id][i]
+        expect(score[id], `scorecard ${id} ${d}`).toBe(want)
+        expect(funnel[id], `funnel ${id} ${d}`).toBe(SPEND_ONLY.includes(id) ? undefined : want)
+      }
+    })
   })
   it('the scorecard lists every campaign in registry order; the funnel the same order without the spend-only arms', () => {
     for (const d of DATES) {

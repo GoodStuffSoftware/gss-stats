@@ -519,10 +519,6 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     activeWhen: () => authErrorMarkedChanges().length > 0,
     appliesTo: (w: AutoCaveatWidget) => cardShowsAuthErrors(w.card),
   },
-  // The Cost card's cost per auth success (ratio campaign.costPerSignin): its denominator is every
-  // auth success, not only new accounts, and from the first-touch change in lib/measurementChanges.ts
-  // the count carries first-touch tags while sign-in screens mostly do not, so it is approximate.
-  // The date comes from that file, never typed here.
   // The funnel per campaign lists beacon-tracked campaigns only (repeat.tracked): a spend-only arm
   // (Flight 4) writes no beacon rows, so a funnel card for it would be all zeros. This caption says
   // why it is absent and where it is shown; the names come from the registry, never typed here.
@@ -538,6 +534,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: [], // not automatic: the funnel card names it in its own captions (presets.ts CAMPAIGN_FUNNEL)
   },
+  // The Cost card's cost per auth success (ratio campaign.costPerSignin): its denominator is every
+  // auth success, not only new accounts, and from the first-touch change in lib/measurementChanges.ts
+  // the count carries first-touch tags while sign-in screens mostly do not, so it is approximate.
+  // The date comes from that file, never typed here.
   'cost-per-signin-approx': {
     id: 'cost-per-signin-approx',
     text: () => {

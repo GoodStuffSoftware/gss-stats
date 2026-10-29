@@ -448,7 +448,8 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
     const seen = new Set<string>()
     for (const [title, o] of old) {
       const c = cards.get(title)!
-      expect(text(c.find('.mc-badge').element), title).toBe(o.status)
+      // The badge reads campaign.statusToday, like the scorecard: the old panel's 'active' is "flighting today" (active and flighting are the same window).
+      expect(text(c.find('.mc-badge').element), title).toBe(o.status === 'active' ? 'flighting today' : o.status)
       const sections = c.findAll('.metric-section')
       const rowsOf = (i: number) => new Map(sections[i].findAll('.mi-row').map((r) => [text(r.find('.mi-label').element), text(r.find('.mi-value').element)]))
       const top = rowsOf(0)
@@ -460,7 +461,7 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
       const bars = rowsOf(1)
       for (const [label, st] of o.steps) {
         if (st.count === 'not instrumented') {
-          expect(c.find('.mc-badge').text(), `${title} ${label}: D2 only on an active flight`).toBe('active')
+          expect(c.find('.mc-badge').text(), `${title} ${label}: D2 only on an active flight`).toBe('flighting today')
           expect(bars.get(label), `${title} ${label}: D2`).toBe('0')
           seen.add('D2')
         } else {
