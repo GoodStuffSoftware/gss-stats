@@ -384,8 +384,10 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     // A percent always shows its (n/d), a 0 denominator included ("— (0/0)"): the reader
     // sees WHY there is no rate (ADR 0003, "n/d is always returned").
     const nd = item.display.as === 'percent' && (item.gating?.whenEmpty ?? 'dash') === 'dash' ? ndSuffix(value) : ''
+    // A 'perRows' with no ratio (nothing to divide by) still says how many rows there are: "— (0 rows)".
+    const rows = item.display.as === 'perRows' && (item.gating?.whenEmpty ?? 'dash') === 'dash' && finite(value.numerator) ? ` (${fmtCount(value.numerator)} rows)` : ''
     // The notes a value carries travel with an empty one too ("stale" with no spend day stored).
-    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
+    return { visible, labelTokens, primary: primary + nd + rows, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
   }
   if (value.status === 'unmeasured') {
     const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value, todayEt)
