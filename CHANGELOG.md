@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Flight 3 now lists before Flight 4.** Campaign lists and "one per campaign" cards show a live Flight 3 arm ahead of Flight 4.
+
 ## [0.67.0] — 2026-10-29
 
 ### Added

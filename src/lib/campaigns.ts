@@ -422,6 +422,8 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   // spend-only with NO read plan (ADS_READ_PLANS): the morning and post-flight reads and the kill
   // rules never run on it, and the sync pulls its daily spend but not placements
   // (noPlacements; lib/adsSync.ts pullsPlacements). The ads lead reads its installs from Google Ads.
+  // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged. They sit before Flight 4 so the registry (and every campaign list read from it) stays in flight order.
+  ...liveStagedCampaigns(),
   {
     id: '24392866056',
     label: 'Flight 4 — Android installs',
@@ -439,8 +441,6 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
     notes:
       '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796): no SDK, no utm tag, no install referrer, so no beacon rows. The tag in ucValues is a placeholder no row carries (it exists only because an empty ucValues breaks the beacon SQL). Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
-  // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged.
-  ...liveStagedCampaigns(),
 ]
 
 /** A flight's status on an ET date: 'upcoming' before flightStart (or with no start yet), 'active' from the start
