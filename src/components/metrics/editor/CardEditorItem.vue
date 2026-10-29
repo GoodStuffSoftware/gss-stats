@@ -205,9 +205,9 @@ const dimModel = flagModel('dim')
 const ruleAboveModel = flagModel('ruleAbove')
 const afterId = useId()
 const afterModel = computed<string>({
-  get: () => item.value.after ?? '',
+  get: () => (typeof item.value.after === 'string' ? item.value.after : ''),
   set: (v) => {
-    if (v === (item.value.after ?? '')) return
+    if (v === (typeof item.value.after === 'string' ? item.value.after : '')) return
     item.value = withField(item.value, 'after', v || undefined)
   },
 })
