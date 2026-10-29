@@ -15,3 +15,7 @@ declare module '*?raw' {
   const source: string
   export default source
 }
+
+// The id of this build, injected by vite.config.ts (also written to dist/build-id.json). 'dev' when
+// not built for release; the new-version check is off then.
+declare const __BUILD_ID__: string

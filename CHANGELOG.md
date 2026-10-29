@@ -6,11 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ## [0.71.1] — 2026-10-29
 
 ### Changed
 - **Cheaper flight charts.** The Campaigns page's flight charts (flight, flight day, arrivals, landing tag) count visits first and work out each visit's flight afterwards, reading about a tenth of the rows they did, with the same numbers.
 - **Capacity notes for Workers Paid.** The capacity doc records the account's move to Workers Paid, its D1 and CPU limits, and that the sync Worker's CPU is now within the plan.
+=======
+### Added
+- **New-version prompt.** A tab left open across a deploy now notices within about 5 minutes (or as soon as you return to it) and shows a small banner with a Reload button, warning that reloading discards unsaved editor changes; it never reloads by itself.
+>>>>>>> 3c0e08c (feat(deploy): new-version banner with Reload for open tabs)
 
 ## [0.71.0] — 2026-10-29
 

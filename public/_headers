@@ -1,0 +1,4 @@
+# The new-version check (src/composables/useBuildCheck.ts) polls this file; it must never be cached
+# by the browser or by Cloudflare's edge.
+/build-id.json
+  Cache-Control: no-store, no-cache, max-age=0, must-revalidate

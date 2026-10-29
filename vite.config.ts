@@ -1,9 +1,26 @@
 import { configDefaults, defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 
 // Keeps hooks and the editor responsive during parallel test runs; worker processes inherit it on Windows.
+// One id per production build, also served as dist/build-id.json (src/composables/useBuildCheck.ts
+// polls it). The dev server and vitest keep 'dev', which turns the check off.
+function buildIdPlugin(): Plugin {
+  let id = 'dev'
+  return {
+    name: 'gss-build-id',
+    config(_c, env) {
+      if (env.command === 'build') id = (process.env.GITHUB_SHA ?? 'local').slice(0, 12) + '-' + Date.now().toString(36)
+      return { define: { __BUILD_ID__: JSON.stringify(id) } }
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'build-id.json', source: JSON.stringify({ id }) })
+    },
+  }
+}
+
 try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
 
 // Build output goes to dist/ which Pages serves; functions/ is picked up by wrangler.
@@ -15,7 +32,7 @@ try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
 // with a `// @vitest-environment happy-dom` comment instead — see Vitest's docs on
 // environment overrides.
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), buildIdPlugin()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

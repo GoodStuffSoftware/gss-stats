@@ -29,6 +29,8 @@ import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
+import { useBuildCheck } from './composables/useBuildCheck'
+import { RELOAD_BANNER_TEXT, reloadBannerWarning } from './lib/buildCheck'
 
 // Live push (composables/useLiveChanges.ts): ONE fail-soft socket for the whole app, open only while
 // the tab is visible and in use. It adds a refetch trigger on top of today's; it never replaces one.
@@ -306,6 +308,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', flushPendingSave)
   flushPendingSave()
 })
+
+// New-version prompt: only a production build checks (the dev server and vitest build id is 'dev').
+// It never reloads on its own. "Unsaved" = an open card/chart editor, or a layout save that is
+// pending, failed or blocked (the layout itself autosaves 700 ms after an edit).
+const { updateAvailable } = useBuildCheck(__BUILD_ID__, __BUILD_ID__ !== 'dev')
+const hasUnsavedWork = computed(() => editing.value !== null || ['saving', 'error', 'blocked'].includes(saveState.value))
+const reloadWarning = computed(() => reloadBannerWarning(hasUnsavedWork.value))
+function reloadNow() { window.location.reload() }
 
 const saveLabel = computed(() =>
   viewOnly.value
@@ -1066,6 +1076,11 @@ function toggleDark() {
       </div>
     </header>
 
+    <div v-if="updateAvailable" class="reload-banner" role="status" data-testid="reload-banner">
+      <span>{{ RELOAD_BANNER_TEXT }}<template v-if="reloadWarning"> · {{ reloadWarning }}</template></span>
+      <button class="btn btn-primary" data-testid="reload-banner-button" @click="reloadNow">Reload</button>
+    </div>
+
     <!-- Main filter bar — in normal flow, always visible, directly under the header (its
          breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
          only on the campaign page, whose widgets each cover their own fixed campaign window and
@@ -1561,6 +1576,14 @@ function toggleDark() {
   align-items: center;
   gap: 8px;
 }
+.reload-banner {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px);
+  padding: 8px 12px; border: 1px solid rgb(var(--line-2)); border-radius: 8px;
+  background: rgb(var(--surface)); color: rgb(var(--ink)); font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+@media print { .reload-banner { display: none } }
 .save-state {
   font-size: 11px;
   color: rgb(var(--ink-3));
