@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { FEATURES } from '../../../lib/featureHealth'
 import { COACH_TIP_FEATURES } from '../../../lib/coachTips'
+import { ASK_ORDER_CARD_FEATURES } from '../../../lib/askOrder'
 // One DataBinding editor (ADR 0003 section 1(b) / section 4 item 5, "Data"): a metric (grouped,
 // searchable, unit shown), a ratio (ONLY registered ratios — so an invalid percentage literally
 // cannot be built), or a scope field. Params inherited from a repeat show as a chip with an
@@ -109,10 +110,18 @@ function setParam(p: MetricParam, v: string | undefined) {
   else params[p] = v
   data.value = withField(data.value as { metric: string; params?: Params }, 'params', Object.keys(params).length ? params : undefined) as DataBinding
 }
-function optionsFor(p: MetricParam) {
-  if (p === 'feature') return [...FEATURES, ...COACH_TIP_FEATURES].map((f) => ({ value: f.id, label: f.label }))
-  if (p === 'step') return [...new Set([...FEATURES, ...COACH_TIP_FEATURES].flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
+const PARAM_FEATURES = [...FEATURES, ...COACH_TIP_FEATURES, ...ASK_ORDER_CARD_FEATURES]
+function knownOptionsFor(p: MetricParam): { value: string; label: string }[] {
+  if (p === 'feature') return PARAM_FEATURES.map((f) => ({ value: f.id, label: f.label }))
+  if (p === 'step') return [...new Set(PARAM_FEATURES.flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
   return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
+}
+/** The choices for a pinned param, plus its current value when the list does not hold it, so the
+ * select always shows what the binding stores and re-picking it never swaps in another value. */
+function optionsFor(p: MetricParam) {
+  const opts = knownOptionsFor(p)
+  const cur = paramValue(p)
+  return paramIsPinned(cur) && !opts.some((o) => o.value === cur) ? [...opts, { value: String(cur), label: String(cur) }] : opts
 }
 
 // ── window ───────────────────────────────────────────────────────────────────────────────────

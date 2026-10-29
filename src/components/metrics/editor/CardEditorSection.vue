@@ -38,7 +38,7 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
 type OptionalLabel = 'title' | 'columnLabel' | 'rowsLabel'
 const remembered: Partial<Record<OptionalLabel, Label>> = {}
 /** The column headings that were set when the columns were cleared (restored with them). */
-const setAside: Partial<Record<'columnLabel' | 'rowsLabel', Label>> & { columnGroups?: Section['columnGroups'] } = {}
+const setAside: Partial<Record<'columnLabel' | 'rowsLabel', Label>> & { columnGroups?: Section['columnGroups']; innerGroup?: RepeatSpec } = {}
 function labelModel(key: OptionalLabel) {
   return computed<Label | undefined>({
     get: () => section.value[key],
@@ -57,6 +57,9 @@ const titleModel = labelModel('title')
 const columnLabelModel = labelModel('columnLabel')
 const rowsLabelModel = labelModel('rowsLabel')
 const hasTitle = computed(() => section.value.title !== undefined)
+/** The scope a section title reads: each panel's own instance in a panels section (MetricSection
+ * panels), otherwise the card's. */
+const titleRepeatOver = computed(() => (section.value.panels && section.value.repeat ? section.value.repeat.over : props.cardRepeatOver))
 function toggleTitle(on: boolean) {
   toggleLabel('title', on)
 }
@@ -111,8 +114,12 @@ function columnGroupModel(level: 0 | 1) {
     set: (v) => {
       if (v === section.value.columnGroups?.[level]) return
       const now = section.value.columnGroups ?? []
-      // Clearing the outer level clears the inner one too: an inner level needs one over it.
-      const next = level === 0 ? (v ? [v, ...now.slice(1)] : []) : v ? [now[0], v] : now.slice(0, 1)
+      // Clearing the outer level clears the inner one too (an inner level needs one over it); the
+      // inner one is set aside and comes back when an outer level is chosen again.
+      if (level === 0 && !v && now[1]) setAside.innerGroup = now[1]
+      const inner = level === 0 && v && !now[0] && setAside.innerGroup ? [setAside.innerGroup] : now.slice(1)
+      if (v) delete setAside.innerGroup
+      const next = level === 0 ? (v ? [v, ...inner] : []) : v ? [now[0], v] : now.slice(0, 1)
       section.value = withField(section.value, 'columnGroups', next.length && next[0] ? next : undefined)
     },
   })
@@ -178,7 +185,7 @@ function removeAt(i: number) {
     <div class="field check">
       <label><input type="checkbox" :checked="hasTitle"@change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Section title</label>
     </div>
-    <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
+    <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="titleRepeatOver" placeholder="Section title" heading="Section title" />
 
     <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'rules', 'assets', 'features', 'steps', 'tips']" label="Repeat this section" />
     <div v-if="section.repeat && section.layout !== 'table'" class="field check">
