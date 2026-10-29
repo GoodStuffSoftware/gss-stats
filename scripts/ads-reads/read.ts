@@ -152,6 +152,9 @@ export interface AsOfMark {
   etDate: string
   realNowMs: number
 }
+/** The exclusive upper `ts` bound of the D1 beacon reads: the ET midnight after the as-of day under --as-of (so a
+ * backfilled reading carries no row from after its day), null on a live read. An ET midnight keeps the counts-only rule. */
+export const beaconUntilMs = (deps: { asOf?: AsOfMark }): number | null => (deps.asOf ? etMidnightUtcMs(addEtDays(deps.asOf.etDate, 1)) : null)
 export interface ReadDeps {
   nowMs: number
   asOf?: AsOfMark
@@ -526,9 +529,9 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const placementRows: Attempt<PlacementDayRow[]> = isSearch ? { ok: true, value: [] } : await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
   const placementsStored = placementRows.ok && !deps.dryRun && i.campaignSync?.placementsOk !== false
   const beacon = deps.beacon
-  const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
-  const returnRaw = beacon ? await attempt('beacon returns', () => beacon.returns(campaign)) : unavailable<ReturnRow[]>('beacon returns', deps.beaconInitError)
-  const returnSites = beacon ? await attempt('beacon return sites', () => beacon.returnSites(WEB_GO_LIVE_UTC_MS)) : unavailable<ReturnSiteStat[]>('beacon return sites', deps.beaconInitError)
+  const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS, beaconUntilMs(deps))) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
+  const returnRaw = beacon ? await attempt('beacon returns', () => beacon.returns(campaign, beaconUntilMs(deps))) : unavailable<ReturnRow[]>('beacon returns', deps.beaconInitError)
+  const returnSites = beacon ? await attempt('beacon return sites', () => beacon.returnSites(WEB_GO_LIVE_UTC_MS, beaconUntilMs(deps))) : unavailable<ReturnSiteStat[]>('beacon return sites', deps.beaconInitError)
   const windowEnd = Math.min(deps.nowMs, flightEndExclusiveMs(campaign))
   const fb = deps.firebase ? await attempt('firebase counts', () => deps.firebase!.counts(attributionStartMs(campaign), windowEnd, i.cohortTiersAtMs ?? null)) : null
 
@@ -728,10 +731,10 @@ async function releaseHealth(
     return { evaluated: false, reason: opts.servedToday === false ? 'not evaluated: no ads served today' : 'not evaluated: could not tell whether ads served today', results: null, alerts: 0 }
   }
   const beacon = deps.beacon
-  const siteRows = cached.siteRows ?? (beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon', deps.beaconInitError))
+  const siteRows = cached.siteRows ?? (beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS, beaconUntilMs(deps))) : unavailable<HourPathCount[]>('beacon', deps.beaconInitError))
   const returns =
     cached.returns ??
-    (beacon ? await attempt('beacon returns', async () => summarizeReturns(await beacon.returns(campaign), campaign.ucValues)) : unavailable<ReturnSummary>('beacon', deps.beaconInitError))
+    (beacon ? await attempt('beacon returns', async () => summarizeReturns(await beacon.returns(campaign, beaconUntilMs(deps)), campaign.ucValues)) : unavailable<ReturnSummary>('beacon', deps.beaconInitError))
   if (!siteRows.ok || !returns.ok || !tagged.ok) {
     const why = [siteRows, returns, tagged].filter((a) => !a.ok).map((a) => (a as { error: string }).error)
     return { evaluated: false, reason: `not evaluated: ${why.join('; ')}`, results: null, alerts: 0, readError: true }
@@ -1235,7 +1238,7 @@ async function flight3BlockRead(
     let siteTutorialAsksN: number | null = null
     if (spendArmed && deps.beacon) {
       const beacon = deps.beacon
-      const sr = await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS))
+      const sr = await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS, beaconUntilMs(deps)))
       if (sr.ok) {
         siteSigninShownN = siteSigninShown(sr.value, attributionStartMs(campaign), windowEnd)
         siteTutorialAsksN = siteTutorialAsksShown(sr.value, attributionStartMs(campaign), windowEnd)
@@ -1373,7 +1376,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, opts.releaseHealth === 'skip' ? null : deps.nowMs - HEALTH_ARRIVAL_AGE_MS)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, opts.releaseHealth === 'skip' ? null : deps.nowMs - HEALTH_ARRIVAL_AGE_MS, beaconUntilMs(deps))) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   if (!taggedRows.ok) errors.push(taggedRows.error)
   const yStart = etMidnightUtcMs(yesterdayEt)
   const yEnd = etMidnightUtcMs(todayEt)
@@ -1467,7 +1470,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   let play = thresholdRead?.play ?? null
   if (!play) {
-    const rs = beacon ? await attempt('beacon return sites', () => beacon.returnSites(WEB_GO_LIVE_UTC_MS)) : unavailable<ReturnSiteStat[]>('beacon return sites', deps.beaconInitError)
+    const rs = beacon ? await attempt('beacon return sites', () => beacon.returnSites(WEB_GO_LIVE_UTC_MS, beaconUntilMs(deps))) : unavailable<ReturnSiteStat[]>('beacon return sites', deps.beaconInitError)
     if (rs.ok) play = playReturnStatus(rs.value, deps.nowMs)
     else if (!errors.includes(rs.error)) errors.push(rs.error)
   }
@@ -1836,7 +1839,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, null)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, null, beaconUntilMs(deps))) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   const wantsCohort = COHORT_TIER_STAGES.includes(opts.stage)
   const { read } = await fullRead(deps, {
     plan,

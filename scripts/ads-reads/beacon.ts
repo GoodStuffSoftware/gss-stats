@@ -20,6 +20,15 @@ export interface Query {
   binds: unknown[]
 }
 
+/** An as-of read (`ads:postflight-read --as-of`) must see no row after its day: an exclusive `ts < untilMs`, which the
+ * caller sets to an ET midnight (so the counts-only rule holds: a refused path is still grouped by ET day, never by
+ * hour). Null = no bound, the live reads. */
+export function untilBound(w: string[], b: unknown[], untilMs: number | null | undefined): void {
+  if (untilMs == null) return
+  w.push('ts < ?')
+  b.push(untilMs)
+}
+
 /** Campaign-attributed rows, by (UTC hour, path, visitor, campaign tag) — and, when a segment boundary is
  * set (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT), by `uf` = the row is at or after it, so the
  * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`).
@@ -37,12 +46,14 @@ export interface Query {
  * `campaign` is the row's own utm_campaign (always one of the arm's ucValues: the WHERE is an IN),
  * carried so an arm with several tags can print a per-tag split (lib/tagSplit.ts). A tag is not an
  * hour, a place or a device (src/lib/splitGuard.ts), and the split is only ever printed as
- * cumulative and ET-day row totals; every rule still sums the rows of all the arm's tags. */
-export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT, maturedBeforeMs: number | null = null): Query {
+ * cumulative and ET-day row totals; every rule still sums the rows of all the arm's tags.
+ * `untilMs` (an as-of read only, see untilBound): an exclusive upper `ts` bound, always an ET midnight. */
+export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT, maturedBeforeMs: number | null = null, untilMs: number | null = null): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
+  untilBound(w, b, untilMs)
   excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
   const refused = refusedPathMatch().sql
   const cols = [`CASE WHEN ${refused} THEN NULL ELSE CAST(ts / 3600000 AS INTEGER) END AS hr`, `CASE WHEN ${refused} THEN ${etDateSql()} ELSE NULL END AS etd`, 'path', 'visitor', 'campaign']
@@ -73,11 +84,12 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
  * the first-finish sign-in ask, its eligibility row and its outcomes): those rows are grouped by their
  * ET DAY (`etd`) with `hr` NULL, never by hour (the same device as taggedRowsQuery), and a NUL-bearing
  * path is still left out. */
-export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
+export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, untilMs: number | null = null): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
   const b: unknown[] = [WEB_SITE, sinceMs, ...inc.binds]
   applyExclusions(w, b)
+  untilBound(w, b, untilMs)
   const refused = refusedPathMatch().sql
   w.push(`(NOT ${refused} OR (path LIKE '/funnel/%' AND NOT (${NUL_PATH_SQL})) OR ${refusedPopupMatchSql()})`)
   // `pf` splits each hour row-exactly at the install fix (lib/popupEvents.ts
@@ -131,8 +143,8 @@ export function returnArrivalsQuery(campaign: CampaignFlight, sinceMs: number, u
  * path's own uc (lib/campaigns.ts parseReturnPath re-checks it exactly). Lower-bounded by the
  * campaign's attribution start (the same bound as the dashboard's campaignReturns fact, so the
  * routine and the page count the same rows); no upper bound: a d31-60 return fires long after
- * the flight. An unconfirmed flightStart attributes nothing. */
-export function returnRowsQuery(campaign: CampaignFlight): Query {
+ * the flight (`untilMs`, an as-of read only: see untilBound). An unconfirmed flightStart attributes nothing. */
+export function returnRowsQuery(campaign: CampaignFlight, untilMs: number | null = null): Query {
   const w = ['site IN (?, ?)', `(${campaign.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
   const b: unknown[] = [WEB_SITE, APP_SITE, ...campaign.ucValues.map((u) => `/return/${u}/%`)]
   const startMs = campaignAttributionStartMs(campaign)
@@ -142,6 +154,7 @@ export function returnRowsQuery(campaign: CampaignFlight): Query {
     b.push(startMs)
   }
   applyExclusions(w, b)
+  untilBound(w, b, untilMs)
   return { sql: `SELECT site, path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY site, path`, binds: b }
 }
 
@@ -151,10 +164,11 @@ export function returnRowsQuery(campaign: CampaignFlight): Query {
  * Counts only (src/lib/splitGuard.ts): the SQL reads each row's ET day (lib/etTime.ts
  * etDateSql, the geo `dateEt` expression), never its ts, so no hour or minute of a /return/ row
  * ever leaves D1. 'YYYY-MM-DD' text sorts by date, so MIN/MAX give the first and last day. */
-export function returnSitesQuery(sinceMs: number): Query {
+export function returnSitesQuery(sinceMs: number, untilMs: number | null = null): Query {
   const w = ['site IN (?, ?)', 'path LIKE ?', 'ts >= ?']
   const b: unknown[] = [WEB_SITE, APP_SITE, '/return/%', sinceMs]
   applyExclusions(w, b)
+  untilBound(w, b, untilMs)
   const d = etDateSql()
   return { sql: `SELECT site, COUNT(*) AS c, MIN(${d}) AS d0, MAX(${d}) AS d1 FROM hits WHERE ${w.join(' AND ')} GROUP BY site`, binds: b }
 }
@@ -220,10 +234,12 @@ export interface BeaconSource {
   /** Optional: the pre-flight gate counts (preflightGateQuery). Absent = line not printed. */
   preflightGate?(): Promise<PreflightCounts>
   /** `upsellFixAtMs`: undefined = the configured instant; null = no segment flag. */
-  tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null, maturedBeforeMs?: number | null): Promise<TaggedRow[]>
-  siteEvents(sinceMs: number): Promise<HourPathCount[]>
-  returns(campaign: CampaignFlight): Promise<ReturnRow[]>
-  returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
+  tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null, maturedBeforeMs?: number | null, untilMs?: number | null): Promise<TaggedRow[]>
+  /** `untilMs` on tagged / siteEvents / returns / returnSites: an exclusive upper `ts` bound, set only by an as-of read
+   * (an ET midnight, see untilBound); absent = no bound. */
+  siteEvents(sinceMs: number, untilMs?: number | null): Promise<HourPathCount[]>
+  returns(campaign: CampaignFlight, untilMs?: number | null): Promise<ReturnRow[]>
+  returnSites(sinceMs: number, untilMs?: number | null): Promise<ReturnSiteStat[]>
   /** Optional: site-wide first-session rows (siteFirstSessionQuery). Absent = not read. */
   siteFirstSession?(sinceMs: number, untilMs: number): Promise<FirstSessionRowSite[]>
   /** Optional: tagged first-session arrivals (returnArrivalsQuery). Absent = not read. */
@@ -241,8 +257,8 @@ export function createBeaconSource(select: D1Select): BeaconSource {
       const r = (await select<any>(q.sql, q.binds))[0] ?? {}
       return { coach: n(r.coach), committed: n(r.committed), eligible: n(r.eligible) }
     },
-    async tagged(campaign, upsellFixAtMs, maturedBeforeMs) {
-      const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs, maturedBeforeMs ?? null)
+    async tagged(campaign, upsellFixAtMs, maturedBeforeMs, untilMs) {
+      const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs, maturedBeforeMs ?? null, untilMs ?? null)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => {
         // A refused-path row carries its ET day (hr is NULL): placed at that day's ET midnight, so every
@@ -259,8 +275,8 @@ export function createBeaconSource(select: D1Select): BeaconSource {
         }
       })
     },
-    async siteEvents(sinceMs) {
-      const q = siteEventsQuery(sinceMs)
+    async siteEvents(sinceMs, untilMs) {
+      const q = siteEventsQuery(sinceMs, undefined, untilMs ?? null)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => {
         const day = x.etd == null ? '' : String(x.etd)
@@ -277,13 +293,13 @@ export function createBeaconSource(select: D1Select): BeaconSource {
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ path: String(x.path ?? ''), count: n(x.c) }))
     },
-    async returns(campaign) {
-      const q = returnRowsQuery(campaign)
+    async returns(campaign, untilMs) {
+      const q = returnRowsQuery(campaign, untilMs ?? null)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ site: String(x.site ?? ''), path: String(x.path ?? ''), count: n(x.c) }))
     },
-    async returnSites(sinceMs) {
-      const q = returnSitesQuery(sinceMs)
+    async returnSites(sinceMs, untilMs) {
+      const q = returnSitesQuery(sinceMs, untilMs ?? null)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstEtDate: etDay(x.d0), lastEtDate: etDay(x.d1) }))
     },

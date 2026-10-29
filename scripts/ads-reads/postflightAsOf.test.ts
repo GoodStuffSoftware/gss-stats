@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { endOfEtDayMs, fixtureDeps, resolvePostflightClock, type Fixture } from './cli'
 import { runPostflightRead } from './read'
+import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
+import { campaignById } from '../../src/lib/campaigns'
 import { formatPostflightReport } from './report'
 import type { PostflightStage } from '../../src/lib/adsRules'
 
@@ -85,6 +87,54 @@ describe.each(ARMS)('--as-of ($id)', (arm) => {
   })
 })
 
+describe('as-of beacon reads carry an exclusive ET-midnight upper bound', () => {
+  const camp = campaignById(ARMS[0].id)!
+  const UNTIL = Date.parse('2026-10-18T04:00:00Z') // the ET midnight after 10-17 (EDT)
+  it('each of the four D1 queries gets `ts < ?` with the bound among its binds, and none without one', () => {
+    const live = [taggedRowsQuery(camp), siteEventsQuery(1), returnRowsQuery(camp), returnSitesQuery(1)]
+    const bounded = [taggedRowsQuery(camp, undefined, null, UNTIL), siteEventsQuery(1, undefined, UNTIL), returnRowsQuery(camp, UNTIL), returnSitesQuery(1, UNTIL)]
+    live.forEach((q, i) => {
+      const n = (sql: string) => sql.split('ts < ?').length - 1 // the tagged read's install-gap exclusion has one already
+      expect(n(bounded[i].sql)).toBe(n(q.sql) + 1)
+
+      expect(bounded[i].binds).toContain(UNTIL)
+      expect(bounded[i].binds.length).toBe(q.binds.length + 1)
+      expect((bounded[i].sql.match(/\?/g) ?? []).length).toBe(bounded[i].binds.length)
+    })
+  })
+  it('an as-of run passes the ET midnight after the as-of day to every beacon read; a live run passes none', async () => {
+    const seen: Record<string, (number | null | undefined)[]> = { tagged: [], siteEvents: [], returns: [], returnSites: [] }
+    const spy = (deps: ReturnType<typeof fixtureDeps>) => {
+      const b = deps.beacon!
+      deps.beacon = {
+        ...b,
+        tagged: (c, u, m, until) => (seen.tagged.push(until), b.tagged(c, u, m, until)),
+        siteEvents: (s, until) => (seen.siteEvents.push(until), b.siteEvents(s, until)),
+        returns: (c, until) => (seen.returns.push(until), b.returns(c, until)),
+        returnSites: (s, until) => (seen.returnSites.push(until), b.returnSites(s, until)),
+      }
+    }
+    const arm = ARMS[0]
+    const clock = resolvePostflightClock({ stage: 'wrapup', campaign: arm.id, 'as-of': '2026-10-17' }, 'wrapup', TODAY)
+    const asOfDeps = fixtureDeps(armFixture(arm, new Date(clock.nowMs).toISOString()), false)
+    asOfDeps.asOf = clock.asOf!
+    spy(asOfDeps)
+    await runPostflightRead(asOfDeps, { campaignId: arm.id, stage: 'wrapup', force: false })
+    for (const k of Object.keys(seen)) {
+      expect(seen[k].length, k).toBeGreaterThan(0)
+      expect(new Set(seen[k]), k).toEqual(new Set([UNTIL]))
+    }
+    for (const k of Object.keys(seen)) seen[k] = []
+    const liveDeps = fixtureDeps(armFixture(arm, '2026-10-29T15:00:00Z'), false)
+    spy(liveDeps)
+    await runPostflightRead(liveDeps, { campaignId: arm.id, stage: 'wrapup', force: false })
+    for (const k of Object.keys(seen)) {
+      expect(seen[k].length, k).toBeGreaterThan(0)
+      expect(new Set(seen[k].map((x) => x ?? null)), k).toEqual(new Set([null]))
+    }
+  })
+})
+
 describe('resolvePostflightClock', () => {
   const base = { stage: 'wrapup', campaign: '24311309184' }
   it('without --as-of the clock is the one given', () => {
@@ -99,6 +149,8 @@ describe('resolvePostflightClock', () => {
   })
   it('refuses a date in the future', () => {
     expect(() => resolvePostflightClock({ ...base, 'as-of': '2026-10-30' }, 'wrapup', TODAY)).toThrow(/in the future/)
+    // checked before the campaign is resolved, so it is the message even without --campaign
+    expect(() => resolvePostflightClock({ stage: 'wrapup', 'as-of': '2026-10-30' }, 'wrapup', TODAY)).toThrow(/in the future/)
   })
   it('refuses a date before the stage is due', () => {
     expect(() => resolvePostflightClock({ ...base, 'as-of': '2026-10-16' }, 'wrapup', TODAY)).toThrow(/before the wrapup stage's due date 2026-10-17/)

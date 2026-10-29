@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.75.5] — 2026-10-29
 
 ### Added
-- **Post-flight reads can be taken for a past stage day.** `ads:postflight-read --as-of <date>` reads a stage as of the end of that ET day and stores it under the stage date, so readings that only ran in shadow mode can be backfilled.
+- **Post-flight reads can be taken for a past stage day.** `ads:postflight-read --as-of <date>` reads a stage as of the end of that ET day (no beacon, Firebase or Ads data from after it) and stores it under the stage date, so readings that only ran in shadow mode can be backfilled.
 
 ## [0.75.4] — 2026-10-29
 

@@ -1310,8 +1310,8 @@ npm run typecheck:scripts
   campaign-attributed; it needs Firestore composite indexes that don't exist yet, so it
   reports "tier split unavailable: index missing" until an owner creates them).
   `--as-of <YYYY-MM-DD ET>` (live runs, with `--stage`) backfills a stage that never ran on its day: the
-  clock is the end of that ET day, so the beacon windows, the Ads spend range and the stored `et_date`
-  follow it; it is refused for a future date or one before the stage is due. `read_at` stays the real
+  clock is the end of that ET day, so the D1 beacon reads (cut at the next ET midnight), the Firebase window, the Ads spend range and
+  the stored `et_date` follow it and the reading carries nothing from after that day; it is refused for a future date or one before the stage is due. `read_at` stays the real
   time and the reading's notes name the as-of.
 - **Sign-ups are an upper bound** everywhere ("at most N campaign sign-ups" =
   min(tagged auth successes, new accounts sitewide in the window)): `/auth/success` also fires

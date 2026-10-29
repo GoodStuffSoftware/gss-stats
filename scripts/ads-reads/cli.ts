@@ -127,9 +127,9 @@ export function resolvePostflightClock(opts: Record<string, string | boolean | u
   if (given === undefined) return { campaignId: resolveCampaignId(opts, 'postflight', clockMs, stage), nowMs: clockMs, asOf: null }
   if (opts.now) throw new Error('--as-of and --now cannot be combined')
   if (typeof given !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(given) || !isEtDate(given)) throw new Error(`--as-of must be an ET date as YYYY-MM-DD, got ${JSON.stringify(given)}`)
-  const campaignId = resolveCampaignId(opts, 'postflight', endOfEtDayMs(given), stage)
   const today = etDateOf(clockMs)
   if (given > today) throw new Error(`--as-of ${given} is in the future (today is ${today} ET)`)
+  const campaignId = resolveCampaignId(opts, 'postflight', endOfEtDayMs(given), stage)
   const campaign = campaignById(campaignId)
   if (!campaign) throw new Error(`--as-of needs a registered campaign with a flight end; ${campaignId} has none`)
   const dueEt = postflightDueDate(stage, campaign.flightEnd)
@@ -260,8 +260,8 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
   const inRange = (d: string, since: string, until: string) => d >= since && d <= until
   const b: BeaconSource | null = beacon
     ? {
-        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.campaign === undefined ? {} : { campaign: r.campaign }), ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
-        siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
+        tagged: async (_c, _u, _m, untilMs) => beacon.tagged.filter((r) => untilMs == null || hourMs(r) < untilMs).map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.campaign === undefined ? {} : { campaign: r.campaign }), ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
+        siteEvents: async (sinceMs, untilMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs && (untilMs == null || r.hourStartMs < untilMs)),
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstEtDate: optEtDate(s.first, s.firstMs), lastEtDate: optEtDate(s.last, s.lastMs) })),
         ...(beacon.siteFirstSession ? { siteFirstSession: async () => beacon.siteFirstSession! } : {}),
