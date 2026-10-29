@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.2] — 2026-10-29
+
+### Fixed
+- **A table that scrolls sideways now shows it.** On a phone the Feature health table (and any other wide card table) has a clear shadow on the cut edge, and another on the left once you scroll.
+
 ## [0.75.1] — 2026-10-29
 
 ### Fixed

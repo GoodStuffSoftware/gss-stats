@@ -321,14 +321,16 @@ const panels = computed(() => {
 /* A table too wide for its card scrolls inside it instead of widening the page. The edge shadows
    (the classic background-attachment trick) show on the side that has more to scroll to, so a cut
    table is never silent: a cover colour moves with the content (local), a soft shadow stays at the
-   edge (scroll), and the cover hides the shadow once the end is reached. */
+   edge (scroll), and the cover (solid as wide as the shadow, then a fade) hides the shadow once the
+   end is reached. The shadow is deliberately strong: a phone shows no scrollbar, so a narrow window
+   onto a wide table (Feature health at 390px) must read as scrollable, not cut off. */
 .metric-table-wrap {
   overflow-x: auto;
   background:
-    linear-gradient(to right, rgb(var(--surface)), rgb(var(--surface) / 0)) left center / 24px 100% no-repeat local,
-    linear-gradient(to left, rgb(var(--surface)), rgb(var(--surface) / 0)) right center / 24px 100% no-repeat local,
-    linear-gradient(to right, rgb(var(--ink) / 0.22), rgb(var(--ink) / 0)) left center / 10px 100% no-repeat scroll,
-    linear-gradient(to left, rgb(var(--ink) / 0.22), rgb(var(--ink) / 0)) right center / 10px 100% no-repeat scroll;
+    linear-gradient(to right, rgb(var(--surface)) 20px, rgb(var(--surface) / 0)) left center / 32px 100% no-repeat local,
+    linear-gradient(to left, rgb(var(--surface)) 20px, rgb(var(--surface) / 0)) right center / 32px 100% no-repeat local,
+    linear-gradient(to right, rgb(var(--ink) / 0.42), rgb(var(--ink) / 0)) left center / 20px 100% no-repeat scroll,
+    linear-gradient(to left, rgb(var(--ink) / 0.42), rgb(var(--ink) / 0)) right center / 20px 100% no-repeat scroll;
 }
 /* A readout table's text cells wrap inside the card (the Flight 3 rule readouts hold sentences, which
    as one nowrap line were 2,700px wide). Pills and the Feature health table (grouped) stay on one line. */
