@@ -11,9 +11,9 @@
 // A new metric is a new entry here over an existing fact; a new fact is a code-reviewed SQL
 // builder. Labels are notes-registry ids (`label.<id>`, lib/notes.ts).
 
-import { assembleHealth, FEATURES, type FeatureDef } from '../featureHealth'
+import { assembleHealth, FEATURES, ratio, type FeatureDef } from '../featureHealth'
 import { COACH_TIP_FEATURE_IDS, COACH_TIP_FEATURES } from '../coachTips'
-import { featureDaysWindow, foldFeatureDays } from '../featureHealthSql'
+import { featureDaysWindow, foldFeatureDays, foldStepTotals } from '../featureHealthSql'
 import { etMidnightMs as etMidnightOf } from './instrumentation'
 import {
   CAMPAIGN_SPEND,
@@ -55,7 +55,8 @@ import { isSplitRefusedPath } from '../splitGuard'
 import { FIRST_FINISH_START_ET } from '../releases'
 import { microsToDollars, resolveCampaignSpend, round2, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
-import type { BeaconRow, FactId, FactRows } from './facts'
+import { ASK_ORDER_DEFAULT_GROUP, ASK_ORDER_FEATURES, askOrderFeatureId, readAskOrder, type AskOrderRead } from '../askOrder'
+import { featureSetOf, modelFeaturesOf, type BeaconRow, type FactId, type FactRows, type FeatureSet } from './facts'
 import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
 import { retentionBar, retentionVerdict, wilsonBounds, type VerdictCode } from './retention'
 import { addDays } from '../etTime'
@@ -89,6 +90,10 @@ export interface StoreResult {
   tooFew?: true
   numerator?: number
   denominator?: number
+  /** The metric does not apply to this read (a reason code): the value is 'unmeasured', its gating decides. */
+  unmeasured?: string
+  /** Values for its notes' variables: config wording and counts only (an Ask-order verdict sentence), never beacon text. */
+  noteVars?: Record<string, string | number>
 }
 
 /** What a reducer knows about the request it is serving. */
@@ -151,6 +156,8 @@ export interface MetricDef {
    * organic arm's campaignReturns fact and passes its rows as StoreEnv.organic. Only a store over
    * campaignReturns that is not itself organic may set it (checked at load). */
   withOrganic?: true
+  /** The feature set its feature fact reads when the request names no feature (a card-level Ask-order metric). */
+  featureSet?: FeatureSet
 }
 
 // ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
@@ -415,7 +422,7 @@ function playThroughOf(rows: FactRows): { value: number | null } {
 type FeatureModel = ReturnType<typeof assembleHealth>
 const featureModels = new WeakMap<object, FeatureModel>()
 /** The feature list a feature id belongs to: a Coach tips id reads COACH_TIP_FEATURES (editor-tools T3), any other FEATURES. */
-const featuresFor = (id: string | undefined): readonly FeatureDef[] => (id !== undefined && COACH_TIP_FEATURE_IDS.has(id) ? COACH_TIP_FEATURES : FEATURES)
+const featuresFor = (id: string | undefined): readonly FeatureDef[] => modelFeaturesOf(featureSetOf(id))
 function featureModelOf(rows: FactRows, env: StoreEnv, features: readonly FeatureDef[]): FeatureModel | null {
   if (rows.kind !== 'featureDays') return null
   let model = featureModels.get(rows.rows)
@@ -430,9 +437,47 @@ function featureModelOf(rows: FactRows, env: StoreEnv, features: readonly Featur
   return model
 }
 const featureOf = (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => featureModelOf(rows, env, featuresFor(ctx.params.feature))?.features.find((f) => f.id === ctx.params.feature)
-/** latestDay = the latest complete ET day, previousDay = the one before, page = the selected range. */
-const FEATURE_WINDOWS: Partial<Record<WindowName, FactId>> = { latestDay: 'featureDays', previousDay: 'featureDays', page: 'featureDays' }
+/** latestDay = the latest complete ET day, previousDay = the one before, page = the selected range, allTime = every row
+ * so far (the featureAllTime fact: one count per step, editor-tools T4). */
+const FEATURE_WINDOWS: Partial<Record<WindowName, FactId>> = { latestDay: 'featureDays', previousDay: 'featureDays', page: 'featureDays', allTime: 'featureAllTime' }
 const byWindow = <T>(o: { latest: T; prev: T; range: T }, w: WindowName): T => (w === 'latestDay' ? o.latest : w === 'previousDay' ? o.prev : o.range)
+/** The featureAllTime rows folded once per rows object and feature list (foldStepTotals: `<featureId>.<stepId>` counts,
+ * and one count per feature). */
+type StepTotals = ReturnType<typeof foldStepTotals>
+const stepTotalsMemo = new WeakMap<object, Map<readonly FeatureDef[], StepTotals>>()
+function stepTotalsOf(rows: FactRows, features: readonly FeatureDef[]): StepTotals | null {
+  if (rows.kind !== 'featureDays') return null
+  let byList = stepTotalsMemo.get(rows.rows)
+  if (!byList) stepTotalsMemo.set(rows.rows, (byList = new Map()))
+  let t = byList.get(features)
+  if (!t) byList.set(features, (t = foldStepTotals(rows.rows, features)))
+  return t
+}
+/** One step's all-time count, or null when the feature or step is not in the list. */
+function allTimeStep(rows: FactRows, featureId: string | undefined, stepId: string | undefined): number | null {
+  const v = stepTotalsOf(rows, featuresFor(featureId))?.steps[`${featureId}.${stepId}`]
+  return v === undefined ? null : v
+}
+/** The Ask-order A/B's pre-registered read (lib/askOrder.ts readAskOrder) from the featureAllTime rows, folded over the
+ * statement's own feature list, so it is the old card's read by construction. One per rows object. */
+const askOrderReads = new WeakMap<object, AskOrderRead>()
+function askOrderReadOf(rows: FactRows): AskOrderRead | null {
+  if (rows.kind !== 'featureDays') return null
+  let r = askOrderReads.get(rows.rows)
+  if (!r) askOrderReads.set(rows.rows, (r = readAskOrder(stepTotalsOf(rows, ASK_ORDER_FEATURES)!.steps)))
+  return r
+}
+const askOrderGroupOf = (rows: FactRows, featureId: string | undefined) => askOrderReadOf(rows)?.groups.find((g) => askOrderFeatureId(g.group) === featureId)
+/** The verdict as a code, shown by its 'askOrder.verdict.<name>' label: 0 preliminary (not both at the call point), 1 switch
+ * (to the larger order, by a multiple), 2 switch (the other order has none), 3 keep (the default already larger), 4 keep
+ * (below the multiple, or no difference). */
+export const ASK_ORDER_VERDICTS = ['preliminary', 'switch', 'switchNone', 'keepLarger', 'keepBelow'] as const
+export function askOrderVerdictCode(read: AskOrderRead): number {
+  const v = read.rule.verdict
+  if (v.state === 'preliminary') return 0
+  if (v.switchTo !== null) return v.multiple !== null ? 1 : 2
+  return read.rule.larger === ASK_ORDER_DEFAULT_GROUP ? 3 : 4
+}
 /** The status as a code, shown by its 'feature.status.<status>' label. */
 const FEATURE_STATUS_CODE = { ok: 0, new: 1, silent: 2 } as const
 function featureMetric(d: Omit<MetricDef, 'label' | 'instrumented'>): MetricDef {
@@ -445,6 +490,7 @@ const FEATURE_METRICS: MetricDef[] = [
     params: ['feature', 'step'],
     windows: FEATURE_WINDOWS,
     store: (rows, ctx, env) => {
+      if (ctx.window === 'allTime') return { value: allTimeStep(rows, ctx.params.feature, ctx.params.step) }
       const s = featureOf(rows, ctx, env)?.steps.find((x) => x.id === ctx.params.step)
       return { value: s ? byWindow(s, ctx.window) : null }
     },
@@ -455,6 +501,11 @@ const FEATURE_METRICS: MetricDef[] = [
     params: ['feature'],
     windows: FEATURE_WINDOWS,
     store: (rows, ctx, env) => {
+      if (ctx.window === 'allTime') {
+        const features = featuresFor(ctx.params.feature)
+        const i = features.findIndex((f) => f.id === ctx.params.feature)
+        return { value: i < 0 ? null : (stepTotalsOf(rows, features)?.features[i] ?? null) }
+      }
       const f = featureOf(rows, ctx, env)
       return { value: f ? byWindow(f, ctx.window) : null }
     },
@@ -467,9 +518,15 @@ const FEATURE_METRICS: MetricDef[] = [
     params: ['feature', 'step'],
     windows: FEATURE_WINDOWS,
     store: (rows, ctx, env) => {
+      const perId = featuresFor(ctx.params.feature).find((x) => x.id === ctx.params.feature)?.steps.find((x) => x.id === ctx.params.step)?.ratioOf?.per
+      if (ctx.window === 'allTime') {
+        const num = allTimeStep(rows, ctx.params.feature, ctx.params.step)
+        const den = perId ? allTimeStep(rows, ctx.params.feature, perId) : null
+        if (num === null || den === null) return { value: null }
+        return { value: ratio(num, den), numerator: num, denominator: den }
+      }
       const f = featureOf(rows, ctx, env)
       const s = f?.steps.find((x) => x.id === ctx.params.step)
-      const perId = featuresFor(ctx.params.feature).find((x) => x.id === ctx.params.feature)?.steps.find((x) => x.id === ctx.params.step)?.ratioOf?.per
       const per = perId ? f?.steps.find((x) => x.id === perId) : undefined
       if (!s?.ratio || !per) return { value: null }
       return { value: byWindow(s.ratio, ctx.window), numerator: byWindow(s, ctx.window), denominator: byWindow(per, ctx.window) }
@@ -481,7 +538,8 @@ const FEATURE_METRICS: MetricDef[] = [
     params: ['feature'],
     windows: { latestDay: 'featureDays' },
     store: (rows, ctx, env) => {
-      const f = featureOf(rows, ctx, env)
+      // The Ask-order set reads only its window (no rows before it), so it has no status.
+      const f = featureSetOf(ctx.params.feature) === 'ask-order' ? undefined : featureOf(rows, ctx, env)
       return f ? { value: FEATURE_STATUS_CODE[f.status], noteIds: [`feature.status.${f.status}`] } : { value: null }
     },
   }),
@@ -490,7 +548,7 @@ const FEATURE_METRICS: MetricDef[] = [
     unit: 'row',
     params: ['feature'],
     windows: { latestDay: 'featureDays' },
-    store: (rows, ctx, env) => ({ value: featureOf(rows, ctx, env)?.baselineAvg ?? null }),
+    store: (rows, ctx, env) => ({ value: featureSetOf(ctx.params.feature) === 'ask-order' ? null : (featureOf(rows, ctx, env)?.baselineAvg ?? null) }),
   }),
   // Coach tips (editor-tools T3): has any coach row ever arrived. No value until one has, so the card's whenEmpty note
   // ("No coach data yet ...") shows; then the 'coach.everSeen.yes' label.
@@ -501,6 +559,116 @@ const FEATURE_METRICS: MetricDef[] = [
     windows: { page: 'coachEver' },
     store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 1, noteIds: ['coach.everSeen.yes'] } : { value: null }),
   }),
+  // The Ask-order A/B (editor-tools T4). Has any ask-order row ever arrived (/api/features view 'ask-order' everSeen): no
+  // value until one has, so the card's whenEmpty note shows; 0 once one has (a card omits it, whenZero).
+  featureMetric({
+    id: 'askOrder.everSeen',
+    unit: 'code',
+    params: [],
+    featureSet: 'ask-order',
+    windows: { page: 'coachEver' },
+    store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 0 } : { value: null }),
+  }),
+  // A group's primary measure (`feature` = ao-<group>): the once-per-device responded rows once any exists, the combined
+  // response rows until then; all days so far, organic + tagged. Its rows, and those per assigned row.
+  featureMetric({
+    id: 'askOrder.primaryRows',
+    unit: 'row',
+    params: ['feature'],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows, ctx) => ({ value: askOrderGroupOf(rows, ctx.params.feature)?.primaryRows ?? null }),
+  }),
+  featureMetric({
+    id: 'askOrder.primaryPerAssigned',
+    unit: 'row',
+    per: true,
+    params: ['feature'],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows, ctx) => {
+      const g = askOrderGroupOf(rows, ctx.params.feature)
+      return g ? { value: g.primaryPerAssigned, numerator: g.primaryRows, denominator: g.assigned } : { value: null }
+    },
+  }),
+  // The same, named by which primary it is: 'unmeasured' (reason 'not-primary') unless it is the read's primary, so a
+  // card shows the one that applies under its own label.
+  ...(['combined', 'responded'] as const).map((p) =>
+    featureMetric({
+      id: `askOrder.${p}PerAssigned`,
+      unit: 'row',
+      per: true,
+      params: ['feature'],
+      featureSet: 'ask-order',
+      windows: { allTime: 'featureAllTime' },
+      store: (rows, ctx) => {
+        const r = askOrderReadOf(rows)
+        const g = askOrderGroupOf(rows, ctx.params.feature)
+        if (!r || !g) return { value: null }
+        if (r.primary.id !== p) return { value: null, unmeasured: 'not-primary' }
+        return { value: g.primaryPerAssigned, numerator: g.primaryRows, denominator: g.assigned }
+      },
+    }),
+  ),
+  // Which primary the rule reads (0 combined response rows, 1 responded rows), by its 'askOrder.primary.<id>' label.
+  featureMetric({
+    id: 'askOrder.primary',
+    unit: 'code',
+    params: [],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows) => {
+      const r = askOrderReadOf(rows)
+      return r ? { value: r.primary.id === 'responded' ? 1 : 0, noteIds: [`askOrder.primary.${r.primary.id}`], noteVars: { text: r.primary.label } } : { value: null }
+    },
+  }),
+  // What the 1.5x rule reads: 0 the primary, 1 sign-ins (signed-in and installed point opposite ways between the groups).
+  featureMetric({
+    id: 'askOrder.ruleBasis',
+    unit: 'code',
+    params: [],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows) => {
+      const r = askOrderReadOf(rows)
+      return r ? { value: r.rule.tieBreak ? 1 : 0, noteIds: [r.rule.tieBreak ? 'askOrder.ruleBasis.signIns' : 'askOrder.ruleBasis.primary'] } : { value: null }
+    },
+  }),
+  // The rule's multiple, larger over smaller (null on a tie, with nobody assigned, or when the smaller reads zero).
+  featureMetric({
+    id: 'askOrder.ruleMultiple',
+    unit: 'row',
+    per: true,
+    params: [],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows) => ({ value: askOrderReadOf(rows)?.rule.multiple ?? null }),
+  }),
+  featureMetric({
+    id: 'askOrder.verdict',
+    unit: 'code',
+    params: [],
+    featureSet: 'ask-order',
+    windows: { allTime: 'featureAllTime' },
+    store: (rows) => {
+      const r = askOrderReadOf(rows)
+      if (!r) return { value: null }
+      const code = askOrderVerdictCode(r)
+      return { value: code, noteIds: [`askOrder.verdict.${ASK_ORDER_VERDICTS[code]}`], noteVars: { text: r.rule.verdict.note } }
+    },
+  }),
+  // Display only: each kind's multiple, larger over smaller (signed-in, then installed).
+  ...(['signedIn', 'installed'] as const).map((k, i) =>
+    featureMetric({
+      id: `askOrder.${k}Multiple`,
+      unit: 'row',
+      per: true,
+      params: [],
+      featureSet: 'ask-order',
+      windows: { allTime: 'featureAllTime' },
+      store: (rows) => ({ value: askOrderReadOf(rows)?.kinds[i]?.multiple ?? null }),
+    }),
+  ),
 ]
 
 export const METRIC_DEFS: MetricDef[] = [
@@ -910,7 +1078,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit' || f === 'featureDays' || f === 'coachEver')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit' || f === 'featureDays' || f === 'featureAllTime' || f === 'coachEver')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {

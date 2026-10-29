@@ -26,12 +26,13 @@ const statusGroupId = useId()
 const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   campaigns: 'One per campaign',
   popups: 'One per pop-up',
-  windows: 'One per before/after window',
+  windows: 'One per window (before/after, latest day, the range)',
+  tags: 'Organic and tagged apart (inside an Ask-order group)',
   readings: 'One per stored reading',
   countries: 'One per country (US / CA / Other)',
   rules: 'One per Flight 3 rule (newest stored read)',
   assets: 'One per ad asset (headline, description, image)',
-  features: 'One per feature (Feature health)',
+  features: 'One per feature (Feature health, Ask-order groups)',
   tips: 'One per coach tip (Coach tips)',
   steps: 'One per step of the feature',
 }
@@ -41,7 +42,7 @@ const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: st
   popups: { title: 'Pop-ups', none: 'none checked = all' },
   windows: { title: 'Windows', none: 'none checked = release before and after' },
   countries: { title: 'Countries', none: 'none checked = all three' },
-  features: { title: 'Features', none: 'none checked = all' },
+  features: { title: 'Features', none: 'none checked = every Feature health feature' },
   tips: { title: 'Tips', none: 'none checked = all' },
 }
 

@@ -7,7 +7,7 @@
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
 import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplayAllowed, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, scopePathOptions, withField, withGating } from '../../../lib/metrics/editorModel'
-import type { MetricItem, RepeatSpec, WindowName } from '../../../lib/metrics/types'
+import type { MetricItem, RepeatSpec, Section, WindowName } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
 import CardEditorLabel from './CardEditorLabel.vue'
@@ -16,6 +16,9 @@ import CardEditorRepeat from './CardEditorRepeat.vue'
 const props = defineProps<{
   cardRepeatOver?: RepeatSpec['over']
   sectionRepeatOver?: RepeatSpec['over']
+  /** The section's layout, and whether it is a column table: the line and row options show only where they apply. */
+  sectionLayout?: Section['layout']
+  columnTable?: boolean
   index: number
   count: number
   errors: string[]
@@ -185,6 +188,29 @@ const frame = computed<'' | NonNullable<MetricItem['frame']>>({
     item.value = withField(item.value, 'frame', v || undefined)
   },
 })
+/** A line item (a 'lines' section, or the 'line' frame): its look options. */
+const isLine = computed(() => (item.value.frame ?? (props.sectionLayout === 'lines' ? 'line' : undefined)) === 'line')
+function flagModel(key: 'lineBreak' | 'mono' | 'dim' | 'ruleAbove') {
+  return computed<boolean>({
+    get: () => item.value[key] === true,
+    set: (on) => {
+      if (on === (item.value[key] === true)) return
+      item.value = withField(item.value, key, on ? true : undefined)
+    },
+  })
+}
+const lineBreakModel = flagModel('lineBreak')
+const monoModel = flagModel('mono')
+const dimModel = flagModel('dim')
+const ruleAboveModel = flagModel('ruleAbove')
+const afterId = useId()
+const afterModel = computed<string>({
+  get: () => item.value.after ?? '',
+  set: (v) => {
+    if (v === (item.value.after ?? '')) return
+    item.value = withField(item.value, 'after', v || undefined)
+  },
+})
 const itemRepeatModel = computed({
   get: () => item.value.repeat,
   set: (v) => {
@@ -301,8 +327,27 @@ const itemRepeatModel = computed({
               <option value="pill">Pill</option>
               <option value="tile">Tile</option>
               <option value="column">Column</option>
+              <option value="line">Line (running text)</option>
             </select>
           </div>
+        </div>
+        <div v-if="isLine" class="row">
+          <div v-if="sectionLayout === 'lines'" class="field check">
+            <label><input type="checkbox" v-model="lineBreakModel" /> Start a new line</label>
+          </div>
+          <div class="field check">
+            <label><input type="checkbox" v-model="monoModel" /> Label in the monospace face</label>
+          </div>
+          <div class="field check">
+            <label><input type="checkbox" v-model="dimModel" /> Dimmer (a secondary figure)</label>
+          </div>
+          <div class="field">
+            <label :for="afterId">Text after the value</label>
+            <input :id="afterId" type="text" maxlength="8" v-model.lazy="afterModel" placeholder="e.g. ." />
+          </div>
+        </div>
+        <div v-if="columnTable" class="field check">
+          <label><input type="checkbox" v-model="ruleAboveModel" /> A rule above this row <span class="hint">— sets a total apart</span></label>
         </div>
       </details>
     </fieldset>

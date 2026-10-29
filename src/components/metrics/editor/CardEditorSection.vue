@@ -30,6 +30,7 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
   { value: 'bars', label: 'Bars' },
   { value: 'columns', label: 'Columns (bars side by side)' },
   { value: 'table', label: 'Table' },
+  { value: 'lines', label: 'Lines (running text)' },
 ]
 
 // Optional labels (title, column heading, row-label heading): switching one off remembers it,
@@ -84,6 +85,7 @@ const columnsModel = computed({
     if (v === section.value.columns) return
     let next = withField(section.value, 'columns', v)
     if (!v) {
+      next = withField(next, 'columnGroups', undefined)
       for (const k of ['columnLabel', 'rowsLabel'] as const) {
         if (next[k] !== undefined) setAside[k] = next[k]
         next = withField(next, k, undefined)
@@ -97,6 +99,35 @@ const columnsModel = computed({
     section.value = next
   },
 })
+
+/** A column table's column groups (Section.columnGroups): they need the columns, so clearing the
+ * columns clears them too. */
+function columnGroupModel(level: 0 | 1) {
+  return computed<RepeatSpec | undefined>({
+    get: () => section.value.columnGroups?.[level],
+    set: (v) => {
+      if (v === section.value.columnGroups?.[level]) return
+      const now = section.value.columnGroups ?? []
+      // Clearing the outer level clears the inner one too: an inner level needs one over it.
+      const next = level === 0 ? (v ? [v, ...now.slice(1)] : []) : v ? [now[0], v] : now.slice(0, 1)
+      section.value = withField(section.value, 'columnGroups', next.length && next[0] ? next : undefined)
+    },
+  })
+}
+const columnGroupOuter = columnGroupModel(0)
+const columnGroupInner = columnGroupModel(1)
+/** A yes/no section option (panels, joined): unchecked removes the field. */
+function flagModel(key: 'panels' | 'joined') {
+  return computed<boolean>({
+    get: () => section.value[key] === true,
+    set: (on) => {
+      if (on === (section.value[key] === true)) return
+      section.value = withField(section.value, key, on ? true : undefined)
+    },
+  })
+}
+const panelsModel = flagModel('panels')
+const joinedModel = flagModel('joined')
 
 function addItem() {
   section.value = { ...section.value, items: [...section.value.items, emptyItem()] }
@@ -145,9 +176,18 @@ function removeAt(i: number) {
     <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
 
     <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'rules', 'assets', 'features', 'steps', 'tips']" label="Repeat this section" />
-    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets']" label="Columns (each item becomes a row)" />
+    <div v-if="section.repeat && section.layout !== 'table'" class="field check">
+      <label><input type="checkbox" v-model="panelsModel" /> Panels <span class="hint">— a bordered box per instance, its title and first item on top</span></label>
+    </div>
+    <div v-if="section.layout === 'lines'" class="field check">
+      <label><input type="checkbox" v-model="joinedModel" /> One sentence <span class="hint">— the items a space apart instead of spaced out</span></label>
+    </div>
+    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets', 'features', 'tags']" label="Columns (each item becomes a row)" />
+    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets', 'features', 'tags']" label="Columns (each item becomes a row)" />
     <CardEditorRepeat v-if="section.layout === 'table' && section.repeat && !section.columns" v-model="rowGroupsModel" :allow="['steps', 'campaigns', 'popups', 'windows', 'countries', 'assets']" label="Rows in each group" />
     <template v-if="section.columns">
+      <CardEditorRepeat v-model="columnGroupOuter" :allow="['windows', 'countries', 'campaigns', 'popups', 'features']" label="Group the columns by (every column repeats under each group)" />
+      <CardEditorRepeat v-if="section.columnGroups?.length" v-model="columnGroupInner" :allow="['windows', 'countries', 'campaigns', 'popups', 'features']" label="Then group them by (a second heading row)" />
       <div class="field check">
         <label><input type="checkbox" :checked="section.columnLabel !== undefined" @change="toggleLabel('columnLabel', ($event.target as HTMLInputElement).checked)" /> Column heading <span class="hint">— default: each column's own name</span></label>
       </div>
@@ -169,6 +209,8 @@ function removeAt(i: number) {
         :section-repeat-over="section.rowGroups?.over ?? section.repeat?.over"
         :row-groups="!!section.rowGroups"
         :in-table="section.layout === 'table' && !section.columns"
+        :section-layout="section.layout"
+        :column-table="section.layout === 'table' && !!section.columns"
         :index="i"
         :count="section.items.length"
         :errors="itemErrors[item.id] ?? []"

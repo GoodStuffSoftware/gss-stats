@@ -160,6 +160,7 @@ const WINDOW_NAMES: Record<WindowName, string> = {
   upsellPost: 'After the upsell fix',
   latestDay: 'The latest whole ET day',
   previousDay: 'The ET day before that',
+  allTime: 'All days so far (up to today)',
 }
 
 // ── field ────────────────────────────────────────────────────────────────────────────────────

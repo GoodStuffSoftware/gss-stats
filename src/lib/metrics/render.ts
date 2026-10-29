@@ -68,6 +68,8 @@ export interface ItemViewModel {
   error?: boolean
   /** A 'bar' display's length: the count, or the rate as a fraction. */
   barValue?: number
+  /** A 'progress' display's bar: the share of its target, 0-100 (capped), and whether the count has reached it. */
+  progress?: { pct: number; done: boolean; value: number; target: number }
   /** A 'sparkline' display's per-ET-day points (oldest first), when the server returned any. */
   series?: readonly SeriesPoint[]
   /** A 'sparkline' display with `days`: the latest ET days' values as text, "Oct 17 12 · Oct 18 9". */
@@ -242,6 +244,13 @@ function rangeDays(start: string, end: string): number {
   return Math.round((Date.parse(end + 'T00:00:00Z') - Date.parse(start + 'T00:00:00Z')) / 86_400_000) + 1
 }
 
+/** A 'progress' display's bar: the count's share of the target as a whole percent, capped at 100, and done at the target. */
+export function progressOf(n: number | null | undefined, target: number): { pct: number; done: boolean; value: number; target: number } {
+  const v = finite(n) ? n : 0
+  const t = finite(target) && target > 0 ? target : 1
+  return { pct: Math.max(0, Math.min(100, Math.round((v / t) * 100))), done: v >= t, value: v, target: t }
+}
+
 // ── Gating (ADR "Closed campaigns: omit, don't label" / "whenEmpty") ─────────────────────
 function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; visible: boolean } {
   const mode = whenEmpty ?? 'dash'
@@ -297,6 +306,12 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
         return { primary: `${main}${nd}`, deltaLines: [], ...(nd ? { split: { main, sub: nd.trim() } } : {}) }
       }
       return { primary: fmtCount(value.value ?? value.numerator), deltaLines: [] }
+    case 'progress':
+      return { primary: `${fmtCount(value.value)} / ${fmtCount(display.target)}`, deltaLines: [] }
+    case 'multiple':
+      return { primary: finite(value.value) ? `${value.value.toFixed(2)}x` : '—', deltaLines: [] }
+    case 'perRows':
+      return { primary: `${fmtPer(value.value)} (${fmtCount(value.numerator ?? 0)} rows)`, deltaLines: [] }
     case 'date':
       return { primary: fmtEtDay(value.value), deltaLines: [] }
     case 'ago':
@@ -308,7 +323,7 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       if (id === 'verdict.maturing' && daysLeft !== null && daysLeft >= 1) {
         return { primary: noteRawText(daysLeft === 1 ? 'verdict.maturing.one' : 'verdict.maturing.days', { n: daysLeft }), deltaLines: [] }
       }
-      return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
+      return { primary: id ? noteRawText(id, value.noteVars) : '—', deltaLines: [] }
     }
     case 'sparkline':
       // The headline stays the metric's value (the sparkline is drawn beside it, from
@@ -413,8 +428,10 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     // A percent always shows its (n/d), a 0 denominator included ("— (0/0)"): the reader
     // sees WHY there is no rate (ADR 0003, "n/d is always returned").
     const nd = item.display.as === 'percent' && (item.gating?.whenEmpty ?? 'dash') === 'dash' ? ndSuffix(value) : ''
+    // A 'perRows' with no ratio (nothing to divide by) still says how many rows there are: "— (0 rows)".
+    const rows = item.display.as === 'perRows' && (item.gating?.whenEmpty ?? 'dash') === 'dash' && finite(value.numerator) ? ` (${fmtCount(value.numerator)} rows)` : ''
     // The notes a value carries travel with an empty one too ("stale" with no spend day stored).
-    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
+    return { visible, labelTokens, primary: primary + nd + rows, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
   }
   if (value.status === 'unmeasured') {
     const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value, todayEt)
@@ -433,10 +450,11 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     deltaLines.push(goLive && goLive < todayEt ? { text: noteRawText('no-comparison-yet'), cls: '' } : { text: noteRawText(pastDay ? 'new-that-day' : 'new-today'), cls: 'new' })
   }
   const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
+  const progress = item.display.as === 'progress' ? { progress: progressOf(value.value, item.display.target) } : {}
   const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
   const series = item.display.as === 'sparkline' && value.series?.length ? { series: value.series } : {}
   const days = item.display.as === 'sparkline' && item.display.days && value.series?.length ? { days: seriesDaysText(value.series, 'unit' in def && def.unit === 'usd') } : {}
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(split ? { split } : {}), ...bar, ...series, ...days, ...(mutedTooFew ? { muted: true } : {}) }
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(split ? { split } : {}), ...bar, ...progress, ...series, ...days, ...(mutedTooFew ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,
