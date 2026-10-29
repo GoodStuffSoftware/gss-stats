@@ -35,11 +35,11 @@ const vm = useMetricItemViewModel(
   <span v-else-if="parts" class="mtc mono"
     ><template v-for="(part, i) in parts" :key="part.id"
       ><template v-if="i"> · </template><MetricTableCell :item="part" :scope="scope" :today-et="todayEt" :context="context" :values="values" /></template
-    ><template v-if="afterTokens.length"> <MetricLabel class="mtc-after" :tokens="afterTokens" /></template
+    ><template v-if="afterTokens.length">{{ ' ' }}<MetricLabel class="mtc-after" :tokens="afterTokens" /></template
   ></span>
   <span v-else-if="vm.visible && vm.pill" class="mtc mtc-pill" :class="`pill-${vm.pill}`">{{ vm.primary }}</span>
   <span v-else-if="vm.visible" class="mtc mono" :class="[{ muted: vm.muted }, vm.tone ? `tone-${vm.tone}` : '']">
-    {{ vm.primary }}<template v-if="afterTokens.length"> <MetricLabel class="mtc-after" :tokens="afterTokens" /></template>
+    {{ vm.primary }}<template v-if="afterTokens.length">{{ ' ' }}<MetricLabel class="mtc-after" :tokens="afterTokens" /></template>
     <span v-for="(d, i) in vm.deltaLines" :key="i" class="mtc-delta" :class="d.cls">{{ d.text }}</span>
     <!-- captionMode 'compact': listed behind the card's one Notes toggle instead (MetricCardInstance). -->
     <MetricLabel v-if="vm.captionTokens.length && item.captionMode !== 'compact'" class="mtc-caption" :tokens="vm.captionTokens" />
