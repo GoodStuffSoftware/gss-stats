@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { FEATURES } from '../../../lib/featureHealth'
+import { COACH_TIP_FEATURES } from '../../../lib/coachTips'
 // One DataBinding editor (ADR 0003 section 1(b) / section 4 item 5, "Data"): a metric (grouped,
 // searchable, unit shown), a ratio (ONLY registered ratios — so an invalid percentage literally
 // cannot be built), or a scope field. Params inherited from a repeat show as a chip with an
@@ -84,7 +85,7 @@ const allowedParams = computed<MetricParam[]>(() => {
   }
   return []
 })
-const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries') || (p === 'assetId' && props.repeatOver === 'assets') || (p === 'feature' && (props.repeatOver === 'features' || props.repeatOver === 'steps')) || (p === 'step' && props.repeatOver === 'steps') || (p === 'campaignId' && props.repeatOver === 'assets')
+const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries') || (p === 'assetId' && props.repeatOver === 'assets') || (p === 'feature' && (props.repeatOver === 'features' || props.repeatOver === 'steps' || props.repeatOver === 'tips')) || (p === 'step' && props.repeatOver === 'steps') || (p === 'campaignId' && props.repeatOver === 'assets')
 /** An optional param (the country split): left unset, the metric counts every country. */
 const optional = (p: MetricParam): boolean => OPTIONAL_PARAMS.has(p)
 const COUNTRY_OPTIONS = [
@@ -109,8 +110,8 @@ function setParam(p: MetricParam, v: string | undefined) {
   data.value = withField(data.value as { metric: string; params?: Params }, 'params', Object.keys(params).length ? params : undefined) as DataBinding
 }
 function optionsFor(p: MetricParam) {
-  if (p === 'feature') return FEATURES.map((f) => ({ value: f.id, label: f.label }))
-  if (p === 'step') return [...new Set(FEATURES.flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
+  if (p === 'feature') return [...FEATURES, ...COACH_TIP_FEATURES].map((f) => ({ value: f.id, label: f.label }))
+  if (p === 'step') return [...new Set([...FEATURES, ...COACH_TIP_FEATURES].flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
   return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
 }
 

@@ -48,7 +48,9 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   featureDays: [
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: [], todayEt: '2026-09-26' },
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], ownBrowser: 'Chrome', ownOS: 'Android', todayEt: '2026-09-26' },
+    { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], todayEt: '2026-09-26', set: 'coach-tips' },
   ],
+  coachEver: [{ todayEt: '2026-09-26' }],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 restoreFlight3()
@@ -103,7 +105,7 @@ describe('every fact is an anonymous aggregate', () => {
     const items = selectItems(sql)
     const grouped = /\bGROUP BY\b/i.test(sql)
     expect(items.some((i) => AGGREGATE.test(i))).toBe(true)
-    if (!grouped) expect(items.every((i) => /^(MIN|MAX)\(/i.test(i))).toBe(true)
+    if (!grouped) expect(items.every((i) => /^(MIN|MAX)\(/i.test(i) || i === 'COUNT(*)')).toBe(true) // bounds, or one whole count (coachEver)
     for (const item of items) {
       if (AGGREGATE.test(item)) continue
       if (isBandCase(item)) continue // a segment or day index, never a raw ts

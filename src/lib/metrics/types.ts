@@ -185,7 +185,7 @@ export interface RepeatSpec {
   /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read).
    * 'assets': the ad assets (headlines, descriptions, images) Google served for one campaign
    * (ads_daily_assets): the enclosing campaign's, else `campaignId`. */
-  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps'
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps' | 'tips'
   ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES; assets: Google asset ids
   /** Assets only: the campaign whose assets to list when the repeat is not inside a campaign repeat. */
   campaignId?: string

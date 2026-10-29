@@ -32,6 +32,7 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   rules: 'One per Flight 3 rule (newest stored read)',
   assets: 'One per ad asset (headline, description, image)',
   features: 'One per feature (Feature health)',
+  tips: 'One per coach tip (Coach tips)',
   steps: 'One per step of the feature',
 }
 /** What "none checked" means for each kind's id list. */
@@ -41,6 +42,7 @@ const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: st
   windows: { title: 'Windows', none: 'none checked = release before and after' },
   countries: { title: 'Countries', none: 'none checked = all three' },
   features: { title: 'Features', none: 'none checked = all' },
+  tips: { title: 'Tips', none: 'none checked = all' },
 }
 
 /** The last spec seen for each kind, so switching away and back restores its filters. */

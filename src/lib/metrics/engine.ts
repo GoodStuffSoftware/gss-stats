@@ -29,6 +29,7 @@ import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../pop
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { addDays as addEtDays } from '../etTime'
+import { COACH_TIP_FEATURE_IDS } from '../coachTips'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
 import { assetSeries, beaconSeries, installsSeries, seriesTwin, spendSeries } from './series'
@@ -124,8 +125,12 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     }
     case 'featureDays': {
       const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
-      return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own, todayEt: env.todayEt }
+      // A Coach tips feature id reads the coach-tips set (editor-tools T3); every other request keeps Feature health's key.
+      const set = req.params.feature !== undefined && COACH_TIP_FEATURE_IDS.has(req.params.feature) ? { set: 'coach-tips' as const } : {}
+      return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own, todayEt: env.todayEt, ...set }
     }
+    case 'coachEver':
+      return { todayEt: env.todayEt }
     case 'bskReleaseSides':
       return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
     case 'bskFirstHit':

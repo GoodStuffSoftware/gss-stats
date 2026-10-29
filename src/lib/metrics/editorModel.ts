@@ -11,6 +11,7 @@
 // this directly). Item/section ids are generated here too, never typed by the user, for the
 // same reason.
 import { FEATURES } from '../featureHealth'
+import { COACH_TIP_ROWS } from '../coachTips'
 import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText, type AutoCaveatWidget } from '../notes'
 import { POPUPS } from '../popupEvents'
@@ -203,6 +204,10 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'feature.label', label: 'Feature name' },
     { value: 'feature.id', label: 'Feature id' },
     { value: 'feature.caption', label: 'Feature reading caveat' },
+  ],
+  tips: [
+    { value: 'feature.label', label: 'Tip name' },
+    { value: 'feature.id', label: 'Tip id' },
   ],
   steps: [
     { value: 'step.label', label: 'Step name' },
@@ -539,6 +544,8 @@ export function repeatIdOptions(over: RepeatSpec['over'] | '' | undefined): { va
       return COUNTRY_BUCKETS.map((c) => ({ value: c, label: COUNTRY_LABELS[c] ?? c }))
     case 'features':
       return FEATURES.map((f) => ({ value: f.id, label: f.label }))
+    case 'tips':
+      return COACH_TIP_ROWS.map((f) => ({ value: f.id, label: f.label }))
     default:
       return []
   }

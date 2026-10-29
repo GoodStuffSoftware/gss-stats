@@ -8,6 +8,7 @@
 // normWidget) is slice 5, where it is wired into normalizeConfig.
 
 import { FEATURES } from '../featureHealth'
+import { COACH_TIP_FEATURES, COACH_TIP_ROWS } from '../coachTips'
 import { MIN_COHORT, POPUPS } from '../popupEvents'
 import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
 import { safeUA } from '../ownExclusion'
@@ -35,9 +36,9 @@ const DELTA_NAMES: readonly DeltaName[] = ['yesterday', 'avg7']
 const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 const COUNTRY_IDS: ReadonlySet<string> = new Set(COUNTRY_BUCKETS)
-const FEATURE_IDS: ReadonlySet<string> = new Set(FEATURES.map((f) => f.id))
+const FEATURE_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES].map((f) => f.id))
 /** Any feature's step id: the feature.* stores give no value for a step that is not the feature's own. */
-const STEP_IDS: ReadonlySet<string> = new Set(FEATURES.flatMap((f) => f.steps.map((s) => s.id)))
+const STEP_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES].flatMap((f) => f.steps.map((s) => s.id)))
 const CARD_ACTIONS: ReadonlySet<CardAction> = new Set(['ads-refresh'])
 const CARD_NOTICES: ReadonlySet<string> = new Set<CardNotices>(['ads-readings'])
 /** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket.
@@ -106,7 +107,7 @@ export function kindOf(b: DataBinding): DataKind | null {
 
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
 const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES, 'latestDay', 'previousDay'])
-const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step' }
+const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step', tips: 'feature' }
 /** A Google Ads asset id: digits, as the store keeps it. */
 const ASSET_ID_RE = /^[0-9]{1,20}$/
 /** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
@@ -146,6 +147,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'popups' && !POPUP_IDS.has(id)) errors.push(`${where}.repeat: unknown pop-up '${id}'`)
       if (r.over === 'countries' && !COUNTRY_IDS.has(id)) errors.push(`${where}.repeat: unknown country bucket '${id}'`)
       if (r.over === 'assets' && !ASSET_ID_RE.test(id)) errors.push(`${where}.repeat: '${id}' is not an asset id`)
+      if (r.over === 'tips' && !COACH_TIP_ROWS.some((f) => f.id === id)) errors.push(`${where}.repeat: unknown coach tip '${id}'`)
       if (r.over === 'features' && !FEATURE_IDS.has(id)) errors.push(`${where}.repeat: unknown feature '${id}'`)
       if (r.over === 'steps' && !STEP_IDS.has(id)) errors.push(`${where}.repeat: unknown step '${id}'`)
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)

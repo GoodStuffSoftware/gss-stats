@@ -6,7 +6,7 @@ import { isTouchDevice } from '../lib/responsive'
 import { GRID_MARGIN, GRID_ROW_HEIGHT, fitRows, isFit } from '../lib/fit'
 import ChartCard from './ChartCard.vue'
 import { viewOnly } from '../lib/viewOnly'
-import { featureHealthCardFor, stepChartFor } from '../lib/defaults'
+import { coachTipsCardFor, featureHealthCardFor, stepChartFor } from '../lib/defaults'
 
 // Two-way bound to the parent's reactive widgets array; grid-layout-plus writes
 // item geometry back on move/resize and we persist via @layout-updated.
@@ -14,7 +14,7 @@ const widgets = defineModel<Widget[]>('widgets', { required: true })
 // A saved Features-page step chart from before T1 (dataset 'features') is drawn, edited and duplicated as the ordinary chart
 // it is now (lib/defaults.ts stepChartFor); the stored widget is never rewritten (ADR 0005 decision 2). Every other widget
 // is passed through as it is.
-const shown = computed(() => widgets.value.map((w) => featureHealthCardFor(stepChartFor(w))))
+const shown = computed(() => widgets.value.map((w) => coachTipsCardFor(featureHealthCardFor(stepChartFor(w)))))
 
 // `drillOpenId` is the id of the ONE widget whose drill menu is currently open (or null) —
 // not a blanket "some menu is open somewhere" flag. Only that widget's ChartCard gets

@@ -52,6 +52,12 @@ export const COACH_TIP_FEATURES: readonly FeatureDef[] = [
   },
 ]
 
+/** The Coach tips feature ids (`tip-<id>` and `tour-opened`): a feature.* metric request naming one reads the coach-tips set
+ * of the featureDays fact (lib/metrics/facts.ts). None of them is a FEATURES id. */
+export const COACH_TIP_FEATURE_IDS: ReadonlySet<string> = new Set(COACH_TIP_FEATURES.map((f) => f.id))
+/** The tips alone (the card editor's `tips` repeat): every Coach tips feature but the "Show me around" total. */
+export const COACH_TIP_ROWS: readonly FeatureDef[] = COACH_TIP_FEATURES.filter((f) => f.id !== 'tour-opened')
+
 export const COACH_TIPS_CAPTION =
   'Counts are rows per ET day, web and app combined. "Per shown" figures are plain ratios of two counts, not per-person rates: a tip is shown once per device, so a ratio can exceed 1. Latest day is the latest complete ET day. Reading rule per tip: shown, then dismissed, closed-at, or nothing. From v1.99.3, × closes one tip (it no longer retires the schedule) and a shown/notes row with no dismissed or closed-at after it can also mean a note was written. Tip-to-tip comparisons, any "dismissed = stopped" reading and the dismissed or closed per shown of any one tip (after v1.99.3 more people reach the later tips) are not comparable across v1.99.3; a range that straddles it mixes both meanings.'
 export const COACH_TIPS_EMPTY_NOTE = "No coach data yet — the game version that sends it hasn't shipped"

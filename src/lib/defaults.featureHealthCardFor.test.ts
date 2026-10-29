@@ -44,7 +44,7 @@ describe('featureHealthCardFor: the saved Feature health table is drawn as the f
     const unset = { ...SAVED_HEALTH } as Widget
     delete (unset as any).excludeKnownTraffic
     expect(featureHealthCardFor(unset)).toBe(unset)
-    // Coach tips is T3's mapping; until then it keeps the old body, with known traffic hidden or shown.
+    // Coach tips is coachTipsCardFor's (T3, defaults.coachTipsCardFor.test.ts), never this mapping's.
     expect(featureHealthCardFor(SAVED_COACH)).toBe(SAVED_COACH)
     expect(featureHealthCardFor({ ...SAVED_COACH, excludeKnownTraffic: false } as Widget).card).toBeUndefined()
     expect(featureHealthCardFor(SAVED_ASK)).toBe(SAVED_ASK)

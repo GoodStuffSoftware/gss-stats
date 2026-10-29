@@ -442,7 +442,7 @@ function removeSection(i: number) {
           </div>
           <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="spec.repeat?.over" placeholder="Card title" heading="Card title" />
 
-          <CardEditorRepeat v-model="repeatModel" :allow="['campaigns', 'popups', 'assets', 'features']" />
+          <CardEditorRepeat v-model="repeatModel" :allow="['campaigns', 'popups', 'assets', 'features', 'tips']" />
 
           <div class="field check">
             <label><input type="checkbox" :checked="hasBadge" @change="toggleBadge(($event.target as HTMLInputElement).checked)" /> Badge</label>
