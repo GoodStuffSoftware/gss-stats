@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.67.3] — 2026-10-29
+
+### Fixed
+- **Pageviews over time.** The Traffic trend card is now named for what it counts; a saved page keeps its title until edited.
+
 ## [0.67.2] — 2026-10-29
 
 ### Fixed

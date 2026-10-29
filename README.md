@@ -941,7 +941,7 @@ whose first beacon was a return or completion row, so its total can sit slightly
 flight-day chart's. A chart that groups by the UTC `date` counts without these rows and carries the
 caption; with event beacons excluded (their default) the only rows that would drop are refused rows
 not on the event-beacon list, and there are none since game starts joined it. The default **Pageviews over
-time** (Beacon page) and **Visits over time** (Best Sudoku · Traffic) trends group by `dateEt`
+time** (Beacon page) and **Pageviews over time** (Best Sudoku · Traffic) trends group by `dateEt`
 since layout version 15, so they count every row and carry no caption: layout version 15 moves a
 stored copy of either from `date` to `dateEt` once, only when it is still exactly the shipped
 default (same dataset, title, type, metric, limit and release markers, any id or position; the

@@ -230,7 +230,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return factoryWidgets([
     bw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, caption: TRAFFIC_WINDOW_CAPTION, x: 0, y: 0, w: 3, h: 3 }),
     bw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
-    bw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
+    bw({ id: 'bsk-trend', title: 'Pageviews over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
     bw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
     bw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
     bw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),

@@ -56,12 +56,12 @@ describe('v15: the defaults', () => {
   const bcn = () => defaultBeaconWidgets().find((w) => w.id === 'bcn-trend')!
   const bsk = () => defaultBestSudokuLaunchWidgets().find((w) => w.id === 'bsk-trend')!
 
-  it('Pageviews over time (Beacon) and Visits over time (Traffic) use dateEt, and nothing else changed', () => {
+  it('Pageviews over time (Beacon) and the Traffic trend use dateEt, and nothing else changed', () => {
     expect(bcn()).toMatchObject({ title: 'Pageviews over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90 })
-    expect(bsk()).toMatchObject({ title: 'Visits over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90, markers: 'releases' })
+    expect(bsk()).toMatchObject({ title: 'Pageviews over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90, markers: 'releases' })
     expect({ ...oldTrend('bcn-trend'), dimension: 'dateEt' }).toEqual(clone(bcn()))
     // the Traffic page's cards also hide known test and household traffic now (defaults.test.ts)
-    expect({ ...oldTrend('bsk-trend'), dimension: 'dateEt', excludeKnownTraffic: true }).toEqual(clone(bsk()))
+    expect({ ...oldTrend('bsk-trend'), title: 'Pageviews over time', dimension: 'dateEt', excludeKnownTraffic: true }).toEqual(clone(bsk()))
   })
 
   it('the migration match shapes are frozen literals, pinned here: editing a factory does not move them', () => {
@@ -84,7 +84,8 @@ describe('v15: the defaults', () => {
     // The Traffic page cards hide known traffic; the stored v14 shape never had that field.
     const { excludeKnownTraffic, ...bskRest } = content(bsk())
     expect(excludeKnownTraffic).toBe(true)
-    expect({ ...bskRest, dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[1])
+    // 0.67.3 retitled the Traffic card Pageviews over time; the frozen v14 shape keeps the old Visits title.
+    expect({ ...bskRest, title: 'Visits over time', dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[1])
   })
 
   it('a stored v14 chart migrates from the literal shape whatever the factories build today', () => {
