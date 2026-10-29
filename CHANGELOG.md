@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.70.1] — 2026-10-29
+
 ### Changed
 - **Funnel per campaign says why Flight 4 has no card.** A caption names the spend-only arms (no tagged arrivals, so no funnel) and points to the Campaign scorecard, which lists them with the same flight-date status and order.
 - **One status badge on both campaign cards.** Funnel per campaign now says "flighting today" while a flight runs, as the Campaign scorecard does.
