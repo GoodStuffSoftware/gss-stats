@@ -10,8 +10,9 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
-import { campaignById } from '../../src/lib/campaigns'
+import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, postflightDueDate, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { campaignById, etMidnightUtcMs } from '../../src/lib/campaigns'
+import { addEtDays } from '../../src/lib/overview'
 import type { SearchSideRaw } from '../../src/lib/searchAdsSide'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { AdsExtrasSource } from '../../src/lib/adsSync'
@@ -42,7 +43,7 @@ import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
 import { readFirebaseCounts, serviceAccountFromEnv, type FirebaseCounts, type ServiceAccountSource } from './firebase'
 import { readPlayReports } from './play'
-import type { AdsSource, ReadDeps } from './read'
+import type { AdsSource, AsOfMark, ReadDeps } from './read'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
 import { loadAdsAuth } from './secrets'
 import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from './wrangler'
@@ -93,6 +94,47 @@ export function resolveCampaignId(opts: Record<string, string | boolean | undefi
   if (given === undefined) return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
   if (typeof given === 'string' && given && (ADS_READ_PLANS[given] || campaignById(given))) return given
   throw new Error(campaignRefusal(given))
+}
+
+// ── --as-of: a post-flight stage read on a past ET day's clock ─────────────────────────────
+/** The last millisecond of ET calendar day `dateEt` (DST-safe). */
+export const endOfEtDayMs = (dateEt: string): number => etMidnightUtcMs(addEtDays(dateEt, 1)) - 1
+
+const isEtDate = (d: string): boolean => {
+  try {
+    return addEtDays(d, 0) === d
+  } catch {
+    return false // an impossible date such as 2026-13-01
+  }
+}
+
+/** A post-flight run's campaign and clock: the instant every time-dependent part keys off, and
+ * (only with --as-of) the mark that tells the reading apart from a same-day read. */
+export interface PostflightClock {
+  campaignId: string
+  nowMs: number
+  asOf: AsOfMark | null
+}
+
+/** Resolves a post-flight run's campaign and clock. Without `--as-of` the clock is `clockMs`
+ * (the real time, or a fixture's). With `--as-of <YYYY-MM-DD ET>` it is the end of that ET day
+ * (or `clockMs` itself when the date is today), so a stage read that never ran on its day can be
+ * taken afterwards with the data of that day: the beacon windows, the matured-arrival cutoff, the
+ * Ads date range and the stored et_date all follow. Refused: a malformed date, a date after
+ * `clockMs`'s ET day, a date before the stage's due date, and `--now` beside it. */
+export function resolvePostflightClock(opts: Record<string, string | boolean | undefined>, stage: PostflightStage, clockMs: number): PostflightClock {
+  const given = opts['as-of']
+  if (given === undefined) return { campaignId: resolveCampaignId(opts, 'postflight', clockMs, stage), nowMs: clockMs, asOf: null }
+  if (opts.now) throw new Error('--as-of and --now cannot be combined')
+  if (typeof given !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(given) || !isEtDate(given)) throw new Error(`--as-of must be an ET date as YYYY-MM-DD, got ${JSON.stringify(given)}`)
+  const campaignId = resolveCampaignId(opts, 'postflight', endOfEtDayMs(given), stage)
+  const today = etDateOf(clockMs)
+  if (given > today) throw new Error(`--as-of ${given} is in the future (today is ${today} ET)`)
+  const campaign = campaignById(campaignId)
+  if (!campaign) throw new Error(`--as-of needs a registered campaign with a flight end; ${campaignId} has none`)
+  const dueEt = postflightDueDate(stage, campaign.flightEnd)
+  if (given < dueEt) throw new Error(`--as-of ${given} is before the ${stage} stage's due date ${dueEt} (flight ended ${campaign.flightEnd})`)
+  return { campaignId, nowMs: Math.min(endOfEtDayMs(given), clockMs), asOf: { etDate: given, realNowMs: clockMs } }
 }
 
 export function loadCfToken(file: string | undefined): string | null {
@@ -158,8 +200,9 @@ export function adsExtrasSource(client: AdsClient): AdsExtrasSource {
   }
 }
 
-/** Live dependencies. `--now` is refused here: a live read always runs on the real clock. */
-export async function liveDeps(opts: Record<string, string | boolean | undefined>): Promise<ReadDeps> {
+/** Live dependencies. `--now` is refused here: a live read runs on the real clock or, for a
+ * post-flight stage read given `--as-of`, on the clock resolvePostflightClock made of it. */
+export async function liveDeps(opts: Record<string, string | boolean | undefined>, clock?: Pick<PostflightClock, 'nowMs' | 'asOf'>): Promise<ReadDeps> {
   if (opts.now) throw new Error('--now is only allowed with --fixture')
   const dryRun = !!opts['dry-run']
   const run = createWranglerRunner({ cfToken: loadCfToken(opts['cf-token-file'] as string | undefined) })
@@ -170,7 +213,8 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
   const saSource: ServiceAccountSource | null = saPath ?? envSa
   const playSaPath = opts['play-sa'] as string | undefined
   return {
-    nowMs: Date.now(),
+    nowMs: clock?.nowMs ?? Date.now(),
+    ...(clock?.asOf ? { asOf: clock.asOf } : {}),
     ads: ads ? adsSource(ads) : null,
     adsInitError,
     beacon: createBeaconSource(createD1Select(run)),

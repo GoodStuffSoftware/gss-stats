@@ -146,8 +146,15 @@ export interface PlayReportsSource {
    * the returned section's ok/error/errors, not as a rejected promise. */
   read(opts: { since: string; until: string; flightStart: string; cumulativeSpend: number }): Promise<PlayReportsSection>
 }
+/** Set only by a live post-flight run given `--as-of` (cli.ts resolvePostflightClock): `nowMs` is
+ * then the end of ET day `etDate`, and `realNowMs` is when the read really ran. */
+export interface AsOfMark {
+  etDate: string
+  realNowMs: number
+}
 export interface ReadDeps {
   nowMs: number
+  asOf?: AsOfMark
   /** null when the Ads client could not be built (credentials); `adsInitError` says why. */
   ads: AdsSource | null
   adsInitError?: string | null
@@ -1714,9 +1721,13 @@ export interface PostflightResult {
 
 export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions): Promise<PostflightResult> {
   const { plan, campaign } = readPlanFor(opts.campaignId)
-  const readAt = new Date(deps.nowMs).toISOString()
+  // `clockAt` is the read's clock (the end of the as-of day under --as-of); the stored `readAt`
+  // stays the real time of the read, and the notes name the as-of.
+  const clockAt = new Date(deps.nowMs).toISOString()
+  const readAt = deps.asOf ? new Date(deps.asOf.realNowMs).toISOString() : clockAt
   const todayEt = etDateFromMs(deps.nowMs)
   const errors: string[] = []
+  const asOfNote = deps.asOf ? `As-of read: taken ${readAt} with the clock set to the end of ${deps.asOf.etDate} ET (a stage read that did not run on its day); et_date is the stage date.` : null
 
   const status = deps.ads ? await attempt('ads status', () => deps.ads!.status(plan.campaignId)) : unavailable<CampaignStatus>('ads status', deps.adsInitError)
   if (!status.ok) errors.push(status.error)
@@ -1763,7 +1774,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     },
     notify: { push: false, busCopy: false, reason: '', text: null },
     errors,
-    notes: [...STANDING_NOTES],
+    notes: [...(asOfNote ? [asOfNote] : []), ...STANDING_NOTES],
   }
   const addFailure = (name: string, err: string | null | undefined) => {
     if (!err || base.failures.includes(name)) return
@@ -1836,7 +1847,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     campaignSync,
     tagged: taggedRows,
     forceDecision: true,
-    readAt,
+    readAt: clockAt,
     campaignState: status.ok ? status.value : null,
     cohortTiersAtMs: wantsCohort ? deps.nowMs : null,
   })
@@ -1905,7 +1916,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
       nonPromoOutcomesStillPlaying: base.promoSplit.beacon?.nonPromo['still-playing'] ?? null,
       nonPromoAccountsInWindow: base.promoSplit.accounts?.nonPromoInWindow ?? null,
     },
-    notes: [...(read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`]), ...base.recommendations],
+    notes: [...(asOfNote ? [asOfNote] : []), ...(read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`]), ...base.recommendations],
   }
   if (base.cohort) {
     Object.assign(rec.counts, {

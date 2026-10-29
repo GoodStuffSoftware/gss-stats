@@ -1239,6 +1239,7 @@ npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the
 npm run ads:morning-read -- --campaign <id> --dry-run --cf-token-file <path>   # daily read; no writes
 npm run ads:morning-read -- --campaign <id> --window-end <YYYY-MM-DD> --dry-run ...   # pin the window end before the registered flight end (F3 Search week-1 final read: 2026-10-23)
 npm run ads:postflight-read -- --stage wrapup --campaign <id> --dry-run --cf-token-file <path>
+npm run ads:postflight-read -- --stage wrapup --campaign <id> --as-of <YYYY-MM-DD> --cf-token-file <path>   # backfill a stage read that never ran on its day (clock = end of that ET day)
 npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
 npm run ads:morning-read -- --campaign <id> --fixture <file.json> --now <iso>   # offline, recorded data
 npm run -s ads:read-page -- --input <read.out> --narrative <n.json> --out <page.html> [--audit-commit <sha>]
@@ -1308,6 +1309,10 @@ npm run typecheck:scripts
   add the flight-window account cohort by access tier and promo marker (sitewide, not
   campaign-attributed; it needs Firestore composite indexes that don't exist yet, so it
   reports "tier split unavailable: index missing" until an owner creates them).
+  `--as-of <YYYY-MM-DD ET>` (live runs, with `--stage`) backfills a stage that never ran on its day: the
+  clock is the end of that ET day, so the beacon windows, the Ads spend range and the stored `et_date`
+  follow it; it is refused for a future date or one before the stage is due. `read_at` stays the real
+  time and the reading's notes name the as-of.
 - **Sign-ups are an upper bound** everywhere ("at most N campaign sign-ups" =
   min(tagged auth successes, new accounts sitewide in the window)): `/auth/success` also fires
   for returning sign-ins. A pause is never proposed for a campaign that isn't serving (after
