@@ -834,10 +834,6 @@ export function stepChartFor(wd: Widget): Widget {
   const base = featureStepWidget(f, { x: wd.x, y: wd.y, w: wd.w, h: wd.h })
   return { ...wd, type: 'line', dataset: 'geo', view: undefined, dimension: base.dimension, metric: base.metric, limit: base.limit, series: base.series, caption: wd.caption ?? base.caption }
 }
-/** A saved Feature health widget (dataset 'features', view 'health', no card) drawn as the feature-health card preset
- * at render time (editor-tools T2). Nothing stored is rewritten (ADR 0005 decision 2): the widget keeps its id, grid
- * cell, title and the rest. Only a widget that hides known traffic maps (the card's fact always hides it); one that
- * shows it keeps its old body, as does every other widget. */
 /** A saved Coach tips widget (dataset 'features', view 'coach-tips', no card) drawn as the coach-tips card preset at
  * render time (editor-tools T3), on the same terms as featureHealthCardFor: nothing stored is rewritten, and only a
  * widget that hides known traffic maps. */
@@ -846,6 +842,10 @@ export function coachTipsCardFor(wd: Widget): Widget {
   return { ...wd, card: { preset: 'coach-tips' } }
 }
 
+/** A saved Feature health widget (dataset 'features', view 'health', no card) drawn as the feature-health card preset
+ * at render time (editor-tools T2). Nothing stored is rewritten (ADR 0005 decision 2): the widget keeps its id, grid
+ * cell, title and the rest. Only a widget that hides known traffic maps (the card's fact always hides it); one that
+ * shows it keeps its old body, as does every other widget. */
 export function featureHealthCardFor(wd: Widget): Widget {
   if (wd.card || wd.dataset !== 'features' || wd.view !== 'health' || wd.excludeKnownTraffic !== true) return wd
   return { ...wd, card: { preset: 'feature-health' } }

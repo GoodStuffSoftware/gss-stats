@@ -473,7 +473,13 @@ warm cache serves repeat loads.
 
 Coach tips (editor tools T3, 2026-10-29). The old Coach tips table read one `/api/features` POST
 with 2 statements (the coach paths by ET day, and an "ever seen" check). The Coach tips card sends
-94 requests in 1 POST and plans 2 statements on a cold cache: `featureDays` with `set: 'coach-tips'`
+53 requests in 1 POST and plans 2 statements on a cold cache: `featureDays` with `set: 'coach-tips'`
 (the same shape as above, over the 16 coach paths only, so its own cache entry) and `coachEver`
 (one whole `COUNT(*)` of coach rows before tomorrow, keyed by the ET day only, so one entry serves
-every range and site selection for 300 s). Same statement count as before; no added load.
+every range and site selection for 300 s). Same statement count as before, but the coach
+`featureDays` read has only the `ts < tomorrow` bound (older rows fold into `''`, as Feature
+health's), so a cold load range-scans the whole history on `idx_hits_ts` twice, where the old card
+scanned the range plus the whole history once: about one extra full-history scan per cold load,
+at most once per 300 s per range and filter set. Accepted: Best Sudoku's history is well under 400
+days and the warm cache serves repeat loads; bounding the coach read at the range start would
+change `feature.status` for a tip, which reads the older rows.

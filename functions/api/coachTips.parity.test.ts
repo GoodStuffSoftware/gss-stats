@@ -70,8 +70,8 @@ async function oldModel(body: Record<string, unknown>) {
   return (await res.json()) as any
 }
 
-// The coach-tips preset's own requests: every tip x shown / dismissed / closed x the three windows (count and ratio), the
-// "Show me around" total, and everSeen. (The preset shows the latest day and the range; the day before is compared too.)
+// A superset of the coach-tips preset's requests (the preset sends 53: the latest day and the range): every tip x shown /
+// dismissed / closed x three windows (count and ratio, the day before too), the "Show me around" totals, and everSeen.
 type Req = { key: string; metric: string; window: string; params: { feature?: string; step?: string } }
 function presetRequests(): Req[] {
   const out: Req[] = []

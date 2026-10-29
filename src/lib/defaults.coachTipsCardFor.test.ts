@@ -1,10 +1,11 @@
 // Saved layouts after T3: a saved Features-page "Coach tips" table (dataset 'features', view 'coach-tips') that hides known
 // traffic is DRAWN as the ordinary coach-tips card through coachTipsCardFor at render time, and nothing stored is rewritten
 // (ADR 0005 decision 2). The fixtures are the production layout's own shapes (version 19, copied 2026-10-27). No env data.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CONFIG_VERSION, coachTipsCardFor, featureHealthCardFor, normalizeConfig, stepChartFor } from './defaults'
 import { presetById } from './metrics/presets'
 import { validateCard } from './metrics/validate'
+import { autoCaveatIds } from './notes'
 import type { Widget } from '../types'
 
 const SAVED_HEALTH = { id: 'ow-feature-health', title: 'Feature health', type: 'table', dataset: 'features', view: 'health', dimension: '', metric: 'pageviews', limit: 1, excludeKnownTraffic: true, x: 0, y: 9, w: 12, h: 20, i: 'ow-feature-health' } as unknown as Widget
@@ -49,6 +50,19 @@ describe('coachTipsCardFor: the saved Coach tips table is drawn as the coach-tip
     expect(shown(SAVED_COACH).card).toEqual({ preset: 'coach-tips' })
     expect(shown(SAVED_HEALTH).card).toEqual({ preset: 'feature-health' })
     expect(shown(SAVED_ASK)).toEqual(stepChartFor(SAVED_ASK))
+  })
+})
+
+describe("the coach notes are the card's captions, never another card's caveat", () => {
+  afterEach(() => vi.useRealTimers())
+  it('with the v1.99.3 measurement change in force, no Overview or Features widget shows a coach note on its own', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-29T15:00:00Z'))
+    const kpis = { ...SAVED_HEALTH, id: 'ow-kpis', i: 'ow-kpis', title: 'Today at a glance', type: 'kpi', dataset: 'overview', view: undefined, card: { preset: 'bsk-kpis' } } as unknown as Widget
+    const timeline = { ...SAVED_HEALTH, id: 'ow-timeline', i: 'ow-timeline', title: 'Pageviews over time', type: 'line', dataset: 'overview', view: undefined, dimension: 'dateEt' } as unknown as Widget
+    for (const w of [kpis, timeline, shown(SAVED_HEALTH), shown(SAVED_COACH), SAVED_ASK]) {
+      expect(autoCaveatIds(w).filter((id) => id.startsWith('coach-')), w.id).toEqual([])
+    }
   })
 })
 

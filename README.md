@@ -817,8 +817,9 @@ same card can be built or changed in the card editor like any other.
 - **What reads differently.** When coach rows have arrived, a *Coach data: Arriving* row shows
   where the old card showed nothing; the caption and the v1.99.3 measurement note are the card's
   captions. A range over 400 days is refused (the metrics endpoint's cap).
-- **Cost.** One `/api/metrics` POST (94 requests) and two statements on a cold cache, as the old
-  card (see [docs/capacity.md §12](docs/capacity.md)).
+- **Cost.** One `/api/metrics` POST (53 requests) and two statements on a cold cache, as the old
+  card, but both read the whole history where the old daily read covered only the range (see
+  [docs/capacity.md §12](docs/capacity.md)).
 - **Saved layouts are not rewritten.** A Coach tips table saved by an older build (dataset
   `features`, view `coach-tips`) that hides known traffic is drawn as this card at render time
   (`coachTipsCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place, title

@@ -250,7 +250,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     text: COACH_TIPS_CAPTION,
     kind: 'note',
     severity: 'info',
-    scopes: ['overview'],
+    scopes: [], // the coach-tips card's own caption only
   },
   // The coach strip's measurement changes up to the latest day (lib/measurementChanges.ts coachMeasurementNote): off until one applies.
   'coach-measurement': {
@@ -258,7 +258,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     text: () => coachMeasurementNote(coachLatestDay()) ?? '',
     kind: 'note',
     severity: 'info',
-    scopes: ['overview'],
+    scopes: [], // the coach-tips card's own caption only
     activeWhen: () => coachMeasurementNote(coachLatestDay()) !== null,
   },
   'feature-health-caption': {
