@@ -338,6 +338,8 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
       ],
     },
   ],
+  // Why a spend-only arm (Flight 4) has no card here: it writes no beacon rows (repeat.tracked drops it).
+  captions: ['funnel-spend-only-arms'],
 }
 
 /** Arrivals and funnel by country (CampaignsWidgetBody 'country'): one card per beacon-tracked

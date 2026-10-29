@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Funnel per campaign says why Flight 4 has no card.** A caption names the spend-only arms (no tagged arrivals, so no funnel) and points to the Campaign scorecard, which lists them with the same flight-date status and order.
+
 ## [0.70.0] — 2026-10-29
 
 ### Added

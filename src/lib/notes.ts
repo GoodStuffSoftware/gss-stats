@@ -50,7 +50,7 @@ import {
   MIN_COHORT,
   INSTALL_FIX_NOTE,
 } from './popupEvents'
-import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
+import { ARRIVALS_CAVEAT, CAMPAIGNS, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
 import { presetById } from './metrics/presets'
 import type { Widget } from '../types'
@@ -523,6 +523,21 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // auth success, not only new accounts, and from the first-touch change in lib/measurementChanges.ts
   // the count carries first-touch tags while sign-in screens mostly do not, so it is approximate.
   // The date comes from that file, never typed here.
+  // The funnel per campaign lists beacon-tracked campaigns only (repeat.tracked): a spend-only arm
+  // (Flight 4) writes no beacon rows, so a funnel card for it would be all zeros. This caption says
+  // why it is absent and where it is shown; the names come from the registry, never typed here.
+  'funnel-spend-only-arms': {
+    id: 'funnel-spend-only-arms',
+    text: () => {
+      const names = CAMPAIGNS.filter((c) => c.measurement === 'spend-only').map((c) => c.label)
+      const many = names.length > 1
+      const who = names.length ? (many ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]) : 'A spend-only campaign'
+      return `${who} ${many ? 'are' : 'is'} spend-only: no tagged arrivals or beacon rows, so no funnel card here. ${many ? 'Their' : 'Its'} spend and results are on the Campaign scorecard.`
+    },
+    kind: 'note',
+    severity: 'info',
+    scopes: [], // not automatic: the funnel card names it in its own captions (presets.ts CAMPAIGN_FUNNEL)
+  },
   'cost-per-signin-approx': {
     id: 'cost-per-signin-approx',
     text: () => {
