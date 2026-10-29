@@ -47,9 +47,10 @@ export const CAMPAIGN_SCORECARD: CardSpec = {
         // Google-reported installs and cost per install: only a campaign with an installActionId (Flight 4) has them, the rest omit the rows.
         { id: 'adsInstalls', label: { metric: true }, data: { metric: 'campaign.adsInstalls' }, display: { as: 'number' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
         { id: 'cpai', label: { metric: true }, data: { ratio: 'campaign.costPerAdsInstall' }, display: { as: 'currency' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
-        // Spend and clicks beside them, on those same cards only (needsInstallAction): the other campaigns' cards are unchanged.
-        { id: 'adsSpend', label: { note: 'label.campaign.adsSpend' }, data: { metric: 'campaign.spend' }, display: { as: 'currency' }, gating: { needsInstallAction: true, whenEmpty: 'omit' }, ...COMPACT },
-        { id: 'adsClicks', label: { note: 'label.campaign.adsClicks' }, data: { metric: 'campaign.clicks' }, display: { as: 'number' }, gating: { needsInstallAction: true, whenEmpty: 'omit' }, ...COMPACT },
+        // Spend and clicks on a spend-only card (forSpendOnly: Play-direct, Flight 4), which has no site numbers; the campaigns
+        // with site numbers keep their cards. A spend-only campaign with no stored Ads data at all says so in one line.
+        { id: 'adsSpend', label: { note: 'label.campaign.adsSpend' }, data: { metric: 'campaign.spend' }, display: { as: 'currency' }, gating: { forSpendOnly: true, whenEmpty: { note: 'no-ads-data' } }, ...COMPACT },
+        { id: 'adsClicks', label: { note: 'label.campaign.adsClicks' }, data: { metric: 'campaign.clicks' }, display: { as: 'number' }, gating: { forSpendOnly: true, whenEmpty: 'omit' }, ...COMPACT },
       ],
     },
     {

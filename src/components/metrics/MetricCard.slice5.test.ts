@@ -224,15 +224,27 @@ describe('MetricCard — freshness and errors', () => {
 })
 
 describe('MetricCard — decided from config, on the client', () => {
-  it('the spend-only campaign shows only its Flight row from the first render — no "…", never requested', async () => {
+  it('the spend-only campaign shows its Flight row and its Google Ads Spend and Clicks, asked for nothing else', async () => {
+    answer = (r) => (r.metric === 'campaign.clicks' ? { status: 'ok', value: 381 } : r.metric === 'campaign.spend' ? { status: 'ok', value: 75.17 } : { status: 'ok', value: 42 })
     const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: NOW })
     const play = () => w.findAll('.metric-card').find((c) => c.find('.mc-title').text().startsWith('Play-direct'))!
-    expect(play().findAll('.mi-row').map((r) => r.find('.mi-label').text())).toEqual(['Flight']) // before any fetch resolves
-    expect(play().text()).not.toContain('…')
+    const labels = () => play().findAll('.mi-row').map((r) => r.find('.mi-label').text())
+    // Before any fetch resolves, the two Ads rows read "…" and the site rows are absent.
+    expect(labels()).toEqual(['Flight', 'Spend (Google Ads)', 'Clicks (Google Ads)'])
     await settle()
-    expect(play().findAll('.mi-row').map((r) => r.find('.mi-label').text())).toEqual(['Flight'])
+    expect(labels()).toEqual(['Flight', 'Spend (Google Ads)', 'Clicks (Google Ads)'])
+    expect(play().findAll('.mi-row').map((r) => r.find('.mi-value').text()).slice(1)).toEqual(['$75.17', '381'])
     expect(play().text()).not.toContain('not yet tracking')
-    expect(bodies.flatMap((b) => b.requests).some((r) => r.params?.campaignId === PLAY)).toBe(false)
+    expect(bodies.flatMap((b) => b.requests).filter((r) => r.params?.campaignId === PLAY).map((r) => r.metric).sort()).toEqual(['campaign.clicks', 'campaign.spend'])
+  })
+
+  it('a spend-only campaign with no stored Ads data says so in one line and leaves Clicks out', async () => {
+    answer = (r) => (r.params?.campaignId === PLAY ? { status: 'no-data', value: null } : { status: 'ok', value: 42 })
+    const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: NOW })
+    await settle()
+    const play = w.findAll('.metric-card').find((c) => c.find('.mc-title').text().startsWith('Play-direct'))!
+    expect(play.findAll('.mi-row').map((r) => r.find('.mi-label').text())).toEqual(['Flight', 'Spend (Google Ads)'])
+    expect(play.findAll('.mi-row')[1].find('.mi-value').text()).toBe('no Google Ads data stored for this campaign')
   })
 })
 

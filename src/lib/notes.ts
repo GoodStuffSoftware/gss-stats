@@ -844,6 +844,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'no-spend-day-yet': 'no closed spend day stored yet',
     'not-synced-yet': 'not synced yet',
     'play-not-synced-yet': 'no Play figures stored yet',
+    'no-ads-data': 'no Google Ads data stored for this campaign',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',

@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { CAMPAIGNS, campaignById, ORGANIC_ARM_ID } from '../campaigns'
 import { noteRawText } from '../notes'
+import { itemViewModel } from './render'
 import { METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
 import { measuredInterval } from './instrumentation'
 import { ORGANIC_TRACKING_LIVE_AT, TOUR_TRACKING_LIVE_AT } from '../popupEvents'
@@ -249,23 +250,55 @@ describe('the Campaign scorecard preset carries the Google-reported install rows
     expect(cpai.gating?.whenEmpty).toBe('omit')
   })
 
-  it('adds Spend and Clicks (Google Ads) rows, only for a campaign with an install action', () => {
+  it('adds Spend and Clicks (Google Ads) rows, only for a spend-only campaign (no site numbers)', () => {
     const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
     const spend = items.find((i) => i.id === 'adsSpend')!
     const clicks = items.find((i) => i.id === 'adsClicks')!
     expect(spend.data).toEqual({ metric: 'campaign.spend' })
     expect(clicks.data).toEqual({ metric: 'campaign.clicks' })
-    expect(spend.gating?.needsInstallAction).toBe(true)
-    expect(clicks.gating?.needsInstallAction).toBe(true)
+    expect(spend.gating?.forSpendOnly).toBe(true)
+    expect(clicks.gating?.forSpendOnly).toBe(true)
     expect(noteRawText('label.campaign.adsSpend')).toBe('Spend (Google Ads)')
     expect(noteRawText('label.campaign.adsClicks')).toBe('Clicks (Google Ads)')
-    const withAction = CAMPAIGNS.find((c) => c.installActionId)!
-    const without = CAMPAIGNS.find((c) => !c.installActionId && c.measurement !== 'spend-only')!
-    const scope = (campaign: typeof withAction): ScopeInstance => ({ kind: 'campaign', campaign }) as unknown as ScopeInstance
+    const scope = (campaign: (typeof CAMPAIGNS)[number]): ScopeInstance => ({ kind: 'campaign', campaign }) as unknown as ScopeInstance
+    const spendOnly = CAMPAIGNS.filter((c) => c.measurement === 'spend-only')
+    const withSite = CAMPAIGNS.filter((c) => c.measurement !== 'spend-only')
+    // Play-direct (no install action) and Flight 4 (with one) both show them; every campaign with site numbers omits them.
+    expect(spendOnly.map((c) => c.id)).toEqual(expect.arrayContaining(['24234347705', '24392866056']))
     for (const it of [spend, clicks]) {
-      expect(unmeasuredByConfig(it.data, scope(withAction), it.gating, TODAY)).toBe(false)
-      // Spend alone would otherwise show for any campaign with a hand-entered spend; here it follows the install rows.
-      expect(unmeasuredByConfig(it.data, scope(without), it.gating, TODAY)).toBe(true)
+      for (const c of spendOnly) expect(unmeasuredByConfig(it.data, scope(c), it.gating, TODAY), `${c.id} ${it.id}`).toBe(false)
+      for (const c of withSite) {
+        expect(unmeasuredByConfig(it.data, scope(c), it.gating, TODAY), `${c.id} ${it.id}`).toBe(true)
+        expect(buildRequestSpec(it, scope(c), TODAY)).toBeNull()
+      }
     }
+    for (const c of spendOnly) expect(buildRequestSpec(spend, scope(c), TODAY)).toMatchObject({ metric: 'campaign.spend', params: { campaignId: c.id } })
+  })
+
+  it('a spend-only card with Ads rows shows Spend and Clicks; with none, Spend reads one plain line and Clicks is left out', () => {
+    const playDirect = campaignById('24234347705')!
+    const sc: ScopeInstance = { kind: 'campaign', campaign: playDirect }
+    const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
+    const spend = items.find((i) => i.id === 'adsSpend')!
+    const clicks = items.find((i) => i.id === 'adsClicks')!
+    const o = { todayEt: TODAY }
+    const sv = itemViewModel(spend, { status: 'ok', value: 75.17 }, sc, o)
+    expect(sv).toMatchObject({ visible: true, primary: '$75.17' })
+    expect(itemViewModel(clicks, { status: 'ok', value: 381 }, sc, o)).toMatchObject({ visible: true, primary: '381' })
+    const none = itemViewModel(spend, { status: 'no-data', value: null }, sc, o)
+    expect(none).toMatchObject({ visible: true, primary: 'no Google Ads data stored for this campaign' })
+    expect(itemViewModel(clicks, { status: 'no-data', value: null }, sc, o).visible).toBe(false)
+    // The cost-of-site rows stay out of a spend-only card whatever the data.
+    for (const id of ['arrivals', 'auth', 'installs', 'return', 'cpa', 'adsInstalls', 'cpai']) {
+      const it = items.find((i) => i.id === id)!
+      expect(unmeasuredByConfig(it.data, sc, it.gating, TODAY), id).toBe(true)
+    }
+  })
+
+  it('a campaign with site numbers is unchanged: no Spend or Clicks row, as before', () => {
+    const web = campaignById('24279250691')!
+    const sc: ScopeInstance = { kind: 'campaign', campaign: web }
+    const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
+    for (const id of ['adsSpend', 'adsClicks']) expect(itemViewModel(items.find((i) => i.id === id)!, { status: 'ok', value: 5 }, sc, { todayEt: TODAY }).visible).toBe(false)
   })
 })

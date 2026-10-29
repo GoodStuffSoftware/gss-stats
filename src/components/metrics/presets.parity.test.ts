@@ -144,6 +144,11 @@ const SCORECARD_DIFFS: [campaign: string, kind: 'row' | 'pill', label: string, o
   [RETEST, 'pill', 'Install', 'too few to report (2/4)', '22.2% (2/9)', 'D1'],
 ]
 
+/** Rows the new card adds that the retired scorecard never had: [campaign, label, text on this fixture]. A spend-only card
+ * shows its Google Ads figures instead of sitting empty (Gating.forSpendOnly). The fixture has no ads rows, so Play-direct
+ * reads its hand-entered spend (lib/adsRules.ts resolveCampaignSpend), and no clicks (only the ads store holds them). */
+const SCORECARD_ADDED: [campaign: string, label: string, text: string][] = [[PLAY, 'Spend (Google Ads)', '$75.17']]
+
 describe('campaign-scorecard ≡ the bespoke Overview scorecard', () => {
   it('same cards, titles, badges, rows and pills, except the documented differences', async () => {
     const before = oldScorecard()
@@ -159,7 +164,11 @@ describe('campaign-scorecard ≡ the bespoke Overview scorecard', () => {
         const oldMap = kind === 'row' ? o.rows : o.pills
         const newMap = kind === 'row' ? n.rows : n.pills
         // Nothing new appears: every new row or pill has an old counterpart.
-        for (const label of newMap.keys()) expect(oldMap.has(label), `${title} ${kind} "${label}" is new`).toBe(true)
+        for (const label of newMap.keys()) {
+          const added = kind === 'row' ? SCORECARD_ADDED.find(([c, l]) => c === title && l === label) : undefined
+          if (added) expect(newMap.get(label), `${title} added row "${label}"`).toBe(added[2])
+          else expect(oldMap.has(label), `${title} ${kind} "${label}" is new`).toBe(true)
+        }
         for (const [label, oldText] of oldMap) {
           const i = SCORECARD_DIFFS.findIndex(([c, k, l]) => c === title && k === kind && l === label)
           if (i < 0) {
