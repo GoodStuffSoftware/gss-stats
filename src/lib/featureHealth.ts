@@ -219,6 +219,17 @@ export function featureStepLabel(key: string): string {
   const hit = featureStepOf(key)
   return hit ? `${hit.feature.label}: ${hit.step.label}` : key
 }
+/** Every step a `featureStep` value can name, in FEATURES order, as the chart editor's picker lists them (editor tools
+ * T7: the value is picked, never typed, so a typo can no longer save a series that counts 0). */
+export function featureStepChoices(): { value: string; label: string }[] {
+  return FEATURES.flatMap((f) => f.steps.map((st) => ({ value: featureStepKey(f.id, st.id), label: featureStepLabel(featureStepKey(f.id, st.id)) })))
+}
+/** The featureStep values in a chart's series that name no step (a value saved before the picker, or a step since
+ * removed from FEATURES), in series order, each once. Empty when every one is known. */
+export function unknownFeatureStepValues(series: readonly { filter?: readonly { field: string; value: string }[] }[] | undefined): string[] {
+  const bad = (series ?? []).flatMap((x) => (x.filter ?? []).filter((f) => f.field === 'featureStep' && !featureStepOf(f.value)).map((f) => f.value))
+  return [...new Set(bad)]
+}
 /** Whether a step can match a path the split guard refuses (a static check on the config, never on data).
  * It errs toward true: the prefix test ignores `except`. A step that cannot needs neither the whole-ET-day
  * caption nor blocks a live refresh. */
@@ -273,7 +284,6 @@ export const HEALTH_BASELINE_DAYS = 7
 export const HEALTH_NEW_DAYS = 7
 
 export type HealthStatus = 'silent' | 'new' | 'ok'
-export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = { silent: 'Went silent', new: 'New', ok: 'OK' }
 
 /** An outage keeps flagging for at most this many complete ET days (the latest one included). */
 export const HEALTH_SILENT_MAX_RUN = 7

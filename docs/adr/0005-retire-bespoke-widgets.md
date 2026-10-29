@@ -410,6 +410,21 @@ as the old `everSeen`). A saved coach-tips widget that hides known traffic is ma
 (`coachTipsCardFor`, decision 2), no `CONFIG_VERSION` change; parity is
 `functions/api/coachTips.parity.test.ts` (decision 3). Left: T4 (Ask-order) and T7.
 
+T7 built (2026-10-29): `FeatureHealthCard`'s health, steps and Coach tips bodies are removed; the
+component draws only the Ask-order A/B, and `ChartCard` mounts it for `view: 'ask-order'` only.
+Every saved `features` widget in production (17, read 2026-10-29) still reaches the screen through
+the unchanged mappings (`stepChartFor`, `featureHealthCardFor`, `coachTipsCardFor`; decision 2),
+nothing stored is rewritten and `CONFIG_VERSION` stays 19. A `features` widget no mapping covers
+(health or Coach tips showing known traffic, a `steps:` view naming an unknown feature; none saved)
+shows the retired-panel note, as other retired panels do; the mappings were not widened, because
+that would silently hide known traffic. The chart editor's `featureStep` series value is a picker of
+the known steps, and a saved value naming no step blocks Save. The page template
+`tpl-bsk-features` ("Best Sudoku · Features") is the Features page's restore set: 14 step charts,
+the Coach tips preset and, until T4, the Ask-order card. `/api/features`, the `features` dataset
+and `src/lib/featureHealthChart.ts` stay: Ask-order reads the endpoint, and the endpoint and the step
+chart config are the parity tests' reference (decision 3). Left: T4 (Ask-order), then the dataset's
+removal, the exit criterion.
+
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
 styles noted above.

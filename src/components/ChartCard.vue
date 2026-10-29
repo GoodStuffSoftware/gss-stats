@@ -25,6 +25,7 @@ import { metricsContextFor } from '../lib/metrics/pageContext'
 import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import FeatureHealthCard from './FeatureHealthCard.vue'
+import { ASK_ORDER_VIEW } from '../lib/askOrder'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
@@ -38,6 +39,8 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 // and type 'note' render their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
 // 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
 // retired); one without a card — a panel the migration does not know — says so.
+// The 'features' dataset draws only the Ask-order A/B now (FeatureHealthCard.vue); its other saved views are mapped
+// to ordinary charts and cards before they get here (lib/defaults.ts), and one no mapping covers says the same.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const retiredPanelText = noteRawText('label.card.retiredPanel')
 const isBespokeBody = computed(() => rendersOwnBody(props.widget))
@@ -677,9 +680,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
-      <FeatureHealthCard v-else-if="widget.dataset === 'features'" :widget="widget" :filters="effectiveFilters" :dark="dark" />
+      <FeatureHealthCard v-else-if="widget.dataset === 'features' && widget.view === ASK_ORDER_VIEW" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
-      <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
+      <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'features'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
 
       <div v-else-if="dimensionUnavailable()" class="state mono">{{ dimensionUnavailable() }}</div>

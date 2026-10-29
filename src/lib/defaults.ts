@@ -788,7 +788,8 @@ export function webAppActivityWidget(geom: { x: number; y: number; w: number; h:
 // per feature in lib/featureHealth.ts FEATURES, with its status (OK / New / Went silent), its step
 // counts for the latest complete ET day, the day before and the selected range, and the plain ratios of
 // those counts. Web and app are combined. Per-ET-day totals only, so the counts-only rule
-// (lib/splitGuard.ts) is untouched. A bespoke body (dataset 'features', components/FeatureHealthCard.vue).
+// (lib/splitGuard.ts) is untouched. Stored as dataset 'features', view 'health' and drawn as the card editor's
+// feature-health preset (featureHealthCardFor); the old bespoke table was removed in T7.
 export function featureHealthWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
   return w({
     id: 'ow-feature-health',
@@ -850,13 +851,15 @@ export function featureHealthCardFor(wd: Widget): Widget {
   if (wd.card || wd.dataset !== 'features' || wd.view !== 'health' || wd.excludeKnownTraffic !== true) return wd
   return { ...wd, card: { preset: 'feature-health' } }
 }
-/** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order,
- * then the Coach tips table (per-tip counts, src/lib/coachTips.ts) full width under them. */
+/** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order (ordinary chart-editor
+ * charts), then the Coach tips card (the coach-tips card-editor preset, per-tip counts, src/lib/coachTips.ts) full width
+ * under them, then the Ask-order A/B, the one bespoke body left (editor tools T4). Also the "Best Sudoku · Features" page
+ * template (TEMPLATE_WIDGETS, editor tools T7). */
 export function defaultFeaturesWidgets(): Widget[] {
   const chartRows = Math.ceil(FEATURES.length / 2)
   return factoryWidgets([
     ...FEATURES.map((f, i) => featureStepWidget(f, { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 })),
-    coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 }),
+    coachTipsCardFor(coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 })),
     askOrderWidget({ x: 0, y: chartRows * 8 + 10, w: 12, h: 17 }),
   ])
 }
@@ -1159,6 +1162,7 @@ export const TEMPLATE_WIDGETS: Readonly<Record<string, () => Widget[]>> = {
   'tpl-bsk-popups': defaultBestSudokuPopupsWidgets,
   'tpl-bsk-launch': defaultBestSudokuLaunchWidgets,
   'tpl-bsk-retention': defaultRetentionWidgets,
+  'tpl-bsk-features': defaultFeaturesWidgets,
 }
 export const RETENTION_TEMPLATE_ID = 'tpl-bsk-retention'
 const TEMPLATE_ID_RE = /^tpl-[a-z0-9][a-z0-9-]{0,39}$/

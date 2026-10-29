@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.70.0] — 2026-10-29
+
+### Added
+- **Best Sudoku · Features page template.** A new page can start from the Features page's own set: the 14 step charts, the Coach tips card and the Ask-order A/B, and Restore default charts on it brings that set back.
+- **Feature steps are picked, not typed.** A chart series filtered on a feature step picks it from the list of known steps; a saved value that names no step shows as unknown and Save waits until it is fixed, so a typo no longer saves a line of zeros.
+
+### Removed
+- **The old Feature health, step chart and Coach tips tables.** Saved panels keep drawing as the editor cards and charts they already showed; one that no card or chart can draw shows the "replaced by a card or a chart" note.
+
 ## [0.69.0] — 2026-10-29
 
 ### Changed
