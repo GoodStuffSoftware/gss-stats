@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.74.3] — 2026-10-29
+
+### Fixed
+- **Half-width card titles wrap instead of being cut off.** A long title or its qualifier now breaks onto a second line at narrow widths.
+- **Wide tables no longer lose their right edge.** Table cells wrap, and a table that still overflows scrolls inside its card with a shadow marking the hidden side.
+- **Phone pages have an even 16px side gutter.** The page and the top bar line up with it at 390px.
+
 ## [0.74.2] — 2026-10-29
 
 ### Fixed

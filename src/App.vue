@@ -1635,13 +1635,14 @@ function toggleDark() {
 }
 
 @media (max-width: 700px) {
+  /* Phone: the same 16px side gutter as desktop; the topbar bleeds out to the screen edge and pads back in. */
   .app {
-    padding: 0 12px 48px;
+    padding: 0 16px 48px;
     gap: 12px;
   }
   .topbar {
-    margin: 0 -12px;
-    padding: 9px 12px;
+    margin: 0 -16px;
+    padding: 9px 16px;
     gap: 8px;
   }
   /* Phone: ☰, the (shortened) breadcrumb, ⋯ and search on the first row; the other actions below. */

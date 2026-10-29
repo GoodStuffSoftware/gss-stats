@@ -774,6 +774,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* A card too narrow for its title and its controls (a quarter-width stat card) puts the controls
+     on a second row instead of squeezing the title to nothing. */
+  flex-wrap: wrap;
   gap: 8px;
   /* No divider/strip (owner clarification, 2026-09-26 — "these bars are supposed to be
      invisible"): a plain heading directly above the content, like the old bespoke pages'
@@ -804,29 +807,32 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 }
 .title-wrap {
   display: flex;
+  flex: 1 1 5.5em;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: 0 6px;
   min-width: 0;
   overflow: hidden;
 }
+/* A long title wraps onto more lines (a half-width card at about 740px used to cut it off with an
+   ellipsis); a single unbroken word longer than the card still breaks instead of overflowing. */
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
   max-width: 100%;
 }
 .ovr {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
   color: rgb(var(--amber-hover));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .pin {
   color: rgb(var(--amber));
@@ -846,6 +852,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 .revealed-controls {
   display: flex;
