@@ -13,7 +13,7 @@
 // { dimension, breakdown } and get the same result via a fallback.
 
 import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
-import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions } from '../../src/lib/campaigns'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions, LATE_FLIGHT_DIMS, lateFlightInputs, lateFlightSqlCase } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { featureStepFilterSql, featureStepPrefilter, featureStepSqlCase, featureStepWindow } from '../../src/lib/featureHealthSql'
@@ -122,8 +122,47 @@ export function ringBlankExclusion(dim: string): string {
 // keeps among an exact-count tie is unspecified, and the two query PLANS being compared here
 // (a bare GROUP BY vs. one wrapped in a subquery) aren't guaranteed to break ties the same way,
 // even reading the identical data. The caller (onRequestPost below) always supplies a full order.
-export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string): string {
-  return withFlightRegistry(`SELECT k, c, SUM(c) OVER () AS total FROM (SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY ${orderBy} LIMIT ?`)
+export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string, late?: LateFlight | null): string {
+  return withFlightRegistry(`SELECT k, c, SUM(c) OVER () AS total FROM (${groupedCountsSql([[col, 'k']], [['COUNT(*)', 'c']], whereSql, late)}) ORDER BY ${orderBy} LIMIT ?`)
+}
+
+// ── Late flight attribution: count first, attribute after (lib/campaigns.ts lateFlightSqlCase) ──
+// A grouped statement that uses a flight dimension (campaignFlight, flightDay, arrival, landingTag: as a
+// key, a blank test or a drill) no longer runs the flight_reg lookup once per hits row. Stage 1 scans
+// `hits` once with the statement's other keys and filters plus the flight expressions' per-row inputs
+// (lateFlightInputs), and counts; stage 2 evaluates the flight keys and filters once per stage-1 group,
+// then re-sums to the statement's own keys. Same groups, same counts (geo.lateFlight.test.ts pins it
+// against the per-row form through the handler); rows read drop from about rows x 14 to about
+// rows + groups x 13, see docs/capacity.md. Points mode keeps the per-row form (its bare
+// city/region/country columns are not grouped, so a re-aggregation could pick other values).
+/** Stage-2 state: the input columns, the flight filters (bind-free text, plus their binds, which follow
+ * every stage-1 bind in the statement) and which key aliases are flight keys. */
+export interface LateFlight {
+  inputs: string[]
+  where: string[]
+  binds: unknown[]
+  lateAliases: Set<string>
+}
+/** `{ late: false }` puts every grouped statement back on the per-row form (the parity tests compare
+ * the two through the real handler; also the one-line revert). */
+export const flightAttribution = { late: true }
+/** `SELECT <keys>, <counts> FROM hits WHERE <where> GROUP BY <keys>` (the old inner aggregate, byte for
+ * byte) without `late`; with it, the two-stage form above. Stage 2 re-sums the counts. */
+export function groupedCountsSql(keys: [string, string][], counts: [string, string][], whereSql: string, late?: LateFlight | null): string {
+  const list = (xs: [string, string][]) => xs.map(([e, a]) => `${e} AS ${a}`)
+  if (!late) return `SELECT ${[...list(keys), ...list(counts)].join(', ')} FROM hits WHERE ${whereSql} GROUP BY ${keys.map(([, a]) => a).join(', ')}`
+  const early = keys.filter(([, a]) => !late.lateAliases.has(a))
+  const inputAliases = late.inputs.map((i) => i.slice(i.lastIndexOf(' AS ') + 4))
+  const inner = `SELECT ${[...list(early), ...late.inputs, ...list(counts)].join(', ')} FROM hits WHERE ${whereSql} GROUP BY ${[...early.map(([, a]) => a), ...inputAliases].join(', ')}`
+  const outerKeys = keys.map(([e, a]) => (late.lateAliases.has(a) ? `${e} AS ${a}` : a))
+  const sums = counts.map(([, a]) => `SUM(${a}) AS ${a}`)
+  const lw = late.where.length ? ` WHERE ${late.where.join(' AND ')}` : ''
+  return `SELECT ${[...outerKeys, ...sums].join(', ')} FROM (${inner})${lw} GROUP BY ${keys.map(([, a]) => a).join(', ')}`
+}
+const splitAlias = (col: string): [string, string] => {
+  const m = /^([\s\S]*) AS (k\d+)$/.exec(col)
+  if (!m) throw new Error(`ring column without a k<i> alias: ${col}`)
+  return [m[1], m[2]]
 }
 
 // `cols` (e.g. `["region AS k0", "device AS k1"]`) aliases the real columns to k0..kN for the
@@ -136,14 +175,18 @@ export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: 
  * date bucket, one count per series (`s<i>`, the step's own match, so two series that share a path each count it), and
  * each series' total over every bucket (`t<i>`, before LIMIT, as `total` above). `stepSql[i]` is featureStepFilterSql's
  * literal for series i, never request text. Grouped by the date key alone. */
-export function buildStepSeriesSql(col: string, stepSql: readonly string[], whereSql: string): string {
-  const sums = stepSql.map((s, i) => `SUM(CASE WHEN ${s} THEN 1 ELSE 0 END) AS s${i}`).join(', ')
+export function buildStepSeriesSql(col: string, stepSql: readonly string[], whereSql: string, late?: LateFlight | null): string {
+  const sums: [string, string][] = stepSql.map((s, i) => [`SUM(CASE WHEN ${s} THEN 1 ELSE 0 END)`, `s${i}`])
   const outer = stepSql.map((_, i) => `s${i}, SUM(s${i}) OVER () AS t${i}`).join(', ')
-  return withFlightRegistry(`SELECT k, ${outer} FROM (SELECT ${col} AS k, ${sums} FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY k DESC LIMIT ?`)
+  return withFlightRegistry(`SELECT k, ${outer} FROM (${groupedCountsSql([[col, 'k']], sums, whereSql, late)}) ORDER BY k DESC LIMIT ?`)
 }
 
-export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string): string {
-  return withFlightRegistry(`SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`)
+// `cols` are `<expr> AS k<i>`, in groupBy's order.
+export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string, late?: LateFlight | null): string {
+  const grouped = late
+    ? groupedCountsSql(cols.map(splitAlias), [['COUNT(*)', 'c']], whereSql, late)
+    : `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}`
+  return withFlightRegistry(`SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (${grouped}) ORDER BY c DESC, ${groupBy} LIMIT ?`)
 }
 
 // Every analytic column on `hits`, plus the derived (non-column) dimensions below — this Set
@@ -302,10 +345,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const stepSeries: string[] | null =
     Array.isArray(body.stepSeries) && body.stepSeries.length ? (body.stepSeries as unknown[]).map((v) => (typeof v === 'string' ? v : '')) : null
   if (stepSeries && stepSeries.length > MAX_STEP_SERIES) return json({ error: `too many series (at most ${MAX_STEP_SERIES})` }, 400)
-  const drillClause = (w: string[], b: any[]) => {
+  const drillClause = (w: string[], b: any[], late: LateFlight | null = null) => {
     for (const c of constraints) {
       const derivedExpr = DERIVED_FILTER_EXPR[c.field]
-      if (c.field === 'featureStep') {
+      if (late && LATE_FLIGHT_DIMS.has(c.field)) {
+        // Stage 2 (late flight attribution): the same label test, over the grouped inputs.
+        late.where.push(`(${lateFlightSqlCase(c.field, '')}) = ?`)
+        late.binds.push(c.value)
+      } else if (c.field === 'featureStep') {
         // The step's own match (featureHealthSql.ts), not the first-match CASE: two steps may share a path.
         // A literal built from the config, never the request's text; an unknown step matches nothing.
         w.push(featureStepFilterSql(c.value))
@@ -472,6 +519,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
+  // Late flight attribution for a grouped statement that uses a flight dimension (see groupedCountsSql). Every
+  // tsWindow form leads with `ts >= ? AND ts < ?` on its outer bounds, so every row read lies in [binds[0], binds[1]).
+  const lateFlightDims = [...activeDims, ...constraints.map((c) => c.field)].filter((d) => LATE_FLIGHT_DIMS.has(d))
+  const newLate = (): LateFlight | null =>
+    !isPoints && flightAttribution.late && lateFlightDims.length ? { inputs: lateFlightInputs(lateFlightDims, [tsWindow.binds[0], tsWindow.binds[1]]), where: [], binds: [], lateAliases: new Set() } : null
 
   // Everything that changes the SQL (and therefore the response) goes into the cache key —
   // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
@@ -556,20 +608,27 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // CAST(... AS TEXT)) is applied uniformly, and if a blank row were ever to reach here
     // (it shouldn't: ringBlankExclusion below drops them first) it would still render as its
     // proper label instead of a raw column value.
-    const cols = ringDims.map((d, i) => `${breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
+    const late = newLate()
+    const isLate = (d: string) => !!late && LATE_FLIGHT_DIMS.has(d)
+    ringDims.forEach((d, i) => {
+      if (isLate(d)) late!.lateAliases.add(`k${i}`)
+    })
+    const cols = ringDims.map((d, i) => `${isLate(d) ? lateFlightSqlCase(d, emptyLabelFor(d)) : breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
     // Ring mode has always EXCLUDED a dimension's blank rows outright (never bucketed them
     // under a label the way single-dim breakdown does) — ringBlankExclusion is the
     // type-correct version of that per-dim test (screenw is INTEGER; every other ring
     // dimension is TEXT).
-    const w: string[] = [...tsWindow.terms, ...ringDims.map(ringBlankExclusion)]
+    const w: string[] = [...tsWindow.terms, ...ringDims.filter((d) => !isLate(d)).map(ringBlankExclusion)]
+    for (const d of ringDims) if (isLate(d)) late!.where.push(`(${lateFlightSqlCase(d, '')}) <> ''`)
     const b: any[] = [...tsWindow.binds]
     eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
     splitGuardClause(w, b)
     knownTrafficClause(w, b)
     siteClause(w, b)
-    drillClause(w, b)
+    drillClause(w, b, late)
     excludeOwnClause(w, b)
     selfReferralClause(ringDims, w, b) // inert unless 'referrer' is one of the ring dims
+    if (late) b.push(...late.binds) // stage 2's filters follow every stage-1 term in the statement
     const whereSql = w.join(' AND ')
     const groupBy = ringDims.map((_, i) => `k${i}`).join(', ')
     // Each extra ring dimension multiplies the possible distinct combinations, so a 2-ring
@@ -579,7 +638,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ringDims.length <= 2 ? Math.min(limit * 4, 1000) : Math.min(limit * 4 * (ringDims.length - 1), 4000)
     // One statement: the inner GROUP BY scans `hits` once; SUM(c) OVER () sums every group's
     // count (not just the fetched top-N) into `total`, replacing the old second COUNT(*) scan.
-    const sql = buildMergedRingSql(cols, whereSql, groupBy)
+    const sql = buildMergedRingSql(cols, whereSql, groupBy, late)
     const tooLarge = statementTooLarge(sql, b.length + 1)
     if (tooLarge) return tooLarge
     let r: any
@@ -606,15 +665,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // that appears on the map also appears (as "(direct)"/"(none)") in the referrer,
   // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
   // location charts stayed full for the very same visits.
-  const col = breakdownColumnExpr(dim, emptyLabelFor(dim))
+  const late = newLate()
+  const dimLate = !!late && LATE_FLIGHT_DIMS.has(dim)
+  if (dimLate) late!.lateAliases.add('k')
+  const col = dimLate ? lateFlightSqlCase(dim, emptyLabelFor(dim)) : breakdownColumnExpr(dim, emptyLabelFor(dim))
   const where = [...tsWindow.terms]
   const binds: any[] = [...tsWindow.binds]
-  if (BLANK_DROPPED_DIMS.has(dim)) where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
+  if (BLANK_DROPPED_DIMS.has(dim)) {
+    if (dimLate) late!.where.push(`(${lateFlightSqlCase(dim, '')}) <> ''`)
+    else where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
+  }
   eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
   splitGuardClause(where, binds)
   knownTrafficClause(where, binds)
   siteClause(where, binds)
-  drillClause(where, binds)
+  drillClause(where, binds, late)
   excludeOwnClause(where, binds)
   selfReferralClause([dim], where, binds) // inert unless this IS the referrer chart
 
@@ -624,7 +689,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // its total over the whole window, and its own caption and live flags.
     const stepSql = stepSeries.map(featureStepFilterSql)
     where.push(`(${[...new Set(stepSql)].join(' OR ')})`)
-    const sql = buildStepSeriesSql(col, stepSql, where.join(' AND '))
+    if (late) binds.push(...late.binds) // stage 2's filters follow every stage-1 term
+    const sql = buildStepSeriesSql(col, stepSql, where.join(' AND '), late)
     const tooLarge = statementTooLarge(sql, binds.length + 1)
     if (tooLarge) return tooLarge
     let r: any
@@ -646,13 +712,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   const whereSql = where.join(' AND ')
+  if (late) binds.push(...late.binds) // stage 2's filters follow every stage-1 term
   // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
   // A date axis keeps the most RECENT `limit` days (newest first under LIMIT, then put back in
   // date order below) — ascending would silently keep the oldest ones on a long range.
   const orderBy = isDateDim(dim) ? 'k DESC' : 'c DESC, k ASC'
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
-  const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
+  const sql = buildMergedBreakdownSql(col, whereSql, orderBy, late)
   const tooLarge = statementTooLarge(sql, binds.length + 1)
   if (tooLarge) return tooLarge
 

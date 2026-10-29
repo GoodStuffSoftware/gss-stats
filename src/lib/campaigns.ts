@@ -785,6 +785,86 @@ export function arrivalSqlCase(emptyLabel: string, fixedAtMs: number | null = IN
   const E = sqlLit(emptyLabel)
   return `CASE WHEN visitor <> 'new' THEN ${E} WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} WHEN (${campaignFlightSqlCase('')}) <> '' THEN 'tagged' ELSE 'untagged' END`
 }
+
+// ── Late flight attribution (functions/api/geo.ts): count first, attribute after ─────────
+// The four flight expressions above run the flight_reg lookup once per hits row, and D1 counts every
+// registry row a lookup scans as a row read (rows in range x ~14 on a 13-row registry). A grouped geo
+// statement instead computes per row only the cheap single-row INPUTS those expressions read (no table
+// read), groups on them, and runs the lookup once per GROUP (lateFlightSqlCase, over the inputs). The
+// inputs are everything the expressions read from a row, so every row of a group gets the same value:
+//   _fu  the row's `campaign`, NULL when EXCLUSIONS drop it (the CASE's first branch)
+//   _ft  the largest registry boundary (attribution start, serving-window start, window end) at or below
+//        `ts`, NULL below them all: for every boundary p, `ts >= p` exactly when `_ft >= p`. With the
+//        statement's outer window [lo, hi) known, only the boundaries inside it are listed (a boundary at or
+//        below lo is passed by every row, one at or above hi by none): ELSE is the largest boundary <= lo
+//   _fd  the row's ET date (flightDay's day number)
+//   _fa  0 where arrival's first two branches apply (not a first beacon; a pre-fix install-gap row), else 1
+//   _fl  the row's path when it is a landing tag's arrival path on a landing site and EXCLUSIONS keep it, else NULL
+// Counts only: the inputs are a row's own columns, grouped like any dimension; no visitor id, no cross-row join.
+export const LATE_FLIGHT_DIMS: ReadonlySet<string> = new Set(['campaignFlight', 'flightDay', 'arrival', 'landingTag'])
+const LATE_INPUTS: Record<string, readonly string[]> = {
+  campaignFlight: ['_fu', '_ft'],
+  flightDay: ['_fu', '_ft', '_fd'],
+  arrival: ['_fa', '_fu', '_ft'],
+  landingTag: ['_fl', '_ft'],
+}
+const LATE_INPUT_ORDER = ['_fu', '_ft', '_fd', '_fa', '_fl'] as const
+function exclusionsSql(): string {
+  const ew: string[] = []
+  const eb: unknown[] = []
+  applyExclusions(ew, eb)
+  return `NOT (${inlineBinds(ew.join(' AND '), eb)})`
+}
+/** Every boundary a flight expression compares `ts` with, newest first (the flight_reg rows' fr_att, fr_from, fr_to). */
+function flightBoundariesMs(): number[] {
+  const set = new Set<number>()
+  for (const c of CAMPAIGNS) {
+    const attrStart = campaignAttributionStartMs(c)
+    if (attrStart === null || !c.flightStart) continue
+    const [from, to] = etFlightRangeMs(c.flightStart, c.flightEnd)
+    set.add(attrStart).add(from).add(to)
+  }
+  return [...set].sort((a, b) => b - a)
+}
+function lateInputSql(name: (typeof LATE_INPUT_ORDER)[number], window: readonly [number, number] | null): string {
+  if (name === '_fu') return `CASE WHEN ${exclusionsSql()} THEN NULL ELSE campaign END`
+  if (name === '_ft') {
+    const all = flightBoundariesMs()
+    const bs = window ? all.filter((p) => p > window[0] && p < window[1]) : all
+    const floor = window ? all.find((p) => p <= window[0]) : undefined
+    const otherwise = floor === undefined ? 'NULL' : String(sqlInt(floor))
+    return bs.length ? `CASE ${bs.map((p) => `WHEN ts >= ${sqlInt(p)} THEN ${sqlInt(p)}`).join(' ')} ELSE ${otherwise} END` : otherwise
+  }
+  if (name === '_fd') return etDateSql()
+  if (name === '_fa') return `CASE WHEN visitor <> 'new' THEN 0 WHEN ${installGapUnmeasuredSql(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS)} THEN 0 ELSE 1 END`
+  const paths = LANDING_TAGS.map((t) => sqlLit(`/return/${t.tag}/d0`)).join(', ')
+  return `CASE WHEN ${exclusionsSql()} OR site NOT IN (${LANDING_SITES.map(sqlLit).join(', ')}) THEN NULL WHEN path IN (${paths}) THEN path ELSE NULL END`
+}
+/** The per-row input columns (`<expr> AS <name>`, fixed order, no binds) the late expressions of `dims` read.
+ * `window` is the statement's outer `ts` bounds [lo, hi), which every row it reads lies inside. */
+export function lateFlightInputs(dims: Iterable<string>, window: readonly [number, number] | null = null): string[] {
+  const need = new Set<string>()
+  for (const d of dims) for (const i of LATE_INPUTS[d] ?? []) need.add(i)
+  return LATE_INPUT_ORDER.filter((i) => need.has(i)).map((i) => `${lateInputSql(i, window)} AS ${i}`)
+}
+/** A late flight dimension's value over lateFlightInputs' columns: the same value its per-row twin
+ * (campaignFlightSqlCase, flightDaySqlCase, arrivalSqlCase, landingTagSqlCase) gives each row of the group. */
+export function lateFlightSqlCase(dim: string, emptyLabel: string): string {
+  const E = sqlLit(emptyLabel)
+  const reg = `FROM ${FLIGHT_REGISTRY_TABLE} WHERE fr_uc = _fu AND _ft >= fr_att ORDER BY fr_ord LIMIT 1`
+  if (dim === 'campaignFlight') return `CASE WHEN _fu IS NULL THEN ${E} ELSE COALESCE((SELECT fr_id ${reg}), ${E}) END`
+  if (dim === 'flightDay') {
+    const day = `CASE WHEN _ft >= fr_from AND NOT (_ft >= fr_to) THEN CAST(CAST(julianday(_fd) - julianday(fr_day0) AS INTEGER) + 1 AS TEXT) ELSE ${E} END`
+    return `CASE WHEN _fu IS NULL THEN ${E} ELSE COALESCE((SELECT ${day} ${reg}), ${E}) END`
+  }
+  if (dim === 'arrival') return `CASE WHEN _fa = 0 THEN ${E} WHEN (${lateFlightSqlCase('campaignFlight', '')}) <> '' THEN 'tagged' ELSE 'untagged' END`
+  if (dim === 'landingTag') {
+    const tags = LANDING_TAGS.map((t) => sqlLit(t.tag)).join(', ')
+    return `CASE WHEN _fl IS NULL THEN ${E} ELSE COALESCE((SELECT fr_uc FROM ${FLIGHT_REGISTRY_TABLE} WHERE fr_uc IN (${tags}) AND _fl = '/return/' || fr_uc || '/d0' AND _ft >= fr_att ORDER BY fr_ord LIMIT 1), ${E}) END`
+  }
+  throw new Error(`not a late flight dimension: ${dim}`)
+}
+
 export function keyEventSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
   const E = sqlLit(emptyLabel)
   const list = (xs: readonly string[]) => xs.map(sqlLit).join(', ')
