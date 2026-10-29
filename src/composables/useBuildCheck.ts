@@ -1,11 +1,11 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { BUILD_ID_URL, BUILD_CHECK_INTERVAL_MS, isNewerBuild, parseBuildId } from '../lib/buildCheck'
+import { BUILD_ID_URL, BUILD_CHECK_INTERVAL_MS, isNewerBuild, parseBuildId } from './buildCheck'
 
-/** Fetches the live build id. Only this static file is requested: no cookie-bearing API, no D1,
+/** Fetches the live build id. Only this static file is requested: no API route, no D1,
  *  nothing sent about the visitor. Any failure (offline, signed out, bad body) is "unknown". */
 export async function fetchLiveBuildId(fetchImpl: typeof fetch = fetch): Promise<string | null> {
   try {
-    const res = await fetchImpl(BUILD_ID_URL, { cache: 'no-store', redirect: 'manual', credentials: 'same-origin' })
+    const res = await fetchImpl(BUILD_ID_URL, { cache: 'no-store', redirect: 'manual', credentials: 'same-origin', signal: AbortSignal.timeout(15_000) })
     if (!res.ok) return null
     return parseBuildId(await res.json())
   } catch {

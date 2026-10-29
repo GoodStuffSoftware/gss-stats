@@ -25,3 +25,10 @@ export const RELOAD_DISCARD_TEXT = 'Reloading discards your unsaved changes.'
 export function reloadBannerWarning(hasUnsaved: boolean): string {
   return hasUnsaved ? RELOAD_DISCARD_TEXT : ''
 }
+
+/** True when a reload would lose edits: a card/chart editor is open, or the layout save failed,
+ *  is blocked, or was refused as stale. A save that is merely pending ('saving') is not counted:
+ *  leaving the page flushes it (pagehide keepalive). */
+export function hasUnsavedWork(editorOpen: boolean, saveState: string): boolean {
+  return editorOpen || saveState === 'error' || saveState === 'blocked' || saveState === 'stale'
+}

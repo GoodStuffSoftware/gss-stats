@@ -2151,13 +2151,13 @@ Single Cloudflare account — no account-ID env needed. Pages project: **gss-sta
 
 Every production build writes a fresh id to `dist/build-id.json` (`vite.config.ts`; the commit sha
 plus a build stamp) and bakes the same id into the app. An open tab fetches that one static file
-(`cache: 'no-store'`; `public/_headers` sets `Cache-Control: no-store` so Cloudflare and the browser
+(`cache: 'no-store'`; the sign-in gate already marks every response `private, no-store`, and `public/_headers` repeats that for this file so Cloudflare and the browser
 never cache it) every 5 minutes while visible, and once when a hidden tab becomes visible. If the live
 id differs, a small banner says "A new version of the site is available" with a **Reload** button;
-if a card/chart editor is open or a layout save is pending, failed or blocked, it adds that reloading
+if a card/chart editor is open or a layout save failed, is blocked or was refused as stale, it adds that reloading
 discards the unsaved changes. It never reloads by itself. The check touches no `/api` route and no D1,
 and sends nothing but that file request; it is off in dev and in tests (id `dev`).
-Logic: `src/lib/buildCheck.ts`, `src/composables/useBuildCheck.ts`.
+Logic: `src/composables/buildCheck.ts`, `src/composables/useBuildCheck.ts`.
 
 ### Preview (dev)
 

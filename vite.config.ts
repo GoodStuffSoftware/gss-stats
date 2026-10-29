@@ -21,6 +21,7 @@ function buildIdPlugin(): Plugin {
   }
 }
 
+// Keeps hooks and the editor responsive during parallel test runs; worker processes inherit it on Windows.
 try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
 
 // Build output goes to dist/ which Pages serves; functions/ is picked up by wrangler.

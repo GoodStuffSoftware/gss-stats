@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { fetchLiveBuildId, useBuildCheck } from './useBuildCheck'
-import { BUILD_CHECK_INTERVAL_MS } from '../lib/buildCheck'
+import { BUILD_CHECK_INTERVAL_MS } from './buildCheck'
 
 const json = (body: unknown, ok = true) => ({ ok, json: async () => body }) as Response
 
@@ -24,7 +24,7 @@ describe('fetchLiveBuildId', () => {
   it('requests only the static file, uncached', async () => {
     const f = vi.fn(async () => json({ id: 'x' }))
     expect(await fetchLiveBuildId(f as unknown as typeof fetch)).toBe('x')
-    expect(f).toHaveBeenCalledWith('/build-id.json', expect.objectContaining({ cache: 'no-store' }))
+    expect(f).toHaveBeenCalledWith('/build-id.json', expect.objectContaining({ cache: 'no-store', redirect: 'manual' }))
   })
   it('is null on a non-ok reply, a bad body or a network error', async () => {
     expect(await fetchLiveBuildId((async () => json({ id: 'x' }, false)) as unknown as typeof fetch)).toBeNull()

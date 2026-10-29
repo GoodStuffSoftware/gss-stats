@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNewerBuild, parseBuildId, reloadBannerWarning, RELOAD_DISCARD_TEXT } from './buildCheck'
+import { hasUnsavedWork, isNewerBuild, parseBuildId, reloadBannerWarning, RELOAD_DISCARD_TEXT } from './buildCheck'
 
 describe('parseBuildId', () => {
   it('reads the id', () => expect(parseBuildId({ id: 'abc-1' })).toBe('abc-1'))
@@ -18,4 +18,10 @@ describe('reloadBannerWarning', () => {
     expect(reloadBannerWarning(true)).toBe(RELOAD_DISCARD_TEXT)
     expect(reloadBannerWarning(false)).toBe('')
   })
+})
+
+describe('hasUnsavedWork', () => {
+  it('counts an open editor', () => expect(hasUnsavedWork(true, 'idle')).toBe(true))
+  it.each(['error', 'blocked', 'stale'])('counts a %s save', (s) => expect(hasUnsavedWork(false, s)).toBe(true))
+  it.each(['idle', 'saving', 'saved'])('does not count a %s save', (s) => expect(hasUnsavedWork(false, s)).toBe(false))
 })

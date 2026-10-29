@@ -30,7 +30,7 @@ import AccountMenu from './components/AccountMenu.vue'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
-import { RELOAD_BANNER_TEXT, reloadBannerWarning } from './lib/buildCheck'
+import { RELOAD_BANNER_TEXT, reloadBannerWarning, hasUnsavedWork } from './composables/buildCheck'
 
 // Live push (composables/useLiveChanges.ts): ONE fail-soft socket for the whole app, open only while
 // the tab is visible and in use. It adds a refetch trigger on top of today's; it never replaces one.
@@ -311,10 +311,10 @@ onBeforeUnmount(() => {
 
 // New-version prompt: only a production build checks (the dev server and vitest build id is 'dev').
 // It never reloads on its own. "Unsaved" = an open card/chart editor, or a layout save that is
-// pending, failed or blocked (the layout itself autosaves 700 ms after an edit).
+// failed, blocked or refused as stale (the layout itself autosaves 700 ms after an edit).
 const { updateAvailable } = useBuildCheck(__BUILD_ID__, __BUILD_ID__ !== 'dev')
-const hasUnsavedWork = computed(() => editing.value !== null || ['saving', 'error', 'blocked'].includes(saveState.value))
-const reloadWarning = computed(() => reloadBannerWarning(hasUnsavedWork.value))
+const hasUnsaved = computed(() => hasUnsavedWork(editing.value !== null, saveState.value))
+const reloadWarning = computed(() => reloadBannerWarning(hasUnsaved.value))
 function reloadNow() { window.location.reload() }
 
 const saveLabel = computed(() =>
@@ -1577,7 +1577,7 @@ function toggleDark() {
   gap: 8px;
 }
 .reload-banner {
-  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60;
+  position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 200;
   display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px);
   padding: 8px 12px; border: 1px solid rgb(var(--line-2)); border-radius: 8px;
   background: rgb(var(--surface)); color: rgb(var(--ink)); font-size: 13px;
