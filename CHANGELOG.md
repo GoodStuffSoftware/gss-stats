@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.75.3] — 2026-10-29
 
 ### Changed
-- **No change to any page.** The card editor's round-trip test over the Ask-order card now runs in about 20 seconds instead of 50, so a deploy no longer times out on it. The render-check guide now has a tool for true 390 px phone screenshots (headless Chrome cannot go below about 500 px).
+- **No change to any page.** The Ask-order card-editor test runs in about 20 seconds instead of 50 so deploys stop timing out on it, and the render-check guide gains a tool for true 390 px phone screenshots.
 
 ## [0.75.2] — 2026-10-29
 

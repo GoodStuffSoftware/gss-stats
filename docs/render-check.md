@@ -66,7 +66,7 @@ loaded height), but re-put the layout before each shot anyway so every shot star
   <page-id> <out.png>`. It sets the viewport through the DevTools Protocol, so the width is exact; give a
   height tall enough to hold the page (12000). It starts its own hidden Chrome and fresh profile, reads
   nothing secret, and waits about 9 s for the page to load its data. Set `CHROME_PATH` if Chrome is not at the
-  default Windows install path. Check a shot's width: a true 390 shot is 390 px wide.
+  default Windows install path; it needs Node 22 or newer. Check a shot's width: a true 390 shot is 390 px wide.
 - Live DOM: with the page open, `.vgl-item` gives each card's `transform` (translate3d y) and
   `offsetHeight`; overlap is a card whose y is less than the previous card's y plus height in the same
   column. Hidden content is `.card-body` with `scrollHeight` greater than `clientHeight`.

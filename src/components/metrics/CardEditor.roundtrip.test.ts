@@ -69,8 +69,8 @@ const wrapEl = (el: Element) => new DOMWrapper(el)
 const controls = (w: VueWrapper) => wrapEl(controlsEl(w))
 /** Raw DOM query inside the controls, for the hot loops below: wrap only the element you act on. */
 const dom = <E extends Element = Element>(w: VueWrapper, selector: string) => [...controlsEl(w).querySelectorAll<E>(selector)]
-/** Per controls column: sees every node added or removed, and every item opened or closed, since the last walk. */
-const changes = new WeakMap<Element, MutationObserver>()
+/** Per controls column: whether any node was added or removed, or any item opened or closed, since the last walk. */
+const changes = new WeakMap<Element, { observer: MutationObserver; dirty: boolean }>()
 /** Opens every item and every "More" block (repeatedly: opening one can reveal more). A walk of a big tree
  * costs about 20 ms and this runs after every checkbox, so it walks only when the controls changed since
  * its last walk (its own clicks count as a change, so what an opening reveals is opened on the next call).
@@ -79,12 +79,14 @@ const changes = new WeakMap<Element, MutationObserver>()
 async function expandAll(w: VueWrapper) {
   const root = controlsEl(w)
   let seen = changes.get(root)
-  if (seen && seen.takeRecords().length === 0) return
+  if (seen && seen.observer.takeRecords().length) seen.dirty = true
+  if (seen && !seen.dirty) return
   if (!seen) {
-    seen = new MutationObserver(() => {})
-    seen.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'open'] })
-    changes.set(root, seen)
+    const state = { observer: new MutationObserver(() => { state.dirty = true }), dirty: true }
+    state.observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'open'] })
+    changes.set(root, (seen = state))
   }
+  seen.dirty = false
   const shutDetails = () => dom<HTMLDetailsElement>(w, 'details:not([open])')
   const shut = dom<HTMLElement>(w, 'button[aria-expanded=false], details:not([open])')
   const summaries = shut.filter((el) => el.classList.contains('ce-item-summary'))

@@ -32,6 +32,8 @@ const chrome = spawn(
   { windowsHide: true, stdio: 'ignore' },
 )
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+let spawnError
+chrome.on('error', (e) => (spawnError = e)) // a wrong CHROME_PATH: report it, and still clean up the profile
 
 try {
   let targets
@@ -45,7 +47,7 @@ try {
     await sleep(200)
   }
   const target = targets?.find((t) => t.type === 'page')
-  if (!target) throw new Error('Chrome did not open a debugging page')
+  if (!target) throw new Error(spawnError ? `could not start Chrome at ${chromePath}: ${spawnError.message}` : 'Chrome did not open a debugging page')
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((r) => (ws.onopen = r))
   let id = 0
