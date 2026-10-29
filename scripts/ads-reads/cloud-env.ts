@@ -28,7 +28,6 @@ export const CLOUD_ENV_SPEC: readonly { name: string; bwsKey?: string; constant?
   { name: 'CLOUDFLARE_API_TOKEN', bwsKey: cloudEnvKey('CLOUDFLARE_API_TOKEN') },
   { name: 'CLOUDFLARE_ACCOUNT_ID', bwsKey: cloudEnvKey('CLOUDFLARE_ACCOUNT_ID') }, // env data: bws, never a repo constant
   { name: 'WRANGLER_SEND_METRICS', constant: 'false' },
-  { name: 'ADS_ROUTINE_MODE', constant: 'SHADOW' },
 ]
 export const CLEAR_AFTER_MS = 60_000
 

@@ -1,6 +1,6 @@
 ---
 name: ads-cloud-daily
-description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Flight 3's two arms are `by-date` rows: read from the arm's dates in code (src/lib/campaigns.ts STAGED_FLIGHT_3_DATES), and not read while their dates are `-`. Runs the gss-stats CLIs from env-var credentials, reports through one Agent Findings finding. Proposes only.
+description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, LIVE by default (a SHADOW dry-run only when the environment holds the opt-out ADS_POSTFLIGHT_MODE=shadow). Flight 3's two arms are `by-date` rows: read from the arm's dates in code (src/lib/campaigns.ts STAGED_FLIGHT_3_DATES), and not read while their dates are `-`. Runs the gss-stats CLIs from env-var credentials, reports through one Agent Findings finding. Proposes only.
 ---
 
 <!--
@@ -45,7 +45,7 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
    24215315197 and 24234347705.
 4. Firestore is COUNT-only through the CLI. Never write Firestore, never write the beacon
    database `gss-geo`, never use `wrangler d1 execute --file`. The only database writes allowed
-   are the ones the CLI makes itself (Part A always; Part B only in LIVE mode).
+   are the ones the CLI makes itself (Part A always; Part B in LIVE mode, which is the default; not in SHADOW).
 5. No git writes: never create a branch, commit, push, tag, issue or pull request. Never send
    email.
 6. At most ONE push line set per part (Part A, Part B), as defined below; it goes into the run's
@@ -439,9 +439,16 @@ routine's; the steps below only make gss-stats read it.
 
 0.1 Run, in one call:
 
-    TZ=America/New_York date +%F; if [ "${ADS_ROUTINE_MODE:-}" = "LIVE" ]; then echo MODE=LIVE; else echo MODE=SHADOW; fi
+    TZ=America/New_York date +%F; if [ "${ADS_POSTFLIGHT_MODE:-}" = "shadow" ]; then echo MODE=SHADOW; else echo MODE=LIVE; fi
 
 Call the printed date DATE and the printed mode MODE. MODE applies to Part B only.
+
+MODE is LIVE unless the environment variable `ADS_POSTFLIGHT_MODE` holds exactly `shadow`
+(lowercase). Unset, empty or any other value is LIVE. SHADOW is the opt-out: Part B runs with
+`--dry-run` (every read happens, nothing is stored) and reports `[SHADOW]` lines. To go back to
+SHADOW, add `ADS_POSTFLIGHT_MODE=shadow` to the `gss-ads-reads` environment variables; remove it to
+return to LIVE. The older `ADS_ROUTINE_MODE` variable is retired and ignored (an environment pasted
+before 2026-10-29 may still hold `ADS_ROUTINE_MODE=SHADOW`; it changes nothing).
 
 0.2 Decide what is due:
 - ARMS = the `live` legs-table rows whose read window contains DATE, plus the `by-date` rows whose
@@ -649,8 +656,8 @@ B1. Run (one call per report). LIVE:
 
     mkdir -p /tmp/pf/CAMPAIGN && PATH=/usr/local/bin:$PATH WRANGLER_SEND_METRICS=false npm run -s ads:postflight-read -- --stage STAGE --campaign CAMPAIGN > /tmp/pf/CAMPAIGN/out.txt 2> /tmp/pf/CAMPAIGN/err.txt; echo read_exit=$?
 
-SHADOW: the same command with `--dry-run` added after `--campaign CAMPAIGN` (every read
-happens, nothing is stored).
+SHADOW (only with the `ADS_POSTFLIGHT_MODE=shadow` opt-out): the same command with `--dry-run`
+added after `--campaign CAMPAIGN` (every read happens, nothing is stored).
 
 B2. Split (no other processing), per report:
 

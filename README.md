@@ -1403,7 +1403,7 @@ npm run ads:cloud-env
 
 It reads Bitwarden in-process, builds the `.env` block (`ADS_SA_B64`, `ADS_DEVELOPER_TOKEN`,
 `FIRESTORE_SA_B64`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
-`WRANGLER_SEND_METRICS=false`, `ADS_ROUTINE_MODE=SHADOW`; never `BWS_ACCESS_TOKEN`) and copies
+`WRANGLER_SEND_METRICS=false`; never `BWS_ACCESS_TOKEN`) and copies
 it to the Windows clipboard through PowerShell's standard input, marked to stay out of clipboard
 history and cloud sync. It prints the variable names only, then clears the clipboard after 60 s
 if it still holds the block (Ctrl+C or closing the window clears it at once). A third-party

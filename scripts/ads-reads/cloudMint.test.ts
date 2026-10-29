@@ -1,6 +1,10 @@
 // cloud-mint and cloud-env with fakes for gcloud, bws, fetch and PowerShell. No network, no
 // real binaries, no real clipboard.
 
+import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { clearRegisteredSecrets, redact } from '../../src/lib/adsRedact'
 import type { FetchLike } from '../../src/lib/adsApi'
@@ -315,7 +319,7 @@ describe('cloud-env', () => {
   ])
   it('builds the block in order with the constants and never BWS_ACCESS_TOKEN', () => {
     const { block, names } = buildEnvBlock(SECRETS)
-    expect(names).toEqual(['ADS_SA_B64', 'ADS_DEVELOPER_TOKEN', 'FIRESTORE_SA_B64', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'WRANGLER_SEND_METRICS', 'ADS_ROUTINE_MODE'])
+    expect(names).toEqual(['ADS_SA_B64', 'ADS_DEVELOPER_TOKEN', 'FIRESTORE_SA_B64', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'WRANGLER_SEND_METRICS'])
     expect(block).toBe(
       [
         'ADS_SA_B64=YWRzLXNhLWI2NC12YWx1ZQ==',
@@ -324,7 +328,6 @@ describe('cloud-env', () => {
         'CLOUDFLARE_API_TOKEN=cf-d1-token-value-888',
         `CLOUDFLARE_ACCOUNT_ID=${CF_ACCOUNT_ID}`,
         'WRANGLER_SEND_METRICS=false',
-        'ADS_ROUTINE_MODE=SHADOW',
         '',
       ].join('\n'),
     )
@@ -378,8 +381,8 @@ describe('cloud-env', () => {
     expect(clipboard).toBe('')
     const text = logs.join('\n')
     for (const v of values) expect(text).not.toContain(v)
-    expect(logs.slice(0, 7)).toEqual(['ADS_SA_B64', 'ADS_DEVELOPER_TOKEN', 'FIRESTORE_SA_B64', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'WRANGLER_SEND_METRICS', 'ADS_ROUTINE_MODE'])
-    expect(text).toContain('copied 7 vars')
+    expect(logs.slice(0, 6)).toEqual(['ADS_SA_B64', 'ADS_DEVELOPER_TOKEN', 'FIRESTORE_SA_B64', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'WRANGLER_SEND_METRICS'])
+    expect(text).toContain('copied 6 vars')
     expect(logs.at(-1)).toBe('clipboard cleared')
   })
   it('arms the Ctrl+C clear BEFORE the copy, and registers BWS_ACCESS_TOKEN with redact', async () => {
@@ -412,5 +415,37 @@ describe('cloud-env', () => {
     expect(logs.at(-1)).toBe('clipboard holds something else now; left alone')
     await expect(runCloudEnv({ env: {}, platform: 'win32', bws: b.bws, ps, log: () => {}, waitForClear: async () => 'timer' })).rejects.toThrow('BWS_ACCESS_TOKEN is not set')
     await expect(runCloudEnv({ env: { BWS_ACCESS_TOKEN: 'x' }, platform: 'linux', bws: b.bws, ps, log: () => {}, waitForClear: async () => 'timer' })).rejects.toThrow(/Windows/)
+  })
+})
+
+describe('ads-cloud-daily Part B mode (docs/routines/ads-cloud-daily.md Step 0.1)', () => {
+  const RUNBOOK = fs
+    .readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'routines', 'ads-cloud-daily.md'), 'utf8')
+    .replace(/\r\n/g, '\n')
+  // The exact one-line shell command the routine runs, taken from the runbook itself.
+  const STEP_0_1 = RUNBOOK.split('\n').find((l) => l.startsWith('    TZ=America/New_York date +%F;'))!.trim()
+  // A POSIX sh: on PATH (Git Bash, CI), else Git for Windows' own (PowerShell has none on PATH). Never System32 bash (WSL).
+  const SH = ['sh', 'C:/Program Files/Git/usr/bin/sh.exe'].find((c) => spawnSync(c, ['-c', 'true'], { windowsHide: true }).status === 0) ?? 'sh'
+  const modeWith = (env: Record<string, string>) => {
+    const r = spawnSync(SH, ['-c', STEP_0_1], { env: { PATH: process.env.PATH ?? '', ...env }, encoding: 'utf8', windowsHide: true })
+    expect(r.status).toBe(0)
+    return /^MODE=(\w+)$/m.exec(r.stdout)![1]
+  }
+  it('is LIVE by default: unset, empty, or any value but the exact opt-out', () => {
+    expect(modeWith({})).toBe('LIVE')
+    expect(modeWith({ ADS_POSTFLIGHT_MODE: '' })).toBe('LIVE')
+    expect(modeWith({ ADS_POSTFLIGHT_MODE: 'LIVE' })).toBe('LIVE')
+    expect(modeWith({ ADS_POSTFLIGHT_MODE: 'SHADOW' })).toBe('LIVE')
+  })
+  it('is SHADOW only with ADS_POSTFLIGHT_MODE=shadow', () => {
+    expect(modeWith({ ADS_POSTFLIGHT_MODE: 'shadow' })).toBe('SHADOW')
+  })
+  it('ignores the retired ADS_ROUTINE_MODE, so an environment pasted before the switch stays LIVE', () => {
+    expect(modeWith({ ADS_ROUTINE_MODE: 'SHADOW' })).toBe('LIVE')
+    expect(modeWith({ ADS_ROUTINE_MODE: 'shadow' })).toBe('LIVE')
+  })
+  it('documents the opt-out, and the cloud-env block no longer sets a mode', () => {
+    expect(RUNBOOK).toContain('ADS_POSTFLIGHT_MODE=shadow')
+    expect(CLOUD_ENV_SPEC.some((v) => /MODE/.test(v.name))).toBe(false)
   })
 })

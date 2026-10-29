@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.4] — 2026-10-29
+
+### Changed
+- **The daily Ads cloud routine now stores its post-flight reads.** Stage reads run live by default and record their readings; `ADS_POSTFLIGHT_MODE=shadow` in the routine environment restores the dry-run reads.
+
 ## [0.75.3] — 2026-10-29
 
 ### Changed
