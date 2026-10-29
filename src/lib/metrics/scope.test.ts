@@ -229,8 +229,8 @@ describe('flattenSectionItems', () => {
     const section: Section = { layout: 'rows', items: [baseItem, { ...baseItem, id: 'y' }] }
     const out = flattenSectionItems(section, campaignScope(ACTIVE_RETEST), { todayEt: '2026-09-27' })
     expect(out).toEqual([
-      { item: section.items[0], scope: campaignScope(ACTIVE_RETEST) },
-      { item: section.items[1], scope: campaignScope(ACTIVE_RETEST) },
+      { item: section.items[0], scope: campaignScope(ACTIVE_RETEST), instance: 0 },
+      { item: section.items[1], scope: campaignScope(ACTIVE_RETEST), instance: 0 },
     ])
   })
 
@@ -249,7 +249,7 @@ describe('flattenSectionItems', () => {
     }
     const section: Section = { layout: 'tiles', items: [item] }
     const out = flattenSectionItems(section, { kind: 'root' }, { todayEt: '2020-01-01' })
-    expect(out).toEqual([{ item, scope: { kind: 'root' }, emptyOf: item.repeat!.empty }])
+    expect(out).toEqual([{ item, scope: { kind: 'root' }, instance: 0, emptyOf: item.repeat!.empty }])
   })
 
   it('organic + flightingToday with no campaign flighting: the plain `empty`, never "no tracked campaign"', () => {
@@ -267,7 +267,7 @@ describe('flattenSectionItems', () => {
     const ctx = { todayEt: '2020-01-01' }
     expect(resolveRepeat(item.repeat, ctx)).toEqual([{ kind: 'organic' }])
     const out = flattenSectionItems(section, { kind: 'root' }, ctx)
-    expect(out).toEqual([{ item, scope: { kind: 'root' }, emptyOf: empty }])
+    expect(out).toEqual([{ item, scope: { kind: 'root' }, instance: 0, emptyOf: empty }])
     expect(JSON.stringify(out)).not.toContain('no-tracked-campaign-flighting')
   })
 

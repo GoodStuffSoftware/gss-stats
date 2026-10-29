@@ -316,7 +316,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (it.frame !== undefined && !['row', 'pill', 'tile', 'column', 'line'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
       if (it.lineBreak !== undefined && (it.lineBreak !== true || s.layout !== 'lines')) errors.push(`${w}: lineBreak is true, in a 'lines' section only`)
       const isLine = (it.frame ?? (s.layout === 'lines' ? 'line' : undefined)) === 'line'
-      for (const k of ['mono', 'dim'] as const) if (it[k] !== undefined && (it[k] !== true || !isLine)) errors.push(`${w}: ${k} is true, on a 'line' item only`)
+      for (const k of ['mono', 'dim', 'hideLabel'] as const) if (it[k] !== undefined && (it[k] !== true || !isLine)) errors.push(`${w}: ${k} is true, on a 'line' item only`)
       if (it.after !== undefined) {
         if (isLine) {
           if (typeof it.after !== 'string' || !it.after || it.after.length > 8 || /[{}]/.test(it.after)) errors.push(`${w}: a line item's after is up to 8 characters of plain text`)

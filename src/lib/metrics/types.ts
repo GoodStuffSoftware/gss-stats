@@ -276,6 +276,9 @@ export interface MetricItem {
   mono?: true
   /** A 'line' item only: drawn in the dimmer ink, a secondary figure. */
   dim?: true
+  /** A 'line' item only: the label is not printed (it still names the item for the editor and
+   * screen readers); the value reads as its own sentence, e.g. a status line. */
+  hideLabel?: true
   /** A column table's row only: a rule above it, setting a total apart from the rows over it. */
   ruleAbove?: true
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign

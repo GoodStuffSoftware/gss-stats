@@ -92,7 +92,7 @@ const textValue = computed(() => props.item.display.as === 'status' || props.ite
          so its text and a progress bar sit straight in the line's flow. -->
     <template v-else-if="frame === 'line'">
       <span class="mi-line" :class="{ mono: item.mono, dim: item.dim }" role="group" :aria-label="ariaLabel"
-        ><template v-if="plainLabel"><MetricLabel :tokens="vm.labelTokens" />{{ ' ' }}</template
+        ><template v-if="plainLabel && !item.hideLabel"><MetricLabel :tokens="vm.labelTokens" />{{ ' ' }}</template
         ><span class="mi-line-value" :class="{ mono: !textValue, muted: vm.muted }">{{ vm.primary }}</span>{{ typeof item.after === 'string' ? item.after : '' }}</span
       >
       <div v-if="vm.progress" class="mi-line-progress" role="progressbar" :aria-valuenow="vm.progress.value" aria-valuemin="0" :aria-valuemax="vm.progress.target" :aria-label="plainLabel"><BarTrack variant="progress" :pct="vm.progress.pct" :done="vm.progress.done" /></div>

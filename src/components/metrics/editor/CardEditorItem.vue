@@ -190,7 +190,7 @@ const frame = computed<'' | NonNullable<MetricItem['frame']>>({
 })
 /** A line item (a 'lines' section, or the 'line' frame): its look options. */
 const isLine = computed(() => (item.value.frame ?? (props.sectionLayout === 'lines' ? 'line' : undefined)) === 'line')
-function flagModel(key: 'lineBreak' | 'mono' | 'dim' | 'ruleAbove') {
+function flagModel(key: 'lineBreak' | 'mono' | 'dim' | 'hideLabel' | 'ruleAbove') {
   return computed<boolean>({
     get: () => item.value[key] === true,
     set: (on) => {
@@ -202,6 +202,7 @@ function flagModel(key: 'lineBreak' | 'mono' | 'dim' | 'ruleAbove') {
 const lineBreakModel = flagModel('lineBreak')
 const monoModel = flagModel('mono')
 const dimModel = flagModel('dim')
+const hideLabelModel = flagModel('hideLabel')
 const ruleAboveModel = flagModel('ruleAbove')
 const afterId = useId()
 const afterModel = computed<string>({
@@ -340,6 +341,9 @@ const itemRepeatModel = computed({
           </div>
           <div class="field check">
             <label><input type="checkbox" v-model="dimModel" /> Dimmer (a secondary figure)</label>
+          </div>
+          <div class="field check">
+            <label><input type="checkbox" v-model="hideLabelModel" /> Hide the label (the value reads as its own sentence)</label>
           </div>
           <div class="field">
             <label :for="afterId">Text after the value</label>
