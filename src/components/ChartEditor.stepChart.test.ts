@@ -82,7 +82,7 @@ describe('ChartEditor: the Feature step picker guards against a value that names
     const w = open(games())
     const pickers = w.findAll('[data-testid="series-feature-step"]')
     expect(pickers).toHaveLength(games().series!.length)
-    expect(pickers.map((p) => (p.element as HTMLSelectElement).value)).toEqual(games().series!.map((s) => s.filter![0].value))
+    expect(pickers.map((p) => (p.element as unknown as HTMLSelectElement).value)).toEqual(games().series!.map((s) => s.filter![0].value))
     expect(w.find('input[aria-label="Series filter value"]').exists()).toBe(false)
     expect(w.find('[data-testid="series-unknown-step"]').exists()).toBe(false)
     expect(saveButton(w).attributes('disabled')).toBeUndefined()

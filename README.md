@@ -388,7 +388,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     Back / Next (Create on the last step), each step's Next waiting until the step is complete
     and saying why inline. A **page**: its name; its group (an existing one or a new one named
     there); what it starts from (blank, a copy of the page on screen, or a built-in page's
-    default charts, including **Best Sudoku · Retention**) and its icon (Auto, shown, or one from the icon picker) — it's added to its
+    default charts, including **Best Sudoku · Retention** and **Best Sudoku · Features**: its 14 step charts, the Coach tips card and the Ask-order A/B) and its icon (Auto, shown, or one from the icon picker) — it's added to its
     group and opened. A page built from a built-in page stores which one (`templateId`, an optional
     field, guarded by layout version 19), so **Restore default charts** on it brings back that page's own
     chart set rather than the generic one; a page without the marker is read by its id, and a
@@ -740,8 +740,8 @@ they are per). The same card can be built or changed in the card editor like any
 - **Saved layouts are not rewritten.** A Feature health table saved by an older build (dataset
   `features`, view `health`) that hides known traffic is drawn as this card at render time
   (`featureHealthCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place,
-  title and settings; one that shows known traffic keeps the old table. The layout version does
-  not change.
+  title and settings. One that shows known traffic, which the card does not draw, shows the "replaced by a card or a chart" note instead (the old table is gone); edit it or restore the
+  default charts. The layout version does not change.
 
 ### Step charts
 
@@ -779,7 +779,13 @@ stays on the Feature health card.
 - **Saved layouts are not rewritten.** A step chart saved by an older build (dataset
   `features`, view `steps:<feature>`) is drawn, edited and duplicated as the ordinary chart at
   render time (`stepChartFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its
-  place, title, caption and settings. The layout version does not change.
+  place, title, caption and settings. A `steps:` view that names no known feature shows the "replaced by a card or a chart" note instead (the old table is gone); edit it or restore the
+  default charts. The layout
+  version does not change.
+- **Steps are picked, not typed.** In the chart editor a series filtered on `featureStep` picks
+  its value from every known step ("Feature: Step", in `FEATURES` order). A saved value that names
+  no step shows as *Unknown step* with an error under the series list, and Save stays off until a
+  step is picked or the series removed; other filter fields keep their free-text box.
 
 ### Coach tips
 
@@ -787,7 +793,7 @@ The **Coach tips** card (bottom of the Features page) has a row per coach-strip 
 wheel, notes, hint, clash): shown, dismissed and closed while showing, with dismissed per shown
 and closed per shown (ratios of counts, "—" for 0), for the latest complete ET day and the
 selected range. "Show me around" taps (`/coach/tour-opened`, no tip) are a separate total row.
-It is the same `/api/features` endpoint with `view: 'coach-tips'`
+Its numbers are those of the `/api/features` `view: 'coach-tips'` reading, kept as the parity reference
 ([`src/lib/coachTips.ts`](src/lib/coachTips.ts)): same two statements, grouped by ET day only.
 Splitting by *which tip* is a split by path, not by hour, place or device, so the refused
 `/coach/shown/%`, `/coach/dismissed/%` and `/coach/closed-at/%` paths are still read only as
@@ -823,7 +829,8 @@ same card can be built or changed in the card editor like any other.
 - **Saved layouts are not rewritten.** A Coach tips table saved by an older build (dataset
   `features`, view `coach-tips`) that hides known traffic is drawn as this card at render time
   (`coachTipsCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place, title
-  and settings; one that shows known traffic keeps the old table. The layout version does not
+  and settings. One that shows known traffic, which the card does not draw, shows the "replaced by a card or a chart" note instead (the old table is gone); edit it or restore the
+  default charts. The layout version does not
   change.
 
 ### Ask-order A/B
@@ -874,7 +881,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
-   │  - /api/features → the Feature health card, Coach tips and Ask-order from the same D1 (web and app combined)
+   │  - /api/features → the Ask-order A/B (and the parity reference for Feature health, Coach tips and the step charts) from the same D1 (web and app combined)
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
    │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)

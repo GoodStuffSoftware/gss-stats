@@ -45,8 +45,8 @@ describe('T7 saved-layout safety: the old Feature health bodies are gone, saved 
     const out = all.map((w) => ({ id: w.id, body: body(shown(w)), w: shown(w) }))
     expect(out.filter((x) => x.body === 'ask-order').map((x) => x.id)).toEqual(['fw-ask-order'])
     expect(out.filter((x) => x.body === 'retired')).toEqual([])
-    for (const x of out.filter((o) => o.body === 'card')) expect(validateCard(presetById(x.w.card!.preset!)!), x.id).toEqual([])
-    expect(out.filter((x) => x.body === 'card').map((x) => [x.id, x.w.card!.preset])).toEqual([['ow-feature-health', 'feature-health'], ['fw-coach-tips', 'coach-tips']])
+    for (const x of out.filter((o) => o.body === 'card')) expect(validateCard(presetById((x.w.card as { preset: string }).preset)!), x.id).toEqual([])
+    expect(out.filter((x) => x.body === 'card').map((x) => [x.id, (x.w.card as { preset: string }).preset])).toEqual([['ow-feature-health', 'feature-health'], ['fw-coach-tips', 'coach-tips']])
     const charts = out.filter((x) => x.body === 'chart')
     expect(charts.map((x) => x.id)).toEqual(STEP_IDS.map((id) => `fw-${id}`))
     for (const x of charts) {
