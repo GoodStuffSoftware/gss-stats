@@ -35,42 +35,4 @@ bump and changelog promotion (see Changelog).
 
 Mike doesn't review PRs (2026-10-06): the writer spawns its own parity reviewer, runs one fix round, then merges to main and verifies the deploy; Mike looks at the live result.
 
-Dashboard changes (Mike, 2026-10-27): chart, card, caption and campaign changes ship straight to production; only large changes (a new page or tab, a navigation or layout overhaul, a new editor tool or workflow, or removing/restructuring existing views) go to the dev preview (https://dev.gss-stats.pages.dev) for Mike's look first.
-
-## Environment data
-
-The repo is **public**. Env data (tokens, keys, secrets, email addresses, IP addresses, the
-Cloudflare account id) comes **only** from Cloudflare secrets (Pages secrets, Secrets Store),
-GitHub Actions secrets, or Bitwarden (`bws`) / env vars at run time; never commit it, and use
-made-up values in tests. See [README → Environment data](README.md#environment-data); the
-`secret-scan` workflow (gitleaks, `.gitleaks.toml`) fails a push that adds any.
-
-## Destructive git safety
-
-Before any `push --force`, `reset --hard`, or deleting an origin-tracked branch:
-back it up first and verify the backup pushed —
-
-```bash
-git branch backup/<branch>-YYYY-MM-DD origin/<branch>
-git push origin backup/<branch>-YYYY-MM-DD
-```
-
-## Documentation discipline
-
-Each fact lives in **one** file; cross-reference rather than duplicate. Update
-`README.md` and `CHANGELOG.md` in the same commit as any behavior change so docs
-never drift from the code.
-
-## Deploy
-
-Merges to `main` deploy automatically via GitHub Actions
-([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the
-`CLOUDFLARE_API_TOKEN` repo secret. A manual `wrangler` deploy is still available
-locally — its analytics token comes from a local, **gitignored** file (never commit
-it). See the [Deploy](README.md#deploy) and
-[Local development](README.md#local-development) sections of the README.
-
-## Not yet set up (optional follow-ups)
-
-- husky `pre-commit` (lint/format via lint-staged) — needs a lint toolchain first.
-- A changelog-style check on `[Unreleased]` bullets.
+Publishing (Mike, 2026-10-29: "You don't have to put stuff up on Dev unless I tell you just publish it so I can see the changes"): every change, large or small, publishes straight to production. The dev preview (https://dev.gss-stats.pages.dev) is used only when Mike asks for it. This replaces the 2026-10-27 rule that sent large dashboard changes to the preview first. When the change lands, give Mike a concrete look-at-X list: the page, tab or card to open, and what he should see.
