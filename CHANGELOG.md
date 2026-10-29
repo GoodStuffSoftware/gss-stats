@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.71.1] — 2026-10-29
+
 ### Changed
 - **Cheaper flight charts.** The Campaigns page's flight charts (flight, flight day, arrivals, landing tag) count visits first and work out each visit's flight afterwards, reading about a tenth of the rows they did, with the same numbers.
 - **Capacity notes for Workers Paid.** The capacity doc records the account's move to Workers Paid, its D1 and CPU limits, and that the sync Worker's CPU is now within the plan.
