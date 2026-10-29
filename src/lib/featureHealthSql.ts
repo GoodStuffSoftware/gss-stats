@@ -6,8 +6,10 @@
 // always whole ET days, so a refused path (src/lib/splitGuard.ts) is only ever read as a per-ET-day
 // total, which the counts-only rule allows.
 
-import { etDateSql } from './etTime'
-import { FEATURES, featureStepKey, featureStepOf, flatSteps, stepMatches, type FeatureDef, type StepMatch } from './featureHealth'
+import { addDays, etDateFast, etDateSql, etWallTimeMs } from './etTime'
+import { applyAlwaysExclusions, applyExclusions } from './campaigns'
+import { excludeOwnClause } from './ownExclusion'
+import { FEATURES, HEALTH_NEW_DAYS, healthDays, featureStepKey, featureStepOf, flatSteps, stepMatches, type FeatureDef, type StepMatch } from './featureHealth'
 import { refusedRowWindow, REFUSED_WINDOW_KEY } from './splitGuard'
 import { NUL_PATH_SQL, sqlInt, sqlLit } from './popupEvents'
 
@@ -154,4 +156,88 @@ export function totalStepsSql(whereTerms: readonly string[], features: readonly 
 export function beforeCutoffSql(whereTerms: readonly string[], features: readonly FeatureDef[] = FEATURES): string {
   const cols = features.map((f, i) => `SUM(CASE WHEN ${featureMatchSql(f)} THEN 1 ELSE 0 END) AS f${i}`)
   return `SELECT ${cols.join(', ')} FROM hits WHERE ${whereTerms.join(' AND ')}`
+}
+
+/** The metric registry's Feature health fact (lib/metrics/facts.ts featureDays): the two statements above folded into
+ * ONE. Its first bind is the window start (an ET midnight): a row before it lands in the day '' (no ET day is read
+ * there), every other row in its ET day. Columns: s<i> per flat step and f<j> per feature (the feature's own match, so
+ * a row matching two of its steps counts once). The where terms carry only an upper bound (`ts < ?`), so the '' row is
+ * every older row: foldFeatureDays turns that into the daily rows and the "before the new-days cutoff" counts.
+ * Grouped by the ET day alone (counts only): a refused path is read only as per-ET-day totals or one older total. */
+export function featureDaysSql(whereTerms: readonly string[], features: readonly FeatureDef[] = FEATURES): string {
+  const steps = flatSteps(features).map((f) => `SUM(CASE WHEN ${stepMatchSql(f.step.match)} THEN 1 ELSE 0 END) AS s${f.index}`)
+  const feats = features.map((f, i) => `SUM(CASE WHEN ${featureMatchSql(f)} THEN 1 ELSE 0 END) AS f${i}`)
+  return `SELECT CASE WHEN ts < ? THEN '' ELSE ${etDateSql()} END AS d, ${[...steps, ...feats].join(', ')} FROM hits WHERE ${whereTerms.join(' AND ')} GROUP BY d ORDER BY d`
+}
+
+/** featureDaysSql's rows as assembleHealth's input: the ET-day rows (the old daily statement's rows) and, per feature,
+ * the count of rows before `newCutoffDay` (an ET date: the old beforeCutoffSql over `ts < etWallTimeMs(newCutoffDay)`).
+ * Exact when the statement's window start is at or before that cutoff, which healthDays guarantees (baselineStart is
+ * earlier than the new-days cutoff). */
+export function foldFeatureDays(
+  raw: readonly Record<string, unknown>[],
+  features: readonly FeatureDef[],
+  newCutoffDay: string,
+): { rows: { d: string; s: number[] }[]; before: number[] } {
+  const stepCount = flatSteps(features).length
+  const rows: { d: string; s: number[] }[] = []
+  const before = features.map(() => 0)
+  for (const r of raw) {
+    const d = String(r.d ?? '')
+    if (d === '' || d < newCutoffDay) features.forEach((_, j) => (before[j] += Number(r[`f${j}`]) || 0))
+    if (d !== '') rows.push({ d, s: Array.from({ length: stepCount }, (_, i) => Number(r[`s${i}`]) || 0) })
+  }
+  return { rows, before }
+}
+
+/** The longest range read, as /api/features MAX_RANGE_DAYS: a longer range is cut to its newest days. */
+export const FEATURE_DAYS_MAX_RANGE_DAYS = 731
+
+/** The whole featureDays statement for a request, the same window and filters /api/features reads (its range snapped to
+ * whole ET days and capped, widened to the status baseline and today; sites, known-traffic and own-visit filters), so
+ * foldFeatureDays + assembleHealth over its rows gives /api/features' model. `rangeFrom`..`rangeTo` are the ET days of
+ * the selected range (assembleHealth's input). */
+export function featureDaysStatement(input: {
+  sinceMs: number
+  untilMs: number
+  nowMs: number
+  sites?: readonly string[]
+  excludeKnownTraffic: boolean
+  excludeOwn?: boolean
+  ownBrowser?: unknown
+  ownOS?: unknown
+  features?: readonly FeatureDef[]
+}): { sql: string; binds: unknown[]; rangeFrom: string; rangeTo: string; newCutoffDay: string } {
+  const features = input.features ?? FEATURES
+  const hd = healthDays(input.nowMs)
+  let [rangeFromMs, rangeToMs] = refusedRowWindow(input.sinceMs, input.untilMs)
+  const hasRange = Number.isFinite(rangeFromMs) && Number.isFinite(rangeToMs) && rangeFromMs < rangeToMs
+  let rangeFrom = ''
+  let rangeTo = ''
+  if (hasRange) {
+    rangeTo = etDateFast(rangeToMs)
+    const oldest = addDays(rangeTo, -FEATURE_DAYS_MAX_RANGE_DAYS)
+    rangeFrom = etDateFast(rangeFromMs) < oldest ? oldest : etDateFast(rangeFromMs)
+    rangeFromMs = etWallTimeMs(rangeFrom)
+  }
+  const fromMs = hasRange ? Math.min(rangeFromMs, hd.baselineStartMs) : hd.baselineStartMs
+  const toMs = hasRange ? Math.max(rangeToMs, hd.tomorrowMs) : hd.tomorrowMs
+  const w: string[] = ['ts < ?', anyStepWhere(features)]
+  const b: unknown[] = [toMs]
+  const sites = input.sites ?? []
+  if (sites.length) {
+    w.push(`site IN (${sites.map(() => '?').join(', ')})`)
+    b.push(...sites)
+  }
+  // Manual production checks are never visitors: dropped whatever the known-traffic toggle says.
+  if (input.excludeKnownTraffic) applyExclusions(w, b)
+  else applyAlwaysExclusions(w, b)
+  excludeOwnClause(w, b, input.excludeOwn === true, input.ownBrowser, input.ownOS)
+  return {
+    sql: featureDaysSql(w, features),
+    binds: [fromMs, ...b],
+    rangeFrom: rangeFrom || hd.today,
+    rangeTo: rangeTo || hd.today,
+    newCutoffDay: addDays(hd.today, -HEALTH_NEW_DAYS),
+  }
 }
