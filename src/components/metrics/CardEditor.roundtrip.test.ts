@@ -10,7 +10,7 @@
 // editor has no control for (Widget.fit, a sparkline's `series`, repeat.organic) ride through
 // every no-op pass, a genuine data edit, and a ChartEditor save + reload.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
+import { mount, flushPromises, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import CardEditor from './CardEditor.vue'
 import ChartEditor from '../ChartEditor.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
@@ -62,16 +62,39 @@ async function customize(w: VueWrapper) {
   await w.findAll('button').find((b) => b.text() === 'Customize…')!.trigger('click')
   await flushPromises()
 }
-const controls = (w: VueWrapper) => w.find('.ce-controls')
-/** Opens every item and every "More" block (repeatedly: opening one can reveal more). */
+/** The controls column. Looked up on the raw DOM: `w.find` walks the component tree and costs milliseconds on a
+ * big card (ask-order: about 33 000 nodes), and a no-op pass looks this column up thousands of times. */
+const controlsEl = (w: VueWrapper): Element => (w.element as Element).querySelector('.ce-controls')!
+const wrapEl = (el: Element) => new DOMWrapper(el)
+const controls = (w: VueWrapper) => wrapEl(controlsEl(w))
+/** Raw DOM query inside the controls, for the hot loops below: wrap only the element you act on. */
+const dom = <E extends Element = Element>(w: VueWrapper, selector: string) => [...controlsEl(w).querySelectorAll<E>(selector)]
+/** Per controls column: sees every node added or removed, and every item opened or closed, since the last walk. */
+const changes = new WeakMap<Element, MutationObserver>()
+/** Opens every item and every "More" block (repeatedly: opening one can reveal more). A walk of a big tree
+ * costs about 20 ms and this runs after every checkbox, so it walks only when the controls changed since
+ * its last walk (its own clicks count as a change, so what an opening reveals is opened on the next call).
+ * One walk finds what is shut (an item summary has `aria-expanded="false"`); a second only follows an item
+ * being opened, which can add "More" blocks. */
 async function expandAll(w: VueWrapper) {
-  for (const b of controls(w).findAll('.ce-item-summary')) if (b.attributes('aria-expanded') !== 'true') await b.trigger('click')
+  const root = controlsEl(w)
+  let seen = changes.get(root)
+  if (seen && seen.takeRecords().length === 0) return
+  if (!seen) {
+    seen = new MutationObserver(() => {})
+    seen.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'open'] })
+    changes.set(root, seen)
+  }
+  const shutDetails = () => dom<HTMLDetailsElement>(w, 'details:not([open])')
+  const shut = dom<HTMLElement>(w, 'button[aria-expanded=false], details:not([open])')
+  const summaries = shut.filter((el) => el.classList.contains('ce-item-summary'))
+  for (const b of summaries) await wrapEl(b).trigger('click')
   await flushPromises()
-  for (const d of controls(w).findAll('details')) (d.element as HTMLDetailsElement).open = true
+  for (const d of summaries.length ? shutDetails() : (shut.filter((el) => el.localName === 'details') as HTMLDetailsElement[])) d.open = true
   await flushPromises()
 }
 const selects = (w: VueWrapper) => controls(w).findAll('select')
-const byId = (w: VueWrapper, id: string) => controls(w).find(`#${CSS.escape(id)}`)
+const byId = (w: VueWrapper, id: string) => wrapEl(controlsEl(w).querySelector(`#${CSS.escape(id)}`)!)
 type Wrapped = { element: unknown }
 const sel = (s: Wrapped) => s.element as HTMLSelectElement
 const firstOption = (s: Wrapped) => sel(s).options[0]?.text ?? ''
@@ -96,13 +119,14 @@ async function noOpPass(w: VueWrapper) {
   await flushPromises()
   // 3. Every checkbox off and back on (or on and back off). Re-queried each time: switching one
   //    off can hide controls below it, and switching it back must bring them back.
-  const nBoxes = controls(w).findAll('input[type=checkbox]').length
+  const nBoxes = dom(w, 'input[type=checkbox]').length
   for (let k = 0; k < nBoxes; k++) {
-    const box = () => controls(w).findAll('input[type=checkbox]')[k]
-    const was = (box().element as HTMLInputElement).checked
-    await box().setValue(!was)
+    let box = dom<HTMLInputElement>(w, 'input[type=checkbox]')[k]
+    const was = box.checked
+    await wrapEl(box).setValue(!was)
     await flushPromises()
-    await box().setValue(was)
+    if (!box.isConnected) box = dom<HTMLInputElement>(w, 'input[type=checkbox]')[k] // the switch re-created it
+    await wrapEl(box).setValue(was)
     await flushPromises()
     await expandAll(w)
   }
@@ -141,7 +165,7 @@ describe('Customize, then use every control without changing anything: still exa
       expect(ref.from).toBe(id)
       expect(ref.spec).toStrictEqual(plain(preset))
       expect(controls(w).findAll('.errors li').map((e) => e.text())).toEqual([])
-    }, 150_000) // the ask-order preset runs about 45 s locally and over 60 s on CI runners
+    }, 60_000) // the ask-order preset (about 33 000 DOM nodes) takes about 20 s locally
   }
 })
 

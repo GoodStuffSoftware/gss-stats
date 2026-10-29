@@ -53,12 +53,20 @@ loaded height), but re-put the layout before each shot anyway so every shot star
 
 ## 6. Look
 
-- Widths: 1280 (desktop), about 740 (narrow, where fit cards wrap), and 390 (phone).
+- Widths: 1280 (desktop), about 740 (narrow, where fit cards wrap), and 390 (phone). Headless Chrome will
+  not open a window narrower than about 500 px, so a `--window-size=390,...` shot is really about 512 wide:
+  take the phone widths (and anything under 500) with `scripts/render/cdpshot.mjs` below.
 - Pages: every page the change can touch, at each width. For a layout change, the whole page, tall enough
   to hold it (a 12000 px viewport avoids a cropped full-page shot).
-- Screenshots: headless Chrome with a fresh profile, `--screenshot=<file> --window-size=<w>,<h>
-  --virtual-time-budget=25000 "http://localhost:<port>/?page=<page-id>"`, before and after, same names
-  apart from a `before`/`after` marker. Never open a visible window.
+- Screenshots, desktop and narrow (500 px and up): headless Chrome with a fresh profile,
+  `--screenshot=<file> --window-size=<w>,<h> --virtual-time-budget=25000
+  "http://localhost:<port>/?page=<page-id>"`, before and after, same names apart from a `before`/`after`
+  marker. Never open a visible window.
+- Screenshots, phone widths (390 and anything under 500): `node scripts/render/cdpshot.mjs <port> 390 <height>
+  <page-id> <out.png>`. It sets the viewport through the DevTools Protocol, so the width is exact; give a
+  height tall enough to hold the page (12000). It starts its own hidden Chrome and fresh profile, reads
+  nothing secret, and waits about 9 s for the page to load its data. Set `CHROME_PATH` if Chrome is not at the
+  default Windows install path. Check a shot's width: a true 390 shot is 390 px wide.
 - Live DOM: with the page open, `.vgl-item` gives each card's `transform` (translate3d y) and
   `offsetHeight`; overlap is a card whose y is less than the previous card's y plus height in the same
   column. Hidden content is `.card-body` with `scrollHeight` greater than `clientHeight`.
