@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.68.0] — 2026-10-29
+
+### Changed
+- **Feature health is an ordinary card.** The Overview's Feature health readout opens in the card editor as the Feature health preset, one small card per feature with the same counts, status and ratios; the status sentence becomes the status and its 7-day average, a range trimmed to whole ET days says so, and ranges over 400 days are not shown.
+
 ## [0.67.3] — 2026-10-29
 
 ### Fixed

@@ -88,6 +88,8 @@ function canonicalSpec(spec: MetricRequestSpec) {
     // Only when set, so every request key made before the country split existed is unchanged.
     ...(spec.params?.country !== undefined ? { country: spec.params.country } : {}),
     ...(spec.params?.assetId !== undefined ? { assetId: spec.params.assetId } : {}),
+    ...(spec.params?.feature !== undefined ? { feature: spec.params.feature } : {}),
+    ...(spec.params?.step !== undefined ? { step: spec.params.step } : {}),
     window: spec.window ?? null,
     deltas: spec.deltas?.length ? [...new Set(spec.deltas)].sort() : [],
     // Only when set, so every request key made before series existed is unchanged.

@@ -10,6 +10,7 @@
 // `undefined` for it rather than resolving through Object.prototype (editorModel.test.ts checks
 // this directly). Item/section ids are generated here too, never typed by the user, for the
 // same reason.
+import { FEATURES } from '../featureHealth'
 import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText, type AutoCaveatWidget } from '../notes'
 import { POPUPS } from '../popupEvents'
@@ -198,6 +199,15 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'reading.count.signUps', label: 'Sign-ups (exact or at most, text)' },
   ],
   assets: [{ value: 'asset.label', label: 'Asset (field type and text)' }],
+  features: [
+    { value: 'feature.label', label: 'Feature name' },
+    { value: 'feature.id', label: 'Feature id' },
+    { value: 'feature.caption', label: 'Feature reading caveat' },
+  ],
+  steps: [
+    { value: 'step.label', label: 'Step name' },
+    { value: 'step.ratioLabel', label: 'What the step ratio is per' },
+  ],
   rules: [
     { value: 'rule.name', label: 'Rule (number and name)' },
     { value: 'rule.number', label: 'Measured number' },
@@ -527,6 +537,8 @@ export function repeatIdOptions(over: RepeatSpec['over'] | '' | undefined): { va
       return WINDOW_SIDES.map((w) => ({ value: w, label: WINDOW_SIDE_LABELS[w] }))
     case 'countries':
       return COUNTRY_BUCKETS.map((c) => ({ value: c, label: COUNTRY_LABELS[c] ?? c }))
+    case 'features':
+      return FEATURES.map((f) => ({ value: f.id, label: f.label }))
     default:
       return []
   }

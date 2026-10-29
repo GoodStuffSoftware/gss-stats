@@ -11,6 +11,7 @@
 // a warmed path from a silently skipped one. Every registry request is warmed, in chunks of at
 // most MAX_REQUESTS (the endpoint's own cap), never truncated.
 
+import { FEATURES } from '../featureHealth'
 import { CAMPAIGNS } from '../campaigns'
 import { POPUPS } from '../popupEvents'
 import { etDateFast } from '../etTime'
@@ -53,7 +54,7 @@ export function prewarmRequests(): MetricRequest[] {
         for (const campaignId of campaigns) {
           for (const popup of popups) {
            for (const assetId of assets) {
-            requests.push({ ...base, key: `w${requests.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}) }, ...(window === 'todaySoFar' && base.metric ? { deltas: ['yesterday', 'avg7'] } : {}) })
+            requests.push({ ...base, key: `w${requests.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}), ...(params.includes('feature') ? { feature: FEATURES[0].id } : {}), ...(params.includes('step') ? { step: FEATURES[0].steps[0].id } : {}) }, ...(window === 'todaySoFar' && base.metric ? { deltas: ['yesterday', 'avg7'] } : {}) })
            }
           }
         }

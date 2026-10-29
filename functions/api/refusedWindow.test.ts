@@ -494,9 +494,10 @@ describe('the daily twins follow the same rule', () => {
 
   it('every fact over a caller-picked range snaps refused rows or leaves them out', () => {
     const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
-    expect(ranged.sort()).toEqual(['bskRangeDaily', 'bskRangePath', 'popupRangeDaily', 'popupRangePath'])
+    expect(ranged.sort()).toEqual(['bskRangeDaily', 'bskRangePath', 'featureDays', 'popupRangeDaily', 'popupRangePath'])
     const m = refusedPathMatch().sql
-    for (const id of ranged) {
+    // featureDays reads whole ET days only: it snaps the range itself (lib/featureHealthSql.ts featureDaysWindow), as /api/features does.
+    for (const id of ranged.filter((x) => x !== 'featureDays')) {
       const sql = buildFact({ id, params: { since: HOURS[1][0], until: HOURS[1][1], sites: [] } }, Date.now()).sql
       expect(sql.includes(`CASE WHEN ${m}`) || sql.includes(`NOT ${m}`), id).toBe(true)
     }
@@ -514,7 +515,11 @@ describe('the daily twins follow the same rule', () => {
     const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
     const worst = Math.max(...ranged.map((id) => b(id, { ...sub, ...heavy })))
     expect(worst).toBeLessThan(100)
-    expect(worst).toBe(57) // measured: popupRangePath and popupRangeDaily (bskRangePath and bskRangeDaily bind far fewer)
+    // measured: featureDays (Feature health, ADR 0005 T2) = 2 window bounds + 50 sites + 10 known-traffic exclusions (it always
+    // hides known traffic, lib/metrics/facts.ts) + 2 hides. Before it, popupRangePath and popupRangeDaily at 57 were the worst.
+    expect(worst).toBe(64)
+    expect(b('featureDays', { ...sub, ...heavy })).toBe(64)
+    expect(Math.max(...ranged.filter((id) => id !== 'featureDays').map((id) => b(id, { ...sub, ...heavy })))).toBe(57) // popupRangePath and popupRangeDaily (bskRangePath and bskRangeDaily bind far fewer)
     expect(b('popupRangeDaily', { ...sub, ...heavy })).toBe(57) // measured: 2 + 50 sites + 2 hides + 3 install-gap
   })
 })

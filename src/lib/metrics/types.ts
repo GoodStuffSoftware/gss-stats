@@ -45,6 +45,13 @@ export type ScopePath =
   | 'rule.verdict'
   | 'popup.id'
   | 'popup.label'
+  /** Feature health (lib/featureHealth.ts FEATURES): the feature of a features repeat, the step of a steps repeat, and
+   * what a step's ratio is per ("tour opened per shown"; empty for a step with no ratio). Config, not a query. */
+  | 'feature.id'
+  | 'feature.label'
+  | 'feature.caption'
+  | 'step.label'
+  | 'step.ratioLabel'
   | 'window.label'
   | 'country.label'
   /** The compared release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
@@ -91,7 +98,7 @@ export type Label =
   | { metric: true } // the data binding's own registry label
 
 /** (b) DATA: a registry id plus params. Never SQL, never an endpoint path. */
-export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' | 'assetId' }
+export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' | 'assetId' | 'feature' | 'step' }
 export interface Params {
   campaignId?: ParamValue
   popup?: ParamValue
@@ -99,13 +106,18 @@ export interface Params {
   country?: ParamValue
   /** A Google Ads asset id (digits): the asset metrics' (asset.*) second param. */
   assetId?: ParamValue
+  /** A Feature health feature id (FEATURES) and one of its step ids: the feature.* metrics. */
+  feature?: ParamValue
+  step?: ParamValue
 }
 /** The country buckets the campaign funnel splits by (lib/campaigns.ts countryBucket). */
 export const COUNTRY_BUCKETS = ['US', 'CA', 'other'] as const
 export type CountryBucket = (typeof COUNTRY_BUCKETS)[number]
 /** The windows a card may ask for. `{ scope: 'window' }` takes the window from a repeat over
  * windows (RepeatSpec.over 'windows'). 'flight' and 'allTime' are reserved. */
-export type WindowSpec = 'page' | 'attribution' | 'flight' | 'todaySoFar' | 'allTime' | ReleaseSide | UpsellSide | { scope: 'window' }
+export type WindowSpec = 'page' | 'attribution' | 'flight' | 'todaySoFar' | 'allTime' | ReleaseSide | UpsellSide | FeatureDayWindow | { scope: 'window' }
+/** Feature health's two whole ET days: the latest complete one (yesterday) and the one before it. */
+export type FeatureDayWindow = 'latestDay' | 'previousDay'
 /** The compared release's before/after windows: the same number of days on each side of its
  * ET date, bounded by the first Best Sudoku hit (lib/overview.ts releaseComparisonWindows). */
 export type ReleaseSide = 'before' | 'after'
@@ -115,7 +127,7 @@ export type UpsellSide = 'upsellPre' | 'upsellPost'
 export type WindowSide = ReleaseSide | UpsellSide
 export const WINDOW_SIDES: readonly WindowSide[] = ['before', 'after', 'upsellPre', 'upsellPost']
 /** The windows the registry can compute (lib/metrics/metrics.ts MetricDef.windows). */
-export type WindowName = 'attribution' | 'todaySoFar' | 'page' | ReleaseSide | UpsellSide
+export type WindowName = 'attribution' | 'todaySoFar' | 'page' | ReleaseSide | UpsellSide | FeatureDayWindow
 export type DeltaName = 'yesterday' | 'avg7'
 
 export type DataBinding =
@@ -173,7 +185,7 @@ export interface RepeatSpec {
   /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read).
    * 'assets': the ad assets (headlines, descriptions, images) Google served for one campaign
    * (ads_daily_assets): the enclosing campaign's, else `campaignId`. */
-  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets'
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps'
   ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES; assets: Google asset ids
   /** Assets only: the campaign whose assets to list when the repeat is not inside a campaign repeat. */
   campaignId?: string
@@ -297,7 +309,7 @@ export interface MetricRequest {
   key: string
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string }
+  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string }
   window?: string
   deltas?: DeltaName[]
   /** 'daily': also return the metric's per-ET-day points (MetricValue.series). A count or a

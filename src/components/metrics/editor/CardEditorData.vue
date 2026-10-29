@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FEATURES } from '../../../lib/featureHealth'
 // One DataBinding editor (ADR 0003 section 1(b) / section 4 item 5, "Data"): a metric (grouped,
 // searchable, unit shown), a ratio (ONLY registered ratios — so an invalid percentage literally
 // cannot be built), or a scope field. Params inherited from a repeat show as a chip with an
@@ -83,7 +84,7 @@ const allowedParams = computed<MetricParam[]>(() => {
   }
   return []
 })
-const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries') || (p === 'assetId' && props.repeatOver === 'assets') || (p === 'campaignId' && props.repeatOver === 'assets')
+const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries') || (p === 'assetId' && props.repeatOver === 'assets') || (p === 'feature' && (props.repeatOver === 'features' || props.repeatOver === 'steps')) || (p === 'step' && props.repeatOver === 'steps') || (p === 'campaignId' && props.repeatOver === 'assets')
 /** An optional param (the country split): left unset, the metric counts every country. */
 const optional = (p: MetricParam): boolean => OPTIONAL_PARAMS.has(p)
 const COUNTRY_OPTIONS = [
@@ -91,7 +92,9 @@ const COUNTRY_OPTIONS = [
   { value: 'CA', label: 'CA' },
   { value: 'other', label: 'Other' },
 ]
-const PARAM_LABELS: Record<MetricParam, string> = { campaignId: 'Campaign', popup: 'Pop-up', country: 'Country', assetId: 'Asset' }
+const PARAM_LABELS: Record<MetricParam, string> = {
+  feature: 'Feature',
+  step: 'Step', campaignId: 'Campaign', popup: 'Pop-up', country: 'Country', assetId: 'Asset' }
 function paramValue(p: MetricParam): ParamValue | undefined {
   return 'params' in data.value ? data.value.params?.[p] : undefined
 }
@@ -106,6 +109,8 @@ function setParam(p: MetricParam, v: string | undefined) {
   data.value = withField(data.value as { metric: string; params?: Params }, 'params', Object.keys(params).length ? params : undefined) as DataBinding
 }
 function optionsFor(p: MetricParam) {
+  if (p === 'feature') return FEATURES.map((f) => ({ value: f.id, label: f.label }))
+  if (p === 'step') return [...new Set(FEATURES.flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
   return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
 }
 
@@ -152,6 +157,8 @@ const WINDOW_NAMES: Record<WindowName, string> = {
   after: 'Release: after',
   upsellPre: 'Before the upsell fix',
   upsellPost: 'After the upsell fix',
+  latestDay: 'The latest whole ET day',
+  previousDay: 'The ET day before that',
 }
 
 // ── field ────────────────────────────────────────────────────────────────────────────────────

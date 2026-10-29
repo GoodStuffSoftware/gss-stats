@@ -611,6 +611,45 @@ export const CAMPAIGN_F3_DAILY: CardSpec = {
   ],
 }
 
+/** Feature health (Overview, widget ow-feature-health; ADR 0005, editor-tools T2): one small card per feature in
+ * FEATURES order. Its status (went silent / new / OK) and the prior 7 days' rows a day, its totals, then one row per
+ * step: the latest complete ET day, the day before, the selected range, and the plain ratio of counts where the step
+ * has one. Web and app combined, known traffic hidden; per-ET-day totals only, so never an hour, a place, a device or
+ * a visitor. Saved widgets get it at render time (lib/defaults.ts featureHealthCardFor). */
+export const FEATURE_HEALTH: CardSpec = {
+  v: 1,
+  repeat: { over: 'features' },
+  minWidth: 360,
+  title: { bind: 'feature.label' },
+  captions: ['feature-health-caption'],
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'status', label: { metric: true }, data: { metric: 'feature.status' }, display: { as: 'status' }, ...COMPACT },
+        { id: 'avg', label: { metric: true }, data: { metric: 'feature.baselineAvg' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'totalLatest', label: { note: 'label.feature.totalLatest' }, data: { metric: 'feature.total', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'totalRange', label: { note: 'label.feature.totalRange' }, data: { metric: 'feature.total', window: 'page' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'caption', label: { note: 'label.feature.caveat' }, data: { field: 'feature.caption' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+      ],
+    },
+    {
+      layout: 'table',
+      repeat: { over: 'steps' },
+      items: [
+        { id: 'step', label: { note: 'label.feature.col.step' }, data: { field: 'step.label' }, display: { as: 'text' } },
+        { id: 'latest', label: { note: 'label.feature.col.latest' }, data: { metric: 'feature.step', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'prev', label: { note: 'label.feature.col.prev' }, data: { metric: 'feature.step', window: 'previousDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'range', label: { note: 'label.feature.col.range' }, data: { metric: 'feature.step', window: 'page' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'ratioLatest', label: { note: 'label.feature.col.ratioLatest' }, data: { metric: 'feature.stepRatio', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'ratioPrev', label: { note: 'label.feature.col.ratioPrev' }, data: { metric: 'feature.stepRatio', window: 'previousDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'ratioRange', label: { note: 'label.feature.col.ratioRange' }, data: { metric: 'feature.stepRatio', window: 'page' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'ratioOf', label: { note: 'label.feature.col.ratioOf' }, data: { field: 'step.ratioLabel' }, display: { as: 'text' }, gating: { whenEmpty: 'dash' } },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -631,6 +670,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'carry-over-completions': CARRY_OVER_COMPLETIONS,
     'f3-rule-readouts': F3_RULE_READOUTS,
     'campaign-f3-daily': CAMPAIGN_F3_DAILY,
+    'feature-health': FEATURE_HEALTH,
   }),
 )
 
