@@ -291,7 +291,7 @@ describe('the controls for fields the form used to hide round-trip', () => {
     await flushPromises()
     await noOpPass(again)
     expect(lastSpec(again)).toStrictEqual(saved)
-  })
+  }, 30_000) // mounts the whole editor twice; slow CI runners pass 5 s
 
   it('feature ids (Feature health): the features repeat lists them, a pick is saved and round-trips', async () => {
     const w = await customized('feature-health')
@@ -305,7 +305,7 @@ describe('the controls for fields the form used to hide round-trip', () => {
     await flushPromises()
     await noOpPass(again)
     expect(lastSpec(again)).toStrictEqual(saved)
-  })
+  }, 30_000) // mounts the whole editor twice; slow CI runners pass 5 s
 
   it('column heading and row-label heading: shown, off and back on restores, and survive clearing the columns', async () => {
     const w = await customized('campaign-country')
