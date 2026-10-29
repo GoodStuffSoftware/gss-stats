@@ -6,6 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.67.0] — 2026-10-29
+
+### Added
+- **"Feature step" in the chart editor.** A beacon chart can group or filter by a Feature health step (e.g. Tour: Started), counted per ET day over whole ET days, web and app combined.
+
+### Changed
+- **Features page step charts are ordinary charts.** Each opens in the chart editor with one Feature-step series per step and shows the same numbers; the feature's blurb is now the chart caption instead of a status header, the axis starts at the first day with data, and a click on a point drills into that day.
+- **Page filters now apply to the step charts.** A place or device filter narrows them and leaves out their counts-only rows, so a step made only of those rows shows nothing under one.
+- **Step charts fetch per chart.** A chart whose series are all feature steps fetches them in one request, so the Features page makes 14 requests where its old step charts shared one, and the step charts without counts-only rows now refresh on live updates.
+- **Whole-number ticks on series line charts.** A quiet chart no longer shows fractional counts on its axis.
+
 ## [0.66.0] — 2026-10-28
 
 ### Added

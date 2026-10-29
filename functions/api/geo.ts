@@ -16,6 +16,8 @@ import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilt
 import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
+import { featureStepFilterSql, featureStepPrefilter, featureStepSqlCase, featureStepWindow } from '../../src/lib/featureHealthSql'
+import { featureStepOf, stepMayMatchRefused } from '../../src/lib/featureHealth'
 import { isDateDim } from '../../src/lib/rings'
 import {
   splitRefused,
@@ -32,7 +34,7 @@ import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 // this moved out of this file. Re-exported here so any existing import of these names from
 // './geo' (this file used to define them) keeps working.
 export { MAX_SITES, MAX_CONSTRAINTS, MAX_BOUND_PARAMS, MAX_SQL_BYTES, statementTooLarge } from '../../src/lib/queryLimits'
-import { MAX_SITES, MAX_CONSTRAINTS, statementTooLarge } from '../../src/lib/queryLimits'
+import { MAX_SITES, MAX_CONSTRAINTS, MAX_STEP_SERIES, statementTooLarge } from '../../src/lib/queryLimits'
 
 interface Env {
   gss_geo: D1Database
@@ -74,6 +76,7 @@ export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'landingTag') return landingTagSqlCase(emptyLabel)
   if (dim === 'arrival') return arrivalSqlCase(emptyLabel)
   if (dim === 'keyEvent') return keyEventSqlCase(emptyLabel)
+  if (dim === 'featureStep') return featureStepSqlCase(emptyLabel)
   // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
   // blocked/failed before the measurement ran) — 0 is the "blank" sentinel here, not ''.
   if (dim === 'screenw') return `CASE WHEN screenw = 0 THEN '${emptyLabel}' ELSE CAST(screenw AS TEXT) END`
@@ -108,6 +111,9 @@ export function emptyLabelFor(dim: string): string {
 // empty blank label, compared against '' (screenwBucket: a 0-width row; the pop-up/completion/
 // flight dims: a row they don't describe; pathFamily is never blank).
 export function ringBlankExclusion(dim: string): string {
+  // featureStep: DIM_PREFILTERS already keeps only rows of some configured step, and a kept row always gets a step key, so
+  // the blank test would repeat the whole CASE (about 2.6 KB) for nothing.
+  if (dim === 'featureStep') return '1'
   if (DERIVED_ONLY_DIMS.has(dim)) return `(${breakdownColumnExpr(dim, '')}) <> ''`
   return dim === 'screenw' ? 'screenw <> 0' : `${dim} <> ''`
 }
@@ -126,6 +132,16 @@ export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: 
 // only the inner subquery has `hits` in scope. Tiebreaks on the group columns themselves after
 // `c DESC` — without it, which rows LIMIT keeps among an exact-count tie is unspecified, and
 // can differ from one query PLAN to another even for the same data (see buildMergedBreakdownSql).
+/** A series line chart whose every series is one featureStep filter (body.stepSeries), in ONE statement: one row per
+ * date bucket, one count per series (`s<i>`, the step's own match, so two series that share a path each count it), and
+ * each series' total over every bucket (`t<i>`, before LIMIT, as `total` above). `stepSql[i]` is featureStepFilterSql's
+ * literal for series i, never request text. Grouped by the date key alone. */
+export function buildStepSeriesSql(col: string, stepSql: readonly string[], whereSql: string): string {
+  const sums = stepSql.map((s, i) => `SUM(CASE WHEN ${s} THEN 1 ELSE 0 END) AS s${i}`).join(', ')
+  const outer = stepSql.map((_, i) => `s${i}, SUM(s${i}) OVER () AS t${i}`).join(', ')
+  return withFlightRegistry(`SELECT k, ${outer} FROM (SELECT ${col} AS k, ${sums} FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY k DESC LIMIT ?`)
+}
+
 export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string): string {
   return withFlightRegistry(`SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`)
 }
@@ -152,6 +168,7 @@ export const GEO_DIMS = new Set([
   'hourEt', // US-Eastern hour of day — see etTime.ts etHourSql
   'landingTag', // the Flight 3 Apps arm's landing tag on its /return/<tag>/d0 arrival rows — see campaigns.ts landingTagSqlCase
   'flightDay', // day of the row's campaign flight, '1' = its first ET day — see campaigns.ts flightDaySqlCase
+  'featureStep', // a feature-walkthrough step, '<featureId>.<stepId>' — see featureHealthSql.ts featureStepSqlCase / featureStepFilterSql
 ])
 
 // Dimensions with no real backing column — computed via CASE/date() in breakdownColumnExpr,
@@ -163,7 +180,7 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay', 'landingTag'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay', 'landingTag', 'featureStep'])
 // Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
 // derived dim groups like a column (its CASE runs per row in the inner SELECT, and
 // ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
@@ -175,7 +192,7 @@ export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 // dimension describes), so the exclusion is lifted for that chart and the dimension's own bound
 // prefilter applies instead (only rows of that event family). Their blank rows are dropped even
 // in single-dim mode, so a page view never shows up as a "(none)" bar.
-export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent', 'landingTag'])
+export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent', 'landingTag', 'featureStep'])
 // Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
 // 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
 // and the metrics registry counts it as a tagged arrival (campaign.taggedArrivals), so the
@@ -193,6 +210,7 @@ const DIM_PREFILTERS: Record<string, (w: string[], b: unknown[]) => void> = {
   campaignFlight: campaignFlightPrefilter,
   flightDay: campaignFlightPrefilter, // only a tagged row can be in a flight
   landingTag: landingTagPrefilter, // only the arrival rows of a live landing tag; none live = no rows
+  featureStep: featureStepPrefilter, // only the rows of some configured feature step
 }
 // Dims whose blank rows are dropped in single-dim mode too (see EVENT_DIMS above).
 const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight', 'arrival', 'flightDay'])
@@ -277,10 +295,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         .filter((c) => c && GEO_DIMS.has(c.field) && !isDateDim(c.field) && typeof c.value === 'string')
         .map((c) => ({ field: String(c.field), value: String(c.value) }))
     : []
+  // A series line chart whose every series is one featureStep filter (api.ts fetchSeriesStats) asks for all its series in one
+  // request: `stepSeries` is the series' step values in legend order, and the answer is { series: [one response per value] },
+  // each the same as that series' own request (`constraints` plus { featureStep: value }) would return, from ONE statement.
+  // A value naming no step matches nothing, as a featureStep filter does.
+  const stepSeries: string[] | null =
+    Array.isArray(body.stepSeries) && body.stepSeries.length ? (body.stepSeries as unknown[]).map((v) => (typeof v === 'string' ? v : '')) : null
+  if (stepSeries && stepSeries.length > MAX_STEP_SERIES) return json({ error: `too many series (at most ${MAX_STEP_SERIES})` }, 400)
   const drillClause = (w: string[], b: any[]) => {
     for (const c of constraints) {
       const derivedExpr = DERIVED_FILTER_EXPR[c.field]
-      if (derivedExpr) {
+      if (c.field === 'featureStep') {
+        // The step's own match (featureHealthSql.ts), not the first-match CASE: two steps may share a path.
+        // A literal built from the config, never the request's text; an unknown step matches nothing.
+        w.push(featureStepFilterSql(c.value))
+      } else if (derivedExpr) {
         // The CASE expression already produces the exact label string for every row, including
         // its own blank/default bucket ('(unknown)' / 'page') — a plain bound equality matches
         // correctly with no separate blank-value branch needed.
@@ -358,7 +387,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // lift and which prefilters apply (see EVENT_DIMS / DIM_PREFILTERS above). A drill on an event
   // dim lifts the exclusion too, for the same reason.
   const activeDims: string[] = isPoints ? [] : isRing ? ringDims : [dim]
-  const eventDimActive = [...activeDims, ...constraints.map((c) => c.field)].some((d) => EXCLUSION_LIFTING_DIMS.has(d))
+  if (stepSeries && (isPoints || isRing || !isDateDim(dim))) return json({ error: 'stepSeries needs a date dimension' }, 400)
+  // The fields this query filters on: the drills, plus the series' featureStep filter in a stepSeries request (every
+  // series has one, so every flag below that reads the fields is the same for each series).
+  const filterFields = [...constraints.map((c) => c.field), ...(stepSeries ? ['featureStep'] : [])]
+  const eventDimActive = [...activeDims, ...filterFields].some((d) => EXCLUSION_LIFTING_DIMS.has(d))
   const eventRowsClause = (w: string[], b: any[]) => {
     if (!includeEventBeacons && !eventDimActive) popupExcludeClause(w, b) // events, not screen views: excluded unless opted in
     const seen = new Set<(w: string[], b: unknown[]) => void>()
@@ -381,27 +414,61 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // and every other row keeps the exact window. It adds no binds either, and a window already on
   // ET midnights gets the unchanged SQL, binds and cache key. Bare-date bounds here are UTC days,
   // so they snap too.
-  const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })
+  const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...filterFields] })
+  // A query on the featureStep dimension (grouped or filtered) reads whole ET days for EVERY row, as /api/features does,
+  // so a step chart and the Features page count the same days. Per-ET-day totals only; with the guard active
+  // (a hour, place or device split) the guard's exact window applies and the refused rows are out entirely.
+  const featureStepActive = !splitGuardActive && [...activeDims, ...filterFields].includes('featureStep')
+  const stepWindow = featureStepActive ? featureStepWindow(sinceMs, untilMs) : null
   const tsWindow = splitGuardActive
     ? { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
-    : refusedWindowClause(sinceMs, untilMs)
-  // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
-  // a /home drill or excluded event rows count none). The snap and its
-  // cache-key marker still follow `moved` alone.
-  const refusedReachable =
-    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, constraints }).length > 0
-  const refusedWholeDays = tsWindow.moved && refusedReachable
-  // Live-update opt-in (meta.liveSafe): only when no refused path can be counted by this query, so a
-  // live "changed" ping may refetch it. Fail-closed, and independent of `moved`; omitted otherwise.
-  // A NUL (U+0000) in a path or pathFamily drill value is never safe: the stored row may read as a
-  // refused path to the SQL guard (which sees the text up to the NUL) while the JS pattern match
-  // above finds none, so fail closed.
-  const nulPathValue = constraints.some((c) => (c.field === 'path' || c.field === 'pathFamily') && c.value.includes('\u0000'))
-  // The pathFamily drill's CASE is NUL-blind, so with event rows counted (opt-in, or an
-  // exclusion-lifting dim) a forged `/return<NUL>x` row can land in a page family while
-  // reachableRefusedPatterns finds nothing to flag: fail closed there. Counts are unchanged.
-  const nulBlindFamilyDrill = (includeEventBeacons || eventDimActive) && constraints.some((c) => c.field === 'pathFamily')
-  const liveSafe = !refusedReachable && !nulPathValue && !nulBlindFamilyDrill
+    : stepWindow ?? refusedWindowClause(sinceMs, untilMs)
+  // The echoed window (meta.since / meta.until) is the one counted: a featureStep query counts whole ET days, so a date
+  // axis (charts.ts dayBucketsInRange) draws exactly the counted days, as the old Features card did. Before noon ET a range
+  // ending now snaps back to today's midnight: today is not counted, so it is not drawn as a 0 either; from noon it is
+  // counted (so far) and drawn. `until` is the last counted millisecond. An empty snapped window keeps the request's.
+  const [stepFrom, stepTo] = stepWindow?.binds ?? [0, 0]
+  const echoSince = stepTo > stepFrom ? new Date(stepFrom).toISOString() : since
+  const echoUntil = stepTo > stepFrom ? new Date(stepTo - 1).toISOString() : until
+  // The per-response flags for one set of filters (a stepSeries request has one set per series).
+  const readFlags = (cs: readonly { field: string; value: string }[]) => {
+    // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
+    // a /home drill or excluded event rows count none). The snap and its
+    // cache-key marker still follow `moved` alone.
+    // A featureStep filter narrows to one step's paths: it reaches a refused path only if that step can match one.
+    const stepsReachRefused = cs.every((c) => {
+      if (c.field !== 'featureStep') return true
+      const hit = featureStepOf(c.value)
+      return !!hit && stepMayMatchRefused(hit.step.match)
+    })
+    const refusedReachable =
+      reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, constraints: cs }).length > 0 && stepsReachRefused
+    const refusedWholeDays = tsWindow.moved && refusedReachable
+    // Live-update opt-in (meta.liveSafe): only when no refused path can be counted by this query, so a
+    // live "changed" ping may refetch it. Fail-closed, and independent of `moved`; omitted otherwise.
+    // A NUL (U+0000) in a path or pathFamily drill value is never safe: the stored row may read as a
+    // refused path to the SQL guard (which sees the text up to the NUL) while the JS pattern match
+    // above finds none, so fail closed.
+    const nulPathValue = cs.some((c) => (c.field === 'path' || c.field === 'pathFamily') && c.value.includes('\u0000'))
+    // The pathFamily drill's CASE is NUL-blind, so with event rows counted (opt-in, or an
+    // exclusion-lifting dim) a forged `/return<NUL>x` row can land in a page family while
+    // reachableRefusedPatterns finds nothing to flag: fail closed there. Counts are unchanged.
+    const nulBlindFamilyDrill = (includeEventBeacons || eventDimActive) && cs.some((c) => c.field === 'pathFamily')
+    const liveSafe = !refusedReachable && !nulPathValue && !nulBlindFamilyDrill
+    return { refusedWholeDays, liveSafe }
+  }
+  const { refusedWholeDays, liveSafe } = readFlags(constraints)
+  const metaFor = (dimensions: string[], flags: { refusedWholeDays: boolean; liveSafe: boolean }) => ({
+    site: sites.length ? sites.join(',') : 'all',
+    since: echoSince,
+    until: echoUntil,
+    dimensions,
+    metric: 'pageviews',
+    dataset: 'geo',
+    ...(splitGuardActive ? { splitGuard: true } : {}),
+    ...(flags.refusedWholeDays ? { refusedWholeDays: true } : {}),
+    ...(flags.liveSafe ? { liveSafe: true } : {}),
+  })
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
@@ -433,6 +500,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // Likewise only a snapped window gets a new key, keyed on the snap mode, so changing
     // REFUSED_WINDOW_SNAP never serves an entry cached under another mode.
     ...(tsWindow.moved ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
+    ...(stepWindow ? { featureStepWindow: stepWindow.key } : {}),
+    // Only a stepSeries request gets a new key; its series order is the response order, so it is kept as sent.
+    ...(stepSeries ? { stepSeries } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -477,7 +547,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
       { pageviews: 0, visits: 0 },
     )
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}), ...(liveSafe ? { liveSafe: true } : {}) } })
+    return json({ rows, totals, meta: metaFor(['points'], { refusedWholeDays, liveSafe }) })
   }
 
   if (isRing) {
@@ -528,7 +598,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     })
     const total = Number(r.results?.[0]?.total) || 0
     const totals = { pageviews: total, visits: total }
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}), ...(liveSafe ? { liveSafe: true } : {}) } })
+    return json({ rows, totals, meta: metaFor(ringDims, { refusedWholeDays, liveSafe }) })
   }
 
   // Bucket blank values under a label ("(direct)" for referrers, "(none)" otherwise)
@@ -547,6 +617,33 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   drillClause(where, binds)
   excludeOwnClause(where, binds)
   selfReferralClause([dim], where, binds) // inert unless this IS the referrer chart
+
+  if (stepSeries) {
+    // Every series in one statement (buildStepSeriesSql): the rows of any series' step, one count per series per day.
+    // Each series gets what its own request would: its days with rows (newest `limit` days with any series' rows),
+    // its total over the whole window, and its own caption and live flags.
+    const stepSql = stepSeries.map(featureStepFilterSql)
+    where.push(`(${[...new Set(stepSql)].join(' OR ')})`)
+    const sql = buildStepSeriesSql(col, stepSql, where.join(' AND '))
+    const tooLarge = statementTooLarge(sql, binds.length + 1)
+    if (tooLarge) return tooLarge
+    let r: any
+    try {
+      r = await ctx.env.gss_geo.prepare(sql).bind(...binds, limit).all()
+    } catch (e) {
+      console.error('geo: d1 query failed', e)
+      return json({ error: 'd1 query failed' }, 500)
+    }
+    const results: any[] = [...(r.results ?? [])].reverse() // date order
+    const series = stepSeries.map((value, i) => {
+      const rows = results
+        .filter((x) => Number(x[`s${i}`]) > 0)
+        .map((x) => ({ key: { [dim]: String(x.k ?? '') }, pageviews: Number(x[`s${i}`]), visits: Number(x[`s${i}`]) }))
+      const total = Number(r.results?.[0]?.[`t${i}`]) || 0
+      return { rows, totals: { pageviews: total, visits: total }, meta: metaFor([dim], readFlags([...constraints, { field: 'featureStep', value }])) }
+    })
+    return json({ series })
+  }
 
   const whereSql = where.join(' AND ')
   // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
@@ -576,7 +673,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 
-  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}), ...(liveSafe ? { liveSafe: true } : {}) } })
+  return json({ rows, totals, meta: metaFor([dim], { refusedWholeDays, liveSafe }) })
   }
 }
 

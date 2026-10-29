@@ -6,10 +6,15 @@ import { isTouchDevice } from '../lib/responsive'
 import { GRID_MARGIN, GRID_ROW_HEIGHT, fitRows, isFit } from '../lib/fit'
 import ChartCard from './ChartCard.vue'
 import { viewOnly } from '../lib/viewOnly'
+import { stepChartFor } from '../lib/defaults'
 
 // Two-way bound to the parent's reactive widgets array; grid-layout-plus writes
 // item geometry back on move/resize and we persist via @layout-updated.
 const widgets = defineModel<Widget[]>('widgets', { required: true })
+// A saved Features-page step chart from before T1 (dataset 'features') is drawn, edited and duplicated as the ordinary chart
+// it is now (lib/defaults.ts stepChartFor); the stored widget is never rewritten (ADR 0005 decision 2). Every other widget
+// is passed through as it is.
+const shown = computed(() => widgets.value.map(stepChartFor))
 
 // `drillOpenId` is the id of the ONE widget whose drill menu is currently open (or null) —
 // not a blanket "some menu is open somewhere" flag. Only that widget's ChartCard gets
@@ -85,7 +90,7 @@ function onFitHeight(item: Widget, px: number) {
       @layout-updated="emit('change')"
     >
       <GridItem
-        v-for="item in widgets"
+        v-for="(item, idx) in widgets"
         :key="item.i"
         :i="item.i"
         :x="item.x"
@@ -98,14 +103,14 @@ function onFitHeight(item: Widget, px: number) {
         drag-allow-from=".card-head"
       >
         <ChartCard
-          :widget="item"
+          :widget="shown[idx]"
           :filters="filters"
           :dark="dark"
           :drill-open="drillOpenId === item.id"
           :force-controls="controlsVisible"
-          @edit="emit('edit', item)"
+          @edit="emit('edit', shown[idx])"
           @remove="emit('remove', item.id)"
-          @duplicate="emit('duplicate', item)"
+          @duplicate="emit('duplicate', shown[idx])"
           @drill="emit('drill', $event)"
           @fit-height="onFitHeight(item, $event)"
           @open-campaigns="emit('open-campaigns')"

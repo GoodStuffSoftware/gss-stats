@@ -7,6 +7,8 @@ import { ASK_ORDER_VIEW } from './lib/askOrder'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
+import { featureStepSeriesOf } from './lib/featureHealth'
+import { MAX_STEP_SERIES } from './lib/queryLimits'
 import { sessionExpired, checkSessionExpired, isAuthError, isNetworkError } from './session'
 
 // Resolve a page's drill-downs into { field, value } pairs for one dataset. A drill
@@ -20,10 +22,66 @@ function drillConstraints(filters: GlobalFilters, dataset: Dataset): { field: st
     .filter((c): c is { field: string; value: string } => c !== null)
 }
 
+/** The /api/geo request body for one widget: the page's drills plus `extraConstraints` (one series' own filter). */
+function geoRequestBody(widget: Widget, filters: GlobalFilters, extraConstraints: { field: string; value: string }[]): Record<string, unknown> {
+  const { tags } = resolveSelection(widget.siteSel ?? filters.siteSel)
+  // The full nested-doughnut ring list (dimension, breakdown, then any further
+  // widget.rings — see lib/rings.ts). Sent as `dims` only when there are 2+ rings; older
+  // single-dim / 2-dim requests keep using `dimension`/`breakdown` alone, unchanged.
+  const rings = queryDims(widget)
+  return {
+    dimension: widget.type === 'map' ? 'points' : widget.dimension || 'region',
+    breakdown: widget.breakdown || undefined,
+    dims: rings.length >= 2 ? rings : undefined,
+    since: filters.since,
+    until: filters.until,
+    limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
+    sites: tags,
+    // The page's drill-downs, plus (for one series of a series line chart) that series'
+    // own filter — native geo fields, validated server-side against GEO_DIMS like any drill.
+    constraints: [...drillConstraints(filters, 'geo'), ...extraConstraints],
+    // "Hide my visits" / "hide self-referrals" apply to the beacon dataset too — same
+    // resolution as the RUM branch below (widget-level override falls back to the global
+    // filter) — so the two datasets agree instead of only RUM honoring these toggles.
+    excludeSelfReferrals: widget.excludeSelfReferrals ?? filters.excludeSelfReferrals,
+    excludeOwnVisits: filters.excludeOwnVisits,
+    ownBrowser: filters.ownBrowser,
+    ownOS: filters.ownOS,
+    // Per-chart override, falling back to the page-level filter — same resolution as
+    // excludeSelfReferrals above. The page-level value is normally unset (every existing
+    // chart keeps excluding pop-up/install/return/game-complete/auth-status rows by
+    // default); App.vue's openFilteredPage sets it when a drill lands on an event-family
+    // pathFamily value, so every widget on that page — not just the one that was
+    // drilled — can actually show the event rows it just filtered down to.
+    includeEventBeacons: widget.includeEventBeacons === true || filters.includeEventBeacons === true,
+    excludeKnownTraffic: widget.excludeKnownTraffic === true,
+  }
+}
+
+/** The step values of a beacon date line whose every series is exactly one featureStep filter (a Features-page step
+ * chart, or one built like it in the editor), or null for any other chart. */
+export function stepSeriesOf(widget: Widget): string[] | null {
+  const steps = featureStepSeriesOf(widget)
+  return steps && steps.length <= MAX_STEP_SERIES ? steps : null
+}
+
 /** A series line chart (Widget.series): one date query per series, each narrowed by its own
- * filter, fetched in parallel (the Function's edge cache keys each one separately). */
+ * filter, fetched in parallel (the Function's edge cache keys each one separately). A chart of
+ * featureStep series (stepSeriesOf) asks once instead: /api/geo answers every series from one
+ * statement, each the same as its own query would be. */
 export async function fetchSeriesStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse[]> {
   const base: Widget = { ...widget, series: undefined, breakdown: undefined, rings: undefined }
+  const steps = stepSeriesOf(widget)
+  if (steps) {
+    const res = await fetch('/api/geo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...geoRequestBody(base, filters, []), stepSeries: steps }) })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`geo ${res.status}: ${text.slice(0, 200)}`)
+    }
+    const out = (await res.json()) as { series?: StatsResponse[] }
+    if (!Array.isArray(out.series) || out.series.length !== steps.length) throw new Error('geo: the step series answer does not match the request')
+    return out.series
+  }
   return Promise.all((widget.series ?? []).map((s) => fetchStats(base, filters, (s.filter ?? []).filter((f) => f.field && f.value))))
 }
 
@@ -87,41 +145,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters, extraCo
 
   // Geo beacon dataset → /api/geo (D1-backed, already bot-free).
   if (widget.dataset === 'geo') {
-    // The full nested-doughnut ring list (dimension, breakdown, then any further
-    // widget.rings — see lib/rings.ts). Sent as `dims` only when there are 2+ rings; older
-    // single-dim / 2-dim requests keep using `dimension`/`breakdown` alone, unchanged.
-    const rings = queryDims(widget)
-    const res = await fetch('/api/geo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dimension: widget.type === 'map' ? 'points' : widget.dimension || 'region',
-        breakdown: widget.breakdown || undefined,
-        dims: rings.length >= 2 ? rings : undefined,
-        since: filters.since,
-        until: filters.until,
-        limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
-        sites: tags,
-        // The page's drill-downs, plus (for one series of a series line chart) that series'
-        // own filter — native geo fields, validated server-side against GEO_DIMS like any drill.
-        constraints: [...drillConstraints(filters, 'geo'), ...extraConstraints],
-        // "Hide my visits" / "hide self-referrals" apply to the beacon dataset too — same
-        // resolution as the RUM branch below (widget-level override falls back to the global
-        // filter) — so the two datasets agree instead of only RUM honoring these toggles.
-        excludeSelfReferrals: widget.excludeSelfReferrals ?? filters.excludeSelfReferrals,
-        excludeOwnVisits: filters.excludeOwnVisits,
-        ownBrowser: filters.ownBrowser,
-        ownOS: filters.ownOS,
-        // Per-chart override, falling back to the page-level filter — same resolution as
-        // excludeSelfReferrals above. The page-level value is normally unset (every existing
-        // chart keeps excluding pop-up/install/return/game-complete/auth-status rows by
-        // default); App.vue's openFilteredPage sets it when a drill lands on an event-family
-        // pathFamily value, so every widget on that page — not just the one that was
-        // drilled — can actually show the event rows it just filtered down to.
-        includeEventBeacons: widget.includeEventBeacons === true || filters.includeEventBeacons === true,
-        excludeKnownTraffic: widget.excludeKnownTraffic === true,
-      }),
-    })
+    const res = await fetch('/api/geo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geoRequestBody(widget, filters, extraConstraints)) })
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       throw new Error(`geo ${res.status}: ${text.slice(0, 200)}`)

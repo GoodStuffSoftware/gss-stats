@@ -2,6 +2,7 @@ import type { SiteKey, ChartType, Metric, Dataset, Widget } from '../types'
 import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
 import { CAMPAIGNS, liveLandingTags } from './campaigns'
 import { LANDING_NOT_LIVE_TEXT, LANDING_TAGS, landingTagLabel } from './landingTags'
+import { featureStepLabel } from './featureHealth'
 import { isDateDim } from './rings'
 
 // `creatable: false` keeps a dataset out of "Add chart" → Data source while its label stays here for
@@ -133,6 +134,9 @@ export const GEO_DIMENSIONS: DimensionDef[] = [
   { key: 'campaignFlight', label: 'Campaign flight (attributed)' },
   { key: 'arrival', label: 'Arrival (first visit): tagged / untagged' },
   { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
+  // A feature-walkthrough step (src/lib/featureHealth.ts FEATURES): a per-ET-day count of its rows. As a series filter on a
+  // date line, the value is "<feature>.<step>", e.g. tour.start; grouped, a row lands on its first matching step.
+  { key: 'featureStep', label: 'Feature step (walkthrough beacons; series filter value feature.step, e.g. tour.start)', valueLabel: featureStepLabel },
   { key: 'hourEt', label: 'Hour of day (ET)' },
   { key: 'flightDay', label: 'Campaign flight day (day 1 = first day)' },
   {

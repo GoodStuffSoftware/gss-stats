@@ -442,3 +442,15 @@ alarms a day, plus one request per tab connect and reconnect (backoff 1 s doubli
 still count as an incoming message at 20:1 (about 86 requests per all-day tab, so 10 all-day tabs are under 1 %); hibernation bills about zero duration (13,000 GB-s/day allowed); outgoing messages are free. The
 object holds at most 100 sockets; at the cap the open socket with the oldest accept time (a number each socket carries) is closed (1013) to admit the new one. All of this is an estimate: expected load is
 a few percent of the daily allowance, and $0.
+
+## 11. The Features page step charts as ordinary charts (editor tools T1, 2026-10-27) — D1 rows read
+
+The 14 step charts of the Features page used to share one `/api/features` request: 2 D1
+statements per load, edge-cached for 300 s. As ordinary charts each one asks `/api/geo` once
+(`stepSeries`, one statement for all its steps), so a load is 14 requests and 14 statements, each
+scanning the range's `ts` window, with the geo edge cache (90 s while the range is live, longer
+for a closed range). Estimate, not a measurement: about 7 times the rows read for the step charts
+per uncached load, since each statement reads the same window the old pair read. Batching the
+steps keeps it at 14 rather than 44 (one per step). The step charts with no counts-only rows are
+now `liveSafe`, so a live ping can refetch them (at most hourly per chart, §10); the old step
+charts never refetched. Coach tips and Ask-order still read `/api/features`, unchanged.
