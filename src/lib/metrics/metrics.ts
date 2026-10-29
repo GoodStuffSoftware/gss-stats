@@ -11,6 +11,9 @@
 // A new metric is a new entry here over an existing fact; a new fact is a code-reviewed SQL
 // builder. Labels are notes-registry ids (`label.<id>`, lib/notes.ts).
 
+import { assembleHealth, FEATURES } from '../featureHealth'
+import { featureDaysWindow, foldFeatureDays } from '../featureHealthSql'
+import { etMidnightMs as etMidnightOf } from './instrumentation'
 import {
   CAMPAIGN_SPEND,
   authSuccessRow,
@@ -60,7 +63,7 @@ import type { Unit } from './units'
 
 /** `country` (a COUNTRY_BUCKETS value) is OPTIONAL wherever a metric declares it: unset, the
  * metric counts every country; set, only that bucket (the campaign fact's `cb` split). */
-export type MetricParam = 'campaignId' | 'popup' | 'country' | 'assetId'
+export type MetricParam = 'campaignId' | 'popup' | 'country' | 'assetId' | 'feature' | 'step'
 export const OPTIONAL_PARAMS: ReadonlySet<MetricParam> = new Set(['country'])
 
 /** What a store reducer (MetricDef.store) sees besides the fact's rows. */
@@ -89,7 +92,7 @@ export interface StoreResult {
 
 /** What a reducer knows about the request it is serving. */
 export interface MetricCtx {
-  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string }
   campaign?: CampaignFlight
   /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
    * site-wide fact (campaign.taggedArrivals over the KPI fact). */
@@ -130,6 +133,8 @@ export interface MetricDef {
   /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
    * value, and the registry notes that travel with it. */
   store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => StoreResult
+  /** A plain ratio of counts (n/d as a number, 2 decimals): kind 'per', never a share. */
+  per?: true
   /** Ad-asset metrics: the ads_daily_assets column they total (and draw per day). */
   asset?: AssetSortField
   instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
@@ -402,6 +407,89 @@ function playThroughOf(rows: FactRows): { value: number | null } {
   if (rows.kind !== 'playDaily' || !rows.rows.length) return { value: null }
   return { value: etMidnightMs(rows.rows.reduce((m, r) => (r.date > m ? r.date : m), rows.rows[0].date)) }
 }
+
+// ── Feature health (ADR 0005, editor-tools T2): the Overview's Feature health readout as ordinary cards ──
+// One featureDays fact: per-ET-day step counts, the rows /api/features reads. The model is assembled once per fact rows
+// object (its key carries the range, the filters and today's ET date, so one rows object is one model).
+type FeatureModel = ReturnType<typeof assembleHealth>
+const featureModels = new WeakMap<object, FeatureModel>()
+function featureModelOf(rows: FactRows, env: StoreEnv): FeatureModel | null {
+  if (rows.kind !== 'featureDays') return null
+  let model = featureModels.get(rows.rows)
+  if (!model) {
+    const nowMs = etMidnightOf(env.todayEt)
+    const [sinceMs, untilMs] = env.pageRange ?? [NaN, NaN]
+    const w = featureDaysWindow(sinceMs, untilMs, nowMs)
+    const folded = foldFeatureDays(rows.rows, FEATURES, w.newCutoffDay)
+    model = assembleHealth({ rows: folded.rows, before: folded.before, nowMs, rangeFrom: w.rangeFrom, rangeTo: w.rangeTo })
+    featureModels.set(rows.rows, model)
+  }
+  return model
+}
+const featureOf = (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => featureModelOf(rows, env)?.features.find((f) => f.id === ctx.params.feature)
+/** latestDay = the latest complete ET day, previousDay = the one before, page = the selected range. */
+const FEATURE_WINDOWS: Partial<Record<WindowName, FactId>> = { latestDay: 'featureDays', previousDay: 'featureDays', page: 'featureDays' }
+const byWindow = <T>(o: { latest: T; prev: T; range: T }, w: WindowName): T => (w === 'latestDay' ? o.latest : w === 'previousDay' ? o.prev : o.range)
+/** The status as a code, shown by its 'feature.status.<status>' label. */
+const FEATURE_STATUS_CODE = { ok: 0, new: 1, silent: 2 } as const
+function featureMetric(d: Omit<MetricDef, 'label' | 'instrumented'>): MetricDef {
+  return { ...d, label: `label.${d.id}`, instrumented: [] }
+}
+const FEATURE_METRICS: MetricDef[] = [
+  featureMetric({
+    id: 'feature.step',
+    unit: 'row',
+    params: ['feature', 'step'],
+    windows: FEATURE_WINDOWS,
+    store: (rows, ctx, env) => {
+      const s = featureOf(rows, ctx, env)?.steps.find((x) => x.id === ctx.params.step)
+      return { value: s ? byWindow(s, ctx.window) : null }
+    },
+  }),
+  featureMetric({
+    id: 'feature.total',
+    unit: 'row',
+    params: ['feature'],
+    windows: FEATURE_WINDOWS,
+    store: (rows, ctx, env) => {
+      const f = featureOf(rows, ctx, env)
+      return { value: f ? byWindow(f, ctx.window) : null }
+    },
+  }),
+  // A step's rows per its "per" step's rows (StepDef.ratioOf): null when the step has none or the "per" count is 0.
+  featureMetric({
+    id: 'feature.stepRatio',
+    unit: 'row',
+    per: true,
+    params: ['feature', 'step'],
+    windows: FEATURE_WINDOWS,
+    store: (rows, ctx, env) => {
+      const f = featureOf(rows, ctx, env)
+      const s = f?.steps.find((x) => x.id === ctx.params.step)
+      const perId = FEATURES.find((x) => x.id === ctx.params.feature)?.steps.find((x) => x.id === ctx.params.step)?.ratioOf?.per
+      const per = perId ? f?.steps.find((x) => x.id === perId) : undefined
+      if (!s?.ratio || !per) return { value: null }
+      return { value: byWindow(s.ratio, ctx.window), numerator: byWindow(s, ctx.window), denominator: byWindow(per, ctx.window) }
+    },
+  }),
+  featureMetric({
+    id: 'feature.status',
+    unit: 'code',
+    params: ['feature'],
+    windows: { latestDay: 'featureDays' },
+    store: (rows, ctx, env) => {
+      const f = featureOf(rows, ctx, env)
+      return f ? { value: FEATURE_STATUS_CODE[f.status], noteIds: [`feature.status.${f.status}`] } : { value: null }
+    },
+  }),
+  featureMetric({
+    id: 'feature.baselineAvg',
+    unit: 'row',
+    params: ['feature'],
+    windows: { latestDay: 'featureDays' },
+    store: (rows, ctx, env) => ({ value: featureOf(rows, ctx, env)?.baselineAvg ?? null }),
+  }),
+]
 
 export const METRIC_DEFS: MetricDef[] = [
   // ── Campaign (one campaignPathVisitor statement per campaign) ────────────────────────────
@@ -800,6 +888,7 @@ export const METRIC_DEFS: MetricDef[] = [
     instrumented: [TRACKING],
     caveats: ['signin-eligible-caveat'],
   }),
+  ...FEATURE_METRICS,
 ]
 
 export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
@@ -809,7 +898,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit' || f === 'featureDays')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {

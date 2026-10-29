@@ -5,6 +5,7 @@
 // scope when left unset. Pure functions only — MetricCard.vue and MetricSection.vue call
 // these to decide what to render and what to request, so the expansion is unit-testable
 // without mounting a component.
+import { FEATURES, stepRatioLabel, type FeatureDef, type StepDef } from '../featureHealth'
 import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
@@ -104,6 +105,9 @@ export type ScopeInstance = (
   | { kind: 'reading'; reading: ReadingScope }
   | { kind: 'rule'; rule: RuleScope }
   | { kind: 'asset'; asset: AssetScope }
+  /** Feature health: a feature (FEATURES), and one of its steps (a steps repeat inside a features repeat). */
+  | { kind: 'feature'; feature: FeatureDef }
+  | { kind: 'step'; step: StepDef; feature: FeatureDef }
 ) & { parent?: ScopeInstance }
 
 export const ROOT_SCOPE: ScopeInstance = { kind: 'root' }
@@ -279,6 +283,17 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       const picked = repeat.ids?.length ? all.filter((a) => repeat.ids!.includes(a.id)) : all
       return sortAssets(picked, repeat.sortBy).slice(0, readingsLimit(repeat)).map((asset) => ({ kind: 'asset', asset }))
     }
+    case 'features': {
+      const list = repeat.ids?.length ? FEATURES.filter((f) => repeat.ids!.includes(f.id)) : FEATURES
+      return list.map((feature) => ({ kind: 'feature', feature }))
+    }
+    case 'steps': {
+      // Only inside a features repeat: that feature's steps, in config order.
+      const feature = scopeOfKind(outer, 'feature')?.feature
+      if (!feature) return []
+      const steps = repeat.ids?.length ? feature.steps.filter((s) => repeat.ids!.includes(s.id)) : feature.steps
+      return steps.map((step) => ({ kind: 'step', step, feature }))
+    }
     default:
       return []
   }
@@ -381,6 +396,18 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return scopeOfKind(scope, 'rule')?.rule.verdict ?? null
     case 'asset.label':
       return scopeOfKind(scope, 'asset')?.asset.label ?? null
+    case 'feature.id':
+      return scopeOfKind(scope, 'feature')?.feature.id ?? null
+    case 'feature.label':
+      return scopeOfKind(scope, 'feature')?.feature.label ?? null
+    case 'feature.caption':
+      return scopeOfKind(scope, 'feature')?.feature.caption ?? null
+    case 'step.label':
+      return scopeOfKind(scope, 'step')?.step.label ?? null
+    case 'step.ratioLabel': {
+      const s = scopeOfKind(scope, 'step')
+      return s ? stepRatioLabel(s.feature, s.step) : null
+    }
     case 'popup.id':
       return popup ? popup.id : null
     case 'popup.label':
@@ -470,7 +497,7 @@ function resolveParamValue(pv: ParamValue | undefined, scopeVal: string | undefi
 export interface ResolvedBinding {
   kind: 'metric' | 'ratio' | 'field'
   def?: MetricDef | RatioDef
-  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string }
   window?: string
   fieldValue?: string | null
 }
@@ -487,9 +514,9 @@ export function resolveBinding(binding: DataBinding, scope: ScopeInstance, today
   const def: MetricDef | RatioDef | undefined = isMetric ? METRICS.get(id) : RATIOS.get(id)
   if (!def) return null
   const allowedParams: MetricParam[] = isMetric ? (def as MetricDef).params : ratioParamsOf(def as RatioDef)
-  const params: { campaignId?: string; popup?: string; country?: string; assetId?: string } = {}
+  const params: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string } = {}
   for (const p of allowedParams) {
-    const scopeVal = p === 'campaignId' ? armIdOfScope(scope) : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : p === 'assetId' ? scopeOfKind(scope, 'asset')?.asset.id : scopeOfKind(scope, 'country')?.country
+    const scopeVal = p === 'campaignId' ? armIdOfScope(scope) : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : p === 'assetId' ? scopeOfKind(scope, 'asset')?.asset.id : p === 'feature' ? scopeOfKind(scope, 'feature')?.feature.id : p === 'step' ? scopeOfKind(scope, 'step')?.step.id : scopeOfKind(scope, 'country')?.country
     const v = resolveParamValue(binding.params?.[p], scopeVal)
     if (v !== undefined) params[p] = v
   }
@@ -572,6 +599,10 @@ export function columnDefaultLabel(scope: ScopeInstance): Label {
       return { bind: 'rule.name' }
     case 'asset':
       return { bind: 'asset.label' }
+    case 'feature':
+      return { bind: 'feature.label' }
+    case 'step':
+      return { bind: 'step.label' }
     default:
       return ''
   }
@@ -587,7 +618,7 @@ function emptyPlaceholderItem(id: string): MetricItem {
 export interface MetricRequestSpec {
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string }
+  params?: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string }
   window?: string
   deltas?: DeltaName[]
   /** 'daily': also return the metric's per-ET-day series (a sparkline display). */

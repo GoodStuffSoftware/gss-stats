@@ -1,6 +1,7 @@
 // The engine's per-batch work (review finding #8): facts arrive aggregated by SQL, every possible
 // request side is served by its fact's static cuts, identical requests share one result, and
 // deltas are finite or absent.
+import { FEATURES } from '../featureHealth'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, releaseWindowsFor, type FactResult } from './engine'
@@ -31,7 +32,7 @@ function everyRequest(): MetricRequest[] {
     for (const window of windows)
       for (const campaignId of campaigns)
         for (const popup of popups)
-          for (const assetId of assets) out.push({ ...base, key: `r${out.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}) } })
+          for (const assetId of assets) out.push({ ...base, key: `r${out.length}`, window, params: { ...(campaignId ? { campaignId } : {}), ...(popup ? { popup } : {}), ...(assetId ? { assetId } : {}), ...(params.includes('feature') ? { feature: FEATURES[0].id } : {}), ...(params.includes('step') ? { step: FEATURES[0].steps[0].id } : {}) } })
   }
   for (const d of METRIC_DEFS) add({ metric: d.id }, d.params, metricWindows(d))
   for (const r of RATIO_DEFS) add({ ratio: r.id }, ratioParamsOf(r), ratioWindowsOf(r))

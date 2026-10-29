@@ -45,6 +45,10 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   adsSpendDaily: [{}],
   adsInstallsDaily: [{}],
   adsAssetDaily: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  featureDays: [
+    { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: [], todayEt: '2026-09-26' },
+    { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], ownBrowser: 'Chrome', ownOS: 'Android', todayEt: '2026-09-26' },
+  ],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 restoreFlight3()
@@ -106,6 +110,7 @@ describe('every fact is an anonymous aggregate', () => {
       if (isRefusedZeroBandCase(item)) continue // the KPI same-time flag: 0 on every refused row
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
+      if (item === `CASE WHEN ts < ? THEN '' ELSE ${etDateSql()} END`) continue // featureDays: the ET day, or '' for every older row
       if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
       if (item === guardedCountryBucket().sql) continue // the same, or '' on a split-refused row
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)

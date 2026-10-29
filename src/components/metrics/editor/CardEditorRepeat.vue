@@ -31,6 +31,8 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   countries: 'One per country (US / CA / Other)',
   rules: 'One per Flight 3 rule (newest stored read)',
   assets: 'One per ad asset (headline, description, image)',
+  features: 'One per feature (Feature health)',
+  steps: 'One per step of the feature',
 }
 /** What "none checked" means for each kind's id list. */
 const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: string }>> = {

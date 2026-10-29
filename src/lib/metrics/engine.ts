@@ -122,6 +122,10 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
       const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
       return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own }
     }
+    case 'featureDays': {
+      const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
+      return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own, todayEt: env.todayEt }
+    }
     case 'bskReleaseSides':
       return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
     case 'bskFirstHit':
@@ -229,6 +233,10 @@ function windowOf(ctx: MetricCtx, clock: Clock, endMs: number): [number, number]
     case 'before':
     case 'after':
       return clock.release ? clock.release[ctx.window] : null
+    case 'latestDay':
+      return [etMidnightMs(addEtDays(clock.todayEt, -1)), etMidnightMs(clock.todayEt)]
+    case 'previousDay':
+      return [etMidnightMs(addEtDays(clock.todayEt, -2)), etMidnightMs(addEtDays(clock.todayEt, -1))]
     case 'upsellPre':
       return [attrStart(), UPSELL_SIGNEDOUT_FIX_AT ?? endMs]
     case 'upsellPost':
@@ -243,7 +251,7 @@ export function newSideMemo(): SideMemo {
   return new Map()
 }
 function resolveStatic(memo: SideMemo, def: MetricDef, req: Pick<ResolvedRequest, 'params' | 'window'>, clock: Clock, endMs: number): { ctx: MetricCtx; stat: Static } {
-  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${endMs}`
+  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.params.feature ?? ''}|${req.params.step ?? ''}|${req.window}|${endMs}`
   let v = memo.get(key)
   if (!v) {
     const ctx = metricCtx(def, req)
@@ -290,7 +298,7 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
   }
   for (const req of requests) {
     for (const def of sidesOf(req)) {
-      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${req.series ?? ''}`
+      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.params.feature ?? ''}|${req.params.step ?? ''}|${req.window}|${req.series ?? ''}`
       if (seenSides.has(sideKey)) continue
       seenSides.add(sideKey)
       const { ctx, stat: side } = resolveStatic(memo, def, req, clock, env.nowMs)
@@ -552,7 +560,7 @@ class Batch {
   /** Resolves (and memoizes) one side. `alignFromMs` restricts the denominator of an aligned
    * proportion to where its numerator is measured. */
   side(def: MetricDef, req: ResolvedRequest, alignFromMs: number | null): SidePlan {
-    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.window}|${alignFromMs ?? ''}`
+    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.params.assetId ?? ''}|${req.params.feature ?? ''}|${req.params.step ?? ''}|${req.window}|${alignFromMs ?? ''}`
     let plan = this.sides.get(key)
     if (plan) return plan
     const factId = def.windows[req.window]!
@@ -923,7 +931,7 @@ export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv, mem
     const r = c.req
     // Everything a result depends on: `wholeDays`, like `deltas`, is a function of the metric id
     // (countsRefused is static per metric), the window and the requested names (r.deltas).
-    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.params.assetId ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
+    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.params.assetId ?? ''}|${r.params.feature ?? ''}|${r.params.step ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
     let v = same.get(sig)
     if (!v) {
       try {

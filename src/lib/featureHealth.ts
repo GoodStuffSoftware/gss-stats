@@ -402,6 +402,8 @@ export interface FeatureHealth {
   status: HealthStatus
   /** Why: "averaged 12.3 a day over the prior 7 days, none yesterday", "no rows yet", … */
   statusNote: string
+  /** The baseline's rows a day, to one decimal (the number statusNote quotes). */
+  baselineAvg?: number
   latest: number
   prev: number
   range: number
@@ -494,6 +496,7 @@ export function assembleHealth(input: {
       ...(feature.caption ? { caption: feature.caption } : {}),
       status,
       statusNote,
+      baselineAvg: Number(avg.toFixed(1)),
       latest,
       prev: total(hd.prev),
       range: days.reduce((a, d) => a + total(d), 0),
@@ -501,4 +504,11 @@ export function assembleHealth(input: {
     }
   })
   return { days, latestDay: hd.latest, prevDay: hd.prev, features: out }
+}
+
+/** What a step's ratio is per ("tour opened per shown"), the label assembleHealth gives it; null for a step with no
+ * ratio, or one whose "per" step is not in the feature. */
+export function stepRatioLabel(feature: FeatureDef, step: StepDef): string | null {
+  const per = step.ratioOf ? feature.steps.find((s) => s.id === step.ratioOf!.per) : undefined
+  return per ? `${lc(step.label)} per ${lc(per.label)}` : null
 }

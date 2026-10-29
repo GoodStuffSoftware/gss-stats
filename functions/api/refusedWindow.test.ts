@@ -494,9 +494,10 @@ describe('the daily twins follow the same rule', () => {
 
   it('every fact over a caller-picked range snaps refused rows or leaves them out', () => {
     const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
-    expect(ranged.sort()).toEqual(['bskRangeDaily', 'bskRangePath', 'popupRangeDaily', 'popupRangePath'])
+    expect(ranged.sort()).toEqual(['bskRangeDaily', 'bskRangePath', 'featureDays', 'popupRangeDaily', 'popupRangePath'])
     const m = refusedPathMatch().sql
-    for (const id of ranged) {
+    // featureDays reads whole ET days only: it snaps the range itself (lib/featureHealthSql.ts featureDaysWindow), as /api/features does.
+    for (const id of ranged.filter((x) => x !== 'featureDays')) {
       const sql = buildFact({ id, params: { since: HOURS[1][0], until: HOURS[1][1], sites: [] } }, Date.now()).sql
       expect(sql.includes(`CASE WHEN ${m}`) || sql.includes(`NOT ${m}`), id).toBe(true)
     }

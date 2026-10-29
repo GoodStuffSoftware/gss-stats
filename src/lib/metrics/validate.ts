@@ -7,6 +7,7 @@
 // normCardRef (the load-time normalizer that keeps `widget.card` through lib/defaults.ts
 // normWidget) is slice 5, where it is wired into normalizeConfig.
 
+import { FEATURES } from '../featureHealth'
 import { MIN_COHORT, POPUPS } from '../popupEvents'
 import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
 import { safeUA } from '../ownExclusion'
@@ -34,6 +35,9 @@ const DELTA_NAMES: readonly DeltaName[] = ['yesterday', 'avg7']
 const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 const COUNTRY_IDS: ReadonlySet<string> = new Set(COUNTRY_BUCKETS)
+const FEATURE_IDS: ReadonlySet<string> = new Set(FEATURES.map((f) => f.id))
+/** Any feature's step id: the feature.* stores give no value for a step that is not the feature's own. */
+const STEP_IDS: ReadonlySet<string> = new Set(FEATURES.flatMap((f) => f.steps.map((s) => s.id)))
 const CARD_ACTIONS: ReadonlySet<CardAction> = new Set(['ads-refresh'])
 const CARD_NOTICES: ReadonlySet<string> = new Set<CardNotices>(['ads-readings'])
 /** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket.
@@ -43,6 +47,8 @@ function paramValueOk(name: MetricParam, v: unknown, organicOk: boolean): boolea
   if (typeof v !== 'string') return false
   if (name === 'campaignId' && v === ORGANIC_ARM_ID) return organicOk
   if (name === 'assetId') return ASSET_ID_RE.test(v)
+  if (name === 'feature') return FEATURE_IDS.has(v)
+  if (name === 'step') return STEP_IDS.has(v)
   return (name === 'campaignId' ? CAMPAIGN_IDS : name === 'popup' ? POPUP_IDS : COUNTRY_IDS).has(v)
 }
 /** Whether a binding serves the organic arm: a metric that declares it, or a ratio whose BOTH
@@ -83,7 +89,7 @@ export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
 }
 
 export function metricKind(def: MetricDef): DataKind {
-  return def.unit === 'usd' ? 'money' : def.unit === 'instant' ? 'time' : def.unit === 'code' ? 'code' : def.unit === 'rate' ? 'rate' : 'count'
+  return def.per ? 'per' : def.unit === 'usd' ? 'money' : def.unit === 'instant' ? 'time' : def.unit === 'code' ? 'code' : def.unit === 'rate' ? 'rate' : 'count'
 }
 export function ratioKind(def: RatioDef): DataKind {
   return def.kind
@@ -99,8 +105,8 @@ export function kindOf(b: DataBinding): DataKind | null {
 }
 
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
-const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES])
-const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId' }
+const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES, 'latestDay', 'previousDay'])
+const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step' }
 /** A Google Ads asset id: digits, as the store keeps it. */
 const ASSET_ID_RE = /^[0-9]{1,20}$/
 /** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
@@ -140,6 +146,8 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'popups' && !POPUP_IDS.has(id)) errors.push(`${where}.repeat: unknown pop-up '${id}'`)
       if (r.over === 'countries' && !COUNTRY_IDS.has(id)) errors.push(`${where}.repeat: unknown country bucket '${id}'`)
       if (r.over === 'assets' && !ASSET_ID_RE.test(id)) errors.push(`${where}.repeat: '${id}' is not an asset id`)
+      if (r.over === 'features' && !FEATURE_IDS.has(id)) errors.push(`${where}.repeat: unknown feature '${id}'`)
+      if (r.over === 'steps' && !STEP_IDS.has(id)) errors.push(`${where}.repeat: unknown step '${id}'`)
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
     if (r.limit !== undefined && ((r.over !== 'readings' && r.over !== 'assets') || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
@@ -452,7 +460,7 @@ export interface ResolvedRequest {
   key: string
   kind: 'metric' | 'ratio'
   id: string
-  params: { campaignId?: string; popup?: string; country?: string; assetId?: string }
+  params: { campaignId?: string; popup?: string; country?: string; assetId?: string; feature?: string; step?: string }
   window: WindowName
   deltas: DeltaName[]
   /** 'daily': the request also wants the metric's per-ET-day series (lib/metrics/series.ts). */

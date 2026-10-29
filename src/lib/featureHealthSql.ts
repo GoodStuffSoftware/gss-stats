@@ -209,19 +209,7 @@ export function featureDaysStatement(input: {
   features?: readonly FeatureDef[]
 }): { sql: string; binds: unknown[]; rangeFrom: string; rangeTo: string; newCutoffDay: string } {
   const features = input.features ?? FEATURES
-  const hd = healthDays(input.nowMs)
-  let [rangeFromMs, rangeToMs] = refusedRowWindow(input.sinceMs, input.untilMs)
-  const hasRange = Number.isFinite(rangeFromMs) && Number.isFinite(rangeToMs) && rangeFromMs < rangeToMs
-  let rangeFrom = ''
-  let rangeTo = ''
-  if (hasRange) {
-    rangeTo = etDateFast(rangeToMs)
-    const oldest = addDays(rangeTo, -FEATURE_DAYS_MAX_RANGE_DAYS)
-    rangeFrom = etDateFast(rangeFromMs) < oldest ? oldest : etDateFast(rangeFromMs)
-    rangeFromMs = etWallTimeMs(rangeFrom)
-  }
-  const fromMs = hasRange ? Math.min(rangeFromMs, hd.baselineStartMs) : hd.baselineStartMs
-  const toMs = hasRange ? Math.max(rangeToMs, hd.tomorrowMs) : hd.tomorrowMs
+  const { fromMs, toMs, rangeFrom, rangeTo, newCutoffDay } = featureDaysWindow(input.sinceMs, input.untilMs, input.nowMs)
   const w: string[] = ['ts < ?', anyStepWhere(features)]
   const b: unknown[] = [toMs]
   const sites = input.sites ?? []
@@ -236,6 +224,30 @@ export function featureDaysStatement(input: {
   return {
     sql: featureDaysSql(w, features),
     binds: [fromMs, ...b],
+    rangeFrom,
+    rangeTo,
+    newCutoffDay,
+  }
+}
+
+/** featureDaysStatement's window: the selected range snapped to whole ET days and capped (rangeFrom..rangeTo, today
+ * when there is none), widened to the status baseline and today ([fromMs, toMs)), and the "new" cutoff day. The
+ * metric registry's featureDays store rebuilds the model from the same window (lib/metrics/metrics.ts). */
+export function featureDaysWindow(sinceMs: number, untilMs: number, nowMs: number): { fromMs: number; toMs: number; rangeFrom: string; rangeTo: string; newCutoffDay: string } {
+  const hd = healthDays(nowMs)
+  let [rangeFromMs, rangeToMs] = refusedRowWindow(sinceMs, untilMs)
+  const hasRange = Number.isFinite(rangeFromMs) && Number.isFinite(rangeToMs) && rangeFromMs < rangeToMs
+  let rangeFrom = ''
+  let rangeTo = ''
+  if (hasRange) {
+    rangeTo = etDateFast(rangeToMs)
+    const oldest = addDays(rangeTo, -FEATURE_DAYS_MAX_RANGE_DAYS)
+    rangeFrom = etDateFast(rangeFromMs) < oldest ? oldest : etDateFast(rangeFromMs)
+    rangeFromMs = etWallTimeMs(rangeFrom)
+  }
+  return {
+    fromMs: hasRange ? Math.min(rangeFromMs, hd.baselineStartMs) : hd.baselineStartMs,
+    toMs: hasRange ? Math.max(rangeToMs, hd.tomorrowMs) : hd.tomorrowMs,
     rangeFrom: rangeFrom || hd.today,
     rangeTo: rangeTo || hd.today,
     newCutoffDay: addDays(hd.today, -HEALTH_NEW_DAYS),

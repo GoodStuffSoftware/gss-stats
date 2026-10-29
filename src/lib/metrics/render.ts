@@ -225,7 +225,7 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
-      if (!('unit' in def) && def.kind === 'per') return { primary: fmtPer(value.value), deltaLines: [] }
+      if ('unit' in def ? def.per === true : def.kind === 'per') return { primary: fmtPer(value.value), deltaLines: [] }
       return { primary: fmtCount(value.value), deltaLines: deltaLinesFor(value, display.deltas, pastDay) }
     case 'currency':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }

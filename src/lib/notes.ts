@@ -34,6 +34,7 @@
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
 //    only; see that function's own doc comment).
+import { HEALTH_CAPTION } from './featureHealth'
 import { REFUSED_WHOLE_DAYS_CAPTION } from './splitGuard'
 import {
   SMALL_SAMPLE_NOTE,
@@ -239,6 +240,13 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+  },
+  'feature-health-caption': {
+    id: 'feature-health-caption',
+    text: HEALTH_CAPTION,
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
   },
   'flight-day-caption': {
     id: 'flight-day-caption',
@@ -584,6 +592,25 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.asset.impressions': 'Impressions',
     'label.asset.clicks': 'Clicks',
     'label.asset.conversions': 'Conversions',
+    'label.feature.step': 'Step rows',
+    'label.feature.total': 'Rows, all steps',
+    'label.feature.stepRatio': 'Step ratio',
+    'label.feature.status': 'Status',
+    'label.feature.baselineAvg': 'Rows a day, prior 7 days',
+    'label.feature.col.step': 'Step',
+    'label.feature.col.latest': 'Latest day',
+    'label.feature.col.prev': 'Day before',
+    'label.feature.col.range': 'Range',
+    'label.feature.col.ratioLatest': 'Ratio, latest day',
+    'label.feature.col.ratioPrev': 'Ratio, day before',
+    'label.feature.col.ratioRange': 'Ratio, range',
+    'label.feature.col.ratioOf': 'Ratio of',
+    'label.feature.totalLatest': 'All steps, latest day',
+    'label.feature.totalRange': 'All steps, range',
+    'label.feature.caveat': 'Reading caveat',
+    'feature.status.ok': 'OK',
+    'feature.status.new': 'New',
+    'feature.status.silent': 'Went silent',
     'label.campaign.installPrompts': 'Install prompts',
     'label.campaign.installs': 'Installs',
     'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
@@ -801,6 +828,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-f3-daily': 'Flight 3 daily counts',
     'label.preset.campaign-f3-daily.description': 'One card per Flight 3 arm: by ET day, the tagged completed-game rows, tagged sign-in ask rows and tagged new accounts. Counts only, never by hour, place or device.',
     'label.preset.f3-rule-readouts': 'Flight 3 rule readouts',
+    'label.preset.feature-health': 'Feature health',
+    'label.preset.feature-health.description': 'One small card per feature: its status (went silent, new, OK), the prior 7 days\' rows a day, and each step\'s rows for the latest day, the day before and the range, with its plain ratio. Known traffic hidden; per-ET-day counts only.',
     'label.preset.f3-rule-readouts.description': 'One card per Flight 3 arm: the date, flight day and proposal of its newest morning read, and each rule with its number, threshold and verdict. Proposals only.',
     'label.preset.ads-readings-log': 'Ads readings log',
     'label.preset.ads-readings-log.description': 'One card per campaign: its spend and freshness, the thresholds it fired, and the ads-read routine readings log with its rule results and proposals.',
