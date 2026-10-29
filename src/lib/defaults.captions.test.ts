@@ -98,8 +98,8 @@ describe('captions: normWidget limits', () => {
     expect('hiddenCaveats' in w).toBe(false)
     for (const p of normalizeConfig(defaultConfig()).pages)
       for (const dw of p.widgets) {
-        // the hero-vs-features donut ships its caption (its one-line note), and so does each Features-page step chart (its blurb)
-        expect('caption' in dw, dw.id).toBe(dw.id === F3_HERO_DONUT_ID || FEATURES.some((f) => dw.id === `fw-${f.id}`))
+        // the hero-vs-features donut ships its caption (its one-line note), and so does each Features-page step chart (its blurb) and the Traffic Pageviews card (its window note)
+        expect('caption' in dw, dw.id).toBe(dw.id === F3_HERO_DONUT_ID || dw.id === 'bsk-views' || FEATURES.some((f) => dw.id === `fw-${f.id}`))
         expect(dw.hiddenCaveats ?? [], dw.id).toEqual(autoCaveatIds(dw).filter(isNoteIdHideable))
       }
   })

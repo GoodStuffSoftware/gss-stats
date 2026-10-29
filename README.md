@@ -66,6 +66,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   Traffic page's "Web vs app" doughnut is the all-time share of page views by site for the chosen
   range, not a per-day trend. `site` is not a split-guard dimension (an ET-day count of page views
   is not an hour, place or device split).
+  Every default Traffic card hides known test and household traffic (`excludeKnownTraffic`), the same
+  exclusion Overview's "Today at a glance" always applies, so on whole ET days the two page-view counts
+  agree. The windows still differ, by definition: Traffic's "1d" is the last 24 hours, the glance is today
+  since ET midnight, which the Pageviews card's caption says (a new Traffic page only: Reset keeps a page's existing cards). A layout saved before this keeps its cards as
+  saved (no layout version bump, nothing is rewritten on load); the setting is changed in the chart editor.
+  Beacon data has no visit count, so the v4 beacon re-point (`beaconizeWidget`) retitles a "Visits" card
+  "Pageviews" rather than leave a second, identical "Visits" card.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick). The v1.99.1
   web release (live 2026-10-16 21:07Z) is a labelled marker that carries the v1.99.0 content, since

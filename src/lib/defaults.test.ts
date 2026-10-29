@@ -20,6 +20,9 @@ import {
   migrateTimelineV9,
   DEVICE_MIX_TITLE,
   CONFIG_VERSION,
+  defaultBestSudokuLaunchWidgets,
+  defaultBestSudokuLaunchPage,
+  beaconizeWidget,
 } from './defaults'
 import { POPUP_KIND_OPTIONS } from './catalog'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
@@ -750,5 +753,55 @@ describe('migratePopupCaveatTitles', () => {
     const w = popupsPage.widgets.find((w) => w.id === 'pu-eligible-bd')!
     expect(w.title).toBe('Sign-in eligibility')
     expect(w.notes).toEqual(['signin-eligible-caveat'])
+  })
+})
+
+describe('Traffic page: known test and household traffic', () => {
+  it('every Traffic card hides known traffic, like the Overview glance does', () => {
+    const ws = defaultBestSudokuLaunchWidgets()
+    expect(ws.length).toBeGreaterThan(0)
+    for (const wd of ws) expect({ id: wd.id, excludeKnownTraffic: wd.excludeKnownTraffic }).toEqual({ id: wd.id, excludeKnownTraffic: true })
+  })
+
+  it('the Pageviews card says "Last 1d" is 24 hours and the glance is since midnight', () => {
+    const views = defaultBestSudokuLaunchWidgets().find((wd) => wd.id === 'bsk-views')!
+    expect(views.caption).toMatch(/last 24 hours/)
+    expect(views.caption).toMatch(/Today at a glance/)
+  })
+
+  it('the setting survives normalizeConfig on a stored Traffic page', () => {
+    const cfg = defaultConfig()
+    const out = normalizeConfig(JSON.parse(JSON.stringify(cfg)))
+    const traffic = out.pages.find((p) => p.id === 'bsk-launch')!
+    expect(traffic.widgets.every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
+  })
+
+  it('a saved Traffic card without the setting is not rewritten on load (the saved layout is fixed in KV)', () => {
+    const cfg = JSON.parse(JSON.stringify(defaultConfig())) as DashboardConfig
+    const traffic = cfg.pages.find((p) => p.id === 'bsk-launch')!
+    traffic.widgets = traffic.widgets.map((wd) => ({ ...wd, excludeKnownTraffic: undefined }))
+    const out = normalizeConfig(cfg)
+    expect(out.pages.find((p) => p.id === 'bsk-launch')!.widgets.some((wd) => wd.excludeKnownTraffic)).toBe(false)
+    expect(defaultBestSudokuLaunchPage().widgets.every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
+  })
+})
+
+describe('beaconizeWidget: no "Visits" title on a page-views count', () => {
+  const visits = (over: Partial<Widget>): Widget => widget({ id: 'kpi-visits', title: 'Visits', type: 'stat', dataset: 'rum', metric: 'visits', ...over })
+
+  it('a RUM Visits stat becomes a page-views count titled Pageviews', () => {
+    const out = beaconizeWidget(visits({}))
+    expect(out.metric).toBe('pageviews')
+    expect(out.dataset).toBe('geo')
+    expect(out.title).toBe('Pageviews')
+  })
+
+  it('keeps the rest of the title: "Visits over time" -> "Pageviews over time"', () => {
+    expect(beaconizeWidget(visits({ type: 'area', title: 'Visits over time', dimension: 'date' })).title).toBe('Pageviews over time')
+  })
+
+  it('leaves other titles alone, including a Pageviews card and a non-visits metric', () => {
+    expect(beaconizeWidget(visits({ metric: 'pageviews', title: 'Visits by hand' })).title).toBe('Visits by hand')
+    expect(beaconizeWidget(visits({ metric: 'pageviews', title: 'Pageviews' })).title).toBe('Pageviews')
   })
 })

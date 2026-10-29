@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.67.2] — 2026-10-29
+
+### Fixed
+- **Traffic matches At a glance.** New Traffic pages now hide known test and household traffic on every card, so Pageviews agrees with Today at a glance on whole days, and its caption says a 1d range is the last 24 hours, not today since midnight. A saved Traffic page keeps its cards as saved until they are edited.
+- **No mislabelled "Visits" card.** Re-pointing a Visits card at beacon data now titles it Pageviews, since beacon data counts page views, not visits.
+
+## [0.67.1] — 2026-10-29
+
 ### Fixed
 - **Flight 3 now lists before Flight 4.** Campaign lists and "one per campaign" cards show a live Flight 3 arm ahead of Flight 4.
 

@@ -60,7 +60,8 @@ describe('v15: the defaults', () => {
     expect(bcn()).toMatchObject({ title: 'Pageviews over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90 })
     expect(bsk()).toMatchObject({ title: 'Visits over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90, markers: 'releases' })
     expect({ ...oldTrend('bcn-trend'), dimension: 'dateEt' }).toEqual(clone(bcn()))
-    expect({ ...oldTrend('bsk-trend'), dimension: 'dateEt' }).toEqual(clone(bsk()))
+    // the Traffic page's cards also hide known test and household traffic now (defaults.test.ts)
+    expect({ ...oldTrend('bsk-trend'), dimension: 'dateEt', excludeKnownTraffic: true }).toEqual(clone(bsk()))
   })
 
   it('the migration match shapes are frozen literals, pinned here: editing a factory does not move them', () => {
@@ -80,7 +81,10 @@ describe('v15: the defaults', () => {
     // further layout step is needed for charts stored at v15 with the old shape.
     const content = (w: Widget) => Object.fromEntries(Object.entries(w).filter(([k, v]) => v !== undefined && !['id', 'i', 'x', 'y', 'w', 'h', 'moved'].includes(k)))
     expect({ ...content(bcn()), dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[0])
-    expect({ ...content(bsk()), dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[1])
+    // The Traffic page cards hide known traffic; the stored v14 shape never had that field.
+    const { excludeKnownTraffic, ...bskRest } = content(bsk())
+    expect(excludeKnownTraffic).toBe(true)
+    expect({ ...bskRest, dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[1])
   })
 
   it('a stored v14 chart migrates from the literal shape whatever the factories build today', () => {

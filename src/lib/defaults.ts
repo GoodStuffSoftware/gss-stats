@@ -217,20 +217,29 @@ export function defaultBeaconPage(): DashboardPage {
 // from every one of these queries at the API layer (functions/api/geo.ts's
 // popupExcludeClause, applied to all three of its query shapes), so they never inflate
 // pageviews/visits or leak into 'Top screens / pages' here — verified, not changed.
+// Every Traffic card hides known test and household traffic (excludeKnownTraffic), the same
+// exclusion the Overview's "Today at a glance" always applies (lib/overview.ts siteWindowClause), so the
+// two pages count the same page views over the same days. The window still differs: the range
+// "1d" is the last 24 hours, the glance is today since ET midnight, which the Pageviews caption says.
+const TRAFFIC_WINDOW_CAPTION =
+  "Page views over this page's range. a 1d range is the last 24 hours, not today since midnight Eastern, so it will not match Today at a glance."
+function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
+  return gw({ excludeKnownTraffic: true, ...p })
+}
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return factoryWidgets([
-    gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, x: 0, y: 0, w: 3, h: 3 }),
-    gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
-    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
-    gw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
-    gw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
-    gw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),
-    gw({ id: 'bsk-device', title: 'Device', type: 'doughnut', dimension: 'device', limit: 6, x: 3, y: 17, w: 3, h: 7 }),
-    gw({ id: 'bsk-country', title: 'By country', type: 'hbar', dimension: 'country', limit: 10, x: 6, y: 16, w: 6, h: 8 }),
-    gw({ id: 'bsk-region', title: 'By region / state', type: 'hbar', dimension: 'region', limit: 12, x: 0, y: 24, w: 6, h: 8 }),
-    gw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
-    gw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
-    gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
+    bw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, caption: TRAFFIC_WINDOW_CAPTION, x: 0, y: 0, w: 3, h: 3 }),
+    bw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
+    bw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
+    bw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
+    bw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
+    bw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),
+    bw({ id: 'bsk-device', title: 'Device', type: 'doughnut', dimension: 'device', limit: 6, x: 3, y: 17, w: 3, h: 7 }),
+    bw({ id: 'bsk-country', title: 'By country', type: 'hbar', dimension: 'country', limit: 10, x: 6, y: 16, w: 6, h: 8 }),
+    bw({ id: 'bsk-region', title: 'By region / state', type: 'hbar', dimension: 'region', limit: 12, x: 0, y: 24, w: 6, h: 8 }),
+    bw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
+    bw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
+    bw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
   ])
 }
 // The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.
@@ -1094,6 +1103,10 @@ const RUM_TO_GEO_DIM: Record<string, string> = {
 export function beaconizeWidget(wd: Widget): Widget {
   const mapDim = (d: string | undefined): string => (d ? (RUM_TO_GEO_DIM[d] ?? d) : '')
   const next: Widget = { ...wd, dataset: 'geo', metric: 'pageviews' }
+  // Beacon data has no visit count, so a RUM "Visits" card becomes a page-views count. Its title says
+  // so ("Visits" -> "Pageviews", "Visits over time" -> "Pageviews over time"), not a second, identical
+  // "Visits" card beside Pageviews.
+  if (wd.metric === 'visits') next.title = wd.title.replace(/\bvisits\b/i, 'Pageviews')
   if (wd.type === 'map') {
     next.dimension = ''
     next.breakdown = undefined
