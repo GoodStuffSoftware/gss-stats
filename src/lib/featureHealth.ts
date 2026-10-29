@@ -284,7 +284,6 @@ export const HEALTH_BASELINE_DAYS = 7
 export const HEALTH_NEW_DAYS = 7
 
 export type HealthStatus = 'silent' | 'new' | 'ok'
-export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = { silent: 'Went silent', new: 'New', ok: 'OK' }
 
 /** An outage keeps flagging for at most this many complete ET days (the latest one included). */
 export const HEALTH_SILENT_MAX_RUN = 7

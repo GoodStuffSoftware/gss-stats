@@ -1219,7 +1219,7 @@ function resetToDefault() {
           <button type="button" class="btn" @click="addSeries">+ Add series</button>
         </div>
         <p v-if="unknownStepValues.length" class="hint error" role="alert" data-testid="series-unknown-step">
-          {{ unknownStepValues.length === 1 ? 'This Feature step names' : 'These Feature steps name' }} no step: {{ unknownStepValues.join(', ') }}. Pick a step from the list, or remove the series, to save.
+          {{ unknownStepValues.length === 1 ? 'This Feature step names' : 'These Feature steps name' }} no step: {{ unknownStepValues.map((v) => v || '(none picked)').join(', ') }}. Pick a step from the list, or remove the series, to save.
         </p>
       </div>
       <div class="row" v-if="canUseSeries && draft.series?.length">

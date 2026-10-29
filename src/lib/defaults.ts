@@ -788,7 +788,8 @@ export function webAppActivityWidget(geom: { x: number; y: number; w: number; h:
 // per feature in lib/featureHealth.ts FEATURES, with its status (OK / New / Went silent), its step
 // counts for the latest complete ET day, the day before and the selected range, and the plain ratios of
 // those counts. Web and app are combined. Per-ET-day totals only, so the counts-only rule
-// (lib/splitGuard.ts) is untouched. A bespoke body (dataset 'features', components/FeatureHealthCard.vue).
+// (lib/splitGuard.ts) is untouched. Stored as dataset 'features', view 'health' and drawn as the card editor's
+// feature-health preset (featureHealthCardFor); the old bespoke table was removed in T7.
 export function featureHealthWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
   return w({
     id: 'ow-feature-health',

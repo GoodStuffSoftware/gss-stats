@@ -61,12 +61,15 @@ describe('T7 saved-layout safety: the old Feature health bodies are gone, saved 
   it.runIf(!!process.env.T7_PROD_COPY)('the full production layout copy: stored widgets unchanged, every features widget but Ask-order mapped', async () => {
     const fs = await import('node:fs')
     const raw = JSON.parse(fs.readFileSync(process.env.T7_PROD_COPY!, 'utf8'))
-    const before = raw.pages.flatMap((p: DashboardPage) => p.widgets) as Widget[]
-    const after = normalizeConfig(JSON.parse(JSON.stringify(raw))).pages.flatMap((p: DashboardPage) => p.widgets)
-    const byId = new Map(after.map((w) => [w.id, w]))
-    const changed = before.filter((w) => JSON.stringify(byId.get(w.id)) !== JSON.stringify(w)).map((w) => w.id)
+    // Widget ids repeat across pages, so a widget is keyed by its page and id.
+    const key = (p: DashboardPage, w: Widget) => `${p.id}/${w.id}`
+    const before = (raw.pages as DashboardPage[]).flatMap((p) => p.widgets.map((w) => [key(p, w), w] as const))
+    const norm = normalizeConfig(JSON.parse(JSON.stringify(raw))).pages as DashboardPage[]
+    const after = norm.flatMap((p) => p.widgets)
+    const byId = new Map(norm.flatMap((p) => p.widgets.map((w) => [key(p, w), w] as const)))
+    const changed = before.filter(([k, w]) => JSON.stringify(byId.get(k)) !== JSON.stringify(w)).map(([k]) => k)
     console.log(`prod copy: ${before.length} widgets, changed by normalizeConfig: ${changed.join(', ') || 'none'}`)
-    for (const w of before.filter((x) => x.dataset === 'features')) expect(JSON.parse(JSON.stringify(byId.get(w.id))), w.id).toEqual(JSON.parse(JSON.stringify(w)))
+    for (const [k, w] of before.filter(([, x]) => x.dataset === 'features')) expect(JSON.parse(JSON.stringify(byId.get(k))), k).toEqual(JSON.parse(JSON.stringify(w)))
     const feats = after.filter((w) => w.dataset === 'features')
     expect(feats.filter((w) => body(shown(w)) === 'retired').map((w) => w.id)).toEqual([])
     expect(feats.filter((w) => body(shown(w)) === 'ask-order').map((w) => w.id)).toEqual(['fw-ask-order'])
