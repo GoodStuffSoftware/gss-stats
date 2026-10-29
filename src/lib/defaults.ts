@@ -843,7 +843,8 @@ export function coachTipsCardFor(wd: Widget): Widget {
   if (wd.card || wd.dataset !== 'features' || wd.view !== 'coach-tips' || wd.excludeKnownTraffic !== true) return wd
   return { ...wd, card: { preset: 'coach-tips' } }
 }
-/** A saved Ask-order A/B widget (dataset 'features', view 'ask-order', no card) drawn as the ask-order card preset at
+
+/** A saved Ask-order A/B widget (dataset 'features', view 'ask-order', no card) drawn as the ask-order card preset at
  * render time (editor-tools T4), on the same terms as featureHealthCardFor: nothing stored is rewritten, and only a
  * widget that hides known traffic maps. */
 export function askOrderCardFor(wd: Widget): Widget {

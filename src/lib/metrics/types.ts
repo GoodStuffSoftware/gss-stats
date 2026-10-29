@@ -279,6 +279,9 @@ export interface MetricItem {
   /** A 'line' item only: the label is not printed (it still names the item for the editor and
    * screen readers); the value reads as its own sentence, e.g. a status line. */
   hideLabel?: true
+  /** A 'line' item with a code value (a status) only: drawn in the dimmer ink while its value is one of these codes,
+   * such as a verdict that is still preliminary (code 0). */
+  dimWhen?: number[]
   /** A column table's row only: a rule above it, setting a total apart from the rows over it. */
   ruleAbove?: true
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
@@ -297,6 +300,11 @@ export interface Section {
   panels?: true
   /** A 'lines' section only: its items run on as one sentence, a space apart, instead of spaced out. */
   joined?: true
+  /** A 'lines' section only: larger text (16 px) in the full ink, a lead line such as which figure a rule reads. */
+  large?: true
+  /** A 'table' section only: roomier rows (12.5 px text, taller rows) with the row labels in bold, the old Feature
+   * health table's look. */
+  roomy?: true
   /** 'table' only: the other orientation — items are ROWS (their label in the first cell) and
    * these repeat instances are the COLUMNS (headed by `columnLabel`, default the instance's own
    * name). Each cell's scope is the column instance inside the card's instance, so a campaign
@@ -345,6 +353,9 @@ export interface CardSpec {
   /** A day selector in the card's status row (previous / next arrows and a date): the card's
    * today-so-far figures are read for the chosen ET day (MetricsContext.day). View state only. */
   dayPicker?: boolean
+  /** In a fixed-height grid slot, the sections scroll in their own box and the card's captions stay pinned under it,
+   * always in view (the old bespoke cards' look). A fit-to-content card, or a phone, shows everything anyway. */
+  pinCaptions?: boolean
 }
 
 /** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts.

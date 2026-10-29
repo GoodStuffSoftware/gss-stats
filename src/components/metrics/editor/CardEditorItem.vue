@@ -205,6 +205,17 @@ const dimModel = flagModel('dim')
 const hideLabelModel = flagModel('hideLabel')
 const ruleAboveModel = flagModel('ruleAbove')
 const afterId = useId()
+const dimWhenId = useId()
+/** A status line's dim codes (MetricItem.dimWhen) as "0, 2": whole numbers only; anything else is dropped. */
+const dimWhenModel = computed<string>({
+  get: () => (item.value.dimWhen ?? []).join(', '),
+  set: (v) => {
+    const codes = v.split(',').map((x) => x.trim()).filter((x) => /^\d{1,2}$/.test(x)).map(Number)
+    const next = codes.length ? [...new Set(codes)].slice(0, 8) : undefined
+    if (JSON.stringify(next) === JSON.stringify(item.value.dimWhen)) return
+    item.value = withField(item.value, 'dimWhen', next)
+  },
+})
 const afterModel = computed<string>({
   get: () => (typeof item.value.after === 'string' ? item.value.after : ''),
   set: (v) => {
@@ -348,6 +359,11 @@ const itemRepeatModel = computed({
           <div class="field">
             <label :for="afterId">Text after the value</label>
             <input :id="afterId" type="text" maxlength="8" v-model.lazy="afterModel" placeholder="e.g. ." />
+          </div>
+          <div v-if="item.display.as === 'status'" class="field">
+            <label :for="dimWhenId">Dimmer while the code is</label>
+            <input :id="dimWhenId" type="text" maxlength="40" v-model.lazy="dimWhenModel" placeholder="e.g. 0" />
+            <p class="hint">Codes, comma-separated (a verdict's 0 is "preliminary"). In a one-sentence section the whole sentence dims.</p>
           </div>
         </div>
         <div v-if="columnTable" class="field check">

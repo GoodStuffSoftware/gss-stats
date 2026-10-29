@@ -720,6 +720,7 @@ export const ASK_ORDER: CardSpec = {
   v: 1,
   minWidth: 360,
   captions: ['ask-order-caption'],
+  pinCaptions: true,
   sections: [
     {
       layout: 'lines',
@@ -745,6 +746,7 @@ export const ASK_ORDER: CardSpec = {
     },
     {
       layout: 'lines',
+      large: true,
       items: [{ id: 'primary', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.primary', window: 'allTime' }, display: { as: 'status' }, ...COMPACT }],
     },
     {
@@ -753,12 +755,13 @@ export const ASK_ORDER: CardSpec = {
       items: [
         { id: 'ruleBasis', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.ruleBasis', window: 'allTime' }, display: { as: 'status' }, mono: true, ...COMPACT },
         { id: 'ruleMultiple', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.ruleMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
-        { id: 'verdict', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.verdict', window: 'allTime' }, display: { as: 'status' }, ...COMPACT },
+        { id: 'verdict', label: { metric: true }, hideLabel: true, data: { metric: 'askOrder.verdict', window: 'allTime' }, display: { as: 'status' }, dimWhen: [0], ...COMPACT },
       ],
     },
     {
       layout: 'lines',
       joined: true,
+      large: true,
       items: [
         { id: 'signedInMultiple', label: { metric: true }, data: { metric: 'askOrder.signedInMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
         { id: 'installedMultiple', label: { metric: true }, data: { metric: 'askOrder.installedMultiple', window: 'allTime' }, display: { as: 'multiple' }, mono: true, after: '.', ...COMPACT },
@@ -771,6 +774,7 @@ export const ASK_ORDER: CardSpec = {
         { over: 'features', ids: ['ao-signin-first', 'ao-install-first'] },
       ],
       columns: { over: 'tags' },
+      roomy: true,
       rowsLabel: { note: 'label.askOrder.col.measure' },
       items: [
         ...AO_COUNT_ROWS.map((step): MetricItem => ({

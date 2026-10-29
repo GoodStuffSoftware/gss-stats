@@ -91,7 +91,7 @@ const textValue = computed(() => props.item.display.as === 'status' || props.ite
     <!-- A line (a 'lines' section): "label value" in running text; the item's own box is dissolved (display: contents),
          so its text and a progress bar sit straight in the line's flow. -->
     <template v-else-if="frame === 'line'">
-      <span class="mi-line" :class="{ mono: item.mono, dim: item.dim }" role="group" :aria-label="ariaLabel"
+      <span class="mi-line" :class="{ mono: item.mono, dim: item.dim || vm.dimmed }" role="group" :aria-label="ariaLabel"
         ><template v-if="plainLabel && !item.hideLabel"><MetricLabel :tokens="vm.labelTokens" />{{ ' ' }}</template
         ><span class="mi-line-value" :class="{ mono: !textValue, muted: vm.muted }">{{ vm.primary }}</span>{{ typeof item.after === 'string' ? item.after : '' }}</span
       >

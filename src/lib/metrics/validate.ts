@@ -243,6 +243,7 @@ export function validateCard(spec: CardSpec): string[] {
 
   if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
   if (spec.dayPicker !== undefined && typeof spec.dayPicker !== 'boolean') errors.push('card: dayPicker must be a boolean')
+  if (spec.pinCaptions !== undefined && typeof spec.pinCaptions !== 'boolean') errors.push('card: pinCaptions must be a boolean')
   if (spec.actions !== undefined && (!Array.isArray(spec.actions) || !spec.actions.every((a) => CARD_ACTIONS.has(a)))) errors.push(`card: actions must be a list of ${[...CARD_ACTIONS].join(', ')}`)
   if (spec.notices !== undefined && !CARD_NOTICES.has(spec.notices)) errors.push(`card: notices must be one of ${[...CARD_NOTICES].join(', ')}`)
   checkRepeat('card', spec.repeat)
@@ -269,6 +270,8 @@ export function validateCard(spec: CardSpec): string[] {
       if (s.layout === 'table') errors.push(`${where}: a table is not shown in panels`)
     }
     if (s.joined !== undefined && (s.joined !== true || s.layout !== 'lines')) errors.push(`${where}: joined is true, on a 'lines' section only`)
+    if (s.large !== undefined && (s.large !== true || s.layout !== 'lines')) errors.push(`${where}: large is true, on a 'lines' section only`)
+    if (s.roomy !== undefined && (s.roomy !== true || s.layout !== 'table')) errors.push(`${where}: roomy is true, on a 'table' section only`)
     if (s.columns !== undefined || s.columnLabel !== undefined) {
       if (s.layout !== 'table') errors.push(`${where}: columns are for a 'table' section`)
       if (s.repeat && s.columns) errors.push(`${where}: a table repeats its rows or its columns, not both`)
@@ -317,6 +320,11 @@ export function validateCard(spec: CardSpec): string[] {
       if (it.lineBreak !== undefined && (it.lineBreak !== true || s.layout !== 'lines')) errors.push(`${w}: lineBreak is true, in a 'lines' section only`)
       const isLine = (it.frame ?? (s.layout === 'lines' ? 'line' : undefined)) === 'line'
       for (const k of ['mono', 'dim', 'hideLabel'] as const) if (it[k] !== undefined && (it[k] !== true || !isLine)) errors.push(`${w}: ${k} is true, on a 'line' item only`)
+      if (it.dimWhen !== undefined) {
+        const codes = it.dimWhen
+        const okList = Array.isArray(codes) && codes.length >= 1 && codes.length <= 8 && codes.every((c) => Number.isInteger(c) && c >= 0 && c <= 99)
+        if (!okList || !isLine || it.display.as !== 'status') errors.push(`${w}: dimWhen is a list of one to eight codes (0-99), on a 'line' item with a status display only`)
+      }
       if (it.after !== undefined) {
         if (isLine) {
           if (typeof it.after !== 'string' || !it.after || it.after.length > 8 || /[{}]/.test(it.after)) errors.push(`${w}: a line item's after is up to 8 characters of plain text`)

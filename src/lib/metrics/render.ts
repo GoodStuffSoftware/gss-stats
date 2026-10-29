@@ -66,6 +66,8 @@ export interface ItemViewModel {
   split?: { main: string; sub: string }
   /** The value failed to load (the server's per-request error, or the batch failed). */
   error?: boolean
+  /** A line item's value is one of its `dimWhen` codes (a verdict still preliminary): drawn in the dimmer ink. */
+  dimmed?: boolean
   /** A 'bar' display's length: the count, or the rate as a fraction. */
   barValue?: number
   /** A 'progress' display's bar: the share of its target, 0-100 (capped), and whether the count has reached it. */
@@ -494,7 +496,8 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   }
   const vm = metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values, opts.pastDay === true)
   const pill = item.display.as === 'status' && item.display.pill && vm.visible && (value.status === 'ok' || value.status === 'partial') ? pillToneOf(value) : undefined
-  return pill ? { ...vm, pill } : vm
+  const dimmed = item.dimWhen !== undefined && typeof value.value === 'number' && item.dimWhen.includes(value.value)
+  return pill || dimmed ? { ...vm, ...(pill ? { pill } : {}), ...(dimmed ? { dimmed } : {}) } : vm
 }
 
 /** The badge's own view (always a `field` binding — validateCard rejects anything else). */

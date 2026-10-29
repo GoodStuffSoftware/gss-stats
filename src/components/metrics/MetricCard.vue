@@ -296,7 +296,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
   <!-- A saved card that failed validation on load (normCardRef) is a placeholder, never a crash. -->
   <p v-if="'preset' in cardRef && cardRef.preset === INVALID_CARD_PRESET" class="metric-card-error">{{ invalidText }}</p>
   <p v-else-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
-  <div v-else class="metric-card-root">
+  <div v-else class="metric-card-root" :class="{ 'pin-captions': spec.pinCaptions }">
     <!-- Present from mount and empty until an error, so screen readers announce the change. -->
     <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
     <div v-if="noticeLines.length" class="mc-notices">
@@ -313,6 +313,8 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
     <!-- The first readings load is out: "Loading…" in place of the grid (kept mounted, so its metric requests start now). -->
     <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
+    <!-- CardSpec.pinCaptions: the body scrolls in this box and the captions below stay in view. -->
+    <div class="mc-body">
     <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
       <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="viewContext" :values="labelValues" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
       <p v-if="((!instances.length && !readingsPending && !readingsLoadFailed) || allHidden) && spec.repeat.empty" class="metric-card-empty">
@@ -326,6 +328,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
         <MetricCardStatus v-if="statusInInstanceHeader" :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
       </template>
     </MetricCardInstance>
+    </div>
 
     <div v-if="statusPlacement === 'footer'" class="mc-status-row mc-footer">
       <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
@@ -374,6 +377,22 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
 }
 .mc-captions {
   margin-top: 8px;
+}
+/* CardSpec.pinCaptions: in a fixed grid slot the root fills the card body, the sections scroll in .mc-body and the
+   captions sit under it. With no definite height (fit to content, a phone) this is plain flow. */
+.metric-card-root.pin-captions {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pin-captions > .mc-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.pin-captions > .mc-captions {
+  flex: none;
 }
 /* The live region: in the accessibility tree, not on screen. */
 .mc-live {

@@ -117,7 +117,7 @@ function columnGroupModel(level: 0 | 1) {
 const columnGroupOuter = columnGroupModel(0)
 const columnGroupInner = columnGroupModel(1)
 /** A yes/no section option (panels, joined): unchecked removes the field. */
-function flagModel(key: 'panels' | 'joined') {
+function flagModel(key: 'panels' | 'joined' | 'large' | 'roomy') {
   return computed<boolean>({
     get: () => section.value[key] === true,
     set: (on) => {
@@ -128,6 +128,8 @@ function flagModel(key: 'panels' | 'joined') {
 }
 const panelsModel = flagModel('panels')
 const joinedModel = flagModel('joined')
+const largeModel = flagModel('large')
+const roomyModel = flagModel('roomy')
 
 function addItem() {
   section.value = { ...section.value, items: [...section.value.items, emptyItem()] }
@@ -182,7 +184,12 @@ function removeAt(i: number) {
     <div v-if="section.layout === 'lines'" class="field check">
       <label><input type="checkbox" v-model="joinedModel" /> One sentence <span class="hint">— the items a space apart instead of spaced out</span></label>
     </div>
-    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets', 'features', 'tags']" label="Columns (each item becomes a row)" />
+    <div v-if="section.layout === 'lines'" class="field check">
+      <label><input type="checkbox" v-model="largeModel" /> Large text <span class="hint">— a lead line, bigger and in the full ink</span></label>
+    </div>
+    <div v-if="section.layout === 'table'" class="field check">
+      <label><input type="checkbox" v-model="roomyModel" /> Roomy rows <span class="hint">— taller rows, the row labels in bold</span></label>
+    </div>
     <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets', 'features', 'tags']" label="Columns (each item becomes a row)" />
     <CardEditorRepeat v-if="section.layout === 'table' && section.repeat && !section.columns" v-model="rowGroupsModel" :allow="['steps', 'campaigns', 'popups', 'windows', 'countries', 'assets']" label="Rows in each group" />
     <template v-if="section.columns">

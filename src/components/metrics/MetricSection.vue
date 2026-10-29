@@ -159,6 +159,14 @@ function splitLines(indexes: number[]): number[][] {
   return lines
 }
 const itemLines = computed(() => splitLines(flatItems.value.map((_, i) => i)))
+/** A joined line (one sentence) dims as a whole while any of its items is dimmed (MetricItem.dimWhen): a preliminary
+ * verdict greys its rule too. */
+const lineDimmed = (line: number[]): boolean =>
+  !!props.section.joined &&
+  line.some((i) => {
+    const fi = flatItems.value[i]
+    return !fi.emptyOf && fi.item.dimWhen !== undefined && !!itemViewModel(fi.item, activeRefs.value[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values, pastDay: props.context?.day !== undefined }).dimmed
+  })
 /** A panels section (Section.panels): one bordered panel per repeat instance, headed by the section title read in the
  * instance and the instance's first item, the rest in lines. A repeat with no instance shows its empty text as usual. */
 const panels = computed(() => {
@@ -178,7 +186,7 @@ const panels = computed(() => {
 </script>
 
 <template>
-  <div v-if="anyVisible || tableEmpty" class="metric-section" :class="`layout-${section.layout}`">
+  <div v-if="anyVisible || tableEmpty" class="metric-section" :class="[`layout-${section.layout}`, { large: section.large, roomy: section.roomy }]">
     <p v-if="titleTokens.length && !panels.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
 
     <div v-if="isColumnTable" class="metric-table-wrap">
@@ -246,7 +254,7 @@ const panels = computed(() => {
 
     <!-- Lines: running text, a line per run of items up to the next lineBreak. -->
     <template v-else-if="section.layout === 'lines'">
-      <div v-for="(line, li) in itemLines" :key="li" class="items-wrap line-row" :class="{ joined: section.joined }">
+      <div v-for="(line, li) in itemLines" :key="li" class="items-wrap line-row" :class="{ joined: section.joined, dim: lineDimmed(line) }">
         <template v-for="i in line" :key="`${flatItems[i].item.id}-${i}`">
           <MetricPlaceholder
             v-if="flatItems[i].emptyOf"
@@ -406,6 +414,42 @@ const panels = computed(() => {
 .line-row.joined :deep(.mi-line)::after {
   content: ' ';
 }
+.line-row.dim {
+  color: rgb(var(--ink-3));
+}
+/* A lead line (Section.large): the old cards' plain paragraph, 16 px in the full ink. */
+.layout-lines.large .line-row {
+  font-size: 16px;
+  color: rgb(var(--ink));
+}
+.metric-section.layout-lines.large {
+  margin: 16px 0;
+}
+/* Roomy rows (Section.roomy): the old Feature health table, 12.5 px, rows 29 px tall, the row labels in bold. */
+.roomy .metric-table {
+  font-size: 12.5px;
+}
+.roomy .metric-table th {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.roomy .metric-table td {
+  padding: 4px 8px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: rgb(var(--ink-2));
+}
+.roomy .metric-table td :deep(.mtc) {
+  font-size: 12.5px;
+}
+.roomy .metric-table.columns th.row-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 20px;
+  color: rgb(var(--ink));
+}
 .layout-lines .line-row + .line-row {
   margin-top: 0;
 }
@@ -414,6 +458,7 @@ const panels = computed(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 12px;
+  padding-bottom: 6px;
 }
 .panel {
   border: 1px solid rgb(var(--line));
