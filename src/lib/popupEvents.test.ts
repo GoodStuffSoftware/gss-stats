@@ -957,13 +957,15 @@ describe('Play/Android tracking (separate from web, and a ramp, not a step)', ()
   })
 
   it('the marker label describes a submission reaching devices over time, never "tracking starts" (that would claim a step that did not happen)', () => {
-    expect(PLAY_TRACKING_MARKER_LABEL).toMatch(/submitted/i)
+    expect(PLAY_TRACKING_MARKER_LABEL).toBe('Play: Android counts from 26 Sep')
+    expect(PLAY_TRACKING_MARKER_LABEL).not.toMatch(/review/i)
     expect(PLAY_TRACKING_MARKER_LABEL).not.toBe('tracking starts')
     expect(PLAY_TRACKING_MARKER_LABEL).not.toMatch(/tracking starts/i)
   })
 
   it('the rollout caveat explains low early counts without implying anything is broken or unmeasured', () => {
     expect(PLAY_TRACKING_ROLLOUT_CAVEAT).toMatch(/rollout/i)
+    expect(PLAY_TRACKING_ROLLOUT_CAVEAT).not.toMatch(/in Google review/i)
     expect(PLAY_TRACKING_ROLLOUT_CAVEAT).not.toMatch(/unmeasured|not tracked|broken/i)
   })
 })

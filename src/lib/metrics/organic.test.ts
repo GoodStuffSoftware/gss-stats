@@ -224,3 +224,29 @@ describe('v1.98.0 go-live: the organic gate and the tour note', () => {
     expect(t).not.toMatch(/\d{1,2}:\d{2}|[AP]M/)
   })
 })
+
+describe('Google-reported installs (campaign.adsInstalls) on a scorecard', () => {
+  const withAction = CAMPAIGNS.find((c) => c.installActionId)!
+  const spendOnlyNoAction = CAMPAIGNS.find((c) => c.measurement === 'spend-only' && !c.installActionId)!
+  const scope = (campaign: typeof withAction): ScopeInstance => ({ kind: 'campaign', campaign }) as unknown as ScopeInstance
+  it('is asked only of a campaign that names an install action', () => {
+    expect(configRuling({ metric: 'campaign.adsInstalls' }, scope(withAction), TODAY)).toBeNull()
+    expect(configRuling({ ratio: 'campaign.costPerAdsInstall' }, scope(withAction), TODAY)).toBeNull()
+    expect(configRuling({ metric: 'campaign.adsInstalls' }, scope(spendOnlyNoAction), TODAY)).toBe('no-install-action')
+    expect(configRuling({ ratio: 'campaign.costPerAdsInstall' }, scope(spendOnlyNoAction), TODAY)).toBe('no-install-action')
+    expect(unmeasuredByConfig({ metric: 'campaign.adsInstalls' }, scope(spendOnlyNoAction), undefined, TODAY)).toBe(true)
+  })
+})
+
+describe('the Campaign scorecard preset carries the Google-reported install rows', () => {
+  it('lists installs and cost per install, each omitted when empty', async () => {
+    const { CAMPAIGN_SCORECARD } = await import('./presets')
+    const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
+    const ads = items.find((i) => i.id === 'adsInstalls')!
+    const cpai = items.find((i) => i.id === 'cpai')!
+    expect(ads.data).toEqual({ metric: 'campaign.adsInstalls' })
+    expect(cpai.data).toEqual({ ratio: 'campaign.costPerAdsInstall' })
+    expect(ads.gating?.whenEmpty).toBe('omit')
+    expect(cpai.gating?.whenEmpty).toBe('omit')
+  })
+})

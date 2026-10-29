@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.73.0] — 2026-10-29
+
+### Changed
+- **Shorter, current measurement notes.** The v1.99.2 Play note now says the release is public on Google Play from 2026-10-17, the Coach tips note is two short sentences instead of about 1,400 characters, and the Android sign-in note is shorter, so Today at a glance carries less caveat text.
+- **Play rollout caveat is past tense.** The Android caveat no longer says the Play submission is in Google review, and the chart marker reads "Play: Android counts from 26 Sep".
+- **Pageview wording on the default charts.** The factory region and map charts are titled "Pageviews by region" and "Pageview map", as they count page views.
+- **Campaign scorecard shows Google-reported installs.** Flight 4 gets an installs row and a cost per install row; campaigns without an install action omit them.
+
 ## [0.72.0] — 2026-10-29
 
 ### Added

@@ -700,12 +700,12 @@ export const PLAY_TRACKING_NOT_LIVE_NOTE = 'Play tracking not yet live'
 /** Chart-marker label at PLAY_TRACKING_ACTIVATION_DATE_ET — deliberately NOT "Play
  * tracking starts" (that would claim a step that didn't happen): the submission date is
  * the earliest possible arrival, not a live date. */
-export const PLAY_TRACKING_MARKER_LABEL = 'Play: submitted 26 Sep, reaching devices from review onward'
+export const PLAY_TRACKING_MARKER_LABEL = 'Play: Android counts from 26 Sep'
 /** Caveat shown alongside any Play/Android figure once PLAY_TRACKING_ACTIVATION_DATE_ET
  * is set — explains why early counts run low without implying anything is broken or
  * that data should be graphed as "unmeasured" the way pre-web-activation rows are. */
 export const PLAY_TRACKING_ROLLOUT_CAVEAT =
-  'Play submission is in Google review and staged rollout — early counts reflect the rollout curve, not full device coverage.'
+  'Early Android counts ran low during the first Play rollout, so they reflect the rollout curve, not full device coverage.'
 
 /** Human status line for wherever Play/Android data is shown — the null (not submitted)
  * and ramp (submitted, ramping) states read very differently, so callers use this instead

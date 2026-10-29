@@ -20,8 +20,8 @@ describe('v1.99.3 coach entries', () => {
   it('the web entry is dated 2026-10-17, the Play one is dated 2026-10-17 too, and both name the coach change', () => {
     expect(web.dateEt).toBe('2026-10-17')
     expect(PLAY_DATE).toBe('2026-10-17')
-    expect(play.note).toContain('Committed 02:09 ET. Public on Play 06:34Z 10-17. Android installs after it may be a mix of 19902 and 19903 until updates spread.')
-    expect(play.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
+    expect(play.note).toContain('public on Play 06:34Z 10-17')
+    expect(play.note).toContain('Android coach rows are a mix of old and new until updates spread')
     expect(web.note).toContain('×')
     expect(play.note).toContain('×')
     expect(play.coachOnly).toBe(true) // coach semantics only: no Play-install caveat on it
@@ -29,13 +29,14 @@ describe('v1.99.3 coach entries', () => {
   })
   it('the web note carries the no-beacon coach fact, the flight-3 caption fact and the other changes', () => {
     expect(web.coachOnly).toBe(true)
-    expect(web.note).toContain('NO beacon')
-    expect(web.note).toContain('notes-tip completions are not counted')
+    expect(web.note).toContain('no beacon')
+    expect(web.note).toContain('notes-tip completion cannot be read from a dismissed row')
     expect(web.note).toContain('before the first flight-3 serve')
-    expect(web.note).toContain('mix v1.99.1, v1.99.2 and v1.99.3')
-    expect(web.note).toContain('reset/duplicate')
-    expect(web.note).toContain('pop-ups')
-    expect(web.note).toContain('email verification')
+    expect(web.note).toContain('later-tip shown counts rise')
+    // the two coach notes together stay at two plain sentences
+    expect(web.note.length).toBeLessThanOrEqual(300)
+    expect(play.note.length).toBeLessThanOrEqual(200)
+    expect(`${web.note}. ${play.note}.`.split(/[.;] /).length).toBeLessThanOrEqual(3)
   })
   it('the coach readouts start the web note on 2026-10-17 and not the day before', () => {
     expect(coachMeasurementNote('2026-10-16')).toBeNull()

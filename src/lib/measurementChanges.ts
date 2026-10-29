@@ -7,8 +7,7 @@
 // ET calendar day (YYYY-MM-DD). While it is null NOTHING shows anywhere: no timeline marker, no
 // card caveat, no read-report line (the ads-cloud-daily routine's judge line is inert then too).
 //
-// The Play release of v1.99.2 is a second entry with its own date (2026-10-17, committed 22:49 ET 10-16; it reaches
-// users once Google's review clears; it reaches the Apps arm, not the web arm). The notes registry has no
+// The Play release of v1.99.2 is a second entry with its own date (2026-10-17, committed 22:49 ET 10-16; public on Google Play from 2026-10-17; it reaches the Apps arm, not the web arm). The notes registry has no
 // per-arm targeting, so its caveat is the generic one under the tagged new-account cards, listed
 // together with the web entry once each is dated.
 //
@@ -58,25 +57,27 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   },
   {
     id: 'v1.99.2 Play',
-    dateEt: '2026-10-17', // committed to Play production 2026-10-17T02:49Z = 22:49 ET 10-16; reaches users when Google's review clears
-    note: "Play release of v1.99.2: Apps-arm installs get the new app, with the sign-in ask-order A/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in. Committed 22:49 ET 10-16; reaches users when Google's review clears",
+    dateEt: '2026-10-17', // committed to Play production 2026-10-17T02:49Z = 22:49 ET 10-16; public on Google Play from 2026-10-17
+    note: "Play release of v1.99.2: Apps-arm installs get the sign-in ask-order A/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in. Public on Google Play from 2026-10-17",
   },
   {
     id: 'v1.99.3 web',
     dateEt: '2026-10-17', // web live 2026-10-17T05:58:55Z = 01:58:55 ET (version.json first read 1.99.3); before the first possible flight-3 serve (12:00 ET 10-17)
-    note: "web release of v1.99.3, live 2026-10-17 01:58 ET, before the first flight-3 serve (12:00 ET 10-17), so all flight-3 web traffic is on it; pre-flight organic rows since 2026-10-16 21:07Z mix v1.99.1, v1.99.2 and v1.99.3. Coach strip meaning change: from this marker the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with NO beacon, so notes-tip completions are not counted after it, later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. The release also fixes the game reset/duplicate across devices, shows cross-device notices as pop-ups, never reloads mid-game, and saves right after email verification",
+    // Detail kept here, not in the note: pre-flight organic rows since 2026-10-16 21:07Z mix v1.99.1, v1.99.2 and v1.99.3; the release also fixes the game reset/duplicate across devices, shows cross-device notices as pop-ups, never reloads mid-game, and saves right after email verification.
+    note: 'live 2026-10-17 01:58 ET, before the first flight-3 serve: the coach × now closes one tip, and writing a note ends the notes tip with no beacon, so later-tip shown counts rise and notes-tip completion cannot be read from a dismissed row',
     coachOnly: true,
   },
   {
     id: 'v1.99.3 Play',
-    dateEt: '2026-10-17', // promoted to Play production 2026-10-17T06:09:41Z = 02:09:41 ET (full rollout, managed publishing off); reaches users when Google's review clears. Listed after the web entry: the same-day release-panel tie goes to the later-listed one, and this is the later-timed (web 05:58:55Z)
-    note: 'Play release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. Committed 02:09 ET. Public on Play 06:34Z 10-17. Android installs after it may be a mix of 19902 and 19903 until updates spread. Android coach rows after this are a mix of old and new semantics until updates spread',
+    dateEt: '2026-10-17', // promoted to Play production 2026-10-17T06:09:41Z = 02:09:41 ET (full rollout, managed publishing off); public on Play 06:34Z 10-17. Listed after the web entry: the same-day release-panel tie goes to the later-listed one, and this is the later-timed (web 05:58:55Z)
+    // Committed 02:09 ET. Android installs after it may be a mix of 19902 and 19903 until updates spread.
+    note: 'same coach × change as web, public on Play 06:34Z 10-17; Android coach rows are a mix of old and new until updates spread',
     coachOnly: true,
   },
   {
     id: 'v1.103.0 Android',
     dateEt: '2026-10-26', // 1.103.0 promoted to Play production 2026-10-26T22:28:21Z = 18:28:21 ET (full rollout, versionCode 1103000); 1.102.0 never reached any prod channel. Same day as the plain v1.103.0 Play marker in lib/releases.ts
-    note: 'native Google sign-in cancels on Android move from the no-code row to the user-cancelled row, while other native Google failures stay in no-code; older Android installs keep sending cancels as no-code until they update, so no-code falls and user-cancelled rises while both are sign-in failure rows',
+    note: 'native Google sign-in cancels on Android move from the no-code row to the user-cancelled row; older Android installs keep sending cancels as no-code until they update',
     authErrorOnly: true,
   },
   {

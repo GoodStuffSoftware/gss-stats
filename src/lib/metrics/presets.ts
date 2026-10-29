@@ -42,6 +42,9 @@ export const CAMPAIGN_SCORECARD: CardSpec = {
         // "Return rate (d2-7): 12.1% (4/33)" — provisional while d2-7 returns can still arrive.
         { id: 'return', label: { metric: true }, data: { ratio: 'campaign.returnD2to7PerD0' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
         { id: 'cpa', label: { metric: true }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
+        // Google-reported installs and cost per install: only a campaign with an installActionId (Flight 4) has them, the rest omit the rows.
+        { id: 'adsInstalls', label: { metric: true }, data: { metric: 'campaign.adsInstalls' }, display: { as: 'number' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
+        { id: 'cpai', label: { metric: true }, data: { ratio: 'campaign.costPerAdsInstall' }, display: { as: 'currency' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
       ],
     },
     {

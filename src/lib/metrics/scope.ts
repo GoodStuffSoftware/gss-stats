@@ -641,16 +641,17 @@ export interface MetricRequestSpec {
 export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating, todayEt?: string): boolean {
   const ruling = configRuling(binding, scope, todayEt)
   // A flight with no start date keeps an item whose gating says how to show "not started".
-  return ruling === 'spend-only' || ruling === 'organic-unsupported' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
+  return ruling === 'spend-only' || ruling === 'organic-unsupported' || ruling === 'no-install-action' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
 }
 /** Why the campaign's own config rules a binding out, or null: 'flight-pending' (no start date
  * yet: nothing but spend can be read), 'spend-only' (never any beacon data), or
+ * 'no-install-action' (Google-reported installs asked of a campaign with no installActionId), or
  * 'organic-unsupported' (the organic arm asked of a binding that doesn't serve it: only the
  * return metrics, and ratios whose both sides are return metrics, do — the server refuses the
  * rest). Such a binding is never requested (buildRequestSpec); unmeasuredByConfig says whether
  * its item is omitted. A `field` binding never gets a ruling, so a date-dependent field (the
  * release-awaiting `release.label`) always renders from `todayEt`, organic scope or not. */
-export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt?: string): 'flight-pending' | 'spend-only' | 'organic-unsupported' | null {
+export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt?: string): 'flight-pending' | 'spend-only' | 'organic-unsupported' | 'no-install-action' | null {
   if ('field' in binding) return null
   if (isOrganicScope(scope)) {
     const resolved = resolveBinding(binding, scope, todayEt)
@@ -666,6 +667,8 @@ export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt
   const sides = resolved.kind === 'metric' ? [resolved.def as MetricDef] : [METRICS.get((resolved.def as RatioDef).num), METRICS.get((resolved.def as RatioDef).den)]
   for (const def of sides) {
     if (!def || !def.params.includes('campaignId') || resolved.params.campaignId !== campaign.id) continue
+    // Google-reported installs exist only for a campaign that names an install action: no action, nothing to ask.
+    if (def.id === 'campaign.adsInstalls' && !campaign.installActionId) return 'no-install-action'
     const fact = def.windows[window]
     const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
     if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return 'spend-only'

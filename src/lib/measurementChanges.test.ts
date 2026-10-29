@@ -176,8 +176,10 @@ describe('the Play release of v1.99.2 (second entry, own date)', () => {
   it('is listed after the web entry and is dated 2026-10-17 (committed 22:49 ET 10-16)', () => {
     expect(MEASUREMENT_CHANGES[1]).toBe(play)
     expect(play.id).toBe('v1.99.2 Play')
-    expect(play.note).toMatch(/^Play release of v1\.99\.2: Apps-arm installs get the new app, with the sign-in ask-order A\/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in\./)
-    expect(play.note).toContain("Committed 22:49 ET 10-16; reaches users when Google's review clears")
+    expect(play.note).toMatch(/^Play release of v1\.99\.2: Apps-arm installs get the sign-in ask-order A\/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in\./)
+    expect(play.note).toContain('Public on Google Play from 2026-10-17')
+    expect(play.note).not.toMatch(/review clears|reaches users/)
+    expect(play.note.length).toBeLessThanOrEqual(230)
     expect(PLAY_SHIPPED).toBe('2026-10-17')
     expect(play.coachOnly).toBeUndefined()
   })
@@ -220,8 +222,8 @@ describe('the Play release of v1.99.2 (second entry, own date)', () => {
 
 describe('v1.99.3 Play caption', () => {
   it('says it was public on Play 06:34Z 10-17, keeps the coach mixed-semantics sentence', () => {
-    expect(V1993_PLAY.note).toContain('Public on Play 06:34Z 10-17.')
-    expect(V1993_PLAY.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
+    expect(V1993_PLAY.note).toContain('public on Play 06:34Z 10-17')
+    expect(V1993_PLAY.note).toContain('Android coach rows are a mix of old and new until updates spread')
   })
 })
 
@@ -240,6 +242,7 @@ describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(android.note).toContain('from the no-code row to the user-cancelled row')
     expect(android.note).not.toContain('/auth/') // plain wording: the notes registry guard bans raw beacon paths
     expect(android.note).toContain('older Android installs keep sending cancels as no-code')
+    expect(android.note.length).toBeLessThanOrEqual(220)
   })
 
   it('is dated the same day as the plain v1.103.0 Play marker (2026-10-26), which is the one timeline marker for the release', () => {
