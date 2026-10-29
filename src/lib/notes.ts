@@ -61,11 +61,11 @@ import type { CardSpec } from './metrics/types'
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, coachMeasurementNote, markedChanges } from './measurementChanges'
 
-/** The Coach tips card's latest day (yesterday, ET): its measurement note is the one for that day, as the old card's. */
 /** A feature's reading caveat as a Feature health caption ("Tour row: …"): the note id. */
 export function featureRowCaptionId(featureId: string): string {
   return `feature-health-row-${featureId}`
 }
+/** The Coach tips card's latest day (yesterday, ET): its measurement note is the one for that day, as the old card's. */
 const coachLatestDay = (): string => addDays(etDateFast(Date.now()), -1)
 import { FIRST_FINISH_START_ET } from './releases'
 import { addDays, etDateFast, etOffsetHours } from './etTime'

@@ -168,7 +168,7 @@ function removeAt(i: number) {
         :card-repeat-over="cardRepeatOver"
         :section-repeat-over="section.rowGroups?.over ?? section.repeat?.over"
         :row-groups="!!section.rowGroups"
-        :in-table="section.layout === 'table'"
+        :in-table="section.layout === 'table' && !section.columns"
         :index="i"
         :count="section.items.length"
         :errors="itemErrors[item.id] ?? []"

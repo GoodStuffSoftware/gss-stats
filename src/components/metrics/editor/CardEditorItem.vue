@@ -22,7 +22,7 @@ const props = defineProps<{
   /** A preset's template shown for reading (CardEditor's preset mode): every control disabled,
    * no reorder/duplicate/remove, but the item still opens so its settings can be read. */
   readonly?: boolean
-  /** The section is a table (enables the combined-windows column and its trailing label). */
+  /** The section is a row table, no columns (enables the combined-windows column and its trailing label). */
   inTable?: boolean
   /** The section groups its rows (Section.rowGroups): enables "once per group". */
   rowGroups?: boolean

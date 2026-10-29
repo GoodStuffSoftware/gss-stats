@@ -6,6 +6,7 @@ import { CONFIG_VERSION, featureHealthCardFor } from '../defaults'
 import { FEATURES } from '../featureHealth'
 import type { Widget } from '../../types'
 import { presetById } from './presets'
+import { STATUS_PILL_TONES, windowHeading } from './render'
 import { ROOT_SCOPE, lacksRequiredField, scopeField, sectionCells, tableRows } from './scope'
 import { validateCard } from './validate'
 
@@ -51,5 +52,20 @@ describe('Feature health table', () => {
     expect(ratioSteps).toBeGreaterThan(0)
     const windows = cells.filter((c) => c.item.id.startsWith('ratio@')).map((c) => c.item.id.split('@')[1])
     expect(new Set(windows)).toEqual(new Set(['latestDay', 'previousDay', 'page']))
+  })
+
+  it('heads a window column with its date, and colours the status pill by its note', () => {
+    expect(windowHeading('latestDay', '2026-10-29')).toBe('Oct 28')
+    expect(windowHeading('previousDay', '2026-10-29')).toBe('Oct 27')
+    expect(windowHeading('page', '2026-10-29')).toBe('Range')
+    expect(STATUS_PILL_TONES).toEqual({ 'feature.status.ok': 'good', 'feature.status.new': 'info', 'feature.status.silent': 'alert' })
+  })
+
+  it('rejects windows outside a row table', () => {
+    const ratio = section.items.find((i) => i.id === 'ratio')!
+    const withColumns = { ...spec, sections: [{ ...section, rowGroups: undefined, columns: { over: 'windows', ids: ['before', 'after'] } }] } as typeof spec
+    expect(validateCard(withColumns).some((e) => e.includes('windows are for a metric or ratio in a row'))).toBe(true)
+    const asRows = { ...spec, sections: [{ ...section, layout: 'rows', items: [ratio] }] } as typeof spec
+    expect(validateCard(asRows).some((e) => e.includes('windows are for a metric or ratio in a row'))).toBe(true)
   })
 })

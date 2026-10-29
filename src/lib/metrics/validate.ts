@@ -277,7 +277,8 @@ export function validateCard(spec: CardSpec): string[] {
       const repeats = [spec.repeat, s.repeat, s.rowGroups, s.columns, it.repeat]
       check(w, it.data, it.display, repeats)
       if (it.windows !== undefined) {
-        if (s.layout !== 'table' || 'field' in it.data || !Array.isArray(it.windows) || !it.windows.length || it.windows.length > 4) errors.push(`${w}: windows are for a metric or ratio in a 'table' section, one to four of them`)
+        // A row table only: a column table's cells (scope.ts sectionCells) never expand the parts.
+        if (s.layout !== 'table' || s.columns || 'field' in it.data || !Array.isArray(it.windows) || !it.windows.length || it.windows.length > 4) errors.push(`${w}: windows are for a metric or ratio in a row 'table' section (no columns), one to four of them`)
         else for (const win of it.windows) check(`${w}@${String(win)}`, { ...it.data, window: win } as DataBinding, it.display, repeats)
       }
       if (it.after !== undefined) {
