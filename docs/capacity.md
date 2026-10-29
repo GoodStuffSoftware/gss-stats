@@ -77,6 +77,15 @@ No standalone `workersInvocationsAdaptive` rows at all — the account's only st
 | CPU time/invocation | 10 ms | not directly measured (no errors observed; D1/GraphQL waits don't count as CPU) | a GAQL fetch + a couple of D1 upserts is unlikely to approach 10ms CPU, but not directly measured this session |
 | Subrequests/invocation | 50 | n/a | an hourly sync doing OAuth refresh + a few GAQL calls + a few D1 writes stays well under 50 |
 
+#### Sync Worker CPU over the Free 10 ms limit (decision 2026-10-29)
+
+The `gss-stats-sync` extras pass (cap 120 rows, cron `20,50 8-11 * * *` UTC) is kept as is, and its CPU is accepted as over the Workers Free plan's 10 ms/invocation limit. Not cut further.
+
+- **Measured (live, 2026-10-29):** extras ticks took 32.06 ms (08:20 UTC) and 25.83 ms (08:50 UTC). Roughly 15-20 ms of every tick that calls Google is fixed cost (token refresh, TLS, claim, writes), so one Google query per tick would still be about 17 ms. Idle ticks take 4.6-5.7 ms. The hourly cost sync has run at 17-43 ms for weeks.
+- **Not enforced today:** 10-15 to 10-29 the Worker had 356 invocations, all success, 0 errors, 0 `exceededCpu`; CPU p50 7.0 ms, p99 49.6 ms. The Free limit is not being enforced on this Worker at present, but Cloudflare could start.
+- **Watch:** `exceededCpu` in the Workers analytics for `gss-stats-sync`, and the sync freshness shown on the site (a stale "last sync" means ticks are failing).
+- **Remedy:** the Workers Paid plan ($5/month) removes the limit; that costs money, so it needs Mike's go. The alternative is to cut to one query per tick spread over more ticks. See the 2026-10-29 entry in the decision log for the reasoning.
+
 ### KV (`STATS_CONFIG`)
 
 Free cap: 100,000 reads/day, **1,000 writes/day**, 1,000 deletes/day, 1,000 list/day, 1 GB stored.

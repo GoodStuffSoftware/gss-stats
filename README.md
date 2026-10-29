@@ -1849,6 +1849,9 @@ none adds a data source of its own.
   statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a
   fresh isolate), a 1-day pull 9-10 ms warm and 12.6 ms cold, so a cold pull can overrun Free's
   limit (ADR 0001: what then happens, and why Workers Paid removes it).
+- **CPU over Free's 10 ms:** the extras ticks run 26-32 ms and the cost sync 17-43 ms, accepted
+  on purpose while the Free limit goes unenforced (0 `exceededCpu`); what to watch and the remedy
+  are in [docs/capacity.md](docs/capacity.md#sync-worker-cpu-over-the-free-10-ms-limit-decision-2026-10-29).
 - **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
   with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of every campaign
   field the sync writes: name, kind, flight, status, uc values, budget, cap, measurement); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
