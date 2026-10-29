@@ -266,6 +266,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (!s.repeat) errors.push(`${where}: panels show a repeat's instances; it needs a repeat`)
       if (s.layout === 'table') errors.push(`${where}: a table is not shown in panels`)
     }
+    if (s.joined !== undefined && (s.joined !== true || s.layout !== 'lines')) errors.push(`${where}: joined is true, on a 'lines' section only`)
     if (s.columns !== undefined || s.columnLabel !== undefined) {
       if (s.layout !== 'table') errors.push(`${where}: columns are for a 'table' section`)
       if (s.repeat && s.columns) errors.push(`${where}: a table repeats its rows or its columns, not both`)
@@ -296,6 +297,10 @@ export function validateCard(spec: CardSpec): string[] {
       if (ns !== undefined && ns !== 'label' && ns !== 'zero') errors.push(`${w}: whenNotStarted must be 'label' or 'zero'`)
       if (it.frame !== undefined && !['row', 'pill', 'tile', 'column', 'line'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
       if (it.lineBreak !== undefined && (it.lineBreak !== true || s.layout !== 'lines')) errors.push(`${w}: lineBreak is true, in a 'lines' section only`)
+      const isLine = (it.frame ?? (s.layout === 'lines' ? 'line' : undefined)) === 'line'
+      for (const k of ['mono', 'dim'] as const) if (it[k] !== undefined && (it[k] !== true || !isLine)) errors.push(`${w}: ${k} is true, on a 'line' item only`)
+      if (it.after !== undefined && (typeof it.after !== 'string' || !it.after || it.after.length > 8 || /[{}]/.test(it.after) || !isLine)) errors.push(`${w}: after is up to 8 characters of plain text, on a 'line' item only`)
+      if (it.ruleAbove !== undefined && (it.ruleAbove !== true || s.layout !== 'table' || !s.columns)) errors.push(`${w}: ruleAbove is true, on a column table's row only`)
     }
   })
   return errors

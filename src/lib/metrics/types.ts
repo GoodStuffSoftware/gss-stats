@@ -250,6 +250,14 @@ export interface MetricItem {
   frame?: 'row' | 'pill' | 'tile' | 'column' | 'line' // overrides the section layout for this item
   /** A 'lines' section only: this item starts a new line. */
   lineBreak?: true
+  /** A 'line' item only: the label in the monospace face too (the value always is). */
+  mono?: true
+  /** A 'line' item only: drawn in the dimmer ink, a secondary figure. */
+  dim?: true
+  /** A 'line' item only: plain text right after the value, such as a full stop (at most 8 characters). */
+  after?: string
+  /** A column table's row only: a rule above it, setting a total apart from the rows over it. */
+  ruleAbove?: true
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
 
@@ -264,6 +272,8 @@ export interface Section {
   /** With `repeat` (not a table): each instance is a bordered panel, side by side while they fit (300 px or more each),
    * headed by the section title (read in the instance, e.g. the feature's name) with the first item beside it. */
   panels?: true
+  /** A 'lines' section only: its items run on as one sentence, a space apart, instead of spaced out. */
+  joined?: true
   /** 'table' only: the other orientation — items are ROWS (their label in the first cell) and
    * these repeat instances are the COLUMNS (headed by `columnLabel`, default the instance's own
    * name). Each cell's scope is the column instance inside the card's instance, so a campaign

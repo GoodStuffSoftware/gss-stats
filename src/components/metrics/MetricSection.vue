@@ -8,7 +8,7 @@
 //     whose every cell is gated out (a closed flight's unmeasured step) is omitted.
 import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
-import { buildRequestSpec, columnDefaultLabel, columnTableColumns, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, columnDefaultLabel, columnGroupDefaultLabel, columnTableColumns, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import type { ValueResolver } from '../../lib/textLite'
@@ -26,7 +26,9 @@ const props = defineProps<{
   values?: ValueResolver
 }>()
 
-const defaultFrame = computed<'row' | 'pill' | 'tile' | 'column'>(() => (props.section.layout === 'pills' ? 'pill' : props.section.layout === 'tiles' ? 'tile' : props.section.layout === 'columns' ? 'column' : 'row'))
+const defaultFrame = computed<'row' | 'pill' | 'tile' | 'column' | 'line'>(() => (props.section.layout === 'pills' ? 'pill' : props.section.layout === 'tiles' ? 'tile' : props.section.layout === 'columns' ? 'column' : props.section.layout === 'lines' ? 'line' : 'row'))
+/** A placeholder has no line frame: in running text it reads as a row. */
+const placeholderFrame = (f: 'row' | 'pill' | 'tile' | 'column' | 'line') => (f === 'line' ? 'row' : f)
 const scaled = computed(() => props.section.layout === 'bars' || props.section.layout === 'columns')
 
 const titleTokens = computed(() => (props.section.title !== undefined ? resolveLabelTokens(props.section.title, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
@@ -106,7 +108,7 @@ const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint
 const columnTable = computed(() => (isColumnTable.value ? columnTableColumns(props.section, props.outerScope, props.ctx) : { columns: [], groups: [] }))
 const tableColumns = computed<ScopeInstance[]>(() => columnTable.value.columns)
 /** Column groups (Section.columnGroups): a heading row over the columns, each spanning its own. */
-const columnGroupHeaders = computed(() => columnTable.value.groups.map((g) => ({ span: g.span, tokens: resolveLabelTokens(columnDefaultLabel(g.scope), g.scope, undefined, props.ctx.todayEt, props.values) })))
+const columnGroupHeaders = computed(() => columnTable.value.groups.map((level) => level.map((g) => ({ span: g.span, tokens: resolveLabelTokens(columnGroupDefaultLabel(g.scope), g.scope, undefined, props.ctx.todayEt, props.values) }))))
 const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt, props.values)))
 const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
@@ -139,26 +141,56 @@ const anyVisible = computed(() => {
   }
   return flatItems.value.some((_, i) => visibleAt(i))
 })
+
+// ── lines and panels ─────────────────────────────────────────────────────────────────────────
+/** Item indexes split into lines: a 'lines' section starts a new line at an item with `lineBreak`. */
+function splitLines(indexes: number[]): number[][] {
+  const lines: number[][] = []
+  for (const i of indexes) {
+    if (!lines.length || (props.section.layout === 'lines' && flatItems.value[i].item.lineBreak)) lines.push([])
+    lines[lines.length - 1].push(i)
+  }
+  return lines
+}
+const itemLines = computed(() => splitLines(flatItems.value.map((_, i) => i)))
+/** A panels section (Section.panels): one bordered panel per repeat instance, headed by the section title read in the
+ * instance and the instance's first item, the rest in lines. A repeat with no instance shows its empty text as usual. */
+const panels = computed(() => {
+  if (!props.section.panels || !props.section.repeat || flatItems.value.some((fi) => fi.emptyOf)) return []
+  const byInstance = new Map<number, number[]>()
+  flatItems.value.forEach((fi, i) => {
+    const k = fi.instance ?? 0
+    byInstance.set(k, [...(byInstance.get(k) ?? []), i])
+  })
+  return [...byInstance.entries()].map(([instance, idx]) => ({
+    instance,
+    titleTokens: props.section.title !== undefined ? resolveLabelTokens(props.section.title, flatItems.value[idx[0]].scope, undefined, props.ctx.todayEt, props.values) : [],
+    head: idx[0],
+    lines: splitLines(idx.slice(1)),
+  }))
+})
 </script>
 
 <template>
   <div v-if="anyVisible || tableEmpty" class="metric-section" :class="`layout-${section.layout}`">
-    <p v-if="titleTokens.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
+    <p v-if="titleTokens.length && !panels.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
 
     <div v-if="isColumnTable" class="metric-table-wrap">
       <table class="metric-table columns">
         <thead>
-          <tr v-if="columnGroupHeaders.length" class="column-groups">
-            <th />
-            <th v-for="(g, i) in columnGroupHeaders" :key="i" :colspan="g.span" class="group"><MetricLabel :tokens="g.tokens" /></th>
+          <!-- Column groups (Section.columnGroups): a heading row per level, outermost first; the row-label heading
+               spans them all, beside the first. -->
+          <tr v-for="(level, li) in columnGroupHeaders" :key="`g${li}`" class="column-groups">
+            <th v-if="li === 0" :rowspan="columnGroupHeaders.length + 1"><MetricLabel :tokens="rowsHeaderTokens" /></th>
+            <th v-for="(g, i) in level" :key="i" :colspan="g.span" class="group"><MetricLabel :tokens="g.tokens" /></th>
           </tr>
           <tr>
-            <th><MetricLabel :tokens="rowsHeaderTokens" /></th>
+            <th v-if="!columnGroupHeaders.length"><MetricLabel :tokens="rowsHeaderTokens" /></th>
             <th v-for="(tokens, i) in columnHeaderTokens" :key="i" class="num"><MetricLabel :tokens="tokens" /></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in columnRows" :key="row.item.id">
+          <tr v-for="row in columnRows" :key="row.item.id" :class="{ 'rule-above': row.item.ruleAbove }">
             <th scope="row" class="row-label"><MetricLabel :tokens="row.labelTokens" /></th>
             <td v-for="(col, ci) in tableColumns" :key="ci" class="num">
               <MetricTableCell :item="row.item" :scope="col" :today-et="ctx.todayEt" :context="context" :values="values" />
@@ -191,13 +223,41 @@ const anyVisible = computed(() => {
       </table>
     </div>
 
+    <!-- Panels: one bordered box per instance, its title and first item side by side over the other lines. -->
+    <div v-else-if="panels.length" class="panels">
+      <div v-for="p in panels" :key="p.instance" class="panel">
+        <div class="panel-head">
+          <span class="panel-title"><MetricLabel :tokens="p.titleTokens" /></span>
+          <MetricItem :item="flatItems[p.head].item" :scope="flatItems[p.head].scope" :frame="flatItems[p.head].item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :values="values" />
+        </div>
+        <div v-for="(line, li) in p.lines" :key="li" class="items-wrap line-row">
+          <MetricItem v-for="i in line" :key="`${flatItems[i].item.id}-${i}`" :item="flatItems[i].item" :scope="flatItems[i].scope" :frame="flatItems[i].item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :values="values" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Lines: running text, a line per run of items up to the next lineBreak. -->
+    <template v-else-if="section.layout === 'lines'">
+      <div v-for="(line, li) in itemLines" :key="li" class="items-wrap line-row" :class="{ joined: section.joined }">
+        <template v-for="i in line" :key="`${flatItems[i].item.id}-${i}`">
+          <MetricPlaceholder
+            v-if="flatItems[i].emptyOf"
+            :label-tokens="resolveLabelTokens(flatItems[i].emptyOf!.label, flatItems[i].scope, undefined, ctx.todayEt, values)"
+            :text-tokens="resolveLabelTokens(flatItems[i].emptyOf!.text, flatItems[i].scope, undefined, ctx.todayEt, values)"
+            frame="row"
+          />
+          <MetricItem v-else :item="flatItems[i].item" :scope="flatItems[i].scope" :frame="flatItems[i].item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :values="values" />
+        </template>
+      </div>
+    </template>
+
     <div v-else class="items-wrap">
       <template v-for="(fi, i) in flatItems" :key="`${fi.item.id}-${i}`">
         <MetricPlaceholder
           v-if="fi.emptyOf"
           :label-tokens="resolveLabelTokens(fi.emptyOf.label, fi.scope, undefined, ctx.todayEt, values)"
           :text-tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt, values)"
-          :frame="fi.item.frame ?? defaultFrame"
+          :frame="placeholderFrame(fi.item.frame ?? defaultFrame)"
         />
         <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :values="values" :bar-max="scaled ? barMax : undefined" />
       </template>
@@ -278,6 +338,54 @@ const anyVisible = computed(() => {
 }
 .metric-table.columns tr.column-groups th.group {
   text-align: center;
+}
+/* A total row set apart from the rows over it (MetricItem.ruleAbove). */
+.metric-table.columns tr.rule-above > * {
+  border-top: 1px solid rgb(var(--line));
+}
+/* Lines: each item "label value" in running text; spaced out and wrapping, or (joined) one sentence. */
+.line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+}
+.line-row.joined {
+  display: block;
+  font-size: 12.5px;
+}
+.line-row.joined :deep(.mi-line)::after {
+  content: ' ';
+}
+.layout-lines .line-row + .line-row {
+  margin-top: 0;
+}
+/* Panels: side by side while each has 300 px, else stacked. */
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+.panel {
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0 8px;
+  font-size: 12.5px;
+}
+.panel-title {
+  color: rgb(var(--ink));
+  font-weight: 600;
+  line-height: 20px;
 }
 .metric-table.columns th.row-label {
   font-size: 11.5px;

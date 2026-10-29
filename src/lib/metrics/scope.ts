@@ -567,6 +567,8 @@ export interface FlatItem {
   item: MetricItem
   scope: ScopeInstance
   emptyOf?: { label: Label; text: Label }
+  /** Which of the section repeat's instances the item belongs to (0 without a section repeat): a panels section draws one panel each. */
+  instance?: number
 }
 
 export function flattenSectionItems(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
@@ -575,10 +577,10 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
     return section.repeat.empty ? [{ item: emptyPlaceholderItem(section.items[0]?.id ?? 'empty'), scope: outerScope, emptyOf: section.repeat.empty }] : []
   }
   const out: FlatItem[] = []
-  for (const sScope of sectionScopes) {
+  for (const [instance, sScope] of sectionScopes.entries()) {
     for (const item of section.items) {
       if (!item.repeat) {
-        out.push({ item, scope: sScope })
+        out.push({ item, scope: sScope, instance })
         continue
       }
       const allScopes = resolveRepeat(item.repeat, ctx, sScope).map((s) => nestScope(s, sScope))
@@ -590,11 +592,11 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
         if (item.repeat.empty) {
           // Only campaign instances say "a campaign is flighting"; the organic baseline never does.
           const untracked = allScopes.some((s) => s.kind === 'campaign') && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
-          out.push({ item, scope: sScope, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
+          out.push({ item, scope: sScope, instance, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
         }
         continue
       }
-      for (const iScope of itemScopes) out.push({ item, scope: iScope })
+      for (const iScope of itemScopes) out.push({ item, scope: iScope, instance })
     }
   }
   return out

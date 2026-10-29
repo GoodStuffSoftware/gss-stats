@@ -18,7 +18,7 @@ import BarTrack from './BarTrack.vue'
 const props = defineProps<{
   item: MetricItemSpec
   scope: ScopeInstance
-  frame: 'row' | 'pill' | 'tile' | 'column'
+  frame: 'row' | 'pill' | 'tile' | 'column' | 'line'
   todayEt: string
   context?: MetricsContext
   /** The largest value in this item's section — a 'bar' display scales its width against it. */
@@ -53,6 +53,8 @@ const ariaLabel = computed(() => [`${plainLabel.value}: ${vm.value.primary}`, ..
 // other compact caption, behind the card's one collapsed "Notes" toggle (the clean look).
 // 'inline' (the default) keeps the caption as a line under the value.
 const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.item.captionMode !== 'compact')
+/** A line's value is in the monospace face unless it is words (a status note, a text field). */
+const textValue = computed(() => props.item.display.as === 'status' || props.item.display.as === 'text')
 </script>
 
 <template>
@@ -84,6 +86,17 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
         <div class="mi-col-label" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" /></div>
         <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
       </div>
+    </template>
+
+    <!-- A line (a 'lines' section): "label value" in running text; the item's own box is dissolved (display: contents),
+         so its text and a progress bar sit straight in the line's flow. -->
+    <template v-else-if="frame === 'line'">
+      <span class="mi-line" :class="{ mono: item.mono, dim: item.dim }" role="group" :aria-label="ariaLabel"
+        ><template v-if="plainLabel"><MetricLabel :tokens="vm.labelTokens" />{{ ' ' }}</template
+        ><span class="mi-line-value" :class="{ mono: !textValue, muted: vm.muted }">{{ vm.primary }}</span>{{ item.after ?? '' }}</span
+      >
+      <div v-if="vm.progress" class="mi-line-progress" role="progressbar" :aria-valuenow="vm.progress.value" aria-valuemin="0" :aria-valuemax="vm.progress.target" :aria-label="plainLabel"><BarTrack variant="progress" :pct="vm.progress.pct" :done="vm.progress.done" /></div>
+      <p v-if="showCaption" class="mi-caption mi-line-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
     </template>
 
     <template v-else-if="frame === 'pill'">
@@ -247,6 +260,16 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
 .mi-value.muted {
   font-style: italic;
   color: rgb(var(--ink-3));
+}
+.metric-item[data-frame='line'] {
+  display: contents;
+}
+.mi-line.dim {
+  color: rgb(var(--ink-3));
+}
+.mi-line-progress,
+.mi-line-caption {
+  flex-basis: 100%;
 }
 .mi-delta.new,
 .mi-tile-delta.new {
