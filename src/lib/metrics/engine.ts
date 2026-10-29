@@ -555,6 +555,8 @@ interface Side {
   tooFew?: boolean
   numerator?: number
   denominator?: number
+  /** A store metric's note variables (StoreResult.noteVars). */
+  noteVars?: Record<string, string | number>
 }
 
 class Batch {
@@ -684,7 +686,9 @@ class Batch {
         // so a moved range carries the note, as a step chart's does (T1, meta.refusedWholeDays). Its day windows are whole
         // ET days by construction: no note there.
         if (plan.factId === 'featureDays' && ctx.window === 'page' && this.clock.pageRefusedWholeDays && countsRefusedRows(def) && !ids.includes('refused-whole-days')) ids = [...ids, 'refused-whole-days']
-        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}) }
+        // A store may say its metric does not apply to this read (an Ask-order primary that is not the read's primary).
+        if (r.unmeasured !== undefined) return { status: 'unmeasured', value: null, reason: r.unmeasured, noteIds: ids }
+        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}), ...(r.noteVars ? { noteVars: r.noteVars } : {}) }
       }
       return { status, value: fact.rows.kind === 'spend' && def.spend ? def.spend(fact.rows.rows, ctx) : null, m, noteIds, asOfMs: plan.asOfMs }
     }
@@ -889,6 +893,7 @@ function deriveMetric(batch: Batch, req: ResolvedRequest): MetricValue {
     if (wholeDays) v.wholeDays = wholeDays
   }
   if (side.noteIds.length) v.noteIds = side.noteIds
+  if (side.noteVars) v.noteVars = side.noteVars
   if (req.series) {
     const points = batch.series(def, req, side)
     if (points) v.series = points

@@ -163,6 +163,10 @@ export function withNoteVar(current: Label | undefined, name: string, path: Scop
 // ── Scope paths (for a `bind` label or a `field` data binding) — a fixed, curated list per
 // repeat kind, never derived from user text. ──────────────────────────────────────────────
 export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; label: string }[]> = {
+  tags: [
+    { value: 'feature.tag', label: 'Tag (organic or tagged)' },
+    { value: 'feature.label', label: 'Group and tag' },
+  ],
   campaigns: [
     { value: 'campaign.id', label: 'Campaign id' },
     { value: 'campaign.label', label: 'Campaign name' },
@@ -431,6 +435,8 @@ export function paramIsPinned(v: ParamValue | undefined): v is string {
 const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   number: 'Number',
   currency: 'Currency',
+  multiple: 'Multiple (1.67x)',
+  perRows: 'Ratio with its rows',
   percent: 'Percent',
   counts: 'Counts',
   dateRange: 'Date range',
