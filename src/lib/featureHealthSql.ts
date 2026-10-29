@@ -159,34 +159,45 @@ export function beforeCutoffSql(whereTerms: readonly string[], features: readonl
 }
 
 /** The metric registry's Feature health fact (lib/metrics/facts.ts featureDays): the two statements above folded into
- * ONE. Its first bind is the window start (an ET midnight): a row before it lands in the day '' (no ET day is read
- * there), every other row in its ET day. Columns: s<i> per flat step and f<j> per feature (the feature's own match, so
- * a row matching two of its steps counts once). The where terms carry only an upper bound (`ts < ?`), so the '' row is
- * every older row: foldFeatureDays turns that into the daily rows and the "before the new-days cutoff" counts.
- * Grouped by the ET day alone (counts only): a refused path is read only as per-ET-day totals or one older total. */
+ * ONE plain count. Its first bind is the window start (an ET midnight): a row before it lands in the day '' (no ET day is
+ * read there), every other row in its ET day. Rows are COUNT(*) per (day, path), the daily twins' shape (facts.test.ts
+ * "every fact is an anonymous aggregate"), plus the campaign tag only when some step matches on it; foldFeatureDays
+ * applies the step matches (stepMatches, the JS twin of stepMatchSql) to each path, so a path matching two steps counts
+ * for each and a feature counts it once. The where terms carry only an upper bound (`ts < ?`), so the '' rows are every
+ * older row: foldFeatureDays turns them into the "before the new-days cutoff" counts.
+ * Grouped by the ET day and path alone (counts only): a refused path is read only as per-ET-day totals or one older total. */
 export function featureDaysSql(whereTerms: readonly string[], features: readonly FeatureDef[] = FEATURES): string {
-  const steps = flatSteps(features).map((f) => `SUM(CASE WHEN ${stepMatchSql(f.step.match)} THEN 1 ELSE 0 END) AS s${f.index}`)
-  const feats = features.map((f, i) => `SUM(CASE WHEN ${featureMatchSql(f)} THEN 1 ELSE 0 END) AS f${i}`)
-  return `SELECT CASE WHEN ts < ? THEN '' ELSE ${etDateSql()} END AS d, ${[...steps, ...feats].join(', ')} FROM hits WHERE ${whereTerms.join(' AND ')} GROUP BY d ORDER BY d`
+  const tagged = flatSteps(features).some((f) => !!f.step.match.tag)
+  const cols = tagged ? 'path, campaign' : 'path'
+  return `SELECT CASE WHEN ts < ? THEN '' ELSE ${etDateSql()} END AS d, ${cols}, COUNT(*) AS n FROM hits WHERE ${whereTerms.join(' AND ')} GROUP BY d, ${cols} ORDER BY d`
 }
 
-/** featureDaysSql's rows as assembleHealth's input: the ET-day rows (the old daily statement's rows) and, per feature,
- * the count of rows before `newCutoffDay` (an ET date: the old beforeCutoffSql over `ts < etWallTimeMs(newCutoffDay)`).
- * Exact when the statement's window start is at or before that cutoff, which healthDays guarantees (baselineStart is
- * earlier than the new-days cutoff). */
+/** featureDaysSql's rows as assembleHealth's input: the ET-day rows (the old daily statement's rows: s<i> per flat step)
+ * and, per feature, the count of rows before `newCutoffDay` (an ET date: the old beforeCutoffSql over
+ * `ts < etWallTimeMs(newCutoffDay)`). Exact when the statement's window start is at or before that cutoff, which
+ * healthDays guarantees (baselineStart is earlier than the new-days cutoff). */
 export function foldFeatureDays(
   raw: readonly Record<string, unknown>[],
   features: readonly FeatureDef[],
   newCutoffDay: string,
 ): { rows: { d: string; s: number[] }[]; before: number[] } {
-  const stepCount = flatSteps(features).length
-  const rows: { d: string; s: number[] }[] = []
+  const steps = flatSteps(features)
+  const byDay = new Map<string, number[]>()
   const before = features.map(() => 0)
   for (const r of raw) {
     const d = String(r.d ?? '')
-    if (d === '' || d < newCutoffDay) features.forEach((_, j) => (before[j] += Number(r[`f${j}`]) || 0))
-    if (d !== '') rows.push({ d, s: Array.from({ length: stepCount }, (_, i) => Number(r[`s${i}`]) || 0) })
+    const path = String(r.path ?? '')
+    const campaign = r.campaign == null ? null : String(r.campaign)
+    const n = Number(r.n) || 0
+    if (!n) continue
+    const hit = steps.map((f) => stepMatches(f.step.match, path, campaign))
+    if (d === '' || d < newCutoffDay) features.forEach((_, j) => { if (steps.some((f, i) => hit[i] && f.featureIndex === j)) before[j] += n })
+    if (d === '') continue
+    let s = byDay.get(d)
+    if (!s) byDay.set(d, (s = steps.map(() => 0)))
+    steps.forEach((_, i) => { if (hit[i]) s![i] += n })
   }
+  const rows = [...byDay.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([d, s]) => ({ d, s }))
   return { rows, before }
 }
 

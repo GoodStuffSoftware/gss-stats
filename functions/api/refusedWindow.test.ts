@@ -515,7 +515,11 @@ describe('the daily twins follow the same rule', () => {
     const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
     const worst = Math.max(...ranged.map((id) => b(id, { ...sub, ...heavy })))
     expect(worst).toBeLessThan(100)
-    expect(worst).toBe(57) // measured: popupRangePath and popupRangeDaily (bskRangePath and bskRangeDaily bind far fewer)
+    // measured: featureDays (Feature health, ADR 0005 T2) = 2 window bounds + 50 sites + 10 known-traffic exclusions (it always
+    // hides known traffic, lib/metrics/facts.ts) + 2 hides. Before it, popupRangePath and popupRangeDaily at 57 were the worst.
+    expect(worst).toBe(64)
+    expect(b('featureDays', { ...sub, ...heavy })).toBe(64)
+    expect(Math.max(...ranged.filter((id) => id !== 'featureDays').map((id) => b(id, { ...sub, ...heavy })))).toBe(57) // popupRangePath and popupRangeDaily (bskRangePath and bskRangeDaily bind far fewer)
     expect(b('popupRangeDaily', { ...sub, ...heavy })).toBe(57) // measured: 2 + 50 sites + 2 hides + 3 install-gap
   })
 })

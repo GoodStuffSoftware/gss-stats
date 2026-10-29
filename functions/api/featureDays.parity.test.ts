@@ -43,6 +43,11 @@ function seed(db: DatabaseSync): void {
       rows.push({ ts: at(day, 13), site: 'bestsudoku-web', path, campaign: 'manual_check', n: 1 })
     }
   }
+  // A second path under every prefix step, and every excepted path, so the per-path fold sums paths and honors except lists.
+  for (const fs of flatSteps()) {
+    for (const p of fs.step.match.prefix ?? []) for (const k of [1, 2, 9, 20]) rows.push({ ts: at(addDays(TODAY, -k), 14), site: 'bestsudoku-web', path: `${p}yy`, n: 2 })
+    for (const p of fs.step.match.except ?? []) rows.push({ ts: at(addDays(TODAY, -1), 15), site: 'bestsudoku-web', path: p, n: 3 })
+  }
   rows.push({ ts: at(addDays(TODAY, -2), 8), site: 'bestsudoku-web', path: '/not/a/step', n: 9 })
   rows.push({ ts: at(addDays(TODAY, -2), 8), site: 'bestsudoku-web', path: '/tour/start\u0000', n: 9 })
   insertHits(db, rows)
@@ -139,14 +144,106 @@ describe('featureDays (one statement) == /api/features health (two statements)',
     expect([...statuses].sort()).toEqual(['new', 'ok', 'silent'])
   })
 
-  it('counts only: grouped by the ET day alone, no visitor, hour, place or device column, no JOIN', async () => {
+  it('counts only: COUNT(*) per ET day and path, no visitor, hour, place or device column, no JOIN', async () => {
     vi.setSystemTime(new Date(NOWS[1]))
     const { sql } = await newModel({ since: addDays(TODAY, -6), until: TODAY, excludeKnownTraffic: true })
-    expect(sql).toMatch(/GROUP BY d ORDER BY d$/)
+    expect(sql).toMatch(/ END AS d, path, COUNT\(\*\) AS n FROM hits .* GROUP BY d, path ORDER BY d$/)
     expect(sql).not.toMatch(/\bJOIN\b/i)
     const select = sql.slice(0, sql.indexOf(' FROM hits '))
     for (const col of ['visitor', 'country', 'region', 'city', 'device', 'browser', 'os', 'colo', 'lat', 'lon', 'postal', 'timezone']) {
       expect(select).not.toMatch(new RegExp(`\\b${col}\\b`))
     }
+  })
+})
+
+// ── Engine level: the card editor's feature.* metrics (POST /api/metrics, the feature-health preset's requests) ──
+// Every number the old table shows, read through the real /api/metrics handler, against the real /api/features.
+// The card hides known traffic always (lib/metrics/facts.ts featureDays), so only those filter combos are compared;
+// lib/defaults.ts featureHealthCardFor maps only a widget that hides it.
+type Req = { key: string; metric: string; window: string; params: { feature: string; step?: string } }
+function presetRequests(): Req[] {
+  const out: Req[] = []
+  const add = (metric: string, window: string, feature: string, step?: string) =>
+    out.push({ key: `k${out.length}`, metric, window, params: step ? { feature, step } : { feature } })
+  for (const f of FEATURES) {
+    add('feature.status', 'latestDay', f.id)
+    add('feature.baselineAvg', 'latestDay', f.id)
+    for (const w of ['latestDay', 'previousDay', 'page']) add('feature.total', w, f.id)
+    for (const s of f.steps) for (const w of ['latestDay', 'previousDay', 'page']) {
+      add('feature.step', w, f.id, s.id)
+      add('feature.stepRatio', w, f.id, s.id)
+    }
+  }
+  return out
+}
+async function cardValues(body: Record<string, unknown>) {
+  const { onRequestPost } = await import('./metrics')
+  const reqs = presetRequests()
+  const results: Record<string, { status: string; value?: number | null; noteIds?: string[] }> = {}
+  const context = { since: body.since, until: body.until, sites: body.sites ?? [], ...(body.excludeOwnVisits ? { excludeOwnVisits: true, ownBrowser: body.ownBrowser, ownOS: body.ownOS } : {}) }
+  for (let i = 0; i < reqs.length; i += 200) {
+    const waited: Promise<unknown>[] = []
+    const res = await onRequestPost(pagesContext(postJson('/api/metrics', { v: 1, context, requests: reqs.slice(i, i + 200) }), { gss_geo: d1 }, waited) as any)
+    await Promise.all(waited)
+    const json = (await res.json()) as any
+    if (res.status !== 200) return { status: res.status, error: json.error as string, reqs, results }
+    Object.assign(results, json.results)
+  }
+  return { status: 200, error: undefined, reqs, results }
+}
+const STATUS_CODE: Record<string, number> = { ok: 0, new: 1, silent: 2 }
+const WIN = { latestDay: 'latest', previousDay: 'prev', page: 'range' } as const
+
+describe('the card editor\'s feature.* metrics (POST /api/metrics) == /api/features health', () => {
+  for (const now of NOWS) {
+    it(`every number of the old table, every window and known-traffic-hidden filter at ${now}`, async () => {
+      vi.setSystemTime(new Date(now))
+      let compared = 0
+      for (const w of WINDOWS(now)) {
+        for (const t of TOGGLES.filter((x) => x.excludeKnownTraffic)) {
+          const body = { ...w, ...t }
+          const got = await cardValues(body)
+          if (w.since === '2020-01-01') {
+            // The deliberate difference: the metrics endpoint refuses a range over 400 days (validate.ts MAX_RANGE_DAYS);
+            // /api/features cut it to its newest 731 days.
+            expect(got.status, JSON.stringify(body)).toBe(400)
+            expect(got.error).toMatch(/longer than 400 days/)
+            continue
+          }
+          expect(got.status, `${JSON.stringify(body)} ${got.error}`).toBe(200)
+          const old = await oldModel(body)
+          const subDay = !/^\d{4}-\d{2}-\d{2}$/.test(w.since) && !/T04:00:00Z$/.test(w.since)
+          for (const r of got.reqs) {
+            const v = got.results[r.key]
+            const label = `${JSON.stringify(body)} ${r.metric} ${r.window} ${r.params.feature} ${r.params.step ?? ''}`
+            const f = old.features.find((x: any) => x.id === r.params.feature)
+            const s = r.params.step ? f.steps.find((x: any) => x.id === r.params.step) : undefined
+            const wk = WIN[r.window as keyof typeof WIN]
+            const want =
+              r.metric === 'feature.status' ? STATUS_CODE[f.status]
+                : r.metric === 'feature.baselineAvg' ? f.baselineAvg
+                  : r.metric === 'feature.total' ? f[wk]
+                    : r.metric === 'feature.step' ? s[wk]
+                      : (s.ratio?.[wk] ?? null)
+            // A step with no ratio (or a 0 "per" count) is null on both sides: the card shows a dash.
+            expect(v?.status, label).toBe(want === null ? 'no-data' : 'ok')
+            expect(v?.value ?? null, label).toEqual(want)
+            if (r.metric === 'feature.status') expect(v.noteIds, label).toContain(`feature.status.${f.status}`)
+            // The whole-days note, as a step chart's: on a page-range figure when the range was snapped, nowhere else.
+            expect((v.noteIds ?? []).includes('refused-whole-days'), label).toBe(subDay && r.window === 'page')
+            compared++
+          }
+        }
+      }
+      expect(compared).toBeGreaterThan(5 * 4 * presetRequests().length - 1)
+    }, 120_000)
+  }
+
+  it('a range between 401 and 731 days is refused by the card, read in full by /api/features', async () => {
+    vi.setSystemTime(new Date(NOWS[1]))
+    const body = { since: addDays(TODAY, -500), until: TODAY, excludeKnownTraffic: true }
+    expect((await cardValues(body)).status).toBe(400)
+    const old = await oldModel(body)
+    expect(old.days).toHaveLength(501)
   })
 })

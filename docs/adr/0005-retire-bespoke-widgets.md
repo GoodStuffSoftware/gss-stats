@@ -389,8 +389,16 @@ there is no `CONFIG_VERSION` change because no new widget field is stored. Count
 split guard drops the refused rows, so a step made only of them reads nothing. The page's load
 cost is in `docs/capacity.md` §11. Parity with `/api/features` is a test
 (`functions/api/featureStep.parity.test.ts`, decision 3); its differences are listed in the
-README (Feature health, Step charts). Left: T2-T4 (the Feature health card, Coach tips and
-Ask-order on the metric registry) and T7 (a Features page template, an editor guard against new
+README (Feature health, Step charts).
+
+T2 built (2026-10-29): the Overview's Feature health card is the card editor's `feature-health`
+preset over a `featureDays` fact (COUNT(*) per ET day and path, the `/api/features` window and
+filters, known traffic hidden), with `features` / `steps` repeats, `latestDay` / `previousDay`
+windows and `feature.*` metrics; status logic stays in `assembleHealth`. A saved health widget
+that hides known traffic is mapped at render time (`featureHealthCardFor`, decision 2), no
+`CONFIG_VERSION` change. Parity is a test (`functions/api/featureDays.parity.test.ts`, decision
+3); its differences are in the README (Feature health in the card editor). Left: T3-T4 (Coach
+tips and Ask-order on the metric registry) and T7 (a Features page template, an editor guard against new
 `features` widgets, then removing `FeatureHealthCard`'s steps branch and the `features`
 dataset, the exit criterion).
 

@@ -681,8 +681,9 @@ coach tip shows, so impressions dip where tips run more often; Install adds that
 Safari count under `/install/prompt/ios` and a dismissal after an in-app App Store tap
 counts as a dismissal.
 
-- **Card:** a row per feature with its status, and per step the count for the latest complete
-  ET day, the day before and the selected range, plus the ratio of those counts.
+- **Card:** a small card per feature with its status, and per step the count for the latest
+  complete ET day, the day before and the selected range, plus the ratio of those counts (see
+  *Feature health in the card editor* below).
 - **Ratios are counts per count**, e.g. "tapped per shown". They are not per-person rates:
   rows are independent counts, never joined into a path, so a ratio can exceed 1. A zero
   denominator shows "—".
@@ -702,6 +703,33 @@ counts as a dismissal.
   [`src/lib/featureHealth.ts`](src/lib/featureHealth.ts): it adds a card row and a Features
   chart.
 - Counts only: the card splits by nothing (no hour, place, device or visitor).
+
+### Feature health in the card editor
+
+The Overview's Feature health readout is an ordinary metric card, the **Feature health** preset:
+it repeats over the features (one small card each: the status, the 7-day average behind it, the
+latest-day and range totals and the feature's caption), and each card has a table that repeats
+over the feature's steps (Step, Yesterday, Day before, Range, and the three ratios with what
+they are per). The same card can be built or changed in the card editor like any other.
+
+- **Building blocks.** Repeats *Features* (all, or the ones checked) and *Steps* (the enclosing
+  feature's); windows *Latest complete ET day* (`latestDay`), *Day before* (`previousDay`) and the
+  page range; metrics `feature.step`, `feature.total`, `feature.stepRatio` (a plain ratio of two
+  counts, never a percent), `feature.status` (OK, New or Went silent) and `feature.baselineAvg`
+  (rows a day over the 7 days the status reads). They read one `featureDays` fact: rows per ET day
+  and path, over the same window and filters as `/api/features`, with known traffic always hidden.
+- **Same numbers as the old table.** `functions/api/featureDays.parity.test.ts` runs the real
+  `/api/metrics` and `/api/features` handlers over one fixture (three clocks, six ranges, four
+  filter sets) and compares every status, average, total, step count and ratio.
+- **What reads differently.** The status sentence is now the status plus its 7-day average; a
+  feature's caption sits in its own card; a range whose bounds moved to ET midnights carries the
+  whole-days caption, as a step chart does; and a range over 400 days is refused (the metrics
+  endpoint's cap), where the old table showed its newest 731 days.
+- **Saved layouts are not rewritten.** A Feature health table saved by an older build (dataset
+  `features`, view `health`) that hides known traffic is drawn as this card at render time
+  (`featureHealthCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place,
+  title and settings; one that shows known traffic keeps the old table. The layout version does
+  not change.
 
 ### Step charts
 

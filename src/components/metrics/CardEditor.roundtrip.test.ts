@@ -17,6 +17,7 @@ import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { normalizeConfig } from '../../lib/defaults'
 import { validateCard } from '../../lib/metrics/validate'
 import { PRESETS } from '../../lib/metrics/presets'
+import { FEATURES } from '../../lib/featureHealth'
 import type { CardRef, CardSpec } from '../../lib/metrics/types'
 import type { Widget } from '../../types'
 
@@ -276,6 +277,20 @@ describe('the controls for fields the form used to hide round-trip', () => {
     await us.setValue(true)
     await flushPromises()
     expect(lastSpec(c).sections[0].columns).toEqual({ over: 'countries', ids: ['US'] })
+  })
+
+  it('feature ids (Feature health): the features repeat lists them, a pick is saved and round-trips', async () => {
+    const w = await customized('feature-health')
+    const first = FEATURES[0]
+    await exactCheckbox(w, first.label).setValue(true)
+    await flushPromises()
+    expect(lastSpec(w).repeat).toEqual({ over: 'features', ids: [first.id] })
+    expect(lastSpec(w).sections[1].repeat).toEqual(plain(PRESETS['feature-health'].sections[1].repeat))
+    const saved = plain(lastSpec(w))
+    const again = mountEditor({ spec: saved })
+    await flushPromises()
+    await noOpPass(again)
+    expect(lastSpec(again)).toStrictEqual(saved)
   })
 
   it('column heading and row-label heading: shown, off and back on restores, and survive clearing the columns', async () => {

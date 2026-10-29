@@ -215,7 +215,7 @@ export type FactRows =
   | { kind: 'playDaily'; rows: PlayDayRow[] }
   /** A single aggregate (the first Best Sudoku hit, epoch ms), null when there is none. */
   | { kind: 'scalar'; value: number | null }
-  /** featureDaysSql's raw rows (lib/featureHealthSql.ts): one per ET day plus the '' row of older counts. */
+  /** featureDaysSql's raw rows (lib/featureHealthSql.ts): COUNT(*) per (ET day, path), day '' for every older row. */
   | { kind: 'featureDays'; rows: Record<string, unknown>[] }
 
 /** How long a fact's cache entry lives (functions/_lib/metricFacts.ts turns it into seconds):
@@ -634,7 +634,7 @@ export const FACTS: Record<FactId, FactDef> = {
 
   // Feature health (ADR 0005, editor-tools T2): /api/features' one featureDays statement, the same window and filters,
   // known traffic always hidden (the card stands in only for a widget that hides it, lib/defaults.ts featureHealthCardFor).
-  // Per ET day only: no visitor, hour, place or device column, no join.
+  // COUNT(*) per ET day and path only: no visitor, hour, place or device column, no join.
   featureDays: {
     id: 'featureDays',
     db: 'gss_geo',

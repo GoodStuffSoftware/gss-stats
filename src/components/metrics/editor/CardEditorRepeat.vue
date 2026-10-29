@@ -40,6 +40,7 @@ const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: st
   popups: { title: 'Pop-ups', none: 'none checked = all' },
   windows: { title: 'Windows', none: 'none checked = release before and after' },
   countries: { title: 'Countries', none: 'none checked = all three' },
+  features: { title: 'Features', none: 'none checked = all' },
 }
 
 /** The last spec seen for each kind, so switching away and back restores its filters. */
