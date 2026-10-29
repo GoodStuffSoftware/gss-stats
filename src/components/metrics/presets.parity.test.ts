@@ -15,7 +15,8 @@
 //   D3  Return rate (d2-7) for the closed Android flight, which ended before the return beacon
 //       existed: old shows a rate, the registry says unmeasured, and a closed card omits it.
 //   D4  The spend-only Play-direct card: old shows zeros and a dash; every beacon value is
-//       unmeasured (spend-only), so the closed card shrinks to its flight row.
+//       unmeasured (spend-only), so the closed card shrinks to its flight row and its Google Ads
+//       spend and clicks.
 //   D5  Closed Android "Installs" row: its flight never saw the installed outcome. The old
 //       body omitted the Install pill but still showed the row's count; the card omits both.
 //   S1  (slice-1 fix) "Game-screen views" is a pair: "100 views · 50 arrivals", never a rate.

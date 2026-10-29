@@ -1073,8 +1073,9 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
 - Decided on the client from the campaign's own config (`unmeasuredByConfig`, the same two
   checks as the engine's `sideStatic`): a spend-only campaign's beacon items and a flight
   without a start date's non-spend items are omitted whatever the status, and never requested.
-  So the Play-direct card is its Flight row from the first render, with no "…" and no "not yet
-  tracking", and "pending — start date not yet confirmed" appears only in the Flight row.
+  So the Play-direct card has no beacon rows and no "not yet tracking"; its Flight row shows
+  from the first render, its Google Ads Spend and Clicks rows show "…" until the fetch lands,
+  and "pending — start date not yet confirmed" appears only in the Flight row.
 - The ET day follows the clock (or the `nowMs` seam), not the first render. The day is part of
   every request's client cache key (`useMetrics`' `epoch`, never sent), and the card body is
   keyed on it: at midnight "flighting today" repeats re-expand, badges change, and today-so-far
