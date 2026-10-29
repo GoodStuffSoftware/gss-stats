@@ -8,9 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { openHitsDb, insertHits, sqliteD1, pagesContext, postJson, type HitRow } from '../_lib/testing/hitsDb'
 import { addDays, etWallTimeMs } from '../../src/lib/etTime'
-import { FEATURES, assembleHealth, flatSteps } from '../../src/lib/featureHealth'
+import { FEATURES, assembleHealth, flatSteps, stepMatches } from '../../src/lib/featureHealth'
 import { featureDaysStatement, foldFeatureDays } from '../../src/lib/featureHealthSql'
 import { BEST_SUDOKU_SITES } from '../../src/lib/bestSudokuSites'
+
+// stepMatches keeps its real behaviour; the spy only counts calls (the fold cost test below).
+vi.mock(import('../../src/lib/featureHealth'), async (orig) => {
+  const m = await orig()
+  return { ...m, stepMatches: vi.fn(m.stepMatches) }
+})
 
 const TODAY = '2026-10-20'
 const at = (date: string, hours: number) => etWallTimeMs(date) + hours * 3_600_000
@@ -245,5 +251,17 @@ describe('the card editor\'s feature.* metrics (POST /api/metrics) == /api/featu
     expect((await cardValues(body)).status).toBe(400)
     const old = await oldModel(body)
     expect(old.days).toHaveLength(501)
+  })
+})
+
+describe('foldFeatureDays cost', () => {
+  it('matches each distinct path against the steps once, not once per row (days x paths rows)', () => {
+    const paths = flatSteps().map((fs) => pathOf(fs.step.match)).filter((p): p is string => !!p).slice(0, 5)
+    const raw: Record<string, unknown>[] = [{ d: '', path: paths[0], n: 3 }]
+    for (let i = 0; i < 400; i++) for (const path of paths) raw.push({ d: addDays('2025-09-01', i), path, n: 1 })
+    vi.mocked(stepMatches).mockClear()
+    const folded = foldFeatureDays(raw, FEATURES, '2026-10-13')
+    expect(vi.mocked(stepMatches).mock.calls.length).toBe(paths.length * flatSteps().length)
+    expect(folded.rows).toHaveLength(400)
   })
 })

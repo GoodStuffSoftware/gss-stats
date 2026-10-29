@@ -724,7 +724,12 @@ they are per). The same card can be built or changed in the card editor like any
 - **What reads differently.** The status sentence is now the status plus its 7-day average; a
   feature's caption sits in its own card; a range whose bounds moved to ET midnights carries the
   whole-days caption, as a step chart does; and a range over 400 days is refused (the metrics
-  endpoint's cap), where the old table showed its newest 731 days.
+  endpoint's cap), where the old table showed its newest 731 days. No "All time" view beyond
+  400 days is accepted for now: Best Sudoku's data is well under 400 days old.
+- **Cost.** The card's 334 requests (14 features, 44 steps) go out as 2 `/api/metrics` POSTs, and
+  on a cold cache each runs its own `featureDays` statement, so an uncached Overview load reads
+  the feature rows about twice where the old table read them once (see
+  [docs/capacity.md §12](docs/capacity.md)).
 - **Saved layouts are not rewritten.** A Feature health table saved by an older build (dataset
   `features`, view `health`) that hides known traffic is drawn as this card at render time
   (`featureHealthCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place,

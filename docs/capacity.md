@@ -454,3 +454,19 @@ per uncached load, since each statement reads the same window the old pair read.
 steps keeps it at 14 rather than 44 (one per step). The step charts with no counts-only rows are
 now `liveSafe`, so a live ping can refetch them (at most hourly per chart, §10); the old step
 charts never refetched. Coach tips and Ask-order still read `/api/features`, unchanged.
+
+## 12. Feature health as a metric card (editor tools T2, 2026-10-29) — D1 rows read and CPU
+
+The Overview Feature health table used to read one `/api/features` POST: 2 D1 statements (the
+range by ET day, and a per-feature count before the new-days cutoff), edge-cached for 300 s. The
+Feature health card reads one `featureDays` fact: one statement, `COUNT(*)` per ET day and path
+over `ts < tomorrow` (older rows fold into one `''` day per path), cached 300 s. The preset
+expands to 334 metric requests (14 features x 5, 44 steps x 6), which the client sends as 2 POSTs
+(the 200-request cap); on a cold cache both plan the fact, so an uncached load runs 2 statements
+that each scan the feature rows of the whole history: about twice the rows the old pair read.
+Measured on the sqlite harness (review of T2, all caches cold): request bodies about 36 KB,
+responses 15-18 KB (old 11-20 KB), handler wall time 83 / 103 / 189 ms at 7 / 30 / 90 days (old
+67 / 54 / 83 ms). The fold matches each distinct path against the steps once (not once per row);
+warm CPU of fold plus status over a pessimistic 109 distinct paths: about 2 ms at 30 days, 4 ms at
+90 days and 17 ms at the 400-day cap. Accepted: the default Overview range is 7 days and the
+warm cache serves repeat loads.

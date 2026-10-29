@@ -184,18 +184,27 @@ export function foldFeatureDays(
   const steps = flatSteps(features)
   const byDay = new Map<string, number[]>()
   const before = features.map(() => 0)
+  // The step matches are worked out once per distinct (path, campaign), not once per row: the rows are days x paths, and
+  // matching every row against every step cost far more than the 10 ms Workers CPU budget at long ranges.
+  const matched = new Map<string, { stepIdx: number[]; featureIdx: number[] }>()
   for (const r of raw) {
     const d = String(r.d ?? '')
     const path = String(r.path ?? '')
     const campaign = r.campaign == null ? null : String(r.campaign)
     const n = Number(r.n) || 0
     if (!n) continue
-    const hit = steps.map((f) => stepMatches(f.step.match, path, campaign))
-    if (d === '' || d < newCutoffDay) features.forEach((_, j) => { if (steps.some((f, i) => hit[i] && f.featureIndex === j)) before[j] += n })
+    const key = campaign === null ? `0${path}` : `1${campaign}\u0000${path}`
+    let m = matched.get(key)
+    if (!m) {
+      const stepIdx = steps.flatMap((f, i) => (stepMatches(f.step.match, path, campaign) ? [i] : []))
+      m = { stepIdx, featureIdx: [...new Set(stepIdx.map((i) => steps[i]!.featureIndex))] }
+      matched.set(key, m)
+    }
+    if (d === '' || d < newCutoffDay) for (const j of m.featureIdx) before[j]! += n
     if (d === '') continue
     let s = byDay.get(d)
     if (!s) byDay.set(d, (s = steps.map(() => 0)))
-    steps.forEach((_, i) => { if (hit[i]) s![i] += n })
+    for (const i of m.stepIdx) s[i]! += n
   }
   const rows = [...byDay.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([d, s]) => ({ d, s }))
   return { rows, before }
