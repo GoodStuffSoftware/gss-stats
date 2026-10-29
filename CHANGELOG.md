@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.74.0] — 2026-10-29
+
 ### Changed
 
 - **Feature health is one table again.** The Overview card is back to a single grouped table with a status pill, dated day columns and one ratio column, and the card editor can build the same layout.
