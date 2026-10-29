@@ -61,6 +61,12 @@ const sparklineDays = computed<boolean>({
     if (display.value.as === 'sparkline') display.value = v ? { as: 'sparkline', series: 'daily', days: true } : { as: 'sparkline', series: 'daily' }
   },
 })
+const statusPill = computed<boolean>({
+  get: () => display.value.as === 'status' && !!display.value.pill,
+  set: (v) => {
+    if (display.value.as === 'status') display.value = v ? { as: 'status', pill: true } : { as: 'status' }
+  },
+})
 const dateRangeDays = computed<boolean>({
   get: () => display.value.as === 'dateRange' && !!display.value.days,
   set: (v) => {
@@ -106,6 +112,12 @@ const dateRangeDays = computed<boolean>({
         </select>
       </div>
       <p class="hint">Always shows the counts, e.g. "12.1% (4/33)" — no toggle to hide them.</p>
+    </template>
+
+    <template v-else-if="display.as === 'status'">
+      <div class="field check">
+        <label><input type="checkbox" v-model="statusPill" /> Show as a coloured pill</label>
+      </div>
     </template>
 
     <template v-else-if="display.as === 'dateRange'">

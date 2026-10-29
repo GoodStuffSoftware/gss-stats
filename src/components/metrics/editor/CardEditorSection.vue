@@ -66,6 +66,15 @@ const repeatModel = computed({
     section.value = withField(section.value, 'repeat', v)
   },
 })
+/** A table's row groups (Section.rowGroups): each section-repeat instance becomes a group of
+ * rows, one per instance of this inner repeat. */
+const rowGroupsModel = computed({
+  get: () => section.value.rowGroups,
+  set: (v) => {
+    if (v === section.value.rowGroups) return
+    section.value = withField(section.value, 'rowGroups', v)
+  },
+})
 /** A table's column repeat (Section.columns): items become rows, these instances columns. The
  * column and row-label headings only apply with columns (validateCard), so clearing the columns
  * sets them aside and choosing columns again brings them back. */
@@ -137,6 +146,7 @@ function removeAt(i: number) {
 
     <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'rules', 'assets', 'features', 'steps', 'tips']" label="Repeat this section" />
     <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets']" label="Columns (each item becomes a row)" />
+    <CardEditorRepeat v-if="section.layout === 'table' && section.repeat && !section.columns" v-model="rowGroupsModel" :allow="['steps', 'campaigns', 'popups', 'windows', 'countries', 'assets']" label="Rows in each group" />
     <template v-if="section.columns">
       <div class="field check">
         <label><input type="checkbox" :checked="section.columnLabel !== undefined" @change="toggleLabel('columnLabel', ($event.target as HTMLInputElement).checked)" /> Column heading <span class="hint">— default: each column's own name</span></label>
@@ -156,7 +166,9 @@ function removeAt(i: number) {
         :model-value="item"
         @update:model-value="(v) => (section.items[i] = v)"
         :card-repeat-over="cardRepeatOver"
-        :section-repeat-over="section.repeat?.over"
+        :section-repeat-over="section.rowGroups?.over ?? section.repeat?.over"
+        :row-groups="!!section.rowGroups"
+        :in-table="section.layout === 'table'"
         :index="i"
         :count="section.items.length"
         :errors="itemErrors[item.id] ?? []"

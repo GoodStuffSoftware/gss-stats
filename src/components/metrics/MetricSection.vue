@@ -6,9 +6,11 @@
 //   - a column repeat (`columns`): items are ROWS (their label in the first cell), instances are
 //     COLUMNS — a campaign card's funnel steps by country, a release's before and after. A row
 //     whose every cell is gated out (a closed flight's unmeasured step) is omitted.
+// A row table with `rowGroups` makes each repeat instance a group of rows (scope.ts tableRows):
+// its `perGroup` cells span the group, and the rule is drawn between groups only.
 import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
-import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, tableRows as tableRowsOf, type FlatItem, type RepeatContext, type ScopeInstance, type TableRow } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import type { ValueResolver } from '../../lib/textLite'
@@ -94,10 +96,14 @@ const barMax = computed(() => {
 })
 
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
-const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
+const tableRows = computed<TableRow[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? tableRowsOf(props.section, props.outerScope, props.ctx) : []))
+const grouped = computed(() => !!props.section.rowGroups)
 /** A row-table column that reads as a number is right-aligned: a number or percent display, or a
- * stored reading's count (the sign-ups cell is text, but still a count). */
-const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || it.display.as === 'percent' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
+ * stored reading's count (the sign-ups cell is text, but still a count). A combined column (a
+ * value per window, then words) reads as text. */
+const isNumColumn = (it: MetricItemSpec) => !it.windows?.length && (it.display.as === 'number' || it.display.as === 'percent' || ('field' in it.data && it.data.field.startsWith('reading.count.')))
+/** A grouped table's plain-text column (a step's name) is set in the body font, as words. */
+const isTextColumn = (it: MetricItemSpec) => 'field' in it.data && it.display.as === 'text'
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt, props.values)))
 /** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
 const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt, props.values).map((t) => t.value).join('') || undefined)))
@@ -168,17 +174,19 @@ const anyVisible = computed(() => {
 
     <!-- Wrapped like the column table: a wide table scrolls inside its card instead of being clipped. -->
     <div v-else-if="section.layout === 'table'" class="metric-table-wrap">
-      <table class="metric-table">
+      <table class="metric-table" :class="{ grouped }">
         <thead>
           <tr>
             <th v-for="(tokens, i) in tableHeaderTokens" :key="i" :class="{ num: isNumColumn(section.items[i]) }" :title="tableHeaderHints[i]"><MetricLabel :tokens="tokens" /></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
-            <td v-for="item in section.items" :key="item.id" :class="{ num: isNumColumn(item) }">
-              <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" :values="values" />
-            </td>
+          <tr v-for="(row, ri) in tableRows" :key="ri" :class="{ incomplete: row.scope.kind === 'reading' && row.scope.reading.complete === false, 'group-first': grouped && row.first, 'group-end': grouped && row.last }">
+            <template v-for="item in section.items" :key="item.id">
+              <td v-if="!item.perGroup || row.first" :rowspan="item.perGroup && row.span > 1 ? row.span : undefined" :class="{ num: isNumColumn(item), text: grouped && isTextColumn(item), lead: grouped && !!item.perGroup }">
+                <MetricTableCell :item="item" :scope="row.scope" :today-et="ctx.todayEt" :context="context" :values="values" />
+              </td>
+            </template>
           </tr>
         </tbody>
       </table>
@@ -268,6 +276,45 @@ const anyVisible = computed(() => {
 .metric-table th.num,
 .metric-table td.num {
   text-align: right;
+}
+/* Row groups (Section.rowGroups): the old Feature health table's look. A group's rows sit 20px
+ * apart with no rule between them; the rule and the padding close each group. */
+.metric-table.grouped {
+  font-size: 12.5px;
+}
+.metric-table.grouped th {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.metric-table.grouped td {
+  padding: 0 8px;
+  line-height: 20px;
+  vertical-align: top;
+  white-space: nowrap;
+  border-bottom: none;
+}
+.metric-table.grouped tr.group-first td {
+  padding-top: 4px;
+}
+.metric-table.grouped tr.group-end td,
+.metric-table.grouped td.lead {
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgb(var(--line));
+}
+.metric-table.grouped td :deep(.mtc) {
+  font-size: 12.5px;
+}
+.metric-table.grouped td :deep(.mtc-pill) {
+  font-size: 11.5px;
+}
+.metric-table.grouped td.text :deep(.mtc) {
+  font-family: inherit;
+}
+.metric-table.grouped td.lead.text :deep(.mtc) {
+  color: rgb(var(--ink));
+  font-weight: 600;
 }
 .metric-table.columns th.row-label {
   font-size: 11.5px;

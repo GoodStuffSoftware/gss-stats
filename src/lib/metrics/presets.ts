@@ -14,6 +14,8 @@
 // them behind its one collapsed "Notes" toggle (MetricCardInstance), the owner's clean look.
 
 import { STAGED_FLIGHT_3 } from '../campaigns'
+import { FEATURES } from '../featureHealth'
+import { featureRowCaptionId } from '../notes'
 import { ELIGIBLE_EARNED_REASON_METRICS, ELIGIBLE_OTHER_METRICS } from './metrics'
 import type { CardSpec, Display, MetricItem } from './types'
 
@@ -617,40 +619,40 @@ export const CAMPAIGN_F3_DAILY: CardSpec = {
   ],
 }
 
-/** Feature health (Overview, widget ow-feature-health; ADR 0005, editor-tools T2): one small card per feature in
- * FEATURES order. Its status (went silent / new / OK) and the prior 7 days' rows a day, its totals, then one row per
- * step: the latest complete ET day, the day before, the selected range, and the plain ratio of counts where the step
- * has one. Web and app combined, known traffic hidden; per-ET-day totals only, so never an hour, a place, a device or
- * a visitor. Saved widgets get it at render time (lib/defaults.ts featureHealthCardFor). */
+/** Feature health (Overview, widget ow-feature-health; ADR 0005): one table, a row group per feature in FEATURES
+ * order. The group's first row carries the feature's name and its status pill (went silent / new / OK); then one row
+ * per step: the latest complete ET day and the day before (headed by their dates), the selected range, and the plain
+ * ratio of counts in those three windows where the step has one. Web and app combined, known traffic hidden; per-ET-day
+ * totals only, so never an hour, a place, a device or a visitor. Captions: what the counts are, the coach strip's
+ * measurement changes, each feature's reading caveat. Saved widgets get it at render time (lib/defaults.ts
+ * featureHealthCardFor). */
 export const FEATURE_HEALTH: CardSpec = {
   v: 1,
-  repeat: { over: 'features' },
   minWidth: 360,
-  title: { bind: 'feature.label' },
-  captions: ['feature-health-caption'],
+  captions: ['feature-health-caption', 'feature-health-coach-measurement', ...FEATURES.filter((f) => f.caption).map((f) => featureRowCaptionId(f.id))],
   sections: [
     {
-      layout: 'rows',
-      items: [
-        { id: 'status', label: { metric: true }, data: { metric: 'feature.status' }, display: { as: 'status' }, ...COMPACT },
-        { id: 'avg', label: { metric: true }, data: { metric: 'feature.baselineAvg' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'totalLatest', label: { note: 'label.feature.totalLatest' }, data: { metric: 'feature.total', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'totalRange', label: { note: 'label.feature.totalRange' }, data: { metric: 'feature.total', window: 'page' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'caption', label: { note: 'label.feature.caveat' }, data: { field: 'feature.caption' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
-      ],
-    },
-    {
       layout: 'table',
-      repeat: { over: 'steps' },
+      repeat: { over: 'features' },
+      rowGroups: { over: 'steps' },
       items: [
+        { id: 'feature', label: { note: 'label.feature.col.feature' }, data: { field: 'feature.label' }, display: { as: 'text' }, perGroup: true },
+        { id: 'status', label: { note: 'label.feature.col.status' }, data: { metric: 'feature.status' }, display: { as: 'status', pill: true }, perGroup: true, ...COMPACT },
         { id: 'step', label: { note: 'label.feature.col.step' }, data: { field: 'step.label' }, display: { as: 'text' } },
-        { id: 'latest', label: { note: 'label.feature.col.latest' }, data: { metric: 'feature.step', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'prev', label: { note: 'label.feature.col.prev' }, data: { metric: 'feature.step', window: 'previousDay' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'range', label: { note: 'label.feature.col.range' }, data: { metric: 'feature.step', window: 'page' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'ratioLatest', label: { note: 'label.feature.col.ratioLatest' }, data: { metric: 'feature.stepRatio', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'ratioPrev', label: { note: 'label.feature.col.ratioPrev' }, data: { metric: 'feature.stepRatio', window: 'previousDay' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'ratioRange', label: { note: 'label.feature.col.ratioRange' }, data: { metric: 'feature.stepRatio', window: 'page' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'ratioOf', label: { note: 'label.feature.col.ratioOf' }, data: { field: 'step.ratioLabel' }, display: { as: 'text' }, gating: { whenEmpty: 'dash' } },
+        { id: 'latest', label: { window: true }, data: { metric: 'feature.step', window: 'latestDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'prev', label: { window: true }, data: { metric: 'feature.step', window: 'previousDay' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'range', label: { window: true }, data: { metric: 'feature.step', window: 'page' }, display: { as: 'number' }, ...COMPACT },
+        {
+          id: 'ratio',
+          label: { note: 'label.feature.col.ratio' },
+          hint: { note: 'label.feature.col.ratioHint' },
+          data: { metric: 'feature.stepRatio' },
+          windows: ['latestDay', 'previousDay', 'page'],
+          after: { bind: 'step.ratioLabel' },
+          display: { as: 'number' },
+          gating: { onlyWith: 'step.ratioLabel' },
+          ...COMPACT,
+        },
       ],
     },
   ],

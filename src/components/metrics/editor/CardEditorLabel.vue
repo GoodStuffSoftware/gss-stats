@@ -162,6 +162,9 @@ const bindPath = computed<ScopePath>({
       <button type="button" class="tab" :class="{ active: kind === 'bind' }" :disabled="!scopeOptions.length" @click="setKind('bind')" :title="scopeOptions.length ? '' : 'Only available inside a repeat'">
         Bound field
       </button>
+      <button v-if="allowMetricOwn" type="button" class="tab" :class="{ active: kind === 'window' }" :disabled="!hasData" @click="setKind('window')" :title="hasData ? 'The window heading: a day date or Range' : 'Pick a metric or ratio first'">
+        Window
+      </button>
     </div>
 
     <template v-if="kind === 'text'">
@@ -175,6 +178,10 @@ const bindPath = computed<ScopePath>({
 
     <template v-else-if="kind === 'metric'">
       <p class="hint">Uses the data binding's own registry name.</p>
+    </template>
+
+    <template v-else-if="kind === 'window'">
+      <p class="hint">Shows the window heading: the latest day's date, the day before's date, or Range.</p>
     </template>
 
     <template v-else-if="kind === 'note'">

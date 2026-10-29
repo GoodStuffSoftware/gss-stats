@@ -298,8 +298,8 @@ describe('the controls for fields the form used to hide round-trip', () => {
     const first = FEATURES[0]
     await exactCheckbox(w, first.label).setValue(true)
     await flushPromises()
-    expect(lastSpec(w).repeat).toEqual({ over: 'features', ids: [first.id] })
-    expect(lastSpec(w).sections[1].repeat).toEqual(plain(PRESETS['feature-health'].sections[1].repeat))
+    expect(lastSpec(w).sections[0].repeat).toEqual({ over: 'features', ids: [first.id] })
+    expect(lastSpec(w).sections[0].rowGroups).toEqual(plain(PRESETS['feature-health'].sections[0].rowGroups))
     const saved = plain(lastSpec(w))
     const again = mountEditor({ spec: saved })
     await flushPromises()

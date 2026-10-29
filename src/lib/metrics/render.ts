@@ -14,6 +14,7 @@
 //                    the registry's "not yet tracking" label | 'omit' | 'label').
 //   error            an em dash; the item's own caption still renders if set.
 import { campaignStatusOn } from '../campaigns'
+import { addDays } from '../etTime'
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
@@ -22,7 +23,7 @@ import { tokenizeAndInterpolate, type TextToken, type ValueResolver } from '../t
 import { globalValueResolver } from '../valueTokens'
 import { armMaturity, METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
+import { campaignOfScope, configRuling, lacksRequiredField, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { CellTone, Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
 import { unitLabelId } from './units'
 
@@ -57,6 +58,9 @@ export interface ItemViewModel {
   muted?: boolean
   /** A table cell's colour, from the scope field it reads (scope.ts scopeTone). */
   tone?: CellTone
+  /** A 'status' display with `pill`: the pill's colour (STATUS_PILL_TONES), 'neutral' for a note
+   * with none. Absent when there is no status to draw. */
+  pill?: StatusPillTone
   /** A percent's two parts, for a tile: the rate big, its "(n/d)" as a small line under it.
    * Rows and pills show `primary`, which is the two joined. */
   split?: { main: string; sub: string }
@@ -100,8 +104,48 @@ export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLab
     const v = scopeField(scope, label.bind, todayEt)
     return v ? [{ type: 'text', value: v }] : []
   }
+  // { window: true } needs the item's window: itemLabelTokens and itemViewModel resolve it.
+  if ('window' in label) return []
   // { metric: true } — the data binding's own registry label; nothing to show without one.
   return metricLabelId ? noteTokens(metricLabelId) : []
+}
+
+/** A `{ window: true }` heading's text for each window: a feature day is its ET date instead. */
+const WINDOW_HEADINGS: Record<string, string> = {
+  page: 'Range',
+  attribution: 'Attribution window',
+  todaySoFar: 'Today so far',
+  before: 'Before',
+  after: 'After',
+  upsellPre: 'pre-fix',
+  upsellPost: 'post-fix',
+}
+/** The heading `{ window: true }` reads for a resolved window: "Oct 28" for the latest complete
+ * ET day (yesterday) and "Oct 27" for the day before it, the window's name otherwise. */
+export function windowHeading(window: string | undefined, todayEt: string): string {
+  if (window === 'latestDay' || window === 'previousDay') return fmtEtDay(Date.parse(`${addDays(todayEt, window === 'latestDay' ? -1 : -2)}T12:00:00Z`))
+  return window && Object.hasOwn(WINDOW_HEADINGS, window) ? WINDOW_HEADINGS[window] : ''
+}
+function itemLabel(item: MetricItem, resolvedWindow: string | undefined, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string, values?: ValueResolver): TextToken[] {
+  if (typeof item.label === 'object' && 'window' in item.label) {
+    const text = windowHeading(resolvedWindow, todayEt)
+    return text ? [{ type: 'text', value: text }] : []
+  }
+  return resolveLabelTokens(item.label, scope, metricLabelId, todayEt, values)
+}
+
+/** A status pill's colour: each status note a pill may show, by its id. A note not listed draws
+ * a neutral pill. Code-reviewed, like the notes themselves: never card data. */
+export type StatusPillTone = 'good' | 'info' | 'alert' | 'neutral'
+export const STATUS_PILL_TONES: Readonly<Record<string, StatusPillTone>> = Object.freeze({
+  'feature.status.ok': 'good',
+  'feature.status.new': 'info',
+  'feature.status.silent': 'alert',
+})
+function pillToneOf(value: MetricValue): StatusPillTone | undefined {
+  const id = statusNoteOf(value)
+  if (!id) return undefined
+  return Object.hasOwn(STATUS_PILL_TONES, id) ? STATUS_PILL_TONES[id] : 'neutral'
 }
 
 // ── Plain-value formatting (parallels lib/kpiFormat.ts's fmtCount/money/pct, kept separate:
@@ -400,7 +444,7 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
 export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt: string, values?: ValueResolver): TextToken[] {
   const resolved = resolveBinding(item.data, scope, todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
-  return resolveLabelTokens(item.label, scope, metricLabelId, todayEt, values)
+  return itemLabel(item, resolved?.window, scope, metricLabelId, todayEt, values)
 }
 
 /** The whole rendering decision for one MetricItem: what its label says, what its value says,
@@ -409,7 +453,7 @@ export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt:
 export function itemViewModel(item: MetricItem, value: MetricValue | undefined, scope: ScopeInstance, opts: ItemViewOptions): ItemViewModel {
   const resolved = resolveBinding(item.data, scope, opts.todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
-  const labelTokens = resolveLabelTokens(item.label, scope, metricLabelId, opts.todayEt, opts.values)
+  const labelTokens = itemLabel(item, resolved?.window, scope, metricLabelId, opts.todayEt, opts.values)
 
   if (!resolved) {
     // Unknown metric/ratio id — treat like the server's own 'unknown-id' error.
@@ -425,11 +469,14 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   // whenNotStarted gating keeps a not-yet-started flight's item: then it reads as the server
   // would answer a window that has not opened yet.
   if (unmeasuredByConfig(item.data, scope, item.gating, opts.todayEt)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
+  if (lacksRequiredField(item, scope, opts.todayEt)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
   if (configRuling(item.data, scope, opts.todayEt) === 'flight-pending') value = NOT_STARTED
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }
-  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values, opts.pastDay === true)
+  const vm = metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values, opts.pastDay === true)
+  const pill = item.display.as === 'status' && item.display.pill && vm.visible && (value.status === 'ok' || value.status === 'partial') ? pillToneOf(value) : undefined
+  return pill ? { ...vm, pill } : vm
 }
 
 /** The badge's own view (always a `field` binding — validateCard rejects anything else). */

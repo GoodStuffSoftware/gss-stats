@@ -712,8 +712,10 @@ coach tip shows, so impressions dip where tips run more often; Install adds that
 Safari count under `/install/prompt/ios` and a dismissal after an in-app App Store tap
 counts as a dismissal.
 
-- **Card:** a small card per feature with its status, and per step the count for the latest
-  complete ET day, the day before and the selected range, plus the ratio of those counts (see
+- **Card:** one table, a group of rows per feature: the feature and its status pill on the
+  group's first row, then per step the count for the latest complete ET day and the day before
+  (headed by their dates, e.g. "Oct 28") and the selected range, plus the ratio of those counts in
+  one column (see
   *Feature health in the card editor* below).
 - **Ratios are counts per count**, e.g. "tapped per shown". They are not per-person rates:
   rows are independent counts, never joined into a path, so a ratio can exceed 1. A zero
@@ -738,10 +740,12 @@ counts as a dismissal.
 ### Feature health in the card editor
 
 The Overview's Feature health readout is an ordinary metric card, the **Feature health** preset:
-it repeats over the features (one small card each: the status, the 7-day average behind it, the
-latest-day and range totals and the feature's caption), and each card has a table that repeats
-over the feature's steps (Step, Yesterday, Day before, Range, and the three ratios with what
-they are per). The same card can be built or changed in the card editor like any other.
+one table section that repeats over the features, with *Rows in each group* repeating over the
+feature's steps. Feature and Status are *Once per group* cells; the date headings use the
+*Window* label; Ratio of counts is one cell showing the three windows' values joined by " · ",
+followed by the step's ratio label, and blank unless the step has one. The status shows as a
+coloured pill (OK green, New blue, Went silent red). Feature captions are card notes. The same
+card can be built or changed in the card editor like any other.
 
 - **Building blocks.** Repeats *Features* (all, or the ones checked) and *Steps* (the enclosing
   feature's); windows *Latest complete ET day* (`latestDay`), *Day before* (`previousDay`) and the
@@ -752,12 +756,11 @@ they are per). The same card can be built or changed in the card editor like any
 - **Same numbers as the old table.** `functions/api/featureDays.parity.test.ts` runs the real
   `/api/metrics` and `/api/features` handlers over one fixture (three clocks, six ranges, four
   filter sets) and compares every status, average, total, step count and ratio.
-- **What reads differently.** The status sentence is now the status plus its 7-day average; a
-  feature's caption sits in its own card; a range whose bounds moved to ET midnights carries the
+- **What reads differently.** A range whose bounds moved to ET midnights carries the
   whole-days caption, as a step chart does; and a range over 400 days is refused (the metrics
   endpoint's cap), where the old table showed its newest 731 days. No "All time" view beyond
   400 days is accepted for now: Best Sudoku's data is well under 400 days old.
-- **Cost.** The card's 334 requests (14 features, 44 steps) go out as 2 `/api/metrics` POSTs, and
+- **Cost.** The card's requests (14 features, 44 steps) go out as 2 `/api/metrics` POSTs, and
   on a cold cache each runs its own `featureDays` statement, so an uncached Overview load reads
   the feature rows about twice where the old table read them once (see
   [docs/capacity.md §12](docs/capacity.md)).

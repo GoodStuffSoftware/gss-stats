@@ -129,6 +129,7 @@ export function validateCard(spec: CardSpec): string[] {
     if ('note' in l && !noteIdOk(l.note)) errors.push(`${where}: ${JSON.stringify(l.note) ?? 'undefined'} is not a note id`)
     if ('note' in l && l.vars && typeof l.vars === 'object') for (const p of Object.values(l.vars)) checkScopePath(where, p)
     if ('metric' in l && !hasData) errors.push(`${where}: { metric: true } needs a metric or ratio binding`)
+    if ('window' in l && (l.window !== true || !hasData)) errors.push(`${where}: { window: true } needs a metric or ratio binding`)
   }
   // A reading's counts are an allow-list (types.ts READING_COUNT_FIELDS): any other
   // `reading.count.*` path is refused, so a return / game-start / tutorial / tour total of a
@@ -174,6 +175,7 @@ export function validateCard(spec: CardSpec): string[] {
     const k = kindOf(b)
     if (!k) return void errors.push(`${where}: unknown data id`)
     if (!DISPLAYS_FOR[k].includes(d.as)) errors.push(`${where}: display '${d.as}' not allowed for a ${k}`)
+    if (d.as === 'status' && d.pill !== undefined && d.pill !== true) errors.push(`${where}: a status pill must be true`)
     if (d.as === 'percent' && d.decimals !== undefined && !(Number.isInteger(d.decimals) && d.decimals >= 0 && d.decimals <= 4)) errors.push(`${where}: decimals must be an integer from 0 to 4`)
     if ('field' in b) return void checkScopePath(where, b.field)
     const isMetric = 'metric' in b
@@ -255,6 +257,10 @@ export function validateCard(spec: CardSpec): string[] {
       checkRepeat(`${where}.columns`, s.columns)
       checkLabel(`${where}.columnLabel`, s.columnLabel, false)
     }
+    if (s.rowGroups !== undefined) {
+      if (s.layout !== 'table' || !s.repeat || s.columns) errors.push(`${where}: rowGroups are for a 'table' section with a row repeat`)
+      checkRepeat(`${where}.rowGroups`, s.rowGroups)
+    }
     if (s.rowsLabel !== undefined) {
       if (!s.columns) errors.push(`${where}: rowsLabel heads a column table's row labels; it needs columns`)
       checkLabel(`${where}.rowsLabel`, s.rowsLabel, false)
@@ -268,7 +274,21 @@ export function validateCard(spec: CardSpec): string[] {
       checkLabel(`${w}.label`, it.label, !('field' in it.data))
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
       checkLabel(`${w}.hint`, it.hint, !('field' in it.data))
-      check(w, it.data, it.display, [spec.repeat, s.repeat, s.columns, it.repeat])
+      const repeats = [spec.repeat, s.repeat, s.rowGroups, s.columns, it.repeat]
+      check(w, it.data, it.display, repeats)
+      if (it.windows !== undefined) {
+        if (s.layout !== 'table' || 'field' in it.data || !Array.isArray(it.windows) || !it.windows.length || it.windows.length > 4) errors.push(`${w}: windows are for a metric or ratio in a 'table' section, one to four of them`)
+        else for (const win of it.windows) check(`${w}@${String(win)}`, { ...it.data, window: win } as DataBinding, it.display, repeats)
+      }
+      if (it.after !== undefined) {
+        if (s.layout !== 'table') errors.push(`${w}: after is for a 'table' section`)
+        checkLabel(`${w}.after`, it.after, !('field' in it.data))
+      }
+      if (it.perGroup !== undefined && (it.perGroup !== true || !s.rowGroups)) errors.push(`${w}: perGroup is for a table with rowGroups, and only true`)
+      if (it.gating?.onlyWith !== undefined) {
+        if (typeof it.gating.onlyWith !== 'string' || !it.gating.onlyWith) errors.push(`${w}: onlyWith must be a scope field`)
+        else checkScopePath(`${w}.gating.onlyWith`, it.gating.onlyWith)
+      }
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       if (it.hideNotes !== undefined && (!Array.isArray(it.hideNotes) || it.hideNotes.some((id) => typeof id !== 'string'))) errors.push(`${w}: hideNotes must be a list of note ids`)

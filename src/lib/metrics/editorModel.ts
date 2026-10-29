@@ -105,11 +105,12 @@ export function presetOptions(): PresetOption[] {
 }
 
 // ── Label kind ─────────────────────────────────────────────────────────────────────────────
-export type LabelKind = 'text' | 'metric' | 'note' | 'bind'
+export type LabelKind = 'text' | 'metric' | 'note' | 'bind' | 'window'
 export function labelKind(label: Label | undefined): LabelKind {
   if (label === undefined || typeof label === 'string') return 'text'
   if ('metric' in label) return 'metric'
   if ('note' in label) return 'note'
+  if ('window' in label) return 'window'
   return 'bind'
 }
 /** Switches a Label to a new kind, keeping whatever of the previous value still applies (e.g.
@@ -121,6 +122,8 @@ export function makeLabel(kind: LabelKind, current: Label | undefined, fallbackS
       return typeof current === 'string' ? current : ''
     case 'metric':
       return { metric: true }
+    case 'window':
+      return { window: true }
     case 'note': {
       // Re-picking 'note' on a note label keeps it whole — its id AND its `vars` (a preset's
       // "{campaign}" binding), never a bare `{ note }` that would render the placeholder raw.
@@ -512,6 +515,8 @@ export function makeDisplay(as: DisplayAs, current: Display): Display {
       return { as: 'badge', ...(current.as === 'badge' && current.tones ? { tones: current.tones } : {}) }
     case 'sparkline':
       return current.as === 'sparkline' ? { ...current } : { as: 'sparkline', series: 'daily' }
+    case 'status':
+      return current.as === 'status' && current.pill ? { as: 'status', pill: true } : { as: 'status' }
     default:
       return { as }
   }

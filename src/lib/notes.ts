@@ -34,7 +34,7 @@
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
 //    only; see that function's own doc comment).
-import { HEALTH_CAPTION } from './featureHealth'
+import { FEATURES, HEALTH_CAPTION } from './featureHealth'
 import { REFUSED_WHOLE_DAYS_CAPTION } from './splitGuard'
 import {
   SMALL_SAMPLE_NOTE,
@@ -62,6 +62,10 @@ import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, coachMeasurementNote, markedChanges } from './measurementChanges'
 
 /** The Coach tips card's latest day (yesterday, ET): its measurement note is the one for that day, as the old card's. */
+/** A feature's reading caveat as a Feature health caption ("Tour row: …"): the note id. */
+export function featureRowCaptionId(featureId: string): string {
+  return `feature-health-row-${featureId}`
+}
 const coachLatestDay = (): string => addDays(etDateFast(Date.now()), -1)
 import { FIRST_FINISH_START_ET } from './releases'
 import { addDays, etDateFast, etOffsetHours } from './etTime'
@@ -268,6 +272,22 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['overview'],
   },
+  // The Feature health table's own captions under HEALTH_CAPTION: the coach strip's measurement
+  // changes (off until one applies), then one line per feature with a reading caveat.
+  'feature-health-coach-measurement': {
+    id: 'feature-health-coach-measurement',
+    text: () => `Coach strip row: ${coachMeasurementNote(coachLatestDay()) ?? ''}`,
+    kind: 'note',
+    severity: 'info',
+    scopes: [], // the Feature health card's own caption only
+    activeWhen: () => coachMeasurementNote(coachLatestDay()) !== null,
+  },
+  ...Object.fromEntries(
+    FEATURES.filter((f) => f.caption).map((f): [string, NoteDef] => [
+      featureRowCaptionId(f.id),
+      { id: featureRowCaptionId(f.id), text: `${f.label} row: ${f.caption}`, kind: 'note', severity: 'info', scopes: [] },
+    ]),
+  ),
   'flight-day-caption': {
     id: 'flight-day-caption',
     text: 'Left: arrivals per flight day. Right: cumulative arrivals per flight day (dashed).',
@@ -632,6 +652,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.feature.stepRatio': 'Step ratio',
     'label.feature.status': 'Status',
     'label.feature.baselineAvg': 'Rows a day, prior 7 days',
+    'label.feature.col.feature': 'Feature',
+    'label.feature.col.status': 'Status',
+    'label.feature.col.ratio': 'Ratio of counts',
+    'label.feature.col.ratioHint': 'Plain ratios of counts: latest day · day before · range',
     'label.feature.col.step': 'Step',
     'label.feature.col.latest': 'Latest day',
     'label.feature.col.prev': 'Day before',

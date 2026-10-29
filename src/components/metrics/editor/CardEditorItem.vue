@@ -6,8 +6,8 @@
 // pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplayAllowed, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, withField, withGating } from '../../../lib/metrics/editorModel'
-import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplayAllowed, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, scopePathOptions, withField, withGating } from '../../../lib/metrics/editorModel'
+import type { MetricItem, RepeatSpec, WindowName } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
 import CardEditorLabel from './CardEditorLabel.vue'
@@ -22,6 +22,10 @@ const props = defineProps<{
   /** A preset's template shown for reading (CardEditor's preset mode): every control disabled,
    * no reorder/duplicate/remove, but the item still opens so its settings can be read. */
   readonly?: boolean
+  /** The section is a table (enables the combined-windows column and its trailing label). */
+  inTable?: boolean
+  /** The section groups its rows (Section.rowGroups): enables "once per group". */
+  rowGroups?: boolean
 }>()
 const emit = defineEmits<{ 'move': [dir: -1 | 1]; duplicate: []; remove: [] }>()
 const item = defineModel<MetricItem>({ required: true })
@@ -92,6 +96,39 @@ const whenNotStarted = computed<'default' | 'label' | 'zero'>({
   },
 })
 /** gating.whenZero: a measured count of exactly 0 is left out. */
+/** gating.onlyWith: the cell is blank where this bound field is empty. */
+const onlyWithId = useId()
+const onlyWithOptions = computed(() => scopePathOptions(innermostOver.value))
+const onlyWith = computed<string>({
+  get: () => item.value.gating?.onlyWith ?? '',
+  set: (v) => {
+    if ((v || undefined) === item.value.gating?.onlyWith) return
+    item.value = withGating(item.value, { onlyWith: v || undefined })
+  },
+})
+/** Table-only: one cell per group (Section.rowGroups), spanning the group's rows. */
+const perGroup = computed<boolean>({
+  get: () => item.value.perGroup === true,
+  set: (v) => {
+    if (v === perGroup.value) return
+    item.value = withField(item.value, 'perGroup', v ? true : undefined)
+  },
+})
+/** Table-only: one cell shows the value in each of these windows, joined by " · ". */
+const WINDOW_CHOICES: { value: WindowName; label: string }[] = [
+  { value: 'latestDay', label: 'Latest day' },
+  { value: 'previousDay', label: 'Day before' },
+  { value: 'page', label: 'Range' },
+]
+function hasWindow(w: WindowName) {
+  return item.value.windows?.includes(w) ?? false
+}
+function toggleWindow(w: WindowName, on: boolean) {
+  if (on === hasWindow(w)) return
+  const next = WINDOW_CHOICES.map((c) => c.value).filter((c) => (c === w ? on : hasWindow(c)))
+  item.value = withField(item.value, 'windows', next.length ? next : undefined)
+  if (!next.length && item.value.after !== undefined) item.value = withField(item.value, 'after', undefined)
+}
 const whenZeroOmit = computed<boolean>({
   get: () => item.value.gating?.whenZero === 'omit',
   set: (v) => {
@@ -204,6 +241,13 @@ const itemRepeatModel = computed({
           <div class="field check">
             <label><input type="checkbox" v-model="whenZeroOmit" /> Leave out a measured 0</label>
           </div>
+          <div v-if="onlyWithOptions.length" class="field">
+            <label :for="onlyWithId">Blank unless</label>
+            <select :id="onlyWithId" v-model="onlyWith">
+              <option value="">(always shown)</option>
+              <option v-for="o in onlyWithOptions" :key="o.value" :value="o.value">{{ o.label }} is set</option>
+            </select>
+          </div>
           <div class="field">
             <label :for="minCohortId">Minimum cohort</label>
             <input :id="minCohortId" type="number" :min="MIN_COHORT" :value="minCohort ?? ''" placeholder="(default)" @change="minCohort = ($event.target as HTMLInputElement).valueAsNumber || undefined" />
@@ -228,6 +272,15 @@ const itemRepeatModel = computed({
           </select>
           <p v-if="whenEmptyNoteInvalid" class="hint">This version doesn't know the note "{{ whenEmptyNote }}", so it shows a dash. It stays saved unless you pick another.</p>
         </template>
+
+        <fieldset v-if="inTable" class="field">
+          <legend>Table cell</legend>
+          <label v-if="rowGroups" class="check"><input type="checkbox" v-model="perGroup" /> Once per group</label>
+          <span v-if="hasData" class="check">Values in one cell:
+            <label v-for="c in WINDOW_CHOICES" :key="c.value"><input type="checkbox" :checked="hasWindow(c.value)" @change="toggleWindow(c.value, ($event.target as HTMLInputElement).checked)" /> {{ c.label }}</label>
+          </span>
+          <CardEditorLabel v-if="item.windows" v-model="item.after" :has-data="false" :allow-metric-own="false" :repeat-over="innermostOver" placeholder="Text after the values" heading="After the values" />
+        </fieldset>
 
         <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'assets']" label="Repeat this item" />
 

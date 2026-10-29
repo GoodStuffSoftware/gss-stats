@@ -584,7 +584,43 @@ export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: R
     const cols = resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope))
     return section.items.flatMap((item) => cols.map((scope) => ({ item, scope })))
   }
-  return resolveRepeat(section.repeat, ctx, outerScope).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
+  return tableRows(section, outerScope, ctx).flatMap((row) => section.items.flatMap((item) => (item.perGroup && !row.first ? [] : windowParts(item).map((part) => ({ item: part, scope: row.scope })))))
+}
+
+/** One row of a row table: its scope and, with `rowGroups`, where it sits in its group. A table
+ * without groups is one row per repeat instance, each its own group of one. */
+export interface TableRow {
+  scope: ScopeInstance
+  /** The group's first row: its `perGroup` cells are drawn here, spanning `span` rows. */
+  first: boolean
+  /** The group's last row: the rule between groups is drawn under it. */
+  last: boolean
+  span: number
+}
+export function tableRows(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): TableRow[] {
+  const groups = resolveRepeat(section.repeat, ctx, outerScope).map((g) => nestScope(g, outerScope))
+  if (!section.rowGroups) return groups.map((scope) => ({ scope, first: true, last: true, span: 1 }))
+  const inner = section.rowGroups
+  return groups.flatMap((g) => {
+    const rows = resolveRepeat(inner, ctx, g).map((r) => nestScope(r, g))
+    return rows.map((scope, i) => ({ scope, first: i === 0, last: i === rows.length - 1, span: rows.length }))
+  })
+}
+
+/** The items a table cell shows: with `windows`, one per window (the binding's window replaced,
+ * in order, for the cell to join); otherwise the item itself. A field binding has no window. */
+export function windowParts(item: MetricItem): MetricItem[] {
+  if (!item.windows?.length || 'field' in item.data) return [item]
+  const rest: MetricItem = { ...item }
+  delete rest.windows
+  delete rest.after
+  return item.windows.map((window) => ({ ...rest, id: `${item.id}@${window}`, data: { ...item.data, window } as DataBinding }))
+}
+
+/** The item's `gating.onlyWith` field is empty in this scope: the cell is blank, never requested. */
+export function lacksRequiredField(item: MetricItem, scope: ScopeInstance, todayEt?: string): boolean {
+  const path = item.gating?.onlyWith
+  return !!path && !scopeField(scope, path, todayEt)
 }
 
 /** The default heading of a table column: the column instance's own name. */
@@ -685,6 +721,7 @@ export function buildRequestSpec(item: MetricItem, scope: ScopeInstance, todayEt
   const resolved = resolveBinding(item.data, scope, todayEt)
   if (!resolved || resolved.kind === 'field') return null
   if (configRuling(item.data, scope, todayEt)) return null // never asked: the answer is known
+  if (lacksRequiredField(item, scope, todayEt)) return null // a blank cell asks nothing
   const spec: MetricRequestSpec = {}
   if (resolved.kind === 'metric') spec.metric = (item.data as { metric: string }).metric
   else spec.ratio = (item.data as { ratio: string }).ratio

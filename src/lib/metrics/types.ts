@@ -96,6 +96,9 @@ export type Label =
   | { note: string; vars?: Record<string, ScopePath> } // a lib/notes.ts registry entry
   | { bind: ScopePath } // a field of the bound object, e.g. the campaign's name
   | { metric: true } // the data binding's own registry label
+  /** The item's data window as a heading: a feature day's ET date ("Oct 28"), else the window's
+   * own name ("Range" for the selected range). A table column over a fixed day reads as its date. */
+  | { window: true }
 
 /** (b) DATA: a registry id plus params. Never SQL, never an endpoint path. */
 export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' | 'assetId' | 'feature' | 'step' }
@@ -154,7 +157,9 @@ export type Display =
   | { as: 'bar' } // a bar scaled to the section's largest value: a count, or a rate with its (n/d)
   | { as: 'date' } // a day (a 'time' metric): "Sep 26"
   | { as: 'ago' } // an instant (a 'time' metric), relative: "3h ago"
-  | { as: 'status' } // the label note the value carries (e.g. where a spend figure came from), not the number
+  /** The label note the value carries (e.g. where a spend figure came from), not the number. `pill`:
+   * drawn as a coloured pill, its colour the note's own (render.ts STATUS_PILL_TONES). */
+  | { as: 'status'; pill?: true }
   | { as: 'sparkline'; series: 'daily'; days?: true } // days: also list the latest ET days' counts ("Oct 17 12 · Oct 18 9")
   | { as: 'text' }
 export type DisplayAs = Display['as']
@@ -171,6 +176,9 @@ export interface Gating {
    * upcoming flight's card shows its funnel); 'zero': a measured 0, for a count that cannot have
    * happened yet (an upcoming flight's arrivals). */
   whenNotStarted?: 'label' | 'zero'
+  /** Shown only where this scope field has a value: elsewhere the cell is left blank and the
+   * value is never requested (a feature step with no ratio of counts: `step.ratioLabel`). */
+  onlyWith?: ScopePath
 }
 
 /** RepeatSpec.limit for a readings repeat: the default and the cap (the readings endpoint's own). */
@@ -230,6 +238,14 @@ export interface MetricItem {
    * `popup-note`); a saved card's author has no use for it. */
   hideNotes?: string[]
   frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
+  /** A 'table' cell only: the value in each of these windows, in order, joined by " · " in one
+   * cell ("0.00 · 0.00 · 0.02"); each replaces the data binding's own window. */
+  windows?: WindowName[]
+  /** A 'table' cell only: dim text after the value (the ratio's "dismissed per shown"). */
+  after?: Label
+  /** A 'table' section with `rowGroups` only: shown once per group, on its first row, spanning
+   * the group's rows (a feature's name and status beside its steps). */
+  perGroup?: true
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
 
@@ -248,6 +264,10 @@ export interface Section {
   columnLabel?: Label
   /** With `columns`: the heading over the item-label column (e.g. "Step"). */
   rowsLabel?: Label
+  /** 'table' with a row `repeat` only: each repeat instance is a GROUP of rows, one per instance
+   * of this inner repeat (a feature's steps), with a rule between groups only. Items marked
+   * `perGroup` show once per group. */
+  rowGroups?: RepeatSpec
   items: MetricItem[]
 }
 

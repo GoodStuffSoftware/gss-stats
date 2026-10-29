@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NOTES_REGISTRY, getNote, noteRawText, isNoteActive, defaultNoteIdsForScope, noteOptions, widgetCaptionNoteIds, FUNNEL_STEP_LABEL_IDS, funnelStepLabel } from './notes'
+import { NOTES_REGISTRY, getNote, noteRawText, isNoteActive, defaultNoteIdsForScope, noteOptions, widgetCaptionNoteIds, FUNNEL_STEP_LABEL_IDS, funnelStepLabel, featureRowCaptionId } from './notes'
+import { FEATURES } from './featureHealth'
 import { FUNNEL_STEP_ORDER } from './campaigns'
 import { MIN_COHORT, INSTALL_FIX_NOTE, INSTALL_OUTCOME_GAP_LABEL, INSTALL_GAP_BEFORE_FIX_LABEL, installOutcomeGapNote, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE, SIGNIN_ELIGIBLE_CAVEAT, POPUP_RATE_SPECS } from './popupEvents'
 
@@ -27,7 +28,7 @@ describe('notes registry — lookups', () => {
 
   // The retention caveats ride on their metrics (MetricDef.caveats), so they must not pre-fill every new campaigns chart.
   // 'retention-page-scope' is a note widget on the Retention page template only: no scope, so it never pre-fills a new chart.
-  const NOTES_WITHOUT_SCOPE = new Set(['ads-installs-google', 'ads-assets-google', 'retention-disjoint', 'retention-organic-bias', 'retention-lower-bound', 'retention-page-scope', 'play-days', 'play-household', 'play-no-retention', 'play-active-is-stock', 'carry-over-weak-signal', 'cost-per-signin-approx', 'funnel-spend-only-arms', 'first-finish-window', 'coach-tips-caption', 'coach-measurement'])
+  const NOTES_WITHOUT_SCOPE = new Set(['ads-installs-google', 'ads-assets-google', 'retention-disjoint', 'retention-organic-bias', 'retention-lower-bound', 'retention-page-scope', 'play-days', 'play-household', 'play-no-retention', 'play-active-is-stock', 'carry-over-weak-signal', 'cost-per-signin-approx', 'funnel-spend-only-arms', 'first-finish-window', 'coach-tips-caption', 'coach-measurement', 'feature-health-coach-measurement', ...FEATURES.filter((f) => f.caption).map((f) => featureRowCaptionId(f.id))])
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)
@@ -154,9 +155,13 @@ describe('notes registry — plain language only', () => {
   // …and no raw beacon path (e.g. "/return/ d1+"), which reads as code to the owner.
   const RAW_PATH = /(^|[\s(])\/(popup-outcome|install|return|auth|game|signin|promo|upsell)\b/
   it('no registry note text names a file, a module path, a code span or a raw beacon path', () => {
+    // A feature's reading caveat (lib/featureHealth.ts FEATURES caption) is shown under the
+    // Feature health table verbatim, as that card always showed it: its beacon paths are the
+    // feature config's own words, so only the code check applies to it.
+    const configCaptions = new Set(FEATURES.filter((f) => f.caption).map((f) => featureRowCaptionId(f.id)))
     for (const id of Object.keys(NOTES_REGISTRY)) {
       expect(noteRawText(id), id).not.toMatch(CODE_LIKE)
-      expect(noteRawText(id), id).not.toMatch(RAW_PATH)
+      if (!configCaptions.has(id)) expect(noteRawText(id), id).not.toMatch(RAW_PATH)
     }
   })
   it('the guard itself catches a raw path', () => {
