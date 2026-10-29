@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, ref, useId } from 'vue'
 import { rateTileHasHideableNote } from '../lib/metrics/rateTileCard'
-import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
+import type { CaptionDisplay, Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -30,6 +30,7 @@ import { peekMetricValue } from '../composables/useMetrics'
 import { useEtClock } from '../composables/useEtClock'
 import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
+import { CAPTION_AUTO_CHARS, captionDisplayOf } from '../lib/captionDisplay'
 import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -797,6 +798,17 @@ const fitValue = computed<boolean>({
   set: (on) => setFit(draft, on),
 })
 
+// How the notes under the widget show (lib/captionDisplay.ts), the same select for a chart and a
+// card. 'always' is stored as no key, so a widget nobody changed stays as it was saved.
+const captionDisplayId = useId()
+const captionDisplayValue = computed<CaptionDisplay>({
+  get: () => captionDisplayOf(draft),
+  set: (v) => {
+    if (v === 'collapsible' || v === 'auto') draft.captionDisplay = v
+    else delete draft.captionDisplay
+  },
+})
+
 function save() {
   // View-only access: App.vue never opens the editor for a viewer; if it ever did, nothing saves.
   if (viewOnly.value) return
@@ -809,6 +821,7 @@ function save() {
   if (draft.type === 'note') {
     delete draft.caption
     delete draft.hiddenCaveats
+    delete draft.captionDisplay
   } else {
     const caption = draft.caption?.trim()
     if (caption) draft.caption = caption.slice(0, CAPTION_MAX_CHARS)
@@ -982,6 +995,14 @@ function resetToDefault() {
           </div>
           <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number} or a catalog metric; it shows "—" when there is no value for it.</p>
           <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
+        </div>
+        <div class="field caption-display">
+          <label :for="captionDisplayId">Long notes <span class="hint">— the caption and every note under the widget</span></label>
+          <select :id="captionDisplayId" v-model="captionDisplayValue" data-testid="caption-display">
+            <option value="always">Always shown in full</option>
+            <option value="collapsible">Collapsible: two lines, with Show more</option>
+            <option value="auto">Auto: collapsible once over {{ CAPTION_AUTO_CHARS }} characters</option>
+          </select>
         </div>
         <div class="field data-caveats">
           <label>Data caveats <span class="hint">— notes the data brings with it</span></label>

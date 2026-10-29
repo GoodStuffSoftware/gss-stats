@@ -6,11 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.71.0] — 2026-10-29
+
+### Added
+- **Collapsible notes under a chart or card.** The chart and card editors have a "Long notes" setting: always shown in full (as before), collapsible (two lines with Show more / Show less), or auto (collapsible once the text is over 250 characters). It folds the caption and every note under it, including the measurement-change and release notes; printing shows the full text. New charts start on auto; every saved chart and card keeps showing its notes in full until the setting is changed.
+
 ## [0.70.1] — 2026-10-29
 
 ### Changed
 - **Funnel per campaign says why Flight 4 has no card.** A caption names the spend-only arms (no tagged arrivals, so no funnel) and points to the Campaign scorecard, which lists them with the same flight-date status and order.
 - **One status badge on both campaign cards.** Funnel per campaign now says "flighting today" while a flight runs, as the Campaign scorecard does.
+
 
 ## [0.70.0] — 2026-10-29
 

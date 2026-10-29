@@ -9,6 +9,7 @@ import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
 import { FEATURES, featureIdOfView, featureStepKey, type FeatureDef } from './featureHealth'
 import { COACH_TIPS_VIEW } from './coachTips'
 import { ASK_ORDER_VIEW } from './askOrder'
+import { normCaptionDisplay } from './captionDisplay'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -1313,16 +1314,20 @@ export const CAPTION_MAX_CHARS = 2000
 export const HIDDEN_CAVEATS_MAX = 32
 export const HIDDEN_CAVEAT_ID_RE = /^[a-z0-9-]{1,64}$/
 
-/** Widget.caption and Widget.hiddenCaveats, whitelisted and capped. A longer caption is cut to
+/** Widget.caption, Widget.hiddenCaveats and Widget.captionDisplay, whitelisted and capped. A longer caption is cut to
  * CAPTION_MAX_CHARS, never dropped; an empty one is absent. hiddenCaveats keeps the first
  * HIDDEN_CAVEATS_MAX distinct well-formed ids; none left = absent. */
-function normCaptionFields(x: any): Pick<Widget, 'caption' | 'hiddenCaveats'> {
-  const out: Pick<Widget, 'caption' | 'hiddenCaveats'> = {}
+function normCaptionFields(x: any): Pick<Widget, 'caption' | 'hiddenCaveats' | 'captionDisplay'> {
+  const out: Pick<Widget, 'caption' | 'hiddenCaveats' | 'captionDisplay'> = {}
   if (typeof x.caption === 'string' && x.caption) out.caption = x.caption.slice(0, CAPTION_MAX_CHARS)
   if (Array.isArray(x.hiddenCaveats)) {
     const ids = [...new Set(x.hiddenCaveats.filter((h: any) => typeof h === 'string' && HIDDEN_CAVEAT_ID_RE.test(h)))] as string[]
     if (ids.length) out.hiddenCaveats = ids.slice(0, HIDDEN_CAVEATS_MAX)
   }
+  // How the notes show (lib/captionDisplay.ts): only a folding mode is kept; absent = always. Optional,
+  // so no version bump: a layout saved without it loads unchanged. A note widget has no notes to fold.
+  const display = normCaptionDisplay(x.captionDisplay)
+  if (display && x.type !== 'note') out.captionDisplay = display
   return out
 }
 

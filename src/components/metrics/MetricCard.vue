@@ -45,6 +45,8 @@ import MetricDayPicker from './MetricDayPicker.vue'
 import { effectiveDay } from '../../lib/glanceDay'
 import AdsRefreshButton from '../AdsRefreshButton.vue'
 import NoteBlock from '../NoteBlock.vue'
+import CaptionCollapse from '../CaptionCollapse.vue'
+import type { CaptionDisplay } from '../../types'
 
 const props = defineProps<{
   cardRef: CardRef
@@ -62,6 +64,9 @@ const props = defineProps<{
    * shown (decision D7: preset captions stay with the preset, and each card can hide them). A
    * data-cut note (`hideable: false`) or an unknown id still shows, whatever the list says. */
   hiddenCaptions?: string[]
+  /** The widget's caption display (Widget.captionDisplay): folds the spec captions like the notes
+   * under a chart. Absent = shown in full. */
+  captionDisplay?: CaptionDisplay
 }>()
 const emit = defineEmits<{ 'open-campaigns': []; reload: []; 'day-change': [day: string | null] }>()
 
@@ -325,9 +330,9 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <div v-if="statusPlacement === 'footer'" class="mc-status-row mc-footer">
       <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
     </div>
-    <div v-if="captionIds.length" class="mc-captions">
+    <CaptionCollapse v-if="captionIds.length" class="mc-captions" :mode="captionDisplay">
       <NoteBlock v-for="id in captionIds" :key="id" :note-id="id" />
-    </div>
+    </CaptionCollapse>
   </div>
 </template>
 

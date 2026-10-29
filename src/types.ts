@@ -22,6 +22,9 @@ export type ChartType =
   | 'rateTable'
   | 'note' // a static text tile (caveats/notes carried over from a bespoke page) — no data fetch
 
+/** How the notes under a widget show; see lib/captionDisplay.ts. */
+export type CaptionDisplay = 'always' | 'collapsible' | 'auto'
+
 export type Metric = 'pageviews' | 'visits'
 
 // 'overview'/'campaigns'/'ads-readings' back the panels that used to be bespoke,
@@ -169,6 +172,11 @@ export interface Widget {
   // range-notice, …) is never hidden, even when listed here. ≤ 32 entries, each
   // /^[a-z0-9-]{1,64}$/. Absent = nothing hidden.
   hiddenCaveats?: string[]
+  // ANY widget except a note (lib/captionDisplay.ts): how the notes under it show. Absent = 'always'
+  // (every line in full, today's display). 'collapsible' = folded to about two lines with a
+  // Show more / Show less button when longer; 'auto' = the same, but only once the text is over
+  // CAPTION_AUTO_CHARS characters. Covers the widget's own caption and every note under it.
+  captionDisplay?: CaptionDisplay
   // ANY widget except one holding a canvas (a chart or the map; lib/fit.ts canFit): 'content' =
   // the card's grid height follows its rendered content instead of the fixed `h` (components/
   // Dashboard.vue sets `h` to the smallest whole number of rows that holds it, so a saved `h` is

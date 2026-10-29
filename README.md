@@ -305,6 +305,30 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     chart is edited, its static entries fold into the caption as text and drop out of `notes`;
     dated, computed, value-tied and data-cut entries stay in `notes` as caveats. A duplicated
     chart is a deep copy, so the two never share a list.
+  - **Long notes** (`Widget.captionDisplay`, [`src/lib/captionDisplay.ts`](src/lib/captionDisplay.ts)):
+    one generic option, the "Long notes" select in the editor, the same for a chart and for a
+    metric card (a card is edited inside the chart editor, so it is one control, not two). It
+    decides how the region under the widget shows, and that region is everything in it: the
+    widget's own caption, a card's own captions, the automatic caveats and the runtime notes,
+    including the measurement-change and release notes ("From 2026-10-16 (v1.99.2): ..."). Values:
+    `always` (the same as no key: every line in full, today's display), `collapsible` (folded to about
+    two lines, with a **Show more** button that opens the text in place and **Show less** to fold it back)
+    and `auto` (the same, but only once the text is over 250 characters, `CAPTION_AUTO_CHARS`).
+    [`CaptionCollapse.vue`](src/components/CaptionCollapse.vue) renders it for both
+    `ChartCard` (the `.card-captions` region) and `MetricCard` (its `.mc-captions` region, passed the
+    widget's value), so a card widget folds each region on its own, each judged by its own length.
+    The button appears only when the folded text really hides something (it is measured, so a
+    caption that fits in two lines never gets one), is a native `<button>` with `aria-expanded` and
+    `aria-controls`, and is reachable by keyboard. The text stays in the page whether folded or open, and
+    print shows it in full with the button hidden (a print block in the component); there is no image
+    export. The open state is not saved. A **note** widget has no notes under it, so it has no
+    setting and never keeps the key. **Defaults:** a widget saved before this has no key and keeps
+    `always`, so nothing changes until someone turns it on; "Add chart" starts a new chart on `auto`
+    (`App.vue` `addChart`); the factory charts and a restored default chart have no key (`always`), and a duplicate
+    copies the original's. It is an optional field that `normalizeConfig` whitelists (only `collapsible`
+    and `auto` are kept; `always` is stored as no key), so there is no storage migration and no
+    `CONFIG_VERSION` bump: a layout stored without it loads unchanged, which
+    [`captionDisplay.test.ts`](src/lib/captionDisplay.test.ts) pins against the stored-layout fixture.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and

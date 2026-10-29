@@ -27,6 +27,7 @@ import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import FeatureHealthCard from './FeatureHealthCard.vue'
 import { ASK_ORDER_VIEW } from '../lib/askOrder'
 import NoteBlock from './NoteBlock.vue'
+import CaptionCollapse from './CaptionCollapse.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
 import { chartValueResolver, noteValueResolver } from '../lib/valueTokens'
@@ -327,7 +328,7 @@ let liveSafeKey: string | null = null
 // request identity is the REST of the widget (deny-list, so a new field defaults to part of it) plus
 // the effective filters.
 const NON_REQUEST_FIELDS = new Set([
-  'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'isDefault',
+  'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'captionDisplay', 'isDefault',
   'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'showShares', 'axisTitles', 'barMode',
   // grid-layout-plus writes `moved` onto every widget it lays out (after ChartCard's first load, so the
   // key would change under the answer's flag and never match again). It is the only field the library
@@ -679,7 +680,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" :class="{ 'is-card': isCard }" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
+      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :caption-display="widget.captionDisplay" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
       <FeatureHealthCard v-else-if="widget.dataset === 'features' && widget.view === ASK_ORDER_VIEW" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'features'" class="state mono">{{ retiredPanelText }}</p>
@@ -723,7 +724,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="notes.length" class="card-captions">
+    <CaptionCollapse v-if="notes.length" class="card-captions" :mode="widget.captionDisplay">
       <NoteBlock
         v-for="n in notes"
         :key="n.key"
@@ -734,7 +735,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         :class="{ 'range-notice': n.key === 'range-notice' }"
         :data-testid="n.key === 'range-notice' ? 'range-notice' : undefined"
       />
-    </div>
+    </CaptionCollapse>
 
     <Teleport to="body">
       <div v-if="filterOpen" class="fp-backdrop" @click="filterOpen = false">

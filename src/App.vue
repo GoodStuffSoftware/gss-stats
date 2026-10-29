@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
+import { NEW_WIDGET_CAPTION_DISPLAY } from './lib/captionDisplay'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, factoryWidget, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, pageFilterBar, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
@@ -638,6 +639,8 @@ function addChart() {
       y: 9999,
       w: 6,
       h: 8,
+      // A new chart folds long notes by itself (lib/captionDisplay.ts); a saved one keeps its own.
+      captionDisplay: NEW_WIDGET_CAPTION_DISPLAY,
     },
   }
 }
