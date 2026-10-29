@@ -11,7 +11,8 @@
 // A new metric is a new entry here over an existing fact; a new fact is a code-reviewed SQL
 // builder. Labels are notes-registry ids (`label.<id>`, lib/notes.ts).
 
-import { assembleHealth, FEATURES } from '../featureHealth'
+import { assembleHealth, FEATURES, type FeatureDef } from '../featureHealth'
+import { COACH_TIP_FEATURE_IDS, COACH_TIP_FEATURES } from '../coachTips'
 import { featureDaysWindow, foldFeatureDays } from '../featureHealthSql'
 import { etMidnightMs as etMidnightOf } from './instrumentation'
 import {
@@ -413,20 +414,22 @@ function playThroughOf(rows: FactRows): { value: number | null } {
 // object (its key carries the range, the filters and today's ET date, so one rows object is one model).
 type FeatureModel = ReturnType<typeof assembleHealth>
 const featureModels = new WeakMap<object, FeatureModel>()
-function featureModelOf(rows: FactRows, env: StoreEnv): FeatureModel | null {
+/** The feature list a feature id belongs to: a Coach tips id reads COACH_TIP_FEATURES (editor-tools T3), any other FEATURES. */
+const featuresFor = (id: string | undefined): readonly FeatureDef[] => (id !== undefined && COACH_TIP_FEATURE_IDS.has(id) ? COACH_TIP_FEATURES : FEATURES)
+function featureModelOf(rows: FactRows, env: StoreEnv, features: readonly FeatureDef[]): FeatureModel | null {
   if (rows.kind !== 'featureDays') return null
   let model = featureModels.get(rows.rows)
   if (!model) {
     const nowMs = etMidnightOf(env.todayEt)
     const [sinceMs, untilMs] = env.pageRange ?? [NaN, NaN]
     const w = featureDaysWindow(sinceMs, untilMs, nowMs)
-    const folded = foldFeatureDays(rows.rows, FEATURES, w.newCutoffDay)
-    model = assembleHealth({ rows: folded.rows, before: folded.before, nowMs, rangeFrom: w.rangeFrom, rangeTo: w.rangeTo })
+    const folded = foldFeatureDays(rows.rows, features, w.newCutoffDay)
+    model = assembleHealth({ features, rows: folded.rows, before: folded.before, nowMs, rangeFrom: w.rangeFrom, rangeTo: w.rangeTo })
     featureModels.set(rows.rows, model)
   }
   return model
 }
-const featureOf = (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => featureModelOf(rows, env)?.features.find((f) => f.id === ctx.params.feature)
+const featureOf = (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => featureModelOf(rows, env, featuresFor(ctx.params.feature))?.features.find((f) => f.id === ctx.params.feature)
 /** latestDay = the latest complete ET day, previousDay = the one before, page = the selected range. */
 const FEATURE_WINDOWS: Partial<Record<WindowName, FactId>> = { latestDay: 'featureDays', previousDay: 'featureDays', page: 'featureDays' }
 const byWindow = <T>(o: { latest: T; prev: T; range: T }, w: WindowName): T => (w === 'latestDay' ? o.latest : w === 'previousDay' ? o.prev : o.range)
@@ -466,7 +469,7 @@ const FEATURE_METRICS: MetricDef[] = [
     store: (rows, ctx, env) => {
       const f = featureOf(rows, ctx, env)
       const s = f?.steps.find((x) => x.id === ctx.params.step)
-      const perId = FEATURES.find((x) => x.id === ctx.params.feature)?.steps.find((x) => x.id === ctx.params.step)?.ratioOf?.per
+      const perId = featuresFor(ctx.params.feature).find((x) => x.id === ctx.params.feature)?.steps.find((x) => x.id === ctx.params.step)?.ratioOf?.per
       const per = perId ? f?.steps.find((x) => x.id === perId) : undefined
       if (!s?.ratio || !per) return { value: null }
       return { value: byWindow(s.ratio, ctx.window), numerator: byWindow(s, ctx.window), denominator: byWindow(per, ctx.window) }
@@ -488,6 +491,15 @@ const FEATURE_METRICS: MetricDef[] = [
     params: ['feature'],
     windows: { latestDay: 'featureDays' },
     store: (rows, ctx, env) => ({ value: featureOf(rows, ctx, env)?.baselineAvg ?? null }),
+  }),
+  // Coach tips (editor-tools T3): has any coach row ever arrived. No value until one has, so the card's whenEmpty note
+  // ("No coach data yet ...") shows; then the 'coach.everSeen.yes' label.
+  featureMetric({
+    id: 'coach.everSeen',
+    unit: 'code',
+    params: [],
+    windows: { page: 'coachEver' },
+    store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 1, noteIds: ['coach.everSeen.yes'] } : { value: null }),
   }),
 ]
 
@@ -898,7 +910,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit' || f === 'featureDays')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'adsInstallsDaily' || f === 'adsAssetDaily' || f === 'bskFirstHit' || f === 'featureDays' || f === 'coachEver')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {

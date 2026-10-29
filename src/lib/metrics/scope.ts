@@ -6,6 +6,7 @@
 // these to decide what to render and what to request, so the expansion is unit-testable
 // without mounting a component.
 import { FEATURES, stepRatioLabel, type FeatureDef, type StepDef } from '../featureHealth'
+import { COACH_TIP_ROWS } from '../coachTips'
 import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
@@ -282,6 +283,11 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       const all = (campaignId ? ctx.ads?.[campaignId]?.assets : undefined) ?? []
       const picked = repeat.ids?.length ? all.filter((a) => repeat.ids!.includes(a.id)) : all
       return sortAssets(picked, repeat.sortBy).slice(0, readingsLimit(repeat)).map((asset) => ({ kind: 'asset', asset }))
+    }
+    case 'tips': {
+      // Coach tips (editor-tools T3): one per tip, as a feature (lib/coachTips.ts COACH_TIP_ROWS, the tour total left out).
+      const list = repeat.ids?.length ? COACH_TIP_ROWS.filter((f) => repeat.ids!.includes(f.id)) : COACH_TIP_ROWS
+      return list.map((feature) => ({ kind: 'feature', feature }))
     }
     case 'features': {
       const list = repeat.ids?.length ? FEATURES.filter((f) => repeat.ids!.includes(f.id)) : FEATURES

@@ -74,7 +74,8 @@
 // which they count over whole ET days the same way (by segment and ET day only, never by hour).
 // facts.test.ts checks every statement.
 
-import { featureDaysStatement } from '../featureHealthSql'
+import { anyStepWhere, featureDaysStatement } from '../featureHealthSql'
+import { COACH_TIP_FEATURES } from '../coachTips'
 import { applyAlwaysExclusions, applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, sqlInt } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
@@ -108,6 +109,7 @@ export type FactId =
   | 'adsInstallsDaily'
   | 'adsAssetDaily'
   | 'featureDays'
+  | 'coachEver'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -129,6 +131,8 @@ export interface FactParams {
    * browser and an OS: rows from that browser on that OS are left out. */
   ownBrowser?: string
   ownOS?: string
+  /** featureDays only: which feature list it counts. Unset = FEATURES (Feature health); 'coach-tips' = COACH_TIP_FEATURES. */
+  set?: 'coach-tips'
 }
 
 export interface FactStatement {
@@ -638,7 +642,9 @@ export const FACTS: Record<FactId, FactDef> = {
   featureDays: {
     id: 'featureDays',
     db: 'gss_geo',
-    keyParams: ['since', 'until', 'sites', 'ownBrowser', 'ownOS', 'todayEt'],
+    // `set` (editor-tools T3): the Coach tips card reads the same statement over COACH_TIP_FEATURES. Unset for Feature
+    // health, so its key is unchanged.
+    keyParams: ['since', 'until', 'sites', 'ownBrowser', 'ownOS', 'todayEt', 'set'],
     honors: ['range', 'sites', 'excludeOwn'],
     bucketMs: null,
     splitAt: null,
@@ -646,10 +652,32 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: { seconds: 300 },
     build(p, nowMs) {
       const [sinceMs, untilMs] = p.since !== undefined && p.until !== undefined ? rangeMs(p.since, p.until) : [NaN, NaN]
-      const s = featureDaysStatement({ sinceMs, untilMs, nowMs: p.todayEt ? etMidnightMs(p.todayEt) : nowMs, sites: p.sites, excludeKnownTraffic: true, excludeOwn: !!(p.ownBrowser && p.ownOS), ownBrowser: p.ownBrowser, ownOS: p.ownOS })
+      const s = featureDaysStatement({ sinceMs, untilMs, nowMs: p.todayEt ? etMidnightMs(p.todayEt) : nowMs, sites: p.sites, excludeKnownTraffic: true, excludeOwn: !!(p.ownBrowser && p.ownOS), ownBrowser: p.ownBrowser, ownOS: p.ownOS, ...(p.set === 'coach-tips' ? { features: COACH_TIP_FEATURES } : {}) })
       return { db: 'gss_geo', sql: s.sql, binds: s.binds }
     },
     parse: (raw) => ({ kind: 'featureDays', rows: raw }),
+  },
+
+  // Coach tips (editor-tools T3): has ANY coach row ever arrived (/api/features view 'coach-tips' everSeen). About the
+  // beacons, not the viewer's selection: every site, only the always-exclusions (manual checks), through today. ONE
+  // whole COUNT(*), no day, path, visitor, hour, place or device column; keyed by today's ET date alone, so every range
+  // and site selection shares one cached read.
+  coachEver: {
+    id: 'coachEver',
+    db: 'gss_geo',
+    keyParams: ['todayEt'],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build(p) {
+      if (!p.todayEt) throw new Error('coachEver needs todayEt')
+      const w: string[] = ['ts < ?', anyStepWhere(COACH_TIP_FEATURES)]
+      const b: unknown[] = [etMidnightMs(addEtDays(p.todayEt, 1))]
+      applyAlwaysExclusions(w, b)
+      return { db: 'gss_geo', sql: `SELECT COUNT(*) AS n FROM hits WHERE ${w.join(' AND ')}`, binds: b }
+    },
+    parse: (raw) => ({ kind: 'scalar', value: Number(raw[0]?.n) || 0 }),
   },
 
   bskFirstHit: {

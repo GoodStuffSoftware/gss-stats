@@ -798,6 +798,33 @@ dismissed, closed-at, or nothing) and warns that, from v1.99.3, × closes one ti
 note ends the notes tip with no beacon, so ratios and tip-to-tip comparisons are not comparable
 across that version (the note under the card appears once the version's date is set).
 
+### Coach tips in the card editor
+
+The Coach tips readout is an ordinary metric card, the **Coach tips** preset: a *Coach data* status
+row, a table that repeats over the tips (Tip, then Shown, Dismissed, Closed, Dismissed per shown and
+Closed per shown for the latest day and for the range), and the two "Show me around" totals. The
+same card can be built or changed in the card editor like any other.
+
+- **Building blocks.** Repeat *Tips* (one per coach tip, all or the ones checked); the
+  `feature.step`, `feature.stepRatio` and `feature.total` metrics of Feature health, with a tip
+  (or `tour-opened`) as the feature; and `coach.everSeen` (*Arriving* once any coach row has ever
+  arrived, otherwise the "no coach data yet" note). A tip's counts read the `featureDays` fact over
+  the coach paths only; `coach.everSeen` reads one whole `COUNT(*)` of coach rows before tomorrow,
+  with only the always-on exclusions (any site, own visits included), as the old `everSeen` did.
+- **Same numbers as the old table.** `functions/api/coachTips.parity.test.ts` runs the real
+  `/api/metrics` and `/api/features` handlers over one fixture (three clocks, six ranges, four
+  filter sets) and compares every count, ratio, tour total and `everSeen`.
+- **What reads differently.** When coach rows have arrived, a *Coach data: Arriving* row shows
+  where the old card showed nothing; the caption and the v1.99.3 measurement note are the card's
+  captions. A range over 400 days is refused (the metrics endpoint's cap).
+- **Cost.** One `/api/metrics` POST (94 requests) and two statements on a cold cache, as the old
+  card (see [docs/capacity.md §12](docs/capacity.md)).
+- **Saved layouts are not rewritten.** A Coach tips table saved by an older build (dataset
+  `features`, view `coach-tips`) that hides known traffic is drawn as this card at render time
+  (`coachTipsCardFor` in [`src/lib/defaults.ts`](src/lib/defaults.ts)), keeping its place, title
+  and settings; one that shows known traffic keeps the old table. The layout version does not
+  change.
+
 ### Ask-order A/B
 
 The **Ask-order A/B** card (Features page, under Coach tips; `?page=bsk-features`) reads the test

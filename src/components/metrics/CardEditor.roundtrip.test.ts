@@ -18,6 +18,7 @@ import { normalizeConfig } from '../../lib/defaults'
 import { validateCard } from '../../lib/metrics/validate'
 import { PRESETS } from '../../lib/metrics/presets'
 import { FEATURES } from '../../lib/featureHealth'
+import { COACH_TIP_ROWS } from '../../lib/coachTips'
 import type { CardRef, CardSpec } from '../../lib/metrics/types'
 import type { Widget } from '../../types'
 
@@ -277,6 +278,19 @@ describe('the controls for fields the form used to hide round-trip', () => {
     await us.setValue(true)
     await flushPromises()
     expect(lastSpec(c).sections[0].columns).toEqual({ over: 'countries', ids: ['US'] })
+  })
+
+  it('tip ids (Coach tips): the tips repeat of a section lists them, a pick is saved and round-trips', async () => {
+    const w = await customized('coach-tips')
+    const tip = COACH_TIP_ROWS[1]
+    await exactCheckbox(w, tip.label).setValue(true)
+    await flushPromises()
+    expect(lastSpec(w).sections[1].repeat).toEqual({ over: 'tips', ids: [tip.id] })
+    const saved = plain(lastSpec(w))
+    const again = mountEditor({ spec: saved })
+    await flushPromises()
+    await noOpPass(again)
+    expect(lastSpec(again)).toStrictEqual(saved)
   })
 
   it('feature ids (Feature health): the features repeat lists them, a pick is saved and round-trips', async () => {

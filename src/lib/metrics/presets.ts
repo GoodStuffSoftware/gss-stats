@@ -650,6 +650,49 @@ export const FEATURE_HEALTH: CardSpec = {
   ],
 }
 
+/** The Coach tips readout (Features page; editor-tools T3, ADR 0005): first whether any coach row has ever arrived (the
+ * "no coach data yet" note until one has), then a table with a row per tip: shown, dismissed and closed while showing for
+ * the latest day and the range, with dismissed and closed per shown (plain ratios); then the "Show me around" taps. The
+ * same featureDays read as Feature health over COACH_TIP_FEATURES. Captions: what the counts are, and the coach
+ * measurement note while a marked change applies. Known traffic hidden. */
+export const COACH_TIPS: CardSpec = {
+  v: 1,
+  minWidth: 360,
+  captions: ['coach-tips-caption', 'coach-measurement'],
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'everSeen', label: { metric: true }, data: { metric: 'coach.everSeen' }, display: { as: 'status' }, gating: { whenEmpty: { note: 'coach-tips-empty' } }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'table',
+      repeat: { over: 'tips' },
+      items: [
+        { id: 'tip', label: { note: 'label.coach.col.tip' }, data: { field: 'feature.label' }, display: { as: 'text' } },
+        { id: 'shownLatest', label: { note: 'label.coach.col.shownLatest' }, data: { metric: 'feature.step', window: 'latestDay', params: { step: 'shown' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'dismissedLatest', label: { note: 'label.coach.col.dismissedLatest' }, data: { metric: 'feature.step', window: 'latestDay', params: { step: 'dismissed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'closedLatest', label: { note: 'label.coach.col.closedLatest' }, data: { metric: 'feature.step', window: 'latestDay', params: { step: 'closed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'dismissedPerLatest', label: { note: 'label.coach.col.dismissedPerLatest' }, data: { metric: 'feature.stepRatio', window: 'latestDay', params: { step: 'dismissed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'closedPerLatest', label: { note: 'label.coach.col.closedPerLatest' }, data: { metric: 'feature.stepRatio', window: 'latestDay', params: { step: 'closed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'shownRange', label: { note: 'label.coach.col.shownRange' }, data: { metric: 'feature.step', window: 'page', params: { step: 'shown' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'dismissedRange', label: { note: 'label.coach.col.dismissedRange' }, data: { metric: 'feature.step', window: 'page', params: { step: 'dismissed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'closedRange', label: { note: 'label.coach.col.closedRange' }, data: { metric: 'feature.step', window: 'page', params: { step: 'closed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'dismissedPerRange', label: { note: 'label.coach.col.dismissedPerRange' }, data: { metric: 'feature.stepRatio', window: 'page', params: { step: 'dismissed' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'closedPerRange', label: { note: 'label.coach.col.closedPerRange' }, data: { metric: 'feature.stepRatio', window: 'page', params: { step: 'closed' } }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'rows',
+      items: [
+        { id: 'tourLatest', label: { note: 'label.coach.tourLatest' }, data: { metric: 'feature.total', window: 'latestDay', params: { feature: 'tour-opened' } }, display: { as: 'number' }, ...COMPACT },
+        { id: 'tourRange', label: { note: 'label.coach.tourRange' }, data: { metric: 'feature.total', window: 'page', params: { feature: 'tour-opened' } }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -671,6 +714,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'f3-rule-readouts': F3_RULE_READOUTS,
     'campaign-f3-daily': CAMPAIGN_F3_DAILY,
     'feature-health': FEATURE_HEALTH,
+    'coach-tips': COACH_TIPS,
   }),
 )
 

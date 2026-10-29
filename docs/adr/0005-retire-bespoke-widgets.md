@@ -402,6 +402,14 @@ tips and Ask-order on the metric registry) and T7 (a Features page template, an 
 `features` widgets, then removing `FeatureHealthCard`'s steps branch and the `features`
 dataset, the exit criterion).
 
+T3 built (2026-10-29): the Features page's Coach tips card is the `coach-tips` preset. A tip is a
+feature of the `featureDays` fact with `set: 'coach-tips'` (derived from the feature id, so no new
+metric parameter and Feature health's keys are unchanged); a `tips` repeat lists them; the
+`coach.everSeen` metric reads a `coachEver` fact (one whole COUNT(*), always-on exclusions only,
+as the old `everSeen`). A saved coach-tips widget that hides known traffic is mapped at render time
+(`coachTipsCardFor`, decision 2), no `CONFIG_VERSION` change; parity is
+`functions/api/coachTips.parity.test.ts` (decision 3). Left: T4 (Ask-order) and T7.
+
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
 styles noted above.

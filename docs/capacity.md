@@ -453,7 +453,7 @@ for a closed range). Estimate, not a measurement: about 7 times the rows read fo
 per uncached load, since each statement reads the same window the old pair read. Batching the
 steps keeps it at 14 rather than 44 (one per step). The step charts with no counts-only rows are
 now `liveSafe`, so a live ping can refetch them (at most hourly per chart, §10); the old step
-charts never refetched. Coach tips and Ask-order still read `/api/features`, unchanged.
+charts never refetched. Ask-order still reads `/api/features`, unchanged; Coach tips: §12.
 
 ## 12. Feature health as a metric card (editor tools T2, 2026-10-29) — D1 rows read and CPU
 
@@ -470,3 +470,10 @@ responses 15-18 KB (old 11-20 KB), handler wall time 83 / 103 / 189 ms at 7 / 30
 warm CPU of fold plus status over a pessimistic 109 distinct paths: about 2 ms at 30 days, 4 ms at
 90 days and 17 ms at the 400-day cap. Accepted: the default Overview range is 7 days and the
 warm cache serves repeat loads.
+
+Coach tips (editor tools T3, 2026-10-29). The old Coach tips table read one `/api/features` POST
+with 2 statements (the coach paths by ET day, and an "ever seen" check). The Coach tips card sends
+94 requests in 1 POST and plans 2 statements on a cold cache: `featureDays` with `set: 'coach-tips'`
+(the same shape as above, over the 16 coach paths only, so its own cache entry) and `coachEver`
+(one whole `COUNT(*)` of coach rows before tomorrow, keyed by the ET day only, so one entry serves
+every range and site selection for 300 s). Same statement count as before; no added load.

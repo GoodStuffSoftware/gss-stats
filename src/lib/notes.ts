@@ -59,9 +59,13 @@ import type { CardSpec } from './metrics/types'
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
-import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, markedChanges } from './measurementChanges'
+import { MEASUREMENT_CHANGES, authErrorMarkedChanges, authMarkedChanges, coachMeasurementNote, markedChanges } from './measurementChanges'
+
+/** The Coach tips card's latest day (yesterday, ET): its measurement note is the one for that day, as the old card's. */
+const coachLatestDay = (): string => addDays(etDateFast(Date.now()), -1)
 import { FIRST_FINISH_START_ET } from './releases'
-import { etOffsetHours } from './etTime'
+import { addDays, etDateFast, etOffsetHours } from './etTime'
+import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE } from './coachTips'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
 
@@ -240,6 +244,22 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+  },
+  'coach-tips-caption': {
+    id: 'coach-tips-caption',
+    text: COACH_TIPS_CAPTION,
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
+  // The coach strip's measurement changes up to the latest day (lib/measurementChanges.ts coachMeasurementNote): off until one applies.
+  'coach-measurement': {
+    id: 'coach-measurement',
+    text: () => coachMeasurementNote(coachLatestDay()) ?? '',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+    activeWhen: () => coachMeasurementNote(coachLatestDay()) !== null,
   },
   'feature-health-caption': {
     id: 'feature-health-caption',
@@ -829,6 +849,24 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-f3-daily.description': 'One card per Flight 3 arm: by ET day, the tagged completed-game rows, tagged sign-in ask rows and tagged new accounts. Counts only, never by hour, place or device.',
     'label.preset.f3-rule-readouts': 'Flight 3 rule readouts',
     'label.preset.feature-health': 'Feature health',
+    'label.preset.coach-tips': 'Coach tips',
+    'label.preset.coach-tips.description': 'Each coach tip\'s shown, dismissed and closed-while-showing rows for the latest day and the range, with dismissed and closed per shown (plain ratios), the "Show me around" taps, and a note until any coach data has arrived. Known traffic hidden.',
+    'label.coach.everSeen': 'Coach data',
+    'coach.everSeen.yes': 'Arriving',
+    'coach-tips-empty': COACH_TIPS_EMPTY_NOTE,
+    'label.coach.col.tip': 'Tip',
+    'label.coach.col.shownLatest': 'Shown, latest day',
+    'label.coach.col.dismissedLatest': 'Dismissed, latest day',
+    'label.coach.col.closedLatest': 'Closed while showing, latest day',
+    'label.coach.col.dismissedPerLatest': 'Dismissed per shown, latest day',
+    'label.coach.col.closedPerLatest': 'Closed per shown, latest day',
+    'label.coach.col.shownRange': 'Shown, range',
+    'label.coach.col.dismissedRange': 'Dismissed, range',
+    'label.coach.col.closedRange': 'Closed while showing, range',
+    'label.coach.col.dismissedPerRange': 'Dismissed per shown, range',
+    'label.coach.col.closedPerRange': 'Closed per shown, range',
+    'label.coach.tourLatest': 'Show me around (taps, no tip), latest day',
+    'label.coach.tourRange': 'Show me around (taps, no tip), range',
     'label.preset.feature-health.description': 'One small card per feature: its status (went silent, new, OK), the prior 7 days\' rows a day, and each step\'s rows for the latest day, the day before and the range, with its plain ratio. Known traffic hidden; per-ET-day counts only.',
     'label.preset.f3-rule-readouts.description': 'One card per Flight 3 arm: the date, flight day and proposal of its newest morning read, and each rule with its number, threshold and verdict. Proposals only.',
     'label.preset.ads-readings-log': 'Ads readings log',

@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Coach tips is an ordinary card.** The Features page's Coach tips readout opens in the card editor as the Coach tips preset, one row per tip with the same shown, dismissed and closed counts and ratios, the "Show me around" totals and the no-data note; once coach rows arrive it shows a "Coach data: Arriving" row.
+
 ## [0.68.0] — 2026-10-29
 
 ### Changed
