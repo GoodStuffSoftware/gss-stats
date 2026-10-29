@@ -27,6 +27,7 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   campaigns: 'One per campaign',
   popups: 'One per pop-up',
   windows: 'One per window (before/after, latest day, the range)',
+  tags: 'Organic and tagged apart (inside an Ask-order group)',
   readings: 'One per stored reading',
   countries: 'One per country (US / CA / Other)',
   rules: 'One per Flight 3 rule (newest stored read)',

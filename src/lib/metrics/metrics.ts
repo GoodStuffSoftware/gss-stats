@@ -90,6 +90,10 @@ export interface StoreResult {
   tooFew?: true
   numerator?: number
   denominator?: number
+  /** The metric does not apply to this read (a reason code): the value is 'unmeasured', its gating decides. */
+  unmeasured?: string
+  /** Values for its notes' variables: config wording and counts only (an Ask-order verdict sentence), never beacon text. */
+  noteVars?: Record<string, string | number>
 }
 
 /** What a reducer knows about the request it is serving. */
@@ -556,14 +560,14 @@ const FEATURE_METRICS: MetricDef[] = [
     store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 1, noteIds: ['coach.everSeen.yes'] } : { value: null }),
   }),
   // The Ask-order A/B (editor-tools T4). Has any ask-order row ever arrived (/api/features view 'ask-order' everSeen): no
-  // value until one has, so the card's whenEmpty note shows.
+  // value until one has, so the card's whenEmpty note shows; 0 once one has (a card omits it, whenZero).
   featureMetric({
     id: 'askOrder.everSeen',
     unit: 'code',
     params: [],
     featureSet: 'ask-order',
     windows: { page: 'coachEver' },
-    store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 1, noteIds: ['askOrder.everSeen.yes'] } : { value: null }),
+    store: (rows) => (rows.kind === 'scalar' && (rows.value ?? 0) > 0 ? { value: 0 } : { value: null }),
   }),
   // A group's primary measure (`feature` = ao-<group>): the once-per-device responded rows once any exists, the combined
   // response rows until then; all days so far, organic + tagged. Its rows, and those per assigned row.
@@ -587,6 +591,25 @@ const FEATURE_METRICS: MetricDef[] = [
       return g ? { value: g.primaryPerAssigned, numerator: g.primaryRows, denominator: g.assigned } : { value: null }
     },
   }),
+  // The same, named by which primary it is: 'unmeasured' (reason 'not-primary') unless it is the read's primary, so a
+  // card shows the one that applies under its own label.
+  ...(['combined', 'responded'] as const).map((p) =>
+    featureMetric({
+      id: `askOrder.${p}PerAssigned`,
+      unit: 'row',
+      per: true,
+      params: ['feature'],
+      featureSet: 'ask-order',
+      windows: { allTime: 'featureAllTime' },
+      store: (rows, ctx) => {
+        const r = askOrderReadOf(rows)
+        const g = askOrderGroupOf(rows, ctx.params.feature)
+        if (!r || !g) return { value: null }
+        if (r.primary.id !== p) return { value: null, unmeasured: 'not-primary' }
+        return { value: g.primaryPerAssigned, numerator: g.primaryRows, denominator: g.assigned }
+      },
+    }),
+  ),
   // Which primary the rule reads (0 combined response rows, 1 responded rows), by its 'askOrder.primary.<id>' label.
   featureMetric({
     id: 'askOrder.primary',
@@ -596,7 +619,7 @@ const FEATURE_METRICS: MetricDef[] = [
     windows: { allTime: 'featureAllTime' },
     store: (rows) => {
       const r = askOrderReadOf(rows)
-      return r ? { value: r.primary.id === 'responded' ? 1 : 0, noteIds: [`askOrder.primary.${r.primary.id}`] } : { value: null }
+      return r ? { value: r.primary.id === 'responded' ? 1 : 0, noteIds: [`askOrder.primary.${r.primary.id}`], noteVars: { text: r.primary.label } } : { value: null }
     },
   }),
   // What the 1.5x rule reads: 0 the primary, 1 sign-ins (signed-in and installed point opposite ways between the groups).
@@ -631,7 +654,7 @@ const FEATURE_METRICS: MetricDef[] = [
       const r = askOrderReadOf(rows)
       if (!r) return { value: null }
       const code = askOrderVerdictCode(r)
-      return { value: code, noteIds: [`askOrder.verdict.${ASK_ORDER_VERDICTS[code]}`] }
+      return { value: code, noteIds: [`askOrder.verdict.${ASK_ORDER_VERDICTS[code]}`], noteVars: { text: r.rule.verdict.note } }
     },
   }),
   // Display only: each kind's multiple, larger over smaller (signed-in, then installed).

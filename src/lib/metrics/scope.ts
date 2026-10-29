@@ -7,12 +7,13 @@
 // without mounting a component.
 import { FEATURES, stepRatioLabel, type FeatureDef, type StepDef } from '../featureHealth'
 import { COACH_TIP_ROWS } from '../coachTips'
-import { ASK_ORDER_CARD_FEATURES } from '../askOrder'
+import { ASK_ORDER_CARD_FEATURES, ASK_ORDER_TAGS } from '../askOrder'
 import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
+import { addDays } from '../etTime'
 import { etDayText, freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
@@ -108,7 +109,8 @@ export type ScopeInstance = (
   | { kind: 'rule'; rule: RuleScope }
   | { kind: 'asset'; asset: AssetScope }
   /** Feature health: a feature (FEATURES), and one of its steps (a steps repeat inside a features repeat). */
-  | { kind: 'feature'; feature: FeatureDef }
+  /** `tag`: an Ask-order tag column (a tags repeat), the tag's name ("Organic"). */
+  | { kind: 'feature'; feature: FeatureDef; tag?: string }
   | { kind: 'step'; step: StepDef; feature: FeatureDef }
 ) & { parent?: ScopeInstance }
 
@@ -166,14 +168,14 @@ export function readingsLimit(repeat: Pick<RepeatSpec, 'limit'> | undefined): nu
   const n = repeat?.limit
   return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), MAX_READINGS_LIMIT) : DEFAULT_READINGS_LIMIT
 }
-type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; columnGroups?: RepeatSpec; items?: { repeat?: RepeatSpec }[] }[] }
+type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; columnGroups?: RepeatSpec[]; items?: { repeat?: RepeatSpec }[] }[] }
 /** Every repeat of a card (the card's, its sections', their columns' and items'). */
 export function cardRepeats(spec: RepeatHolder): RepeatSpec[] {
   const out: RepeatSpec[] = []
   if (spec.repeat) out.push(spec.repeat)
   for (const s of spec.sections ?? []) {
     if (s.repeat) out.push(s.repeat)
-    if (s.columnGroups) out.push(s.columnGroups)
+    if (s.columnGroups) out.push(...s.columnGroups)
     if (s.columns) out.push(s.columns)
     for (const it of s.items ?? []) if (it.repeat) out.push(it.repeat)
   }
@@ -297,6 +299,17 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       const list = repeat.ids?.length ? [...FEATURES, ...ASK_ORDER_CARD_FEATURES].filter((f) => repeat.ids!.includes(f.id)) : FEATURES
       return list.map((feature) => ({ kind: 'feature', feature }))
     }
+    case 'tags': {
+      // Only inside an Ask-order group (a features repeat over ao-<group>): its organic and tagged rows, each as the
+      // feature ao-<group>-<tag> (lib/askOrder.ts ASK_ORDER_CARD_FEATURES).
+      const group = scopeOfKind(outer, 'feature')?.feature
+      if (!group) return []
+      const tags = repeat.ids?.length ? ASK_ORDER_TAGS.filter((t) => repeat.ids!.includes(t.id)) : ASK_ORDER_TAGS
+      return tags.flatMap((t) => {
+        const feature = ASK_ORDER_CARD_FEATURES.find((f) => f.id === `${group.id}-${t.id}`)
+        return feature ? [{ kind: 'feature' as const, feature, tag: t.label }] : []
+      })
+    }
     case 'steps': {
       // Only inside a features repeat: that feature's steps, in config order.
       const feature = scopeOfKind(outer, 'feature')?.feature
@@ -410,6 +423,8 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return scopeOfKind(scope, 'feature')?.feature.id ?? null
     case 'feature.label':
       return scopeOfKind(scope, 'feature')?.feature.label ?? null
+    case 'feature.tag':
+      return scopeOfKind(scope, 'feature')?.tag ?? null
     case 'feature.caption':
       return scopeOfKind(scope, 'feature')?.feature.caption ?? null
     case 'step.label':
@@ -424,6 +439,13 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       return popup ? popup.label : null
     case 'window.label':
       return window ? WINDOW_LABELS[window] : null
+    case 'window.dated': {
+      if (!window) return null
+      const back = window === 'latestDay' ? -1 : window === 'previousDay' ? -2 : 0
+      if (!back) return WINDOW_LABELS[window]
+      const day = new Date(`${addDays(todayEt, back)}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+      return `${WINDOW_LABELS[window]} (${day})`
+    }
     case 'country.label':
       return country ? COUNTRY_LABELS[country] : null
     case 'release.label': {
@@ -591,22 +613,36 @@ export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: R
   return resolveRepeat(section.repeat, ctx, outerScope).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
 }
 
-/** A column table's columns, left to right, and its column groups (Section.columnGroups) with the
- * number of columns under each; without groups, `groups` is empty. Each column's scope is the
- * column inside its group inside the outer instance. */
-export function columnTableColumns(section: Pick<Section, 'columns' | 'columnGroups'>, outerScope: ScopeInstance, ctx: RepeatContext): { columns: ScopeInstance[]; groups: { scope: ScopeInstance; span: number }[] } {
+/** A column table's columns, left to right, and its column groups (Section.columnGroups), one heading row per
+ * level, outermost first, each group with the number of columns under it; without groups, `groups` is empty. Each
+ * column's scope is the column inside its groups inside the outer instance; a group with no columns is left out. */
+export function columnTableColumns(section: Pick<Section, 'columns' | 'columnGroups'>, outerScope: ScopeInstance, ctx: RepeatContext): { columns: ScopeInstance[]; groups: { scope: ScopeInstance; span: number }[][] } {
   if (!section.columns) return { columns: [], groups: [] }
-  if (!section.columnGroups) return { columns: resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope)), groups: [] }
-  const columns: ScopeInstance[] = []
-  const groups: { scope: ScopeInstance; span: number }[] = []
-  for (const g of resolveRepeat(section.columnGroups, ctx, outerScope)) {
-    const gScope = nestScope(g, outerScope)
-    const cols = resolveRepeat(section.columns, ctx, gScope).map((c) => nestScope(c, gScope))
-    if (!cols.length) continue
-    groups.push({ scope: gScope, span: cols.length })
-    columns.push(...cols)
+  const levels = section.columnGroups ?? []
+  const groups: { scope: ScopeInstance; span: number }[][] = levels.map(() => [])
+  const walk = (level: number, scope: ScopeInstance): ScopeInstance[] => {
+    if (level === levels.length) return resolveRepeat(section.columns, ctx, scope).map((c) => nestScope(c, scope))
+    const out: ScopeInstance[] = []
+    for (const g of resolveRepeat(levels[level], ctx, scope)) {
+      const gScope = nestScope(g, scope)
+      const at = groups[level].length
+      groups[level].push({ scope: gScope, span: 0 })
+      const cols = walk(level + 1, gScope)
+      if (!cols.length) {
+        groups[level].splice(at, 1)
+        continue
+      }
+      groups[level][at].span = cols.length
+      out.push(...cols)
+    }
+    return out
   }
-  return { columns, groups }
+  return { columns: walk(0, outerScope), groups }
+}
+
+/** The default heading of a column group: as a column's, but a single-day window carries its date ("Latest day (Oct 28)"). */
+export function columnGroupDefaultLabel(scope: ScopeInstance): Label {
+  return scope.kind === 'window' ? { bind: 'window.dated' } : columnDefaultLabel(scope)
 }
 
 /** The default heading of a table column: the column instance's own name. */
@@ -628,7 +664,7 @@ export function columnDefaultLabel(scope: ScopeInstance): Label {
     case 'asset':
       return { bind: 'asset.label' }
     case 'feature':
-      return { bind: 'feature.label' }
+      return scope.tag !== undefined ? { bind: 'feature.tag' } : { bind: 'feature.label' }
     case 'step':
       return { bind: 'step.label' }
     default:

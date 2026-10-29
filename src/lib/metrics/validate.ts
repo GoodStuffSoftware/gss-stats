@@ -83,7 +83,7 @@ export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
   cost: ['currency'],
   pair: ['counts'],
   // 'per': n/d as a plain number (2 decimals); 'rate': a share in 0-1 shown as a percent.
-  per: ['number', 'counts'],
+  per: ['number', 'counts', 'multiple', 'perRows'],
   rate: ['percent'],
   field: ['dateRange', 'datetime', 'datetime-et', 'badge', 'text', 'number', 'currency'],
   time: ['date', 'ago'],
@@ -112,7 +112,7 @@ export const isProgressTarget = (t: unknown): t is number => typeof t === 'numbe
 
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
 const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES, 'latestDay', 'previousDay', 'allTime'])
-const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step', tips: 'feature' }
+const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step', tips: 'feature', tags: 'feature' }
 /** A Google Ads asset id: digits, as the store keeps it. */
 const ASSET_ID_RE = /^[0-9]{1,20}$/
 /** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
@@ -154,6 +154,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'assets' && !ASSET_ID_RE.test(id)) errors.push(`${where}.repeat: '${id}' is not an asset id`)
       if (r.over === 'tips' && !COACH_TIP_ROWS.some((f) => f.id === id)) errors.push(`${where}.repeat: unknown coach tip '${id}'`)
       if (r.over === 'features' && !FEATURE_IDS.has(id)) errors.push(`${where}.repeat: unknown feature '${id}'`)
+      if (r.over === 'tags' && id !== 'organic' && id !== 'tagged') errors.push(`${where}.repeat: unknown tag '${id}'`)
       if (r.over === 'steps' && !STEP_IDS.has(id)) errors.push(`${where}.repeat: unknown step '${id}'`)
       if (r.over === 'windows' && !(REPEAT_WINDOWS as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
@@ -252,12 +253,18 @@ export function validateCard(spec: CardSpec): string[] {
   }
   spec.sections?.forEach((s, si) => {
     const where = `sections[${si}]`
-    if (!['rows', 'pills', 'tiles', 'bars', 'columns', 'table'].includes(s.layout)) errors.push(`${where}: unknown layout '${String(s.layout)}'`)
+    if (!['rows', 'pills', 'tiles', 'bars', 'columns', 'table', 'lines'].includes(s.layout)) errors.push(`${where}: unknown layout '${String(s.layout)}'`)
     checkRepeat(where, s.repeat)
     checkLabel(`${where}.title`, s.title, false)
     if (s.columnGroups !== undefined) {
       if (!s.columns) errors.push(`${where}: columnGroups group a column table's columns; it needs columns`)
-      checkRepeat(`${where}.columnGroups`, s.columnGroups)
+      if (!Array.isArray(s.columnGroups) || s.columnGroups.length < 1 || s.columnGroups.length > 2) errors.push(`${where}: columnGroups is a list of one or two repeats`)
+      else s.columnGroups.forEach((g, gi) => checkRepeat(`${where}.columnGroups[${gi}]`, g))
+    }
+    if (s.panels !== undefined) {
+      if (s.panels !== true) errors.push(`${where}: panels must be true`)
+      if (!s.repeat) errors.push(`${where}: panels show a repeat's instances; it needs a repeat`)
+      if (s.layout === 'table') errors.push(`${where}: a table is not shown in panels`)
     }
     if (s.columns !== undefined || s.columnLabel !== undefined) {
       if (s.layout !== 'table') errors.push(`${where}: columns are for a 'table' section`)
@@ -278,7 +285,7 @@ export function validateCard(spec: CardSpec): string[] {
       checkLabel(`${w}.label`, it.label, !('field' in it.data))
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
       checkLabel(`${w}.hint`, it.hint, !('field' in it.data))
-      check(w, it.data, it.display, [spec.repeat, s.repeat, s.columnGroups, s.columns, it.repeat])
+      check(w, it.data, it.display, [spec.repeat, s.repeat, ...(Array.isArray(s.columnGroups) ? s.columnGroups : []), s.columns, it.repeat])
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       if (it.hideNotes !== undefined && (!Array.isArray(it.hideNotes) || it.hideNotes.some((id) => typeof id !== 'string'))) errors.push(`${w}: hideNotes must be a list of note ids`)
@@ -287,7 +294,8 @@ export function validateCard(spec: CardSpec): string[] {
       if (it.gating?.whenZero !== undefined && it.gating.whenZero !== 'omit') errors.push(`${w}: whenZero must be 'omit'`)
       const ns = it.gating?.whenNotStarted
       if (ns !== undefined && ns !== 'label' && ns !== 'zero') errors.push(`${w}: whenNotStarted must be 'label' or 'zero'`)
-      if (it.frame !== undefined && !['row', 'pill', 'tile', 'column'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
+      if (it.frame !== undefined && !['row', 'pill', 'tile', 'column', 'line'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
+      if (it.lineBreak !== undefined && (it.lineBreak !== true || s.layout !== 'lines')) errors.push(`${w}: lineBreak is true, in a 'lines' section only`)
     }
   })
   return errors

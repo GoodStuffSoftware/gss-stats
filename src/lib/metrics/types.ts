@@ -52,7 +52,12 @@ export type ScopePath =
   | 'feature.caption'
   | 'step.label'
   | 'step.ratioLabel'
+  /** An Ask-order tag column (RepeatSpec.over 'tags'): "Organic" or "Tagged". */
+  | 'feature.tag'
   | 'window.label'
+  /** The window's name with its ET day for a single-day window: "Latest day (Oct 28)", "Previous day (Oct 27)"; the
+   * other windows as window.label. A column group's default heading (Section.columnGroups). */
+  | 'window.dated'
   | 'country.label'
   /** The compared release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
   | 'release.label'
@@ -159,6 +164,10 @@ export type Display =
   /** A count toward a fixed target: "40 / 150" and a bar filled to the share of the target (full, and marked done, at
    * or past it). `target` is a whole number from 1 to 1,000,000,000. */
   | { as: 'progress'; target: number }
+  /** A ratio of two row counts read as a multiple: "1.67x" (two decimals), an em dash with none. A 'per' value only. */
+  | { as: 'multiple' }
+  /** A ratio of two row counts with the rows behind it: "0.33 (4 rows)", the numerator's count. A 'per' value only. */
+  | { as: 'perRows' }
   | { as: 'date' } // a day (a 'time' metric): "Sep 26"
   | { as: 'ago' } // an instant (a 'time' metric), relative: "3h ago"
   | { as: 'status' } // the label note the value carries (e.g. where a spend figure came from), not the number
@@ -191,8 +200,10 @@ export type AssetSortField = (typeof ASSET_SORT_FIELDS)[number]
 export interface RepeatSpec {
   /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read).
    * 'assets': the ad assets (headlines, descriptions, images) Google served for one campaign
-   * (ads_daily_assets): the enclosing campaign's, else `campaignId`. */
-  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps' | 'tips'
+   * (ads_daily_assets): the enclosing campaign's, else `campaignId`.
+   * 'tags': inside an Ask-order group (a features repeat over `ao-<group>`), its organic and tagged rows apart, each as
+   * the feature `ao-<group>-<tag>` (ids: 'organic', 'tagged'). */
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps' | 'tips' | 'tags'
   ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: REPEAT_WINDOWS; assets: Google asset ids
   /** Assets only: the campaign whose assets to list when the repeat is not inside a campaign repeat. */
   campaignId?: string
@@ -236,26 +247,32 @@ export interface MetricItem {
    * Set at render time by a mapping that must honour a stored hide (rateTileCard.ts: the legacy
    * `popup-note`); a saved card's author has no use for it. */
   hideNotes?: string[]
-  frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
+  frame?: 'row' | 'pill' | 'tile' | 'column' | 'line' // overrides the section layout for this item
+  /** A 'lines' section only: this item starts a new line. */
+  lineBreak?: true
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
 
 export interface Section {
   /** 'bars': one horizontal bar per row; 'columns': bars side by side, read left to right as a
    * curve (a value over its bar, the label under it); 'table': items are columns, repeat
-   * instances are rows (or the other way round with `columns`). */
-  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'columns' | 'table'
+   * instances are rows (or the other way round with `columns`).
+   * 'lines': each item as "label value" in running text, wrapping, a new line where an item says so (`lineBreak`). */
+  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'columns' | 'table' | 'lines'
   title?: Label
   repeat?: RepeatSpec
+  /** With `repeat` (not a table): each instance is a bordered panel, side by side while they fit (300 px or more each),
+   * headed by the section title (read in the instance, e.g. the feature's name) with the first item beside it. */
+  panels?: true
   /** 'table' only: the other orientation — items are ROWS (their label in the first cell) and
    * these repeat instances are the COLUMNS (headed by `columnLabel`, default the instance's own
    * name). Each cell's scope is the column instance inside the card's instance, so a campaign
    * card can split its funnel steps by country. */
   columns?: RepeatSpec
-  /** With `columns`: an outer repeat the columns are grouped under, e.g. a windows repeat over the
-   * latest day and the page range, each holding every column (a heading row over each group, the
-   * columns' own headings under it). Each cell's scope is the column inside its group. */
-  columnGroups?: RepeatSpec
+  /** With `columns`: the repeats the columns are grouped under, outermost first (at most two), e.g. a windows repeat
+   * over the latest day and the page range, then the Ask-order groups: a heading row per level, each heading spanning
+   * the columns under it, the columns' own headings last. Each cell's scope is the column inside its groups. */
+  columnGroups?: RepeatSpec[]
   columnLabel?: Label
   /** With `columns`: the heading over the item-label column (e.g. "Step"). */
   rowsLabel?: Label
@@ -371,6 +388,9 @@ export interface MetricValue {
   measuredFrom?: number // epoch ms, when partial
   provisional?: boolean // lagged numerator still arriving
   noteIds?: string[] // registry ids only, never text
+  /** Values for the variables of the notes in noteIds (a store metric's StoreResult.noteVars): config wording and
+   * counts only, never a beacon's own text. */
+  noteVars?: Record<string, string | number>
   reason?: string // machine code: 'spend-only' | 'not-live' | 'not-seen-in-flight' | 'unknown-id' | ...
   /** Server-set, only ever `true`: this metric (or both ratio sides) can never count a refused row,
    * so a live "changed" ping may refetch it. Absent means do not (fail-closed). */

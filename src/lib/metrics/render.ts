@@ -264,6 +264,10 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: fmtCount(value.value ?? value.numerator), deltaLines: [] }
     case 'progress':
       return { primary: `${fmtCount(value.value)} / ${fmtCount(display.target)}`, deltaLines: [] }
+    case 'multiple':
+      return { primary: finite(value.value) ? `${value.value.toFixed(2)}x` : '—', deltaLines: [] }
+    case 'perRows':
+      return { primary: `${fmtPer(value.value)} (${fmtCount(value.numerator ?? 0)} rows)`, deltaLines: [] }
     case 'date':
       return { primary: fmtEtDay(value.value), deltaLines: [] }
     case 'ago':
@@ -275,7 +279,7 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       if (id === 'verdict.maturing' && daysLeft !== null && daysLeft >= 1) {
         return { primary: noteRawText(daysLeft === 1 ? 'verdict.maturing.one' : 'verdict.maturing.days', { n: daysLeft }), deltaLines: [] }
       }
-      return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
+      return { primary: id ? noteRawText(id, value.noteVars) : '—', deltaLines: [] }
     }
     case 'sparkline':
       // The headline stays the metric's value (the sparkline is drawn beside it, from
