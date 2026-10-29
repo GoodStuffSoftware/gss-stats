@@ -75,6 +75,7 @@ const columnsModel = computed({
     if (v === section.value.columns) return
     let next = withField(section.value, 'columns', v)
     if (!v) {
+      next = withField(next, 'columnGroups', undefined)
       for (const k of ['columnLabel', 'rowsLabel'] as const) {
         if (next[k] !== undefined) setAside[k] = next[k]
         next = withField(next, k, undefined)
@@ -86,6 +87,16 @@ const columnsModel = computed({
       }
     }
     section.value = next
+  },
+})
+
+/** A column table's column groups (Section.columnGroups): they need the columns, so clearing the
+ * columns clears them too. */
+const columnGroupsModel = computed({
+  get: () => section.value.columnGroups,
+  set: (v) => {
+    if (v === section.value.columnGroups) return
+    section.value = withField(section.value, 'columnGroups', v)
   },
 })
 
@@ -136,8 +147,9 @@ function removeAt(i: number) {
     <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
 
     <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries', 'rules', 'assets', 'features', 'steps', 'tips']" label="Repeat this section" />
-    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets']" label="Columns (each item becomes a row)" />
+    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'assets', 'features']" label="Columns (each item becomes a row)" />
     <template v-if="section.columns">
+      <CardEditorRepeat v-model="columnGroupsModel" :allow="['windows', 'countries', 'campaigns', 'popups', 'features']" label="Group the columns by (every column repeats under each group)" />
       <div class="field check">
         <label><input type="checkbox" :checked="section.columnLabel !== undefined" @change="toggleLabel('columnLabel', ($event.target as HTMLInputElement).checked)" /> Column heading <span class="hint">— default: each column's own name</span></label>
       </div>

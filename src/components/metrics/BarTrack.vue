@@ -2,11 +2,12 @@
 // The one horizontal bar. A metric card's bar display and bars layout (MetricItem) draw it as a
 // 'track' (a sunken groove with a fill), a bar table row (BarTable) as 'plain' (the fill alone).
 // The caller works out the width; this only draws it. ADR 0005 slice 5.
-withDefaults(defineProps<{ pct: number; variant?: 'track' | 'plain' }>(), { variant: 'track' })
+// `done`: a 'progress' display that has reached its target (the fill turns from amber to green).
+withDefaults(defineProps<{ pct: number; variant?: 'track' | 'plain'; done?: boolean }>(), { variant: 'track', done: false })
 </script>
 
 <template>
-  <div v-if="variant === 'track'" class="bar-track mi-bar-track"><div class="bar-fill mi-bar-fill" :style="{ width: pct + '%' }" /></div>
+  <div v-if="variant === 'track'" class="bar-track mi-bar-track"><div class="bar-fill mi-bar-fill" :class="{ done }" :style="{ width: pct + '%' }" /></div>
   <span v-else class="bt-fill" :style="{ width: pct + '%' }"></span>
 </template>
 
@@ -22,6 +23,9 @@ withDefaults(defineProps<{ pct: number; variant?: 'track' | 'plain' }>(), { vari
   height: 100%;
   background: rgb(var(--amber-hover));
   border-radius: 3px;
+}
+.bar-fill.done {
+  background: rgb(var(--g5));
 }
 .bt-fill {
   display: block;

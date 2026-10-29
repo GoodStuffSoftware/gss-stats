@@ -122,44 +122,49 @@ export const ASK_ORDER_FEATURES: readonly FeatureDef[] = ASK_ORDER_GROUPS.map(
   }),
 )
 
-/** The Ask-order feature ids: the metric registry's 'ask-order' feature set (lib/metrics/facts.ts featureSetOf). */
-export const ASK_ORDER_FEATURE_IDS: ReadonlySet<string> = new Set(ASK_ORDER_FEATURES.map((f) => f.id))
-
-/** The measures the card's table sums over both asks, per tag (step `<measure>-<tag>`, its rows per assigned row as the
- * step ratio): the signed-in and installed rows, the combined response rows (signed-in + installed: a device that does
- * both counts twice), the once-per-device responded rows, and the returned and still-playing twin rows. */
+/** The measures the editor card sums over both asks (step `<measure>`, its rows per assigned row as the step ratio): the
+ * signed-in and installed rows, the combined response rows (signed-in + installed: a device that does both counts twice),
+ * and the returned and still-playing twin rows. */
 export const ASK_ORDER_SUM_MEASURES = [
   { id: 'signed-in', label: 'Signed-in rows', outcomes: ['signed-in'] as const },
   { id: 'installed', label: 'Installed rows', outcomes: ['installed'] as const },
-  { id: 'response', label: 'Response rows', outcomes: ASK_ORDER_RESPONSE_OUTCOMES },
-  { id: 'responded', label: 'Responded rows', outcomes: [] as const },
-  { id: 'returned', label: 'Returned rows', outcomes: ['returned'] as const },
-  { id: 'still-playing', label: 'Still-playing rows', outcomes: ['still-playing'] as const },
+  { id: 'response', label: 'Response rows (signed-in + installed; a device doing both counts twice)', outcomes: ASK_ORDER_RESPONSE_OUTCOMES },
+  { id: 'returned', label: 'Returned rows (group rows only)', outcomes: ['returned'] as const },
+  { id: 'still-playing', label: 'Still-playing rows (group rows only)', outcomes: ['still-playing'] as const },
 ] as const satisfies readonly { id: string; label: string; outcomes: readonly OutcomeId[] }[]
 
-/** ASK_ORDER_FEATURES with the summed measures appended to each group (the card's feature list, the registry's
- * 'ask-order' set): each sum is one step over the paths it adds up, so a row counts once in it. The statement reads
- * the same rows (the sums reuse the group's own paths). */
-export const ASK_ORDER_CARD_FEATURES: readonly FeatureDef[] = ASK_ORDER_FEATURES.map((f, i) => {
-  const g = ASK_ORDER_GROUPS[i]!.id
-  return {
-    ...f,
-    steps: [
-      ...f.steps,
-      ...ASK_ORDER_TAGS.flatMap((t) =>
-        ASK_ORDER_SUM_MEASURES.map((m) => ({
-          id: `${m.id}-${t.id}`,
-          label: `${m.label}, either ask (${t.label.toLowerCase()})`,
-          match: {
-            exact: m.id === 'responded' ? ASK_ORDER_ASKS.map((a) => askOrderRespondedPath(g, a.id)) : ASK_ORDER_ASKS.flatMap((a) => m.outcomes.map((o) => askOrderOutcomePath(g, a.id, o))),
-            tag: t.id,
-          },
-          ratioOf: { per: assignedStepId(t.id) },
-        })),
-      ),
-    ],
-  }
-})
+/** The editor card's feature id for a group and tag (`ao-signin-first-organic`), or both tags (`ao-signin-first`). */
+export const askOrderModelFeatureId = (g: AskOrderGroupId, tag?: StepTag) => (tag ? `${askOrderFeatureId(g)}-${tag}` : askOrderFeatureId(g))
+
+/** One group's steps for the editor card, organic + tagged (no tag) or one tag: the same paths as ASK_ORDER_FEATURES with
+ * tag-free step ids, plus sums over both asks. Each step matches its paths once, so a row counts once in it. */
+function modelSteps(g: AskOrderGroupId, tag?: StepTag): FeatureDef['steps'] {
+  const m = (exact: string[]) => ({ exact, ...(tag ? { tag } : {}) })
+  const perAssigned = { per: 'assigned' }
+  return [
+    { id: 'assigned', label: 'Assigned', match: m([askOrderAssignedPath(g)]) },
+    ...ASK_ORDER_ASKS.map((a) => ({ id: `shown-${a.id}`, label: `${a.label} shown`, match: m([askOrderShownPath(g, a.id)]), ratioOf: perAssigned })),
+    { id: 'shown', label: 'Asks shown (both asks)', match: m(ASK_ORDER_ASKS.map((a) => askOrderShownPath(g, a.id))), ratioOf: perAssigned },
+    ...ASK_ORDER_ASKS.flatMap((a) =>
+      ASK_ORDER_OUTCOMES.map((o) => ({ id: `${a.id}-${o.id}`, label: `${a.label}: ${o.label.toLowerCase()}`, match: m([askOrderOutcomePath(g, a.id, o.id)]), ratioOf: { per: `shown-${a.id}` } })),
+    ),
+    ...ASK_ORDER_ASKS.map((a) => ({ id: `responded-${a.id}`, label: `Responded by ${a.label.toLowerCase()} (once per device)`, match: m([askOrderRespondedPath(g, a.id)]), ratioOf: perAssigned })),
+    { id: 'responded', label: 'Responded rows (once per device)', match: m(ASK_ORDER_ASKS.map((a) => askOrderRespondedPath(g, a.id))), ratioOf: perAssigned },
+    ...ASK_ORDER_SUM_MEASURES.map((s) => ({ id: s.id, label: s.label, match: m(ASK_ORDER_ASKS.flatMap((a) => s.outcomes.map((o) => askOrderOutcomePath(g, a.id, o)))), ratioOf: perAssigned })),
+  ]
+}
+
+/** The editor card's features (the registry's 'ask-order' set, lib/metrics/facts.ts modelFeaturesOf): per group, organic +
+ * tagged (`ao-<group>`, the progress and the rule), then organic and tagged on their own (`ao-<group>-<tag>`, the tables).
+ * The statement reads ASK_ORDER_FEATURES' paths, which are the same rows. */
+export const ASK_ORDER_CARD_FEATURES: readonly FeatureDef[] = ASK_ORDER_GROUPS.flatMap((g) => [
+  { id: askOrderModelFeatureId(g.id), label: g.label, blurb: `${g.label}, organic and tagged.`, steps: modelSteps(g.id) },
+  ...ASK_ORDER_TAGS.map((t) => ({ id: askOrderModelFeatureId(g.id, t.id), label: `${g.label}, ${t.label.toLowerCase()}`, blurb: `${g.label}, ${t.label.toLowerCase()} rows.`, steps: modelSteps(g.id, t.id) })),
+])
+
+/** The Ask-order feature ids, the statement's and the editor card's: the metric registry's 'ask-order' feature set
+ * (lib/metrics/facts.ts featureSetOf). */
+export const ASK_ORDER_FEATURE_IDS: ReadonlySet<string> = new Set([...ASK_ORDER_FEATURES, ...ASK_ORDER_CARD_FEATURES].map((f) => f.id))
 
 export const ASK_ORDER_CAPTION =
   'Counts are rows per ET day, web and app combined, organic (no campaign tag) vs tagged. Every figure is a plain ratio of two row counts (a row ratio), not a per-person rate: ' +
