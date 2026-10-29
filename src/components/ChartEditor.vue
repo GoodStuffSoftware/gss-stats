@@ -18,6 +18,7 @@ import {
   breakdownCapability,
   widgetShowsShares,
 } from '../lib/catalog'
+import { featureStepChoices, unknownFeatureStepValues } from '../lib/featureHealth'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, CARD_PRESET_FOR_PANEL, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, isCardPanel, syncCardWithView } from '../lib/defaults'
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
@@ -585,6 +586,12 @@ function setSeriesFilter(idx: number, part: 'field' | 'value', v: string) {
   const next = { ...cur, [part]: v }
   s.filter = next.field ? [next] : undefined
 }
+// A Feature step series value is picked from the known steps, never typed (editor tools T7). A stored value that
+// names no step (saved before the picker, or a step since removed) is shown as unknown and blocks Save until it is
+// picked again or the series is removed; it would otherwise draw a line of zeros.
+const FEATURE_STEP_CHOICES = featureStepChoices()
+const unknownStepValues = computed(() => (canUseSeries.value ? unknownFeatureStepValues(draft.series) : []))
+const stepSaveDisabled = computed(() => unknownStepValues.value.length > 0)
 const axisTitlesValue = (side: 'left' | 'right') => draft.axisTitles?.[side] ?? ''
 function setAxisTitle(side: 'left' | 'right', v: string) {
   draft.axisTitles = { ...(draft.axisTitles ?? {}), [side]: v || undefined }
@@ -794,6 +801,7 @@ function save() {
   // View-only access: App.vue never opens the editor for a viewer; if it ever did, nothing saves.
   if (viewOnly.value) return
   if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
+  if (stepSaveDisabled.value) return // the same for an unknown Feature step value
   // Text on the chart (slice 1c). A blank caption, an empty hidden list and an empty legacy
   // `notes` list are deleted, never saved as '' or []. A note widget is its own text: the
   // chart-only caption fields go. `notes` is never written, only folded (D5) or emptied (N1).
@@ -1178,8 +1186,19 @@ function resetToDefault() {
               <option value="">(all page views)</option>
               <option v-for="d in SERIES_FIELDS" :key="d.key" :value="d.key">{{ d.label }}</option>
             </select>
+            <select
+              v-if="s.filter?.[0]?.field === 'featureStep'"
+              :value="s.filter?.[0]?.value ?? ''"
+              aria-label="Series feature step"
+              data-testid="series-feature-step"
+              @change="setSeriesFilter(idx, 'value', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="" disabled>Pick a step</option>
+              <option v-if="s.filter?.[0]?.value && unknownStepValues.includes(s.filter[0].value)" :value="s.filter[0].value">Unknown step: {{ s.filter[0].value }}</option>
+              <option v-for="c in FEATURE_STEP_CHOICES" :key="c.value" :value="c.value">{{ c.label }}</option>
+            </select>
             <input
-              v-if="s.filter?.[0]?.field"
+              v-else-if="s.filter?.[0]?.field"
               type="text"
               :value="s.filter?.[0]?.value ?? ''"
               placeholder="value"
@@ -1199,6 +1218,9 @@ function resetToDefault() {
           </div>
           <button type="button" class="btn" @click="addSeries">+ Add series</button>
         </div>
+        <p v-if="unknownStepValues.length" class="hint error" role="alert" data-testid="series-unknown-step">
+          {{ unknownStepValues.length === 1 ? 'This Feature step names' : 'These Feature steps name' }} no step: {{ unknownStepValues.join(', ') }}. Pick a step from the list, or remove the series, to save.
+        </p>
       </div>
       <div class="row" v-if="canUseSeries && draft.series?.length">
         <div class="field">
@@ -1219,7 +1241,7 @@ function resetToDefault() {
         <button v-if="!isNew && defaultWidget" v-edit class="btn" data-testid="reset-default" title="Fill in this chart's default settings. Save keeps them; Cancel leaves the chart as it was." @click="resetToDefault">Reset to default</button>
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
-        <button v-edit class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
+        <button v-edit class="btn btn-primary" :disabled="cardSaveDisabled || stepSaveDisabled" :title="cardSaveDisabled || stepSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
       </div>
     </div>
   </div>
@@ -1408,6 +1430,9 @@ h2 {
 .caveat-remove {
   flex: none;
   padding: 4px 9px;
+}
+.hint.error {
+  color: rgb(var(--g4));
 }
 .hint {
   font-size: 12px;

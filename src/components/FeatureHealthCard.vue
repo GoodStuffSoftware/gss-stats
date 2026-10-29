@@ -1,30 +1,20 @@
 <script setup lang="ts">
-// The 'features' dataset's body (Widget.dataset 'features', see functions/api/features.ts):
-//   view 'health'        the Feature health table: a row per feature with its status, and per step the
-//                        counts for the latest complete ET day, the day before and the selected range,
-//                        plus the plain ratios of those counts;
-//   view 'steps:<id>'    that feature's step chart: a line per step, a point per ET day;
-//   view 'coach-tips'    the Coach tips table (src/lib/coachTips.ts): a row per coach tip with shown,
-//                        dismissed and closed-while-showing counts and their ratios, for the latest
-//                        complete ET day and the selected range, plus the "Show me around" total;
-//   view 'ask-order'     the Ask-order A/B (src/lib/askOrder.ts): progress toward the call point and the
-//                        pre-registered read per group (all days so far), then a table of the counts per group,
-//                        organic vs tagged, for the latest complete ET day and the selected range.
-// Web and app are combined. Counts only: nothing here is a per-person rate, and the caption says so.
+// The 'features' dataset's one remaining bespoke body: the Ask-order A/B (view 'ask-order', src/lib/askOrder.ts),
+// read from functions/api/features.ts: progress toward the call point and the pre-registered read per group (all
+// days so far), then a table of the counts per group, organic vs tagged, for the latest complete ET day and the
+// selected range. Web and app are combined. Counts only: nothing here is a per-person rate, and the caption says so.
+// The Feature health table, the step charts and the Coach tips table that used to live here are ordinary card and
+// chart widgets now (editor tools T1-T3, ADR 0005); a saved widget naming them is mapped at render time
+// (lib/defaults.ts stepChartFor, featureHealthCardFor, coachTipsCardFor) and ChartCard mounts this body for Ask-order only.
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget } from '../types'
 import { fetchFeatureHealth, type FeatureHealthResponse } from '../api'
-import { HEALTH_CAPTION, HEALTH_STATUS_LABEL, featureIdOfView, formatRatio, ratio, type FeatureHealth } from '../lib/featureHealth'
-import { buildStepChartConfig } from '../lib/featureHealthChart'
+import { formatRatio, ratio } from '../lib/featureHealth'
 import { formatKey } from '../lib/charts'
-import { coachMeasurementNote } from '../lib/measurementChanges'
-import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import {
-  ASK_ORDER_ASKS, ASK_ORDER_CALL_ASKS, ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_GROUPS, ASK_ORDER_OUTCOMES, ASK_ORDER_SWITCH_MULTIPLE, ASK_ORDER_TAGS, ASK_ORDER_VIEW,
+  ASK_ORDER_ASKS, ASK_ORDER_CALL_ASKS, ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_GROUPS, ASK_ORDER_OUTCOMES, ASK_ORDER_SWITCH_MULTIPLE, ASK_ORDER_TAGS,
   askOrderFeatureId, assignedStepId, outcomeRowsOf, outcomeStepId, readAskOrder, respondedStepId, responseRowsOf, shownStepId, stepCount, type OutcomeId,
 } from '../lib/askOrder'
-import BaseChart from './charts/BaseChart.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
 
@@ -59,22 +49,8 @@ onBeforeUnmount(() => {
   seq++ // a response that lands after unmount is dropped
 })
 
-// The Coach tips table: one row per tip (every feature but the last), then the tour-opened total.
-const isCoachTips = computed(() => props.widget.view === COACH_TIPS_VIEW)
-const coachStep = (f: FeatureHealth, id: string) => f.steps.find((s) => s.id === id)
-const coachRatio = (f: FeatureHealth, id: string, which: 'latest' | 'range') => formatRatio(coachStep(f, id)?.ratio?.[which] ?? null)
-const coachTourOpened = computed(() => {
-  const f = model.value?.features.find((x) => x.id === 'tour-opened')
-  const s = f?.steps.find((x) => x.id === 'opened')
-  return f && s ? { label: f.label, blurb: f.blurb, latest: s.latest, range: s.range } : null
-})
-// The v1.99.3 coach meaning-change note: shown once its date is set and has come (against the latest complete day), nothing while null.
-const coachNote = computed(() => (model.value ? coachMeasurementNote(model.value.latestDay) : null))
-const coachTipRows = computed(() => (model.value?.features ?? []).filter((f) => f.id.startsWith('tip-')))
-
 // The Ask-order A/B: the pre-registered read (all days so far) and the range table (a column per
 // window, group and tag; a row per measure).
-const isAskOrder = computed(() => props.widget.view === ASK_ORDER_VIEW)
 const askRead = computed(() => readAskOrder(model.value?.allTime ?? {}))
 const askFeature = (g: string) => model.value?.features.find((f) => f.id === askOrderFeatureId(g as (typeof ASK_ORDER_GROUPS)[number]['id']))
 const askCols = (['latest', 'range'] as const).flatMap((which) =>
@@ -127,80 +103,17 @@ const askRatio = (c: AskCol, outcomes: OutcomeId[], responded = false) => {
 }
 const pct = (x: number) => `${Math.round(x * 100)}%`
 
-const stepsFeatureId = computed(() => featureIdOfView(props.widget.view))
-const stepsFeature = computed<FeatureHealth | null>(() => {
-  const id = stepsFeatureId.value
-  return id ? (model.value?.features.find((f) => f.id === id) ?? null) : null
-})
-const chartConfig = computed<ChartConfiguration | null>(() => {
-  void props.dark // recompute colours on a theme toggle
-  const m = model.value
-  const f = stepsFeature.value
-  return m && f ? buildStepChartConfig(m, f) : null
-})
-
 const fmt = (n: number) => n.toLocaleString('en-US')
 const dayLabel = (d: string | undefined) => (d ? formatKey('date', d) : '')
 const rangeTitle = computed(() => (model.value ? `${model.value.meta.rangeFrom || model.value.meta.since} to ${model.value.meta.until}` : ''))
-const ratioCells = (f: FeatureHealth, i: number) => {
-  const r = f.steps[i].ratio
-  return r ? { text: `${formatRatio(r.latest)} · ${formatRatio(r.prev)} · ${formatRatio(r.range)}`, label: r.label } : null
-}
 </script>
 
 <template>
   <div class="fh-body">
     <p v-if="loading && !model" class="state mono">Loading…</p>
     <p v-else-if="error" class="state error mono">{{ error }}</p>
-
-    <!-- The Coach tips table -->
-    <template v-else-if="isCoachTips && model">
-      <p v-if="model.everSeen === false" class="fh-caption" data-testid="coach-tips-empty">{{ COACH_TIPS_EMPTY_NOTE }}</p>
-      <div class="fh-scroll">
-        <table class="fh-table" data-testid="coach-tips-table">
-          <thead>
-            <tr>
-              <th class="l" rowspan="2">Tip</th>
-              <th class="c" colspan="5" :title="model.latestDay">Latest day ({{ dayLabel(model.latestDay) }})</th>
-              <th class="c" colspan="5" :title="rangeTitle">Range</th>
-            </tr>
-            <tr>
-              <template v-for="g in ['latest', 'range']" :key="g">
-                <th class="r">Shown</th>
-                <th class="r">Dismissed</th>
-                <th class="r">Closed while showing</th>
-                <th class="r" title="Dismissed divided by shown">Dismissed per shown</th>
-                <th class="r" title="Closed while showing divided by shown">Closed per shown</th>
-              </template>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="f in coachTipRows" :key="f.id" :data-tip="f.id">
-              <td class="l fh-name" :title="f.blurb">{{ f.label }}</td>
-              <template v-for="g in (['latest', 'range'] as const)" :key="g">
-                <td class="r mono" :data-col="g + '-shown'">{{ fmt(coachStep(f, 'shown')?.[g] ?? 0) }}</td>
-                <td class="r mono" :data-col="g + '-dismissed'">{{ fmt(coachStep(f, 'dismissed')?.[g] ?? 0) }}</td>
-                <td class="r mono" :data-col="g + '-closed'">{{ fmt(coachStep(f, 'closed')?.[g] ?? 0) }}</td>
-                <td class="r mono" :data-col="g + '-dismissed-ratio'">{{ coachRatio(f, 'dismissed', g) }}</td>
-                <td class="r mono" :data-col="g + '-closed-ratio'">{{ coachRatio(f, 'closed', g) }}</td>
-              </template>
-            </tr>
-            <tr v-if="coachTourOpened" class="fh-total" data-tip="tour-opened">
-              <td class="l fh-name" :title="coachTourOpened.blurb">{{ coachTourOpened.label }} (taps, no tip)</td>
-              <td class="r mono" data-col="latest-opened">{{ fmt(coachTourOpened.latest) }}</td>
-              <td class="l" colspan="4"></td>
-              <td class="r mono" data-col="range-opened">{{ fmt(coachTourOpened.range) }}</td>
-              <td class="l" colspan="4"></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="fh-caption" data-testid="coach-tips-caption">{{ COACH_TIPS_CAPTION }}</p>
-      <p v-if="coachNote" class="fh-caption" data-testid="coach-tips-measurement">{{ coachNote }}</p>
-    </template>
-
     <!-- The Ask-order A/B -->
-    <template v-else-if="isAskOrder && model">
+    <template v-else-if="model">
       <p v-if="model.everSeen === false" class="fh-caption" data-testid="ask-order-empty">{{ ASK_ORDER_EMPTY_NOTE }}</p>
       <div class="fh-scroll">
         <div class="ao-read" data-testid="ask-order-read">
@@ -270,58 +183,6 @@ const ratioCells = (f: FeatureHealth, i: number) => {
         </table>
       </div>
       <p class="fh-caption" data-testid="ask-order-caption">{{ ASK_ORDER_CAPTION }}</p>
-    </template>
-
-    <!-- A feature's step chart -->
-    <template v-else-if="stepsFeatureId">
-      <p v-if="!stepsFeature" class="state mono">No such feature: {{ stepsFeatureId }}</p>
-      <div v-else class="fh-chart" :data-feature="stepsFeature.id">
-        <div class="fh-chart-head">
-          <span class="fh-chip" :class="`st-${stepsFeature.status}`" :title="stepsFeature.statusNote">{{ HEALTH_STATUS_LABEL[stepsFeature.status] }}</span>
-          <span class="fh-blurb">{{ stepsFeature.blurb }}</span>
-        </div>
-        <p v-if="stepsFeature.caption" class="fh-caption" data-testid="feature-caption">{{ stepsFeature.caption }}</p>
-        <div class="fh-chart-canvas"><BaseChart v-if="chartConfig" :config="chartConfig" :drill-open="false" /></div>
-      </div>
-    </template>
-
-    <!-- The Feature health table -->
-    <template v-else-if="model">
-      <div class="fh-scroll">
-        <table class="fh-table" data-testid="feature-health-table">
-          <thead>
-            <tr>
-              <th class="l">Feature</th>
-              <th class="l">Status</th>
-              <th class="l">Step</th>
-              <th class="r" :title="model.latestDay">{{ dayLabel(model.latestDay) }}</th>
-              <th class="r" :title="model.prevDay">{{ dayLabel(model.prevDay) }}</th>
-              <th class="r" :title="rangeTitle">Range</th>
-              <th class="l" title="Plain ratios of counts: latest day · day before · range">Ratio of counts</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="f in model.features" :key="f.id" :data-feature="f.id">
-              <td class="l fh-name" :title="f.blurb">{{ f.label }}</td>
-              <td class="l">
-                <span class="fh-chip" :class="`st-${f.status}`" :title="f.statusNote">{{ HEALTH_STATUS_LABEL[f.status] }}</span>
-              </td>
-              <td class="l"><div v-for="s in f.steps" :key="s.id" class="ln">{{ s.label }}</div></td>
-              <td class="r mono"><div v-for="s in f.steps" :key="s.id" class="ln">{{ fmt(s.latest) }}</div></td>
-              <td class="r mono"><div v-for="s in f.steps" :key="s.id" class="ln">{{ fmt(s.prev) }}</div></td>
-              <td class="r mono"><div v-for="s in f.steps" :key="s.id" class="ln">{{ fmt(s.range) }}</div></td>
-              <td class="l mono">
-                <div v-for="(s, i) in f.steps" :key="s.id" class="ln">
-                  <template v-if="ratioCells(f, i)">{{ ratioCells(f, i)!.text }} <span class="fh-ratio-label">{{ ratioCells(f, i)!.label }}</span></template>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="fh-caption" data-testid="feature-health-caption">{{ HEALTH_CAPTION }}</p>
-      <p v-if="coachNote" class="fh-caption" data-testid="feature-health-coach-measurement">Coach strip row: {{ coachNote }}</p>
-      <p v-for="f in model.features.filter((x) => x.caption)" :key="f.id" class="fh-caption" :data-testid="`feature-health-caption-${f.id}`">{{ f.label }} row: {{ f.caption }}</p>
     </template>
   </div>
 </template>
@@ -433,63 +294,14 @@ const ratioCells = (f: FeatureHealth, i: number) => {
 .mono {
   font-family: 'JetBrains Mono', monospace;
 }
-.ln {
-  line-height: 20px;
-  height: 20px;
-}
 .fh-name {
   color: rgb(var(--ink));
   font-weight: 600;
   line-height: 20px;
 }
-.fh-chip {
-  display: inline-block;
-  padding: 0 8px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  line-height: 18px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-.fh-chip.st-ok {
-  color: rgb(var(--g5));
-  border-color: rgb(var(--g5) / 0.5);
-}
-.fh-chip.st-new {
-  color: rgb(var(--g6));
-  border-color: rgb(var(--g6) / 0.5);
-}
-.fh-chip.st-silent {
-  color: rgb(var(--g4));
-  border-color: rgb(var(--g4) / 0.6);
-  font-weight: 600;
-}
-.fh-ratio-label {
-  color: rgb(var(--ink-3));
-  font-family: inherit;
-}
 .fh-caption {
   margin: 6px 0 0;
   font-size: 11.5px;
   color: rgb(var(--ink-3));
-}
-.fh-chart {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.fh-chart-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: rgb(var(--ink-3));
-  padding-bottom: 4px;
-}
-.fh-chart-canvas {
-  flex: 1;
-  min-height: 0;
-  position: relative;
 }
 </style>

@@ -18,6 +18,7 @@ import {
   defaultOverviewPage,
   defaultPage,
   defaultRetentionPage,
+  defaultFeaturesPage,
   defaultWidgetsForPage,
 } from './defaults'
 import { addGroup, groupNameError, insertPageInGroup, isPinnedPage, movePageToGroup, navTree, orderedGroups, pageNameError, type GroupResult, type GroupState } from './nav'
@@ -76,6 +77,7 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = [
   { id: 'tpl-bsk-popups', label: 'Best Sudoku · Pop-ups', make: defaultBestSudokuPopupsPage },
   { id: 'tpl-bsk-launch', label: 'Best Sudoku · Traffic', make: defaultBestSudokuLaunchPage },
   { id: 'tpl-bsk-retention', label: 'Best Sudoku · Retention', make: defaultRetentionPage },
+  { id: 'tpl-bsk-features', label: 'Best Sudoku · Features', make: defaultFeaturesPage },
 ]
 
 export interface PageDraft {

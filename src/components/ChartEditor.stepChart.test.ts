@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import ChartEditor from './ChartEditor.vue'
 import { defaultFeaturesWidgets, stepChartFor } from '../lib/defaults'
-import { stepsViewFor } from '../lib/featureHealth'
+import { featureStepChoices, featureStepKey, FEATURES, stepsViewFor, unknownFeatureStepValues } from '../lib/featureHealth'
 import type { Widget } from '../types'
 
 const mounted: VueWrapper[] = []
@@ -51,5 +51,67 @@ describe('ChartEditor: a step chart round-trips unchanged', () => {
     expect(defined(out!)).toEqual(defined(shown))
     expect(out!.dataset).toBe('geo')
     expect(out!.view).toBeUndefined()
+  })
+})
+
+// Editor tools T7: a Feature step series value is picked from the known steps, never typed. A stored value that names no
+// step shows as unknown and Save stays disabled until it is fixed (it would draw a line of zeros).
+describe('ChartEditor: the Feature step picker guards against a value that names no step', () => {
+  const games = () => JSON.parse(JSON.stringify(STEP_CHARTS.find((w) => w.id === 'fw-games')!)) as Widget
+  const saveButton = (w: VueWrapper) => button(w, /^save$/i)!
+
+  it('lists every step of every feature, in FEATURES order, and nothing else', () => {
+    const all = FEATURES.flatMap((f) => f.steps.map((s) => featureStepKey(f.id, s.id)))
+    expect(featureStepChoices().map((c) => c.value)).toEqual(all)
+    expect(featureStepChoices()[0].label).toBe(`${FEATURES[0].label}: ${FEATURES[0].steps[0].label}`)
+  })
+
+  it('finds only featureStep values that name no step, each once', () => {
+    const series = [
+      { filter: [{ field: 'featureStep', value: 'games.start' }] },
+      { filter: [{ field: 'featureStep', value: 'games.strat' }] },
+      { filter: [{ field: 'featureStep', value: 'games.strat' }] },
+      { filter: [{ field: 'country', value: 'nowhere' }] },
+      {},
+    ]
+    expect(unknownFeatureStepValues(series)).toEqual(['games.strat'])
+    expect(unknownFeatureStepValues(undefined)).toEqual([])
+  })
+
+  it('shows a picker (no free-text box) for every series of a step chart, set to its step, and Save is enabled', () => {
+    const w = open(games())
+    const pickers = w.findAll('[data-testid="series-feature-step"]')
+    expect(pickers).toHaveLength(games().series!.length)
+    expect(pickers.map((p) => (p.element as HTMLSelectElement).value)).toEqual(games().series!.map((s) => s.filter![0].value))
+    expect(w.find('input[aria-label="Series filter value"]').exists()).toBe(false)
+    expect(w.find('[data-testid="series-unknown-step"]').exists()).toBe(false)
+    expect(saveButton(w).attributes('disabled')).toBeUndefined()
+  })
+
+  it('a stored value naming no step is shown as unknown, blocks Save, and picking a step saves it', async () => {
+    const bad = games()
+    bad.series![0].filter = [{ field: 'featureStep', value: 'games.strat' }]
+    const w = open(bad)
+    expect(w.find('[data-testid="series-unknown-step"]').text()).toContain('games.strat')
+    expect(w.find('[data-testid="series-feature-step"]').text()).toContain('Unknown step: games.strat')
+    expect(saveButton(w).attributes('disabled')).toBeDefined()
+    await saveButton(w).trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+    await w.find('[data-testid="series-feature-step"]').setValue('games.start')
+    expect(w.find('[data-testid="series-unknown-step"]').exists()).toBe(false)
+    const out = await saved(w)
+    expect(out!.series![0].filter).toEqual([{ field: 'featureStep', value: 'games.start' }])
+  })
+
+  it('removing the series with the unknown value also clears the block; other fields keep their free-text box', async () => {
+    const bad = games()
+    bad.series!.push({ label: 'Typo', filter: [{ field: 'featureStep', value: 'nope' }], axis: 'left', style: 'solid' })
+    bad.series!.push({ label: 'Country', filter: [{ field: 'country', value: 'XX' }], axis: 'left', style: 'solid' })
+    const w = open(bad)
+    expect(w.findAll('input[aria-label="Series filter value"]')).toHaveLength(1)
+    expect(saveButton(w).attributes('disabled')).toBeDefined()
+    const rows = w.findAll('.series-row')
+    await rows[rows.length - 2].find('button[title="Remove series"]').trigger('click')
+    expect(saveButton(w).attributes('disabled')).toBeUndefined()
   })
 })
