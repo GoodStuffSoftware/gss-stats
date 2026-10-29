@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.74.2] — 2026-10-29
+
 ### Fixed
 - **A spend-only campaign's scorecard card is no longer empty.** Play-direct (like Flight 4) shows Spend and Clicks (Google Ads) under its flight dates; Google installs stay on the card that has an install action, and a campaign with no stored Ads data says so in one line.
 
