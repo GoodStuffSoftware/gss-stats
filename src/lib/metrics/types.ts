@@ -127,7 +127,7 @@ export type UpsellSide = 'upsellPre' | 'upsellPost'
 export type WindowSide = ReleaseSide | UpsellSide
 export const WINDOW_SIDES: readonly WindowSide[] = ['before', 'after', 'upsellPre', 'upsellPost']
 /** The windows the registry can compute (lib/metrics/metrics.ts MetricDef.windows). */
-export type WindowName = 'attribution' | 'todaySoFar' | 'page' | ReleaseSide | UpsellSide | FeatureDayWindow
+export type WindowName = 'attribution' | 'todaySoFar' | 'page' | 'allTime' | ReleaseSide | UpsellSide | FeatureDayWindow
 export type DeltaName = 'yesterday' | 'avg7'
 
 export type DataBinding =

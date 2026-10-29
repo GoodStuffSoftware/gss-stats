@@ -55,7 +55,7 @@ import { isSplitRefusedPath } from '../splitGuard'
 import { FIRST_FINISH_START_ET } from '../releases'
 import { microsToDollars, resolveCampaignSpend, round2, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
-import type { BeaconRow, FactId, FactRows } from './facts'
+import { featureSetOf, modelFeaturesOf, type BeaconRow, type FactId, type FactRows, type FeatureSet } from './facts'
 import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
 import { retentionBar, retentionVerdict, wilsonBounds, type VerdictCode } from './retention'
 import { addDays } from '../etTime'
@@ -151,6 +151,8 @@ export interface MetricDef {
    * organic arm's campaignReturns fact and passes its rows as StoreEnv.organic. Only a store over
    * campaignReturns that is not itself organic may set it (checked at load). */
   withOrganic?: true
+  /** The feature set its feature fact reads when the request names no feature (a card-level Ask-order metric). */
+  featureSet?: FeatureSet
 }
 
 // ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
@@ -415,7 +417,7 @@ function playThroughOf(rows: FactRows): { value: number | null } {
 type FeatureModel = ReturnType<typeof assembleHealth>
 const featureModels = new WeakMap<object, FeatureModel>()
 /** The feature list a feature id belongs to: a Coach tips id reads COACH_TIP_FEATURES (editor-tools T3), any other FEATURES. */
-const featuresFor = (id: string | undefined): readonly FeatureDef[] => (id !== undefined && COACH_TIP_FEATURE_IDS.has(id) ? COACH_TIP_FEATURES : FEATURES)
+const featuresFor = (id: string | undefined): readonly FeatureDef[] => modelFeaturesOf(featureSetOf(id))
 function featureModelOf(rows: FactRows, env: StoreEnv, features: readonly FeatureDef[]): FeatureModel | null {
   if (rows.kind !== 'featureDays') return null
   let model = featureModels.get(rows.rows)

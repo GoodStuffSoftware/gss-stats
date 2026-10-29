@@ -122,6 +122,45 @@ export const ASK_ORDER_FEATURES: readonly FeatureDef[] = ASK_ORDER_GROUPS.map(
   }),
 )
 
+/** The Ask-order feature ids: the metric registry's 'ask-order' feature set (lib/metrics/facts.ts featureSetOf). */
+export const ASK_ORDER_FEATURE_IDS: ReadonlySet<string> = new Set(ASK_ORDER_FEATURES.map((f) => f.id))
+
+/** The measures the card's table sums over both asks, per tag (step `<measure>-<tag>`, its rows per assigned row as the
+ * step ratio): the signed-in and installed rows, the combined response rows (signed-in + installed: a device that does
+ * both counts twice), the once-per-device responded rows, and the returned and still-playing twin rows. */
+export const ASK_ORDER_SUM_MEASURES = [
+  { id: 'signed-in', label: 'Signed-in rows', outcomes: ['signed-in'] as const },
+  { id: 'installed', label: 'Installed rows', outcomes: ['installed'] as const },
+  { id: 'response', label: 'Response rows', outcomes: ASK_ORDER_RESPONSE_OUTCOMES },
+  { id: 'responded', label: 'Responded rows', outcomes: [] as const },
+  { id: 'returned', label: 'Returned rows', outcomes: ['returned'] as const },
+  { id: 'still-playing', label: 'Still-playing rows', outcomes: ['still-playing'] as const },
+] as const satisfies readonly { id: string; label: string; outcomes: readonly OutcomeId[] }[]
+
+/** ASK_ORDER_FEATURES with the summed measures appended to each group (the card's feature list, the registry's
+ * 'ask-order' set): each sum is one step over the paths it adds up, so a row counts once in it. The statement reads
+ * the same rows (the sums reuse the group's own paths). */
+export const ASK_ORDER_CARD_FEATURES: readonly FeatureDef[] = ASK_ORDER_FEATURES.map((f, i) => {
+  const g = ASK_ORDER_GROUPS[i]!.id
+  return {
+    ...f,
+    steps: [
+      ...f.steps,
+      ...ASK_ORDER_TAGS.flatMap((t) =>
+        ASK_ORDER_SUM_MEASURES.map((m) => ({
+          id: `${m.id}-${t.id}`,
+          label: `${m.label}, either ask (${t.label.toLowerCase()})`,
+          match: {
+            exact: m.id === 'responded' ? ASK_ORDER_ASKS.map((a) => askOrderRespondedPath(g, a.id)) : ASK_ORDER_ASKS.flatMap((a) => m.outcomes.map((o) => askOrderOutcomePath(g, a.id, o))),
+            tag: t.id,
+          },
+          ratioOf: { per: assignedStepId(t.id) },
+        })),
+      ),
+    ],
+  }
+})
+
 export const ASK_ORDER_CAPTION =
   'Counts are rows per ET day, web and app combined, organic (no campaign tag) vs tagged. Every figure is a plain ratio of two row counts (a row ratio), not a per-person rate: ' +
   '"per assigned row" divides a count of rows by the assigned rows of that group. ' +
