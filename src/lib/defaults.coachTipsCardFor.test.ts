@@ -2,7 +2,7 @@
 // traffic is DRAWN as the ordinary coach-tips card through coachTipsCardFor at render time, and nothing stored is rewritten
 // (ADR 0005 decision 2). The fixtures are the production layout's own shapes (version 19, copied 2026-10-27). No env data.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CONFIG_VERSION, coachTipsCardFor, featureHealthCardFor, normalizeConfig, stepChartFor } from './defaults'
+import { CONFIG_VERSION, askOrderCardFor, coachTipsCardFor, featureHealthCardFor, normalizeConfig, stepChartFor } from './defaults'
 import { presetById } from './metrics/presets'
 import { validateCard } from './metrics/validate'
 import { autoCaveatIds } from './notes'
@@ -18,7 +18,7 @@ const layout = (overview: Widget[], features: Widget[]) =>
     { id: 'bsk-overview', name: 'Overview', isDefault: false, group: 'Best Sudoku', filters, widgets: overview },
     { id: 'bsk-features', name: 'Features', isDefault: false, group: 'Best Sudoku', filters, widgets: features },
   ] }))
-const shown = (w: Widget) => coachTipsCardFor(featureHealthCardFor(stepChartFor(w))) // Dashboard.vue's chain
+const shown = (w: Widget) => askOrderCardFor(coachTipsCardFor(featureHealthCardFor(stepChartFor(w)))) // Dashboard.vue's chain
 
 describe('coachTipsCardFor: the saved Coach tips table is drawn as the coach-tips card', () => {
   it('maps the saved Features-page widget (known traffic hidden) to a valid preset, keeping its identity, grid cell and query fields', () => {
@@ -46,10 +46,10 @@ describe('coachTipsCardFor: the saved Coach tips table is drawn as the coach-tip
     expect(coachTipsCardFor(card)).toBe(card)
   })
 
-  it("Dashboard.vue's chain: Coach tips -> coach-tips, Feature health -> feature-health, Ask-order untouched", () => {
+  it("Dashboard.vue's chain: Coach tips -> coach-tips, Feature health -> feature-health, Ask-order -> ask-order", () => {
     expect(shown(SAVED_COACH).card).toEqual({ preset: 'coach-tips' })
     expect(shown(SAVED_HEALTH).card).toEqual({ preset: 'feature-health' })
-    expect(shown(SAVED_ASK)).toEqual(stepChartFor(SAVED_ASK))
+    expect(shown(SAVED_ASK).card).toEqual({ preset: 'ask-order' })
   })
 })
 

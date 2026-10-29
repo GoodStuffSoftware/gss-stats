@@ -843,6 +843,13 @@ export function coachTipsCardFor(wd: Widget): Widget {
   if (wd.card || wd.dataset !== 'features' || wd.view !== 'coach-tips' || wd.excludeKnownTraffic !== true) return wd
   return { ...wd, card: { preset: 'coach-tips' } }
 }
+/** A saved Ask-order A/B widget (dataset 'features', view 'ask-order', no card) drawn as the ask-order card preset at
+ * render time (editor-tools T4), on the same terms as featureHealthCardFor: nothing stored is rewritten, and only a
+ * widget that hides known traffic maps. */
+export function askOrderCardFor(wd: Widget): Widget {
+  if (wd.card || wd.dataset !== 'features' || wd.view !== ASK_ORDER_VIEW || wd.excludeKnownTraffic !== true) return wd
+  return { ...wd, card: { preset: 'ask-order' } }
+}
 
 /** A saved Feature health widget (dataset 'features', view 'health', no card) drawn as the feature-health card preset
  * at render time (editor-tools T2). Nothing stored is rewritten (ADR 0005 decision 2): the widget keeps its id, grid
@@ -854,14 +861,14 @@ export function featureHealthCardFor(wd: Widget): Widget {
 }
 /** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order (ordinary chart-editor
  * charts), then the Coach tips card (the coach-tips card-editor preset, per-tip counts, src/lib/coachTips.ts) full width
- * under them, then the Ask-order A/B, the one bespoke body left (editor tools T4). Also the "Best Sudoku · Features" page
+ * under them, then the Ask-order A/B card (the ask-order preset, editor tools T4). Also the "Best Sudoku · Features" page
  * template (TEMPLATE_WIDGETS, editor tools T7). */
 export function defaultFeaturesWidgets(): Widget[] {
   const chartRows = Math.ceil(FEATURES.length / 2)
   return factoryWidgets([
     ...FEATURES.map((f, i) => featureStepWidget(f, { x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 })),
     coachTipsCardFor(coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 })),
-    askOrderWidget({ x: 0, y: chartRows * 8 + 10, w: 12, h: 17 }),
+    askOrderCardFor(askOrderWidget({ x: 0, y: chartRows * 8 + 10, w: 12, h: 17 })),
   ])
 }
 /** The Ask-order A/B card (Features page): progress toward the call point and the pre-registered read per
