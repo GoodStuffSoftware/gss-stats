@@ -141,7 +141,7 @@ describe('Customize, then use every control without changing anything: still exa
       expect(ref.from).toBe(id)
       expect(ref.spec).toStrictEqual(plain(preset))
       expect(controls(w).findAll('.errors li').map((e) => e.text())).toEqual([])
-    }, 60_000)
+    }, 150_000) // the ask-order preset runs about 45 s locally and over 60 s on CI runners
   }
 })
 

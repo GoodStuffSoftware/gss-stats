@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.1] — 2026-10-29
+
+### Fixed
+- **The card editor stays quick with the Ask-order steps listed.** The feature and step pickers build their lists once per item instead of on every redraw.
+
 ## [0.75.0] — 2026-10-29
 
 ### Changed

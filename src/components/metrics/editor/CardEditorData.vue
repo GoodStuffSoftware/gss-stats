@@ -111,9 +111,11 @@ function setParam(p: MetricParam, v: string | undefined) {
   data.value = withField(data.value as { metric: string; params?: Params }, 'params', Object.keys(params).length ? params : undefined) as DataBinding
 }
 const PARAM_FEATURES = [...FEATURES, ...COACH_TIP_FEATURES, ...ASK_ORDER_CARD_FEATURES]
+const FEATURE_OPTIONS = PARAM_FEATURES.map((f) => ({ value: f.id, label: f.label }))
+const STEP_OPTIONS = [...new Set(PARAM_FEATURES.flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
 function knownOptionsFor(p: MetricParam): { value: string; label: string }[] {
-  if (p === 'feature') return PARAM_FEATURES.map((f) => ({ value: f.id, label: f.label }))
-  if (p === 'step') return [...new Set(PARAM_FEATURES.flatMap((f) => f.steps.map((s) => s.id)))].map((id) => ({ value: id, label: id }))
+  if (p === 'feature') return FEATURE_OPTIONS
+  if (p === 'step') return STEP_OPTIONS
   return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
 }
 /** The choices for a pinned param, plus its current value when the list does not hold it, so the
