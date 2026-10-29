@@ -72,6 +72,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
       </svg>
       <p v-if="vm.days" class="mi-days mono">{{ vm.days }}</p>
       <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
+      <div v-if="vm.progress" role="progressbar" :aria-valuenow="vm.progress.value" aria-valuemin="0" :aria-valuemax="vm.progress.target" :aria-label="plainLabel"><BarTrack :pct="vm.progress.pct" :done="vm.progress.done" /></div>
       <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
     </template>
 
@@ -110,6 +111,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
         </svg>
         <p v-if="vm.days" class="mi-days mono">{{ vm.days }}</p>
         <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
+        <div v-if="vm.progress" role="progressbar" :aria-valuenow="vm.progress.value" aria-valuemin="0" :aria-valuemax="vm.progress.target" :aria-label="plainLabel"><BarTrack :pct="vm.progress.pct" :done="vm.progress.done" /></div>
         <p v-if="showCaption" class="mi-tile-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
       </StatTile>
     </template>

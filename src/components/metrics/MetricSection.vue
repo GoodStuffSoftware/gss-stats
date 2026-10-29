@@ -8,7 +8,7 @@
 //     whose every cell is gated out (a closed flight's unmeasured step) is omitted.
 import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
-import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, columnDefaultLabel, columnTableColumns, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import type { ValueResolver } from '../../lib/textLite'
@@ -103,7 +103,10 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
 const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt, props.values).map((t) => t.value).join('') || undefined)))
 
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
-const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx, props.outerScope).map((c) => nestScope(c, props.outerScope)) : []))
+const columnTable = computed(() => (isColumnTable.value ? columnTableColumns(props.section, props.outerScope, props.ctx) : { columns: [], groups: [] }))
+const tableColumns = computed<ScopeInstance[]>(() => columnTable.value.columns)
+/** Column groups (Section.columnGroups): a heading row over the columns, each spanning its own. */
+const columnGroupHeaders = computed(() => columnTable.value.groups.map((g) => ({ span: g.span, tokens: resolveLabelTokens(columnDefaultLabel(g.scope), g.scope, undefined, props.ctx.todayEt, props.values) })))
 const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt, props.values)))
 const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
@@ -145,6 +148,10 @@ const anyVisible = computed(() => {
     <div v-if="isColumnTable" class="metric-table-wrap">
       <table class="metric-table columns">
         <thead>
+          <tr v-if="columnGroupHeaders.length" class="column-groups">
+            <th />
+            <th v-for="(g, i) in columnGroupHeaders" :key="i" :colspan="g.span" class="group"><MetricLabel :tokens="g.tokens" /></th>
+          </tr>
           <tr>
             <th><MetricLabel :tokens="rowsHeaderTokens" /></th>
             <th v-for="(tokens, i) in columnHeaderTokens" :key="i" class="num"><MetricLabel :tokens="tokens" /></th>
@@ -268,6 +275,9 @@ const anyVisible = computed(() => {
 .metric-table th.num,
 .metric-table td.num {
   text-align: right;
+}
+.metric-table.columns tr.column-groups th.group {
+  text-align: center;
 }
 .metric-table.columns th.row-label {
   font-size: 11.5px;

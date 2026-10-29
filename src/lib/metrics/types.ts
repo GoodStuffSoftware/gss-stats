@@ -126,6 +126,10 @@ export type ReleaseSide = 'before' | 'after'
 export type UpsellSide = 'upsellPre' | 'upsellPost'
 export type WindowSide = ReleaseSide | UpsellSide
 export const WINDOW_SIDES: readonly WindowSide[] = ['before', 'after', 'upsellPre', 'upsellPost']
+/** The windows a windows repeat may list (RepeatSpec.over 'windows'): the before/after sides, the
+ * latest and previous complete ET days, and the page's range. Unpinned, it is release before/after. */
+export type RepeatWindow = WindowSide | FeatureDayWindow | 'page'
+export const REPEAT_WINDOWS: readonly RepeatWindow[] = [...WINDOW_SIDES, 'latestDay', 'previousDay', 'page']
 /** The windows the registry can compute (lib/metrics/metrics.ts MetricDef.windows). */
 export type WindowName = 'attribution' | 'todaySoFar' | 'page' | 'allTime' | ReleaseSide | UpsellSide | FeatureDayWindow
 export type DeltaName = 'yesterday' | 'avg7'
@@ -152,6 +156,9 @@ export type Display =
   | { as: 'datetime-et' }
   | { as: 'badge'; tones?: Record<string, 'neutral' | 'live' | 'warn'> }
   | { as: 'bar' } // a bar scaled to the section's largest value: a count, or a rate with its (n/d)
+  /** A count toward a fixed target: "40 / 150" and a bar filled to the share of the target (full, and marked done, at
+   * or past it). `target` is a whole number from 1 to 1,000,000,000. */
+  | { as: 'progress'; target: number }
   | { as: 'date' } // a day (a 'time' metric): "Sep 26"
   | { as: 'ago' } // an instant (a 'time' metric), relative: "3h ago"
   | { as: 'status' } // the label note the value carries (e.g. where a spend figure came from), not the number
@@ -186,7 +193,7 @@ export interface RepeatSpec {
    * 'assets': the ad assets (headlines, descriptions, images) Google served for one campaign
    * (ads_daily_assets): the enclosing campaign's, else `campaignId`. */
   over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules' | 'assets' | 'features' | 'steps' | 'tips'
-  ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES; assets: Google asset ids
+  ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: REPEAT_WINDOWS; assets: Google asset ids
   /** Assets only: the campaign whose assets to list when the repeat is not inside a campaign repeat. */
   campaignId?: string
   /** Assets only: order by this total over the stored days, highest first (a leaderboard); with
@@ -245,6 +252,10 @@ export interface Section {
    * name). Each cell's scope is the column instance inside the card's instance, so a campaign
    * card can split its funnel steps by country. */
   columns?: RepeatSpec
+  /** With `columns`: an outer repeat the columns are grouped under, e.g. a windows repeat over the
+   * latest day and the page range, each holding every column (a heading row over each group, the
+   * columns' own headings under it). Each cell's scope is the column inside its group. */
+  columnGroups?: RepeatSpec
   columnLabel?: Label
   /** With `columns`: the heading over the item-label column (e.g. "Step"). */
   rowsLabel?: Label

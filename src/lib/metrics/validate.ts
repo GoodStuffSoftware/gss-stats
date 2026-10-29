@@ -9,6 +9,7 @@
 
 import { FEATURES } from '../featureHealth'
 import { COACH_TIP_FEATURES, COACH_TIP_ROWS } from '../coachTips'
+import { ASK_ORDER_CARD_FEATURES } from '../askOrder'
 import { MIN_COHORT, POPUPS } from '../popupEvents'
 import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
 import { safeUA } from '../ownExclusion'
@@ -19,7 +20,7 @@ import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricPar
 import { seriesTwin } from './series'
 import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
-import { ASSET_SORT_FIELDS, COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, WINDOW_SIDES, type CardAction, type CardNotices, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
+import { ASSET_SORT_FIELDS, COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, REPEAT_WINDOWS, WINDOW_SIDES, type CardAction, type CardNotices, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
 export const MAX_BODY_BYTES = 64 * 1024
@@ -36,9 +37,9 @@ const DELTA_NAMES: readonly DeltaName[] = ['yesterday', 'avg7']
 const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 const COUNTRY_IDS: ReadonlySet<string> = new Set(COUNTRY_BUCKETS)
-const FEATURE_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES].map((f) => f.id))
+const FEATURE_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES, ...ASK_ORDER_CARD_FEATURES].map((f) => f.id))
 /** Any feature's step id: the feature.* stores give no value for a step that is not the feature's own. */
-const STEP_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES].flatMap((f) => f.steps.map((s) => s.id)))
+const STEP_IDS: ReadonlySet<string> = new Set([...FEATURES, ...COACH_TIP_FEATURES, ...ASK_ORDER_CARD_FEATURES].flatMap((f) => f.steps.map((s) => s.id)))
 const CARD_ACTIONS: ReadonlySet<CardAction> = new Set(['ads-refresh'])
 const CARD_NOTICES: ReadonlySet<string> = new Set<CardNotices>(['ads-readings'])
 /** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket.
@@ -75,7 +76,7 @@ function sidesOf(b: { metric: string } | { ratio: string }): (MetricDef | undefi
  * label note it carries (where a spend figure came from). Neither is a count. */
 export type DataKind = 'count' | 'money' | 'proportion' | 'cost' | 'pair' | 'per' | 'rate' | 'field' | 'time' | 'code'
 export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
-  count: ['number', 'bar', 'sparkline'],
+  count: ['number', 'bar', 'sparkline', 'progress'],
   money: ['currency', 'sparkline'],
   // 'bar': the rate as a bar scaled to the section's largest rate, with its (n/d).
   proportion: ['percent', 'counts', 'bar'],
@@ -105,8 +106,12 @@ export function kindOf(b: DataBinding): DataKind | null {
   return r ? ratioKind(r) : null
 }
 
+/** The largest target a 'progress' display takes. */
+export const PROGRESS_TARGET_MAX = 1_000_000_000
+export const isProgressTarget = (t: unknown): t is number => typeof t === 'number' && Number.isInteger(t) && t >= 1 && t <= PROGRESS_TARGET_MAX
+
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
-const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES, 'latestDay', 'previousDay'])
+const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES, 'latestDay', 'previousDay', 'allTime'])
 const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null, assets: 'assetId', features: 'feature', steps: 'step', tips: 'feature' }
 /** A Google Ads asset id: digits, as the store keeps it. */
 const ASSET_ID_RE = /^[0-9]{1,20}$/
@@ -150,7 +155,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'tips' && !COACH_TIP_ROWS.some((f) => f.id === id)) errors.push(`${where}.repeat: unknown coach tip '${id}'`)
       if (r.over === 'features' && !FEATURE_IDS.has(id)) errors.push(`${where}.repeat: unknown feature '${id}'`)
       if (r.over === 'steps' && !STEP_IDS.has(id)) errors.push(`${where}.repeat: unknown step '${id}'`)
-      if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
+      if (r.over === 'windows' && !(REPEAT_WINDOWS as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
     if (r.limit !== undefined && ((r.over !== 'readings' && r.over !== 'assets') || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
       errors.push(`${where}.repeat: limit is for readings and assets, a whole number from 1 to ${MAX_READINGS_LIMIT}`)
@@ -175,6 +180,7 @@ export function validateCard(spec: CardSpec): string[] {
     if (!k) return void errors.push(`${where}: unknown data id`)
     if (!DISPLAYS_FOR[k].includes(d.as)) errors.push(`${where}: display '${d.as}' not allowed for a ${k}`)
     if (d.as === 'percent' && d.decimals !== undefined && !(Number.isInteger(d.decimals) && d.decimals >= 0 && d.decimals <= 4)) errors.push(`${where}: decimals must be an integer from 0 to 4`)
+    if (d.as === 'progress' && !isProgressTarget(d.target)) errors.push(`${where}: a progress target must be a whole number from 1 to ${PROGRESS_TARGET_MAX}`)
     if ('field' in b) return void checkScopePath(where, b.field)
     const isMetric = 'metric' in b
     const allowedParams = isMetric ? METRICS.get(b.metric)!.params : ratioParamsOf(RATIOS.get(b.ratio)!)
@@ -249,6 +255,10 @@ export function validateCard(spec: CardSpec): string[] {
     if (!['rows', 'pills', 'tiles', 'bars', 'columns', 'table'].includes(s.layout)) errors.push(`${where}: unknown layout '${String(s.layout)}'`)
     checkRepeat(where, s.repeat)
     checkLabel(`${where}.title`, s.title, false)
+    if (s.columnGroups !== undefined) {
+      if (!s.columns) errors.push(`${where}: columnGroups group a column table's columns; it needs columns`)
+      checkRepeat(`${where}.columnGroups`, s.columnGroups)
+    }
     if (s.columns !== undefined || s.columnLabel !== undefined) {
       if (s.layout !== 'table') errors.push(`${where}: columns are for a 'table' section`)
       if (s.repeat && s.columns) errors.push(`${where}: a table repeats its rows or its columns, not both`)
@@ -268,7 +278,7 @@ export function validateCard(spec: CardSpec): string[] {
       checkLabel(`${w}.label`, it.label, !('field' in it.data))
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
       checkLabel(`${w}.hint`, it.hint, !('field' in it.data))
-      check(w, it.data, it.display, [spec.repeat, s.repeat, s.columns, it.repeat])
+      check(w, it.data, it.display, [spec.repeat, s.repeat, s.columnGroups, s.columns, it.repeat])
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       if (it.hideNotes !== undefined && (!Array.isArray(it.hideNotes) || it.hideNotes.some((id) => typeof id !== 'string'))) errors.push(`${w}: hideNotes must be a list of note ids`)

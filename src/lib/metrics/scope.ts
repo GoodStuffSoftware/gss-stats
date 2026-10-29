@@ -7,6 +7,7 @@
 // without mounting a component.
 import { FEATURES, stepRatioLabel, type FeatureDef, type StepDef } from '../featureHealth'
 import { COACH_TIP_ROWS } from '../coachTips'
+import { ASK_ORDER_CARD_FEATURES } from '../askOrder'
 import { CAMPAIGNS, campaignById, campaignStatusOn, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
@@ -16,7 +17,7 @@ import { etDayText, freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type AssetSortField, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, REPEAT_WINDOWS, type AssetSortField, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type RepeatWindow, type ScopePath, type Section } from './types'
 
 /** The count keys a reading scope carries: the record field behind each ReadingCountPath
  * (types.ts READING_COUNT_FIELDS, the allow-list). Nothing else of a record's counts gets here. */
@@ -101,7 +102,7 @@ export type ScopeInstance = (
    * extra instance (RepeatSpec.organic). Not a campaign: campaignOfScope never returns it. */
   | { kind: 'organic' }
   | { kind: 'popup'; popup: PopupDef }
-  | { kind: 'window'; window: WindowSide }
+  | { kind: 'window'; window: RepeatWindow }
   | { kind: 'country'; country: CountryBucket }
   | { kind: 'reading'; reading: ReadingScope }
   | { kind: 'rule'; rule: RuleScope }
@@ -149,7 +150,7 @@ export function nestScope(inner: ScopeInstance, outer: ScopeInstance): ScopeInst
 }
 
 const COUNTRY_LABELS: Record<CountryBucket, string> = { US: 'US', CA: 'CA', other: 'Other' }
-const WINDOW_LABELS: Record<WindowSide, string> = { before: 'Before', after: 'After', upsellPre: 'pre-fix', upsellPost: 'post-fix' }
+const WINDOW_LABELS: Record<RepeatWindow, string> = { before: 'Before', after: 'After', upsellPre: 'pre-fix', upsellPost: 'post-fix', latestDay: 'Latest day', previousDay: 'Previous day', page: 'Range' }
 
 export interface RepeatContext {
   todayEt: string
@@ -165,13 +166,14 @@ export function readingsLimit(repeat: Pick<RepeatSpec, 'limit'> | undefined): nu
   const n = repeat?.limit
   return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), MAX_READINGS_LIMIT) : DEFAULT_READINGS_LIMIT
 }
-type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; items?: { repeat?: RepeatSpec }[] }[] }
+type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; columnGroups?: RepeatSpec; items?: { repeat?: RepeatSpec }[] }[] }
 /** Every repeat of a card (the card's, its sections', their columns' and items'). */
 export function cardRepeats(spec: RepeatHolder): RepeatSpec[] {
   const out: RepeatSpec[] = []
   if (spec.repeat) out.push(spec.repeat)
   for (const s of spec.sections ?? []) {
     if (s.repeat) out.push(s.repeat)
+    if (s.columnGroups) out.push(s.columnGroups)
     if (s.columns) out.push(s.columns)
     for (const it of s.items ?? []) if (it.repeat) out.push(it.repeat)
   }
@@ -265,8 +267,8 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       return list.map((popup) => ({ kind: 'popup', popup }))
     }
     case 'windows': {
-      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as WindowSide[]
-      return ids.filter((w) => WINDOW_SIDES.includes(w)).map((window) => ({ kind: 'window', window }))
+      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as RepeatWindow[]
+      return ids.filter((w) => REPEAT_WINDOWS.includes(w)).map((window) => ({ kind: 'window', window }))
     }
     case 'readings': {
       const arm = armIdOfScope(outer)
@@ -290,7 +292,9 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       return list.map((feature) => ({ kind: 'feature', feature }))
     }
     case 'features': {
-      const list = repeat.ids?.length ? FEATURES.filter((f) => repeat.ids!.includes(f.id)) : FEATURES
+      // Pinned ids may also name the Ask-order groups (lib/askOrder.ts ASK_ORDER_CARD_FEATURES), in
+      // config order; unpinned it is Feature health's own FEATURES.
+      const list = repeat.ids?.length ? [...FEATURES, ...ASK_ORDER_CARD_FEATURES].filter((f) => repeat.ids!.includes(f.id)) : FEATURES
       return list.map((feature) => ({ kind: 'feature', feature }))
     }
     case 'steps': {
@@ -581,10 +585,28 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
 export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
   if (section.layout !== 'table') return flattenSectionItems(section, outerScope, ctx).filter((fi) => !fi.emptyOf)
   if (section.columns) {
-    const cols = resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope))
+    const cols = columnTableColumns(section, outerScope, ctx).columns
     return section.items.flatMap((item) => cols.map((scope) => ({ item, scope })))
   }
   return resolveRepeat(section.repeat, ctx, outerScope).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
+}
+
+/** A column table's columns, left to right, and its column groups (Section.columnGroups) with the
+ * number of columns under each; without groups, `groups` is empty. Each column's scope is the
+ * column inside its group inside the outer instance. */
+export function columnTableColumns(section: Pick<Section, 'columns' | 'columnGroups'>, outerScope: ScopeInstance, ctx: RepeatContext): { columns: ScopeInstance[]; groups: { scope: ScopeInstance; span: number }[] } {
+  if (!section.columns) return { columns: [], groups: [] }
+  if (!section.columnGroups) return { columns: resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope)), groups: [] }
+  const columns: ScopeInstance[] = []
+  const groups: { scope: ScopeInstance; span: number }[] = []
+  for (const g of resolveRepeat(section.columnGroups, ctx, outerScope)) {
+    const gScope = nestScope(g, outerScope)
+    const cols = resolveRepeat(section.columns, ctx, gScope).map((c) => nestScope(c, gScope))
+    if (!cols.length) continue
+    groups.push({ scope: gScope, span: cols.length })
+    columns.push(...cols)
+  }
+  return { columns, groups }
 }
 
 /** The default heading of a table column: the column instance's own name. */
