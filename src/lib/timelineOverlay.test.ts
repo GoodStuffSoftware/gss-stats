@@ -200,11 +200,11 @@ describe('series line chart (the Overall timeline as a standard line chart)', ()
 describe('timelineOverlayPlugin tooltip', () => {
   // A fake chart and canvas context: x = 20 + 30 * index, plot area 40..200 tall. fillText calls are recorded.
   const dates = days('2026-10-26', 5) // 10-26 .. 10-30
-  const mk = (items: OverlayItem[]) => {
+  const mk = (items: OverlayItem[], step = 30, height = 240) => {
     const plugin: any = timelineOverlayPlugin(dates, items)
     const texts: string[] = []
     const ctx: any = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * 5 }) : k === 'fillText' ? (t: string) => texts.push(t) : () => {}), set: () => true })
-    const chart: any = { ctx, chartArea: { left: 10, right: 200, top: 40, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, height: 240 }
+    const chart: any = { ctx, chartArea: { left: 10, right: 200, top: 40, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + step * i } }, height }
     plugin.beforeDatasetsDraw(chart)
     plugin.afterDatasetsDraw(chart)
     const move = (x: number, y = 100) => {
@@ -220,6 +220,21 @@ describe('timelineOverlayPlugin tooltip', () => {
     const { move } = mk([rel('2026-10-27', 'solo')])
     expect(move(50)).toEqual(['2026-10-27 · solo', 'note of solo'])
     expect(move(150)).toEqual([])
+  })
+  it('a hover lists only the markers on the nearest x, never a neighbouring day (5 px a day, hit boxes overlap)', () => {
+    const { move } = mk([rel('2026-10-27', 'before'), rel('2026-10-28', 'web'), rel('2026-10-28', 'Play'), rel('2026-10-29', 'after')], 5)
+    // x = 20 + 5 * index: 10-28 sits at x = 30
+    expect(move(30).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-28 · web', '2026-10-28 · Play'])
+    expect(move(26).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-27 · before'])
+  })
+  it('many markers on one x are capped to what fits the canvas, with a +N more line', () => {
+    const many = Array.from({ length: 8 }, (_, i) => rel('2026-10-28', 'm' + i))
+    const out = mk(many, 30, 200).move(80)
+    const shown = out.filter((t) => t.startsWith('2026-'))
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown.length).toBeLessThan(8)
+    expect(out[out.length - 1]).toBe(`+${8 - shown.length} more, listed under the chart`)
+    expect(mk(many, 30, 2000).move(80).some((t) => t.startsWith('+'))).toBe(false)
   })
   it('markers that share an x position all show, in item order (two and three)', () => {
     const two = mk([rel('2026-10-28', 'web'), rel('2026-10-28', 'Play', 'release')])

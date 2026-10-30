@@ -390,7 +390,7 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
         return
       }
       if (e.type !== 'mousemove' && e.type !== 'click') return
-      const under = hits.filter((h) => e.x >= h.x0 && e.x <= h.x1 && e.y >= h.y0 && e.y <= h.y1).map((h) => h.item)
+      const under = itemsAtPointer(hits, e.x, e.y)
       const next = under.length ? { items: under, x: e.x, y: e.y } : null
       const same = (next?.items.length ?? 0) === (active?.items.length ?? 0) && (next?.items ?? []).every((it, i) => it === active!.items[i])
       if (!same) {
@@ -408,10 +408,18 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
         const when = it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date
         return [`${when} · ${it.label}`, ...wrapText(ctx, it.note, 220)]
       })
-      const lineCount = blocks.reduce((n, b) => n + b.length, 0)
       const gap = 7
-      const w = Math.min(240, Math.max(...blocks.flat().map((l) => ctx.measureText(l).width)) + 14)
-      const h = lineCount * 14 + 10 + (blocks.length - 1) * gap
+      // Many markers on one x (up to eight on a busy day) would overflow the canvas: keep as many whole blocks as fit, then a "+N more" line.
+      const room = (chart.height ?? Infinity) - 4
+      const heightOf = (bs: string[][], more: boolean) => bs.reduce((n, b) => n + b.length, 0) * 14 + 10 + (bs.length - 1) * gap + (more ? 14 + gap : 0)
+      let more = 0
+      while (blocks.length > 1 && heightOf(blocks, more > 0 || blocks.length < active.items.length) > room) {
+        blocks.pop()
+        more = active.items.length - blocks.length
+      }
+      const moreLine = more ? `+${more} more, listed under the chart` : ''
+      const w = Math.min(240, Math.max(...blocks.flat().map((l) => ctx.measureText(l).width), moreLine ? ctx.measureText(moreLine).width : 0) + 14)
+      const h = heightOf(blocks, more > 0)
       const x = Math.min(Math.max(chartArea.left, active.x + 8), chartArea.right - w)
       const y = Math.max(2, Math.min(chartArea.top + 4, (chart.height ?? Infinity) - h - 2))
       ctx.fillStyle = dark ? 'rgba(33,28,24,0.96)' : 'rgba(255,255,255,0.97)'
@@ -436,9 +444,28 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
           ly += 14
         })
       })
+      if (moreLine) {
+        ctx.beginPath()
+        ctx.moveTo(x + 7, ly + gap / 2 - 0.5)
+        ctx.lineTo(x + w - 7, ly + gap / 2 - 0.5)
+        ctx.stroke()
+        ctx.font = 'italic 11px Inter, system-ui, sans-serif'
+        ctx.fillText(moreLine, x + 7, ly + gap)
+      }
       ctx.restore()
     },
   }
+}
+/** The overlay items a pointer at (x, y) is over. A band's name strip wins (as before); otherwise the marker whose line is nearest
+ * the pointer, plus every other marker on that same x (a web and a Play release on one day), never a neighbouring day's. */
+function itemsAtPointer(hits: { x0: number; x1: number; y0: number; y1: number; item: OverlayItem }[], x: number, y: number): OverlayItem[] {
+  const under = hits.filter((h) => x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1)
+  const band = under.find((h) => h.item.kind === 'flight')
+  if (band) return [band.item]
+  const centre = (h: { x0: number; x1: number }) => (h.x0 + h.x1) / 2
+  let nearest = Infinity
+  for (const h of under) if (Math.abs(centre(h) - x) < Math.abs(nearest - x)) nearest = centre(h)
+  return under.filter((h) => Math.abs(centre(h) - nearest) < 0.5).map((h) => h.item)
 }
 function wrapText(ctx: any, text: string, maxW: number): string[] {
   ctx.font = '11px Inter, system-ui, sans-serif'

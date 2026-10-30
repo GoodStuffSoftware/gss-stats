@@ -483,7 +483,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   de-dupe) and shaded campaign-flight bands (an active flight's band runs to the axis end), each
   a checkbox in the chart editor ([`src/lib/timelineOverlay.ts`](src/lib/timelineOverlay.ts)).
   Close labels stagger into rows and drop out rather than overprint (fewer rows at phone width);
-  hovering or tapping a marker line or a band's name shows its date and note, and a collapsed
+  hovering or tapping a marker line or a band's name shows its date and note (every marker on that same day, when a web and a Play release share one), and a collapsed
   "Markers and bands" list under the chart holds every item in range for keyboard and touch. A
   beacon line chart can also draw several **series** (`Widget.series`): each is its own date
   query narrowed by one field = value filter (e.g. `keyEvent = install`), on the left or right
@@ -1721,7 +1721,7 @@ the Google Ads rows (Installs, Cost / install, Spend, Clicks). The entry's `tagg
 `hasBeaconRows`) is what lifts the spend-only beacon ruling for those chips; the three site-install rows (Installs,
 Cost / arrival, Install rate) stay off it (`Gating.notForInstallAction`, because Google's count sits there) and the chips carry the
 caption in `tagged.note` ("Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled."). The go-live
-instant (Play full rollout 2026-10-30T03:31:18Z) is named in that caption and is the `v1.105.1 Play` marker in `src/lib/releases.ts` (`v1.105.1 web`, live 03:24:33Z, is a plain marker too). The Cost card's cost-per-arrival, per-sign-in and per-game rows follow the same rule as the three
+instant (Play full rollout 2026-10-30T03:31:18Z) is named in that caption and is the `v1.105.1 Play` marker in `src/lib/releases.ts` (it is a major marker, a dashed labelled line; `v1.105.1 web`, live 03:24:33Z, is a plain tick). The Cost card's cost-per-arrival, per-sign-in and per-game rows follow the same rule as the three
 web-install rows (`Gating.notForInstallAction`), and the Overview "At a glance" card gets a Tagged arrivals tile for Flight 4 while it flights. The entry sets
 `noPlacements: true`, so the hourly sync (the `gss-stats-sync` Worker) pulls its daily spend but never
 the placement report (an App campaign has no placement report, so the pull is skipped rather than risked), and a

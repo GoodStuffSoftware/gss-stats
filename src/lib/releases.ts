@@ -269,7 +269,7 @@ export const RELEASES: ReleaseMarker[] = [
     note: 'Web live 21:58:36Z 10-28. A single transient sw.js update failure no longer files an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still does.',
   },
   // v1.105.1: the Android app now labels fresh installs with their campaign tag (Play Install Referrer), which is what gives Flight 4
-  // (sudoku_funnel_f4_android) its tagged counts. A plain marker: nothing already counted changes, tagged rows for that tag just begin
+  // (sudoku_funnel_f4_android) its tagged counts. Nothing already counted changes, tagged rows for that tag just begin
   // (the web build carries the same code but the label does nothing there). Web went live 6m45s BEFORE Play, so web is listed first
   // and the later-timed Play entry wins the same-day tie.
   {
