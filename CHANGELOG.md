@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.10] — 2026-10-30
+
 ### Fixed
 - **A failed ads read now says why.** When the Cloudflare database refuses a read or write (for example its daily row limit), the error shows that reason instead of the proxy warning wrangler prints first; ids in the message are masked.
 - **A stored daily ads reading carries the routine's verdict.** The proposal column now holds `CONTINUE` or `PROPOSE PAUSE` on daily rows instead of staying empty unless a pause was proposed.
