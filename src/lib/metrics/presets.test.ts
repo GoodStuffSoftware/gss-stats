@@ -118,10 +118,10 @@ describe('ads-readings-log (ADR 0005 slice 3)', () => {
   const table = log.sections.find((s) => s.layout === 'table')!
   const fieldOf = (it: MetricItem): string | null => ('field' in it.data ? String(it.data.field) : null)
 
-  it('is the readings table: ten columns in the old widget order, default limit 30, a campaign card each', () => {
+  it('is the readings table: the ten old columns plus Data through, default limit 30, a campaign card each', () => {
     expect(log.repeat?.over).toBe('campaigns')
     expect(table.repeat).toMatchObject({ over: 'readings', limit: 30 })
-    expect(table.items.map((i) => i.id)).toEqual(['read', 'kind', 'spend', 'rules', 'proposal', 'arrivals', 'asks', 'accepts', 'auth', 'signUps'])
+    expect(table.items.map((i) => i.id)).toEqual(['read', 'through', 'kind', 'spend', 'rules', 'proposal', 'arrivals', 'asks', 'accepts', 'auth', 'signUps'])
     expect(log.actions).toEqual(['ads-refresh'])
     expect(log.notices).toBe('ads-readings')
   })
@@ -138,7 +138,7 @@ describe('ads-readings-log (ADR 0005 slice 3)', () => {
     // no generic count path, no refused-count words, no hour / place / device in any binding or id
     const everything = JSON.stringify(log)
     expect(everything).not.toMatch(/reading\.count\.\*|return|gamestart|game-start|tutorial|tour|hour|country|device|visitor|platform|placement/i)
-    for (const f of items(log).map(fieldOf)) if (f?.startsWith('reading.')) expect(/^reading\.(readAt|kind|spend|rules|proposal)$/.test(f) || isReadingCountPath(f), f).toBe(true)
+    for (const f of items(log).map(fieldOf)) if (f?.startsWith('reading.')) expect(/^reading\.(readAt|dataThrough|kind|spend|rules|proposal)$/.test(f) || isReadingCountPath(f), f).toBe(true)
   })
 
   it('validateCard refuses a count path outside the allow-list, so a saved spec cannot widen it', () => {

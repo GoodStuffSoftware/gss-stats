@@ -89,7 +89,7 @@ async function mountLog(props: Record<string, unknown> = {}) {
   await settle()
   return wrapper
 }
-const asks = (w: VueWrapper) => [...new Set(w.findAll('tbody tr').map((tr) => tr.findAll('td')[6].text()))]
+const asks = (w: VueWrapper) => [...new Set(w.findAll('tbody tr').map((tr) => tr.findAll('td')[7].text()))]
 const failed = (w: VueWrapper) => w.find('.mc-live').text() !== ''
 
 beforeEach(() => {

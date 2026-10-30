@@ -514,6 +514,7 @@ export const ADS_READINGS_LOG: CardSpec = {
       repeat: { over: 'readings', limit: 30, empty: { label: '', text: { note: 'no-readings-yet' } } },
       items: [
         { id: 'read', label: { note: 'label.reading.read' }, data: { field: 'reading.readAt' }, display: { as: 'datetime-et' } },
+        { id: 'through', label: { note: 'label.reading.dataThrough' }, hint: { note: 'label.reading.dataThroughHint' }, data: { field: 'reading.dataThrough' }, display: { as: 'text' } },
         { id: 'kind', label: { note: 'label.reading.kind' }, data: { field: 'reading.kind' }, display: { as: 'text' } },
         { id: 'spend', label: { note: 'label.campaign.spend' }, data: { field: 'reading.spend' }, display: { as: 'currency' } },
         { id: 'rules', label: { note: 'label.reading.rules' }, data: { field: 'reading.rules' }, display: { as: 'text' } },

@@ -142,7 +142,7 @@ describe('the card', () => {
     serve([camp(APPS, [rec(APPS, { f3: f3('CONTINUE', 'PASS') })]), camp(SEARCH, []), camp(PLAY, [])])
     const [apps, search] = blocks(await newCard())
     expect(apps.empty).toBeNull()
-    expect(apps.tables[0]).toMatchObject({ heads: ['Read (ET)', 'Proposal'], rows: [['Oct 19 · flight day 2', 'CONTINUE']], tones: [[null, null]] })
+    expect(apps.tables[0]).toMatchObject({ heads: ['Read (ET)', 'Proposal'], rows: [['Oct 19 · data through Oct 18 · flight day 2', 'CONTINUE']], tones: [[null, null]] })
     expect(apps.tables[1].heads).toEqual(['Rule', 'Number', 'Threshold', 'Verdict'])
     expect(apps.tables[1].rows).toEqual([
       ['1 · Placement leak', '$0.40 on 1 placement', 'under $2 on any one', 'PASS'],
@@ -159,7 +159,7 @@ describe('the card', () => {
     const threshold = rec(APPS, { kind: 'threshold', thresholds: [50] })
     serve([camp(APPS, [threshold, newest, older]), camp(SEARCH, []), camp(PLAY, [])])
     const [apps] = blocks(await newCard())
-    expect(apps.tables[0].rows).toEqual([['Oct 19 · flight day 2', 'PROPOSE PAUSE']])
+    expect(apps.tables[0].rows).toEqual([['Oct 19 · data through Oct 18 · flight day 2', 'PROPOSE PAUSE']])
     expect(apps.tables[0].tones).toEqual([[null, 'trip']])
     expect(apps.tables[1].rows[1]).toEqual(['2 · CTR', '0.21%', 'at least 0.30%', 'PROPOSE PAUSE'])
     expect(apps.tables[1].tones.map((r) => r[3])).toEqual(['clear', 'trip', 'muted', 'muted'])
@@ -172,7 +172,7 @@ describe('scope pieces', () => {
     expect(campaignF3ReadOf([rec(APPS)])).toBeUndefined()
     expect(campaignF3ReadOf([rec(APPS, { kind: 'threshold', f3: f3('CONTINUE', 'PASS') })])).toBeUndefined()
     const got = campaignF3ReadOf([rec(APPS, { f3: f3(null, 'PROPOSE PAUSE', 3) })])!
-    expect(got).toEqual({ etDate: '2026-10-19', flightDay: 3, proposal: null, rules: readouts('PROPOSE PAUSE') })
+    expect(got).toEqual({ etDate: '2026-10-19', dataThrough: '2026-10-18', flightDay: 3, proposal: null, rules: readouts('PROPOSE PAUSE') })
     expect(JSON.stringify(got)).not.toContain('taggedArrivals')
   })
   it("a 'rules' repeat yields nothing outside a campaign; the not-serving proposal reads as a note", () => {

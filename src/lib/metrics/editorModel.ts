@@ -197,6 +197,7 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
   countries: [{ value: 'country.label', label: 'Country (US / CA / Other)' }],
   readings: [
     { value: 'reading.readAt', label: 'Read at' },
+    { value: 'reading.dataThrough', label: 'Data through (last closed day the reading covers)' },
     { value: 'reading.kind', label: 'Reading kind' },
     { value: 'reading.spend', label: 'Spend' },
     { value: 'reading.rules', label: 'Rules' },

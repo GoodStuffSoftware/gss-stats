@@ -134,7 +134,7 @@ export type ScopePath =
   | 'campaign.flight' | 'campaign.measurabilityNote'
   | 'popup.id' | 'popup.label'
   | 'window.label'
-  | 'reading.readAt' | 'reading.kind' | 'reading.spend' | 'reading.rules' | 'reading.proposal'
+  | 'reading.readAt' | 'reading.dataThrough' | 'reading.kind' | 'reading.spend' | 'reading.rules' | 'reading.proposal'
 
 /** (a) LABEL: literal text, or a bound object. */
 export type Label =

@@ -8,7 +8,8 @@
 // spec says. What a reading keeps is an aggregate with its own read time.
 import { proposalLabel, type ReadingRecord } from '../adsRules'
 import { rulesSummary } from '../adsRulesSummary'
-import { readingKindLabel } from '../adsReadingsFormat'
+import { readingDataThrough, readingKindLabel } from '../adsReadingsFormat'
+import { campaignById } from '../campaigns'
 import type { AdsReadingsAsset, AdsReadingsCampaign, AdsReadingsResponse } from '../adsStore'
 import type { AssetScope, CampaignAdsInfo, CampaignF3Read, ReadingCountKey, ReadingScope } from './scope'
 import { READING_COUNT_FIELDS } from './types'
@@ -25,6 +26,7 @@ export function readingScopeOf(r: ReadingRecord): ReadingScope {
   return {
     campaignId: r.campaignId,
     readAt: r.readAt,
+    dataThrough: readingDataThrough(r, campaignById(r.campaignId)?.flightEnd),
     // A read that depended on a read that returned nothing says so in the Kind text (it is also
     // dimmed, MetricSection.vue), as the bespoke readings log did.
     kind: r.complete ? readingKindLabel(r) : `${readingKindLabel(r)} (incomplete)`,
@@ -61,6 +63,7 @@ export function campaignF3ReadOf(readings: readonly ReadingRecord[] | null | und
   if (!r?.f3) return undefined
   return {
     etDate: r.etDate,
+    dataThrough: readingDataThrough(r, campaignById(r.campaignId)?.flightEnd),
     flightDay: r.f3.flightDay,
     proposal: r.f3.proposal ?? null,
     rules: r.f3.readouts.map((x) => ({ n: x.n, name: x.name, number: x.number, threshold: x.threshold ?? null, verdict: x.verdict })),

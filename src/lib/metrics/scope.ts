@@ -33,6 +33,8 @@ export interface ReadingScope {
    * instance keeps only that campaign's readings (resolveRepeat). */
   campaignId?: string
   readAt: string
+  /** The last closed ET day the reading's numbers cover (YYYY-MM-DD); null when it cannot be told. */
+  dataThrough?: string | null
   kind: string
   /** The reading's cumulative closed-day spend; null when the read had none. */
   spend: number | null
@@ -88,6 +90,8 @@ export interface RuleScope {
 /** A campaign's newest stored F3 read: its ET read date, flight day, proposal and rules. */
 export interface CampaignF3Read {
   etDate: string
+  /** The last closed ET day the read's numbers cover (the day before etDate). */
+  dataThrough?: string | null
   flightDay: number
   proposal: 'PROPOSE PAUSE' | 'CONTINUE' | null
   rules: RuleScope[]
@@ -403,7 +407,7 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     }
     case 'campaign.f3Read': {
       const f3 = campaignInstanceOf(scope)?.ads?.f3
-      return f3 ? `${etDayText(f3.etDate)} · flight day ${f3.flightDay}` : null
+      return f3 ? `${etDayText(f3.etDate)} · data through ${f3.dataThrough ? etDayText(f3.dataThrough) : '—'} · flight day ${f3.flightDay}` : null
     }
     case 'campaign.f3Proposal': {
       const f3 = campaignInstanceOf(scope)?.ads?.f3
@@ -459,6 +463,8 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     }
     case 'reading.readAt':
       return reading ? reading.readAt : null
+    case 'reading.dataThrough':
+      return reading?.dataThrough ? etDayText(reading.dataThrough) : null
     case 'reading.kind':
       return reading ? reading.kind : null
     case 'reading.spend':

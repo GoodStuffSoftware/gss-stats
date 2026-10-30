@@ -64,6 +64,8 @@ export type ScopePath =
   /** The compared release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
   | 'release.label'
   | 'reading.readAt'
+  /** The last closed ET day the reading's numbers cover, "Oct 28" (adsReadingsFormat.ts readingDataThrough): a daily read taken Oct 29 carries Oct 28. */
+  | 'reading.dataThrough'
   | 'reading.kind'
   | 'reading.spend'
   | 'reading.rules'

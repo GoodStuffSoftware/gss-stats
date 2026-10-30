@@ -139,7 +139,7 @@ const newBlocks = (w: VueWrapper) =>
       rows: c.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => squash(td.text()))),
       dim: c.findAll('tbody tr').map((tr) => tr.classes().includes('incomplete')),
       // the tone class of the Rules and Proposal cells, per row (null: none)
-      tones: c.findAll('tbody tr').map((tr) => [3, 4].map((i) => tr.findAll('td')[i].find('.mtc').classes().find((k) => k.startsWith('tone-'))?.slice(5) ?? null)),
+      tones: c.findAll('tbody tr').map((tr) => [4, 5].map((i) => tr.findAll('td')[i].find('.mtc').classes().find((k) => k.startsWith('tone-'))?.slice(5) ?? null)),
       titles: c.findAll('th').map((t) => t.attributes('title') ?? null),
       empty: c.find('.metric-table-empty').exists() ? squash(c.find('.metric-table-empty').text()) : null,
     }
@@ -164,13 +164,13 @@ afterEach(() => {
 })
 
 // Captured from the bespoke widget (B1, live comparison) for the mixed fixture below.
-const MIXED_HEADS = ['Read', 'Kind', 'Spend', 'Rules', 'Proposal', 'Arrivals', 'Asks', 'Accepts', 'Auth', 'Sign-ups']
+const MIXED_HEADS = ['Read', 'Data through', 'Kind', 'Spend', 'Rules', 'Proposal', 'Arrivals', 'Asks', 'Accepts', 'Auth', 'Sign-ups']
 const MIXED_ROWS = [
-  ['Sep 26, 7:00 AM ET', 'daily (incomplete)', '$10.50', '—', '—', '5', '4', '3', '2', 'at most 1'],
-  ['Sep 26, 8:00 AM ET', 'threshold $50', '$10.50', 'TRIPPED: placement-leak', 'PROPOSE PAUSE', '5', '4', '3', '2', '7 (exact)'],
-  ['Sep 26, 9:00 AM ET', 'post-flight day15', '—', '3 clear, 1 watch', 'campaign ended', '5', '4', '3', '2', 'at most 1,500'],
-  ['Sep 26, 10:00 AM ET', 'daily', '$10.50', 'not armed', '—', '—', '0', '—', '2', '—'],
-  ['Sep 26, 11:00 AM ET', 'adhoc (incomplete)', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '4', '3', '2', '1,234 (exact)'],
+  ['Sep 26, 7:00 AM ET', 'Sep 25', 'daily (incomplete)', '$10.50', '—', '—', '5', '4', '3', '2', 'at most 1'],
+  ['Sep 26, 8:00 AM ET', 'Sep 25', 'threshold $50', '$10.50', 'TRIPPED: placement-leak', 'PROPOSE PAUSE', '5', '4', '3', '2', '7 (exact)'],
+  ['Sep 26, 9:00 AM ET', 'Sep 9', 'post-flight day15', '—', '3 clear, 1 watch', 'campaign ended', '5', '4', '3', '2', 'at most 1,500'],
+  ['Sep 26, 10:00 AM ET', 'Sep 25', 'daily', '$10.50', 'not armed', '—', '—', '0', '—', '2', '—'],
+  ['Sep 26, 11:00 AM ET', 'Sep 25', 'adhoc (incomplete)', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '4', '3', '2', '1,234 (exact)'],
 ]
 // The old widget's tone classes on those rows' Rules and Proposal cells (rulesSummary's tone; a
 // 'PROPOSE PAUSE' proposal was 'trip', every other proposal had none).
@@ -204,11 +204,11 @@ describe('ads-readings-log parity: the readings table', () => {
     expect(c[0].fresh).toBe('Spend through Oct 2 · synced 30m ago')
     expect(c[0].fired).toBeNull()
     // the pieces the issue calls out, spelled out so a regression names itself
-    const kinds = c[0].rows.map((r) => r[1])
+    const kinds = c[0].rows.map((r) => r[2])
     expect(kinds).toEqual(['daily (incomplete)', 'threshold $50', 'post-flight day15', 'daily', 'adhoc (incomplete)'])
-    expect(c[0].rows.map((r) => r[9])).toEqual(['at most 1', '7 (exact)', 'at most 1,500', '—', '1,234 (exact)'])
-    expect(c[0].rows[2][2]).toBe('—') // null spend
-    expect(c[0].rows[2][4]).toBe('campaign ended') // proposalLabel's "no pause proposed" note
+    expect(c[0].rows.map((r) => r[10])).toEqual(['at most 1', '7 (exact)', 'at most 1,500', '—', '1,234 (exact)'])
+    expect(c[0].rows[2][3]).toBe('—') // null spend
+    expect(c[0].rows[2][5]).toBe('campaign ended') // proposalLabel's "no pause proposed" note
   })
 
   it('P5 the Rules and Proposal cells carry the old tone classes (trip / watch / clear / muted; a pause proposal is trip)', async () => {
@@ -216,7 +216,7 @@ describe('ads-readings-log parity: the readings table', () => {
     const w = await newCard()
     expect(newBlocks(w)[0].tones).toEqual(MIXED_TONES)
     // only those two columns are toned; no other cell of a row has a tone class
-    expect(w.findAll('tbody td').filter((_, i) => i % 10 !== 3 && i % 10 !== 4).some((td) => td.find('[class*="tone-"]').exists())).toBe(false)
+    expect(w.findAll('tbody td').filter((_, i) => i % 11 !== 4 && i % 11 !== 5).some((td) => td.find('[class*="tone-"]').exists())).toBe(false)
   })
 
   it('an empty campaign shows "No readings yet."', async () => {
@@ -234,8 +234,8 @@ describe('ads-readings-log parity: the readings table', () => {
     expect(new URLSearchParams(mocked.mock.calls[0][0] as string).get('limit')).toBe('30')
     // the server applies the limit; the stub here returns 45, the card trims to its repeat's limit
     expect(c[0].rows).toHaveLength(30)
-    expect(c[0].rows.map((r) => r[6])).toEqual(Array.from({ length: 30 }, (_, i) => String(i)))
-    expect(c[0].rows[0]).toEqual(['Sep 1, 8:00 AM ET', 'daily', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '0', '3', '2', 'at most 1'])
+    expect(c[0].rows.map((r) => r[7])).toEqual(Array.from({ length: 30 }, (_, i) => String(i)))
+    expect(c[0].rows[0]).toEqual(['Sep 1, 8:00 AM ET', 'Sep 25', 'daily', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '0', '3', '2', 'at most 1'])
     expect(c[0].rows[29][0]).toBe('Sep 2, 8:00 AM ET')
   })
 
@@ -244,7 +244,7 @@ describe('ads-readings-log parity: the readings table', () => {
     const c = newBlocks(await newCard({ campaignIds: [Y] }))
     expect(c).toHaveLength(1)
     expect(c[0].label).toBe(LABEL[Y])
-    expect(c[0].rows).toEqual([['Sep 26, 8:00 AM ET', 'daily', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '4', '3', '2', 'at most 1']])
+    expect(c[0].rows).toEqual([['Sep 26, 8:00 AM ET', 'Sep 25', 'daily', '$10.50', '2 clear, 1 no data, 1 n/a', '—', '5', '4', '3', '2', 'at most 1']])
     // narrowing also narrows the request
     expect(mocked.mock.calls.every(([q]) => new URLSearchParams(q as string).getAll('campaignId').join() === Y)).toBe(true)
   })
@@ -327,8 +327,10 @@ describe('ads-readings-log parity: the closed and accepted differences', () => {
   it('P4 the Sign-ups header carries the old tooltip; no other header has one', async () => {
     serve(resp([camp(X, [rec(X)]), camp(Y, [])]))
     const c = newBlocks(await newCard())
-    expect(c[0].titles[9]).toBe(SIGNUPS_HINT)
-    expect(c[0].titles.slice(0, 9)).toEqual(Array(9).fill(null))
+    expect(c[0].titles[10]).toBe(SIGNUPS_HINT)
+    expect(c[0].titles.slice(2, 10)).toEqual(Array(8).fill(null))
+    expect(c[0].titles[0]).toBeNull()
+    expect(c[0].titles[1]).toContain('last closed day')
   })
 
   it('P7 the first load reads "Loading…" (as the old widget did), then the readings', async () => {
@@ -354,6 +356,6 @@ describe('ads-readings-log parity: the closed and accepted differences', () => {
     serve(resp([camp(X, [rec(X, {}, { returnD0Web: 777, returnD0App: 778, returnD1: 779, gameStart: 888, tutorialComplete: 889, tourSkip: 890 })]), camp(Y, [])]))
     const w = await newCard()
     expect(w.text()).not.toMatch(/777|778|779|888|889|890/)
-    expect(w.findAll('tbody tr')[0].findAll('td')).toHaveLength(10)
+    expect(w.findAll('tbody tr')[0].findAll('td')).toHaveLength(11)
   })
 })
