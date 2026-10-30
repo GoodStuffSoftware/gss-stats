@@ -413,7 +413,7 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
   if (!cs.fetchOk) return { section: { ...base, error: cs.error ?? 'ads daily: failed' }, stored: null, sync, campaignSync: cs }
 
   // An as-of read (limitEt) sees only the days it could have seen on its day: later stored days are dropped and today's partial is not read.
-  const throughEt = limitEt && cs.spendThrough && cs.spendThrough > limitEt ? limitEt : cs.spendThrough
+  const throughEt = limitEt && cs.spendThrough && cs.spendThrough > limitEt ? (limitEt >= campaign.flightStart! ? limitEt : null) : cs.spendThrough
   const stored: StoredSpend = {
     ...(cs.spend ?? { v: 1, campaignId: plan.campaignId, source: 'google-ads-api', apiVersion: '', customerId: '', fetchedAt: sync.startedAt, closedThroughEt: null, days: {} }),
   }

@@ -240,6 +240,18 @@ describe('a morning --as-of read', () => {
     expect(daily.counts.yesterdaySpend).toBe(8.5)
     expect(JSON.stringify(daily.rules)).toContain('17.00')
   })
+  it('an as-of read on the flight start day has no spend yet, not a day before the flight', async () => {
+    const clock = resolveMorningClock({ 'as-of': '2026-10-17' }, REAL_NOW)!
+    const f = fx()
+    f.now = new Date(clock.nowMs).toISOString()
+    const day = (cost: number) => ({ costMicros: cost * 1_000_000, impressions: 100, clicks: 2 })
+    f.store = { spend: { v: 1, campaignId: F3_SEARCH, source: 'google-ads-api', apiVersion: 'v', customerId: 'c', fetchedAt: '2026-10-21T10:00:00Z', closedThroughEt: '2026-10-20', days: { '2026-10-17': day(8.5), '2026-10-18': day(8.5) } } }
+    const deps = fixtureDeps(f, false)
+    deps.asOf = clock.asOf!
+    const r = await runMorningRead(deps, optsFor(F3_SEARCH))
+    expect(r.spend.throughEt).toBeNull()
+    expect(r.spend.yesterday).toBeNull()
+  })
   it('every beacon read of an as-of run stops at the read day midnight, the first-session ones too', async () => {
     const MIDNIGHT = Date.parse('2026-10-19T04:00:00Z')
     const clock = resolveMorningClock({ 'as-of': '2026-10-19' }, REAL_NOW)!
