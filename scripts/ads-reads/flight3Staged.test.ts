@@ -498,7 +498,7 @@ describe('runbook LEGS table', () => {
     const want: string[] = []
     for (const arm of STAGED_ARMS) {
       const end = STAGED_FLIGHT_3_DATES[arm].flightEnd
-      expect(end, arm).toBeTruthy() // every arm is live; a staged arm would need no rows
+      expect(end, arm).toBeTruthy() // all three arms are filled in code today; a staged arm would need its own handling here
       for (const stage of ['wrapup', 'day15'] as const) {
         expect(postflightDueDate(stage, end!), `${arm} ${stage}`).toBe(addDays(end!, stage === 'wrapup' ? 7 : 15)) // the CLI's own rule
         want.push([postflightDueDate(stage, end!), STAGED_FLIGHT_3[arm].ids.campaignId, labels[arm], stage].join('|'))

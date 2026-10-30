@@ -109,7 +109,7 @@ CLI's own due dates, from the Flight end cell of the arm's legs-table row and it
 entry). For a live `by-date` arm, REPORTS also derives the same two reports from the row's Flight
 end (LABEL `F3 apps`, `F3 search` or `F3 apps play`). The explicit rows are authoritative and must
 match that derivation (a test fails if they differ); a report that is both a row and derived runs once.
-A row whose "What it adds" starts with `DONE` was already run by hand on its date and is not run again, and neither is its derived twin.
+A row whose "What it adds" starts with `DONE` was already run by hand on its date and is not run again, and neither is its derived twin (a `stage=` fire still runs it).
 The return windows are cumulative `/return/<uc>/` bucket
 counts, so each read shows every bucket the flight has reached.
 
@@ -433,7 +433,7 @@ routine's; the steps below only make gss-stats read it.
 1. **Dates** (one commit, merged to main before the arm's first morning read at D + 1, 08:37 ET;
    the merge redeploys Pages and the sync Worker). Set `STAGED_FLIGHT_3_DATES.<arm>` `flightStart`
    (D) and `flightEnd` (D + 6) in `src/lib/campaigns.ts`, and the same two dates in that arm's
-   LEGS row of this file (Flight start, Flight end). A test fails the build if the two disagree or
+   LEGS row of this file (Flight start, Flight end), and that arm's two F3 rows in the Part B table (flight end + 7 `wrapup`, + 15 `day15`). A test fails the build if the two disagree or
    if exactly one of an arm's two dates is filled. Both arms are filled:
    2026-10-17..2026-10-23 (Apps started 10-17, ahead of the Play release).
 2. **Manual steps no date can drive** (the lead, per arm, once its dates are on main):
@@ -469,7 +469,7 @@ before 2026-10-29 may still hold `ADS_ROUTINE_MODE=SHADOW`; it changes nothing).
 - REPORTS = the Part B rows whose DATE is today (zero, one or more; skip a row whose "What it adds" starts with `DONE`, and its derived twin), each with its CAMPAIGN,
   LABEL and STAGE (the F3 rows included), plus for each `by-date` row with both dates filled its derived reports:
   `wrapup` when DATE is Flight end + 7 and `day15` when DATE is Flight end + 15 (CAMPAIGN the
-  row's id, LABEL `F3 apps`, `F3 search` or `F3 apps play`). Exception: if a routine-fire payload is present and its whole text is
+  row's id, LABEL `F3 apps`, `F3 search` or `F3 apps play`). A derived report with the same CAMPAIGN and STAGE as a row IS that row: one report, run once. Exception: if a routine-fire payload is present and its whole text is
   exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
   REPORTS is the single row (campaign 24279250691, LABEL BSK retest) with that STAGE (a manual
   rerun of flight 1); if the whole text is `stage=STAGE campaign=ID` with STAGE as above and ID
