@@ -869,7 +869,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     // The ads readings log's column heads (lib/metrics/presets.ts ADS_READINGS_LOG).
     'label.reading.read': 'Read',
     'label.reading.dataThrough': 'Data through',
-    'label.reading.dataThroughHint': 'The last closed day the numbers cover. A daily read covers the day before its read date; a post-flight read stops at the last day of the flight.',
+    'label.reading.dataThroughHint': 'The last closed day the spend covers. A daily read covers the day before its read date, a post-flight read stops at the last day of the flight, and a sync that lagged lowers it. Counts run to the read time.',
     'label.reading.kind': 'Kind',
     'label.reading.rules': 'Rules',
     'label.reading.proposal': 'Proposal',

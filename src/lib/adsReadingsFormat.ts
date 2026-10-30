@@ -48,9 +48,13 @@ export interface DataThroughInput {
   etDate: string
   /** A stored data-through date, when the reading carries one: preferred over the derivation. */
   dataThrough?: string | null
+  /** The last closed day the reading's spend reached (ads_readings.spend_through_et), when stored. */
+  spendThroughEt?: string | null
 }
 
 const ET_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+/** A real calendar day: the shape, and no roll-over (2026-02-30 is not a day). */
+const isDay = (s: unknown): s is string => typeof s === 'string' && ET_DAY_RE.test(s) && addDays(s, 0) === s
 
 /**
  * The last closed ET day (YYYY-MM-DD) a reading's numbers cover, or null when it cannot be told.
@@ -60,15 +64,20 @@ const ET_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
  *    flight's last day (`flightEnd`; the --as-of backfill follows the same rule, its etDate is the
  *    as-of day), so a stage read taken weeks after the flight says the flight's last day. Without
  *    `flightEnd` a post-flight read's cut is unknown: null, never a guess.
+ *  - whichever the kind, a stored `spendThroughEt` earlier than that cut lowers it to that day.
  * The day arithmetic is on the calendar date (etTime addDays), so the 11-01 DST change moves nothing.
  */
 export function readingDataThrough(r: DataThroughInput, flightEnd?: string | null): string | null {
-  if (typeof r.dataThrough === 'string' && ET_DAY_RE.test(r.dataThrough)) return r.dataThrough
-  if (typeof r.etDate !== 'string' || !ET_DAY_RE.test(r.etDate)) return null
-  const dayBefore = addDays(r.etDate, -1)
-  if (r.kind !== 'postflight') return dayBefore
-  if (!flightEnd || !ET_DAY_RE.test(flightEnd)) return null
-  return flightEnd < dayBefore ? flightEnd : dayBefore
+  if (isDay(r.dataThrough)) return r.dataThrough
+  if (!isDay(r.etDate)) return null
+  let cut = addDays(r.etDate, -1)
+  if (r.kind === 'postflight') {
+    if (!isDay(flightEnd)) return null
+    if (flightEnd < cut) cut = flightEnd
+  }
+  // a stored spend cut that stops earlier (a lagging sync, a pinned window end) is the truer day
+  if (isDay(r.spendThroughEt) && r.spendThroughEt < cut) cut = r.spendThroughEt
+  return cut
 }
 
 /** "Oct 28" for the data-through date; null stays null. */

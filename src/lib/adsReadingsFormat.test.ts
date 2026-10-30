@@ -60,3 +60,19 @@ describe('dataThroughText', () => {
     expect(dataThroughText(null)).toBeNull()
   })
 })
+
+describe('readingDataThrough: a stored spendThroughEt and impossible dates', () => {
+  it('a spend cut earlier than the derived day lowers it; a later or missing one changes nothing', () => {
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-10-29', spendThroughEt: '2026-10-27' })).toBe('2026-10-27')
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-10-29', spendThroughEt: '2026-10-28' })).toBe('2026-10-28')
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-10-29', spendThroughEt: '2026-10-31' })).toBe('2026-10-28')
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-10-29', spendThroughEt: null })).toBe('2026-10-28')
+    expect(readingDataThrough({ kind: 'postflight', etDate: '2026-11-04', spendThroughEt: '2026-10-20' }, '2026-10-28')).toBe('2026-10-20')
+  })
+
+  it('a roll-over date is not a date', () => {
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-02-30' })).toBeNull()
+    expect(readingDataThrough({ kind: 'daily', etDate: '2026-10-29', dataThrough: '2026-13-45' })).toBe('2026-10-28')
+    expect(readingDataThrough({ kind: 'postflight', etDate: '2026-11-04' }, '2026-02-31')).toBeNull()
+  })
+})
