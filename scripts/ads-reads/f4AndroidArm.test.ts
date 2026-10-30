@@ -58,7 +58,7 @@ describe('the F4 registry entry', () => {
     expect(c.hardCapUsd).toBe(75)
     expect(c.noPlacements).toBe(true)
     expect(c.measurabilityNote).toMatch(/Google counts the Play installs/)
-    expect(c.tagged?.note).toBe('Tagged counts start at the app release; installs before it are unlabelled.')
+    expect(c.tagged?.note).toBe('Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled.')
     expect(hasBeaconRows(c)).toBe(true)
     expect(hasBeaconRows(campaignById(PLAY_DIRECT_SEPT)!)).toBe(false) // F3 Play direct stays ruled out of the beacon metrics
     expect(c.notes).toMatch(/829601920531/)

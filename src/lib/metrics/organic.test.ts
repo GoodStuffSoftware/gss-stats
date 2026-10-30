@@ -335,7 +335,7 @@ describe('the Campaign scorecard F4 card reads the tagged rows beside the Google
   it('captions the chips with when tagged counts start, and no other card has a caption', () => {
     const pills = CAMPAIGN_SCORECARD.sections.find((s) => s.layout === 'pills')!
     expect(pills.title).toEqual({ bind: 'campaign.taggedNote' })
-    expect(scopeField(sc(F4), 'campaign.taggedNote', TODAY)).toBe('Tagged counts start at the app release; installs before it are unlabelled.')
+    expect(scopeField(sc(F4), 'campaign.taggedNote', TODAY)).toBe('Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled.')
     for (const c of CAMPAIGNS.filter((x) => x.id !== F4)) expect(scopeField(sc(c.id), 'campaign.taggedNote', TODAY), c.id).toBeNull()
   })
 

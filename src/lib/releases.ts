@@ -268,6 +268,20 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-28', // web live 2026-10-28T21:58:36Z = 17:58:36 ET (deploy started 21:57:18Z)
     note: 'Web live 21:58:36Z 10-28. A single transient sw.js update failure no longer files an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still does.',
   },
+  // v1.105.1: the Android app now labels fresh installs with their campaign tag (Play Install Referrer), which is what gives Flight 4
+  // (sudoku_funnel_f4_android) its tagged counts. A plain marker: nothing already counted changes, tagged rows for that tag just begin
+  // (the web build carries the same code but the label does nothing there). Web went live 6m45s BEFORE Play, so web is listed first
+  // and the later-timed Play entry wins the same-day tie.
+  {
+    version: 'v1.105.1 web',
+    dateEt: '2026-10-29', // web live 2026-10-30T03:24:33Z = 23:24:33 ET on 10-29
+    note: 'Web live 03:24:33Z 10-30 (23:24 ET 10-29). Carries the install-label code, which does nothing on the web; no change to counts.',
+  },
+  {
+    version: 'v1.105.1 Play',
+    dateEt: '2026-10-29', // full Play production rollout 2026-10-30T03:31:18Z = 23:31:18 ET on 10-29 (versionCode 1105001)
+    note: 'Play production 03:31:18Z 10-30 (1105001); old and new Android builds mix until updates spread. Fresh installs from this build on are labelled with their campaign tag, so Flight 4 (sudoku_funnel_f4_android) counts start here; installs before it are unlabelled.',
+  },
 ]
 
 /** The first WHOLE ET day the once-per-device first-finish rows (FIRST_FINISH_PATH, lib/popupEvents.ts) exist: the day after the
