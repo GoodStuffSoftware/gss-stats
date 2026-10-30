@@ -2,7 +2,7 @@
 // buildSeriesLineConfig) that together replace the Overview's bespoke timeline panel.
 import { describe, expect, it } from 'vitest'
 import { flightItems, goLiveItems, itemsInRange, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
-import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, truncatedFrom, seriesRows } from './charts'
+import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, truncatedFrom, seriesRows, timelineOverlayPlugin } from './charts'
 import { timelineWidget, TIMELINE_SERIES } from './defaults'
 import type { CampaignFlight } from './campaigns'
 import type { StatsResponse } from '../types'
@@ -194,5 +194,38 @@ describe('series line chart (the Overall timeline as a standard line chart)', ()
     const cfg: any = buildChartConfig(left, resp([['2026-09-24', 1]]), [resp([['2026-09-24', 1]])])
     expect(cfg.options.scales.y2).toBeUndefined()
     expect(buildChartConfig(left, resp([]))).toBeNull() // no series responses yet → nothing drawn
+  })
+})
+
+describe('timelineOverlayPlugin tooltip', () => {
+  // A fake chart and canvas context: x = 20 + 30 * index, plot area 40..200 tall. fillText calls are recorded.
+  const dates = days('2026-10-26', 5) // 10-26 .. 10-30
+  const mk = (items: OverlayItem[]) => {
+    const plugin: any = timelineOverlayPlugin(dates, items)
+    const texts: string[] = []
+    const ctx: any = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * 5 }) : k === 'fillText' ? (t: string) => texts.push(t) : () => {}), set: () => true })
+    const chart: any = { ctx, chartArea: { left: 10, right: 200, top: 40, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, height: 240 }
+    plugin.beforeDatasetsDraw(chart)
+    plugin.afterDatasetsDraw(chart)
+    const move = (x: number, y = 100) => {
+      texts.length = 0
+      plugin.afterEvent(chart, { event: { type: 'mousemove', x, y } })
+      plugin.afterDraw(chart)
+      return [...texts]
+    }
+    return { move }
+  }
+  const rel = (date: string, label: string, kind: OverlayItem['kind'] = 'minor-release'): OverlayItem => ({ kind, date, label, note: 'note of ' + label })
+  it('one marker under the pointer shows just that marker; empty space shows nothing', () => {
+    const { move } = mk([rel('2026-10-27', 'solo')])
+    expect(move(50)).toEqual(['2026-10-27 · solo', 'note of solo'])
+    expect(move(150)).toEqual([])
+  })
+  it('markers that share an x position all show, in item order (two and three)', () => {
+    const two = mk([rel('2026-10-28', 'web'), rel('2026-10-28', 'Play', 'release')])
+    expect(two.move(80)).toEqual(['2026-10-28 · web', 'note of web', '2026-10-28 · Play', 'note of Play'])
+    const three = mk([rel('2026-10-28', 'a'), rel('2026-10-28', 'b', 'go-live'), rel('2026-10-28', 'c', 'release'), rel('2026-10-29', 'other')])
+    expect(three.move(80).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-28 · a', '2026-10-28 · b', '2026-10-28 · c'])
+    expect(three.move(110).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-29 · other'])
   })
 })

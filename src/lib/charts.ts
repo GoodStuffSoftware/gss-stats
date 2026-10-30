@@ -300,7 +300,8 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
     .filter((p) => p.index !== -1)
   // Hit areas from the last draw, for hover/tap.
   let hits: { x0: number; x1: number; y0: number; y1: number; item: OverlayItem }[] = []
-  let active: { item: OverlayItem; x: number; y: number } | null = null
+  // Every item under the pointer: markers that share an x position (a web and a Play release on one day) all show.
+  let active: { items: OverlayItem[]; x: number; y: number } | null = null
   const bandFlightIndex = new Map(items.filter((i) => i.kind === 'flight').map((it, n) => [it, n]))
   return {
     id: 'timelineOverlay',
@@ -389,9 +390,10 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
         return
       }
       if (e.type !== 'mousemove' && e.type !== 'click') return
-      const hit = hits.find((h) => e.x >= h.x0 && e.x <= h.x1 && e.y >= h.y0 && e.y <= h.y1)
-      const next = hit ? { item: hit.item, x: e.x, y: e.y } : null
-      if ((next?.item ?? null) !== (active?.item ?? null)) {
+      const under = hits.filter((h) => e.x >= h.x0 && e.x <= h.x1 && e.y >= h.y0 && e.y <= h.y1).map((h) => h.item)
+      const next = under.length ? { items: under, x: e.x, y: e.y } : null
+      const same = (next?.items.length ?? 0) === (active?.items.length ?? 0) && (next?.items ?? []).every((it, i) => it === active!.items[i])
+      if (!same) {
         active = next
         args.changed = true
       }
@@ -399,15 +401,19 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
     afterDraw(chart: any) {
       if (!active) return
       const { ctx, chartArea } = chart
-      const it = active.item
-      const when = it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date
-      const lines = [`${when} · ${it.label}`, ...wrapText(ctx, it.note, 220)]
       ctx.save()
       ctx.font = '11px Inter, system-ui, sans-serif'
-      const w = Math.min(240, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14)
-      const h = lines.length * 14 + 10
+      // One block per item (a bold "date · name" line, then its wrapped note), a thin rule between blocks.
+      const blocks = active.items.map((it) => {
+        const when = it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date
+        return [`${when} · ${it.label}`, ...wrapText(ctx, it.note, 220)]
+      })
+      const lineCount = blocks.reduce((n, b) => n + b.length, 0)
+      const gap = 7
+      const w = Math.min(240, Math.max(...blocks.flat().map((l) => ctx.measureText(l).width)) + 14)
+      const h = lineCount * 14 + 10 + (blocks.length - 1) * gap
       const x = Math.min(Math.max(chartArea.left, active.x + 8), chartArea.right - w)
-      const y = chartArea.top + 4
+      const y = Math.max(2, Math.min(chartArea.top + 4, (chart.height ?? Infinity) - h - 2))
       ctx.fillStyle = dark ? 'rgba(33,28,24,0.96)' : 'rgba(255,255,255,0.97)'
       ctx.strokeStyle = dark ? 'rgba(240,238,233,0.25)' : 'rgba(26,23,21,0.18)'
       ctx.fillRect(x, y, w, h)
@@ -415,9 +421,20 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
       ctx.fillStyle = dark ? '#F4F1EA' : INK
       ctx.textBaseline = 'top'
       ctx.textAlign = 'left'
-      lines.forEach((l, i) => {
-        ctx.font = i === 0 ? '600 11px Inter, system-ui, sans-serif' : '11px Inter, system-ui, sans-serif'
-        ctx.fillText(l, x + 7, y + 5 + i * 14)
+      let ly = y + 5
+      blocks.forEach((lines, b) => {
+        if (b > 0) {
+          ctx.beginPath()
+          ctx.moveTo(x + 7, ly + gap / 2 - 0.5)
+          ctx.lineTo(x + w - 7, ly + gap / 2 - 0.5)
+          ctx.stroke()
+          ly += gap
+        }
+        lines.forEach((l, i) => {
+          ctx.font = i === 0 ? '600 11px Inter, system-ui, sans-serif' : '11px Inter, system-ui, sans-serif'
+          ctx.fillText(l, x + 7, ly)
+          ly += 14
+        })
       })
       ctx.restore()
     },

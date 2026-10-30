@@ -280,7 +280,8 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.105.1 Play',
     dateEt: '2026-10-29', // full Play production rollout 2026-10-30T03:31:18Z = 23:31:18 ET on 10-29 (versionCode 1105001)
-    note: 'Play production 03:31:18Z 10-30 (1105001); old and new Android builds mix until updates spread. Fresh installs from this build on are labelled with their campaign tag, so Flight 4 (sudoku_funnel_f4_android) counts start here; installs before it are unlabelled.',
+    note: 'Play production 03:31:18Z 10-30 (1105001); old and new Android builds mix until updates spread. Fresh installs from this build on are labelled with their campaign tag, so Flight 4 (sudoku_funnel_f4_android) tagged counts start here; installs before it are unlabelled.',
+    major: true, // a go-live moment (Flight 4's tagged counts start): a labelled line, not a tick. The web entry above stays a tick.
   },
 ]
 

@@ -98,11 +98,13 @@ describe('the flight 3 web releases', () => {
     expect(MEASUREMENT_CHANGES.some((c) => c.id.startsWith('v1.104'))).toBe(false)
     expect(RELEASES.filter((r) => r.version.startsWith('v1.104.0 ')).map((r) => r.version)).toEqual(['v1.104.0 web', 'v1.104.0 Play'])
   })
-  it('v1.105.1 web (03:24:33Z) and v1.105.1 Play (03:31:18Z, 1105001) are plain markers on the ET day 2026-10-29, web listed first so the later-timed Play entry wins the tie; Play is when Flight 4 tagged counts start', () => {
+  it('v1.105.1 web (03:24:33Z) and v1.105.1 Play (03:31:18Z, 1105001) are markers on the ET day 2026-10-29, web listed first so the later-timed Play entry wins the tie; Play is when Flight 4 tagged counts start, so it is a labelled (major) line and web stays a tick', () => {
     const web = datedReleases().find((r) => r.version === 'v1.105.1 web')!
     const play = datedReleases().find((r) => r.version === 'v1.105.1 Play')!
     expect(web).toMatchObject({ dateEt: '2026-10-29' })
     expect(play).toMatchObject({ dateEt: '2026-10-29' })
+    expect(play.major).toBe(true)
+    expect(web.major).toBeFalsy()
     expect(at('v1.105.1 Play')).toBeGreaterThan(at('v1.105.1 web'))
     expect(at('v1.105.1 web')).toBeGreaterThan(at('v1.105.0 web'))
     expect(web.note).toContain('03:24:33Z')
