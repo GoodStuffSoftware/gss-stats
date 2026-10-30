@@ -2007,13 +2007,13 @@ instead of being stored as zero. The cloud routine runs it daily 2026-10-27 to 1
   as-of day itself under `--as-of` (its clock is the end of that day); the spend-only line: the day it describes (its `et_date` is the next day). Rows stored before
   this change have no such note; read their data-through as `et_date` minus one day (`spend_through_et` on a daily row is the last day with a spend row).
 - **`proposal` carries the routine's verdict word.** The column only accepts `PROPOSE PAUSE` or `CONTINUE` (a table CHECK; anything else is stored as null). A daily
-  row stores `PROPOSE PAUSE` when kill rule 4 trips or the Flight 3 rules propose one, `CONTINUE` when the rules ran and found nothing to pause, and null when no rule
+  row stores `PROPOSE PAUSE` when kill rule 4 trips or the Flight 3 rules propose one, `CONTINUE` when the rules ran and found nothing to pause (on a campaign without the Flight 3 rules the daily row checks only the hard cap, kill rule 4; rules 1 to 3 sit on the threshold row, so one read can store a daily `CONTINUE` and a threshold `PROPOSE PAUSE`), and null when no rule
   was evaluated (spend unread) or a rule tripped on a campaign that is not serving (the `no pause proposed` note says why). WATCH and INFO have no slot: the spend-only
   arm's INFO line stays in its notes. `decision` stays null: it is for the call a human makes, not the routine.
 - `npm run ads:morning-read -- --campaign <id> --as-of <YYYY-MM-DD ET>` (live, not combined with `--now` or `--release-health-only`) backfills a daily read that never
   ran on its day: the clock is 08:05 ET of that date, so the Ads range, the sync and the D1 beacon reads (cut at that date's midnight) cover only the days before it, and the
-  row is stored under that `et_date`. `read_at` stays the real time and the first note names the as-of. The campaign status, the Firebase counts and the diagnostics
-  sections are read as of the real moment, not date-bounded. A second run of the same day stores nothing (one row per campaign, day and kind).
+  row is stored under that `et_date`. `read_at` stays the real time and the first note names the as-of. The campaign status is read as of the real moment; the Firebase counts stop at the 08:05 ET clock and some diagnostics
+  sections stop at the day before; the "today so far" line shows that whole read day, not a partial one. A second run of the same day stores nothing (one row per campaign, day and kind).
 
 ## Live updates
 

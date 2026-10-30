@@ -1417,7 +1417,8 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   let firstSession: MorningResult['firstSession'] = null
   if (!opts.healthOnly && taggedRows.ok) {
     const sinceMs = attributionStartMs(campaign)
-    const untilMs = Math.min(deps.nowMs, flightEndExclusiveMs(campaign)) // the tagged side's end too
+    // The tagged side's end too; under --as-of also the read day's midnight (the clock is 08:05 ET, the beacon reads stop at 00:00).
+    const untilMs = Math.min(deps.nowMs, flightEndExclusiveMs(campaign), beaconUntilMs(deps) ?? Infinity)
     const siteFs = beacon?.siteFirstSession
       ? await attempt('beacon site first-session', () => beacon.siteFirstSession!(sinceMs, untilMs))
       : unavailable<FirstSessionRowSite[]>('beacon site first-session', beacon ? 'not supported by this beacon source' : deps.beaconInitError)

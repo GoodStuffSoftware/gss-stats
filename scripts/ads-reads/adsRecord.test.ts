@@ -221,6 +221,20 @@ describe('a morning --as-of read', () => {
     expect(again.dedup.skipped.map((s) => s.kind)).toContain('daily')
     expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(1)
   })
+  it('every beacon read of an as-of run stops at the read day midnight, the first-session ones too', async () => {
+    const MIDNIGHT = Date.parse('2026-10-19T04:00:00Z')
+    const clock = resolveMorningClock({ 'as-of': '2026-10-19' }, REAL_NOW)!
+    const f = fx()
+    f.now = new Date(clock.nowMs).toISOString()
+    const deps = fixtureDeps(f, false)
+    deps.asOf = clock.asOf!
+    const seen: (number | null | undefined)[] = []
+    const b = deps.beacon!
+    deps.beacon = { ...b, returnArrivals: async (c, s, until) => (seen.push(until), b.returnArrivals!(c, s, until)) }
+    await runMorningRead(deps, optsFor(F3_SEARCH))
+    expect(seen.length).toBeGreaterThan(0)
+    expect(new Set(seen)).toEqual(new Set([MIDNIGHT]))
+  })
   it('a live read (no as-of) has no as-of note', async () => {
     const deps = fixtureDeps(f3Fixture(8.5, withComplete), false)
     await runMorningRead(deps, optsFor(F3_SEARCH))
