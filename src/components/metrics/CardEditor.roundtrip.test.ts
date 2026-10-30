@@ -412,7 +412,7 @@ describe('the controls for fields the form used to hide round-trip', () => {
       const named = (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)) || e.closest('label') || e.getAttribute('aria-label')
       expect(named, e.outerHTML.slice(0, 120)).toBeTruthy()
     }
-  })
+  }, 30_000) // mounts the whole editor; slow CI runners pass 5 s
 })
 
 describe('fields the editor has no control for survive it: fit, a sparkline series, repeat.organic', () => {

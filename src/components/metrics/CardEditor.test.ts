@@ -532,7 +532,7 @@ describe('every preset, customised: labels read as their names, never "Unknown n
       expect(el.selectedOptions[0]?.textContent ?? '', id).not.toMatch(/^\s*$/)
     }
     if (id === 'campaign-funnel') expect(pickers).toBeGreaterThanOrEqual(14)
-  })
+  }, 30_000) // mounts the whole editor per preset; slow CI runners pass 5 s
 })
 
 describe('"Before the flight starts" (gating.whenNotStarted)', () => {
