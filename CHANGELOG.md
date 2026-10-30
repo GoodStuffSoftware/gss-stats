@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A failed ads read now says why.** When the Cloudflare database refuses a read or write (for example its daily row limit), the error shows that reason instead of the proxy warning wrangler prints first; ids in the message are masked.
+- **A stored daily ads reading carries the routine's verdict.** The proposal column now holds `CONTINUE` or `PROPOSE PAUSE` on daily rows instead of staying empty unless a pause was proposed.
+
+### Added
+- **Every stored ads reading says which day its numbers run through.** The read date is the day the read ran; a `data through` date now sits in the row's notes and next to the read date in the CLI report.
+- **A missed daily ads read can be backfilled.** `ads:morning-read --as-of <date>` takes a daily reading for a day the routine skipped, as the 08:05 ET read of that day would have, and stores it under that date.
+
 ## [0.75.9] — 2026-10-30
 
 ### Added

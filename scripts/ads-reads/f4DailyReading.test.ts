@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SPEND_ONLY_LABEL, buildSpendOnlyLine, spendOnlyLineText, spendOnlyReading, type SpendOnlyDay } from '../../src/lib/adsRules'
+import { SPEND_ONLY_LABEL, buildSpendOnlyLine, dataThroughOf, spendOnlyLineText, spendOnlyReading, type SpendOnlyDay } from '../../src/lib/adsRules'
 import { CAMPAIGNS, campaignById, type CampaignFlight } from '../../src/lib/campaigns'
 import { EXTRAS_RUN_KEY_PREFIX, createSqlAdsStore, type ConversionDayRow } from '../../src/lib/adsStore'
 import { armShortName, runSpendOnlyDailyRead, type ReadDeps } from './read'
@@ -125,6 +125,7 @@ describe('spendOnlyReading', () => {
     expect(r.id).toBe(`daily:${ID}:spend-only:2026-10-26`)
     expect(r.counts).toEqual({ flightDay: 1, spend: 9.95, impressions: 800, clicks: 12, installs: 4, costPerInstall: 2.49, cumulativeSpend: 9.95, hardCap: 75 })
     expect(r.notes[0]).toBe(SPEND_ONLY_LABEL)
+    expect(dataThroughOf(r.notes)).toBe('2026-10-26') // etDate is the day after; the numbers are the day itself
     expect(r.f3).toBeUndefined()
   })
 })

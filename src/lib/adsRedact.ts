@@ -60,3 +60,50 @@ export function redactedFirstLine(text: string, max = 240): string {
   const line = (text || '').split(/\r?\n/).find((l) => l.trim().length > 0) ?? ''
   return redact(line.trim()).slice(0, max)
 }
+
+// Known wrangler noise that precedes the real failure on stderr: the "▲ [WARNING] …" banners
+// (for example "Proxy environment variables detected") and their indented continuation lines.
+const WARNING_HEADER = /^\W*\[?WARNING\]?\b/i
+// The version banner (" wrangler 4.x.y") and its dashed rule, printed before anything else.
+const BANNER = /^(?:\W*wrangler\b[ \d.]*|[-=]{3,})$/i
+const ERROR_HEADER = /^\W*\[?ERROR\]?\b/i
+// Cloudflare ids that sit in a failing API path: 32-hex account ids and UUID database ids.
+const CF_ID_PATTERNS: RegExp[] = [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, /\b[0-9a-f]{32}\b/gi]
+
+/** The first REAL error line of a failed child process (wrangler): `texts` are tried in order
+ * (stderr, then stdout), "[WARNING]" banner blocks and blank lines are skipped, and a bare
+ * "[ERROR] …" headline gets the detail line under it appended (the D1 limit text lives there:
+ * "… failed.\n\n D1 … daily limit … [code: 7500]"). Redacted, Cloudflare ids masked, capped. Falls
+ * back to the first non-blank line when everything is warning noise. */
+export function redactedErrorLine(texts: readonly (string | null | undefined)[], max = 240): string {
+  let fallback = ''
+  for (const text of texts) {
+    const lines = (text || '').split(/\r?\n/)
+    let inWarning = false
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (!line) {
+        inWarning = false
+        continue
+      }
+      if (BANNER.test(line)) continue
+      if (!fallback) fallback = line
+      if (WARNING_HEADER.test(line)) {
+        inWarning = true
+        continue
+      }
+      if (inWarning && /^\s/.test(lines[i])) continue // the indented body of a warning block
+      inWarning = false
+      let out = line
+      if (ERROR_HEADER.test(line)) {
+        const next = lines.slice(i + 1).map((l) => l.trim()).find((l) => l.length > 0)
+        if (next && !WARNING_HEADER.test(next)) out = `${line} ${next}`
+      }
+      return maskIds(redact(out)).slice(0, max)
+    }
+  }
+  return maskIds(redact(fallback)).slice(0, max)
+}
+function maskIds(s: string): string {
+  return CF_ID_PATTERNS.reduce((acc, re) => acc.replace(re, '<id>'), s)
+}

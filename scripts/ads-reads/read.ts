@@ -27,6 +27,8 @@ import {
   type SpendOnlyLine,
   decideAt100,
   evaluateHealthPairs,
+  closedDataThrough,
+  dataThroughNote,
   evaluateKillRules,
   lastSpendDate,
   microsToDollars,
@@ -928,6 +930,8 @@ export interface SpendOnlyResult {
   dryRun: boolean
   readAt: string
   etDate: string
+  /** The newest closed ET day the lines cover (null before the first one). */
+  dataThrough: string | null
   campaign: CampaignHeader & { hardCapUsd: number; installActionId: string }
   /** Every closed day the stored rows cover, flight start through min(yesterday, flight end). */
   lines: SpendOnlyLine[]
@@ -982,6 +986,7 @@ export async function runSpendOnlyDailyRead(deps: ReadDeps, opts: SpendOnlyOptio
     dryRun: deps.dryRun,
     readAt,
     etDate: todayEt,
+    dataThrough: lines.at(-1)?.date ?? null,
     campaign: head,
     lines,
     stored,
@@ -1063,6 +1068,8 @@ export interface MorningResult {
   dryRun: boolean
   readAt: string
   etDate: string
+  /** The last closed ET day the numbers cover (etDate is the READ date): the day before it, not past the flight end. */
+  dataThrough: string
   campaign: CampaignHeader
   status: CampaignStatus | null
   statusError: string | null
@@ -1325,14 +1332,25 @@ async function searchSideRead(deps: ReadDeps, campaign: CampaignFlight, todayEt:
   return buildSearchAdsSide({ flightDay, flightStartEt, throughEt: until, raw, error })
 }
 
+/** The proposal word a daily reading stores in the `proposal` column (its CHECK allows only these two values). PROPOSE PAUSE when
+ * kill rule 4 or the F3 rules propose one; otherwise CONTINUE when the rules were evaluated and nothing needs a pause. null when no
+ * rule was evaluated (spend unread), or a rule tripped on a campaign that is not serving (the `no pause proposed` note says why). */
+export function dailyProposal(hardCapDaily: RuleResult | null, flight3: Pick<Flight3Block, 'proposal'> | undefined): 'PROPOSE PAUSE' | 'CONTINUE' | null {
+  if (hardCapDaily?.status === 'trip' || flight3?.proposal === 'PROPOSE PAUSE') return 'PROPOSE PAUSE'
+  if (flight3) return flight3.proposal
+  return hardCapDaily?.status === 'not-armed' ? 'CONTINUE' : null
+}
+
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
   const registered = readPlanFor(opts.campaignId)
   const { plan } = registered
+  if (deps.asOf && opts.healthOnly) throw new Error('an as-of read is a daily reading, not a release-health backstop')
   if (opts.windowEndEt !== undefined && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.windowEndEt) && opts.windowEndEt >= registered.campaign.flightStart! && opts.windowEndEt <= registered.campaign.flightEnd)) {
     throw new Error(`--window-end must be a YYYY-MM-DD between ${registered.campaign.flightStart} and ${registered.campaign.flightEnd}`)
   }
   const campaign = opts.windowEndEt ? { ...registered.campaign, flightEnd: opts.windowEndEt } : registered.campaign
-  const readAt = new Date(deps.nowMs).toISOString()
+  // Under --as-of the clock is 08:05 ET of the read day; read_at stays the real time and a note names the as-of.
+  const readAt = new Date(deps.asOf ? deps.asOf.realNowMs : deps.nowMs).toISOString()
   const todayEt = etDateFromMs(deps.nowMs)
   const yesterdayEt = addEtDays(todayEt, -1)
   const errors: string[] = []
@@ -1497,6 +1515,9 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const records: ReadingRecord[] = []
   const notes: string[] = []
+  const dataThrough = closedDataThrough(todayEt, campaign.flightEnd)
+  const asOfNote = deps.asOf ? `As-of read: taken ${readAt} with the clock set to 08:05 ET on ${todayEt} (a daily read that did not run on its day); et_date is the read date, the campaign status is as of the real read and the diagnostics sections are not date-bounded.` : null
+  if (asOfNote) notes.push(asOfNote)
   if (!opts.healthOnly) {
     records.push({
       v: 1,
@@ -1510,7 +1531,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       thresholds: [],
       complete: spend.ok && taggedRows.ok,
       rules: hardCapDaily ? [hardCapDaily] : null,
-      proposal: hardCapDaily?.status === 'trip' || flight3Pause ? 'PROPOSE PAUSE' : null,
+      proposal: dailyProposal(hardCapDaily, flight3),
       decision: null,
       counts: {
         yesterdaySpend: spend.yesterday?.cost ?? null,
@@ -1527,10 +1548,12 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
         asksYesterday: tagged.yesterday?.asks ?? null,
       },
       notes: [
+        ...(asOfNote ? [asOfNote] : []),
         status.ok ? `campaign ${status.value.status}/${status.value.servingStatus}` : 'campaign status unreadable',
         ...(flight3Pause ? [`F3 rules PROPOSE PAUSE (${flight3TrippedText(flight3!)})`] : []),
         ...(play ? [play.line] : []),
         ...(missedReads.length ? [`previous scheduled read missing: ${missedReads.join(', ')}`] : []),
+        dataThroughNote(dataThrough),
       ],
       // F3 arms only (migration 0006): the rules block as the report prints it, for the Campaigns card.
       ...(flight3 ? { f3: readingF3Of(flight3) } : {}),
@@ -1555,6 +1578,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       notes: [
         ...(thresholdRead.kill.tripped.length && thresholdRead.kill.proposal === null ? [noPauseNote(thresholdRead.kill.servingState, status.ok ? status.value : null)] : []),
         ...(thresholdRead.complete ? [] : [`incomplete read, thresholds not consumed: ${thresholdRead.errors.join('; ')}`]),
+        dataThroughNote(dataThrough),
       ],
     })
     if (!thresholdRead.complete) notes.push('The threshold read was incomplete, so it does not consume the threshold: the next run retries it.')
@@ -1578,7 +1602,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       proposal: null,
       decision: null,
       counts: Object.fromEntries((health.results ?? []).flatMap((h) => [[`${h.id}:parent`, h.parent], [`${h.id}:children`, h.children]])),
-      notes: (health.results ?? []).filter((h) => h.status === 'alert').map((h) => `ALERT ${h.id}: ${h.parentLabel} ${h.parent}, ${h.childLabel} 0`),
+      notes: [...(health.results ?? []).filter((h) => h.status === 'alert').map((h) => `ALERT ${h.id}: ${h.parentLabel} ${h.parent}, ${h.childLabel} 0`), dataThroughNote(dataThrough)],
     })
   }
   if (!consumedA.ok && crossedNow.length) notes.push('Threshold state was unreadable, so every crossed threshold was treated as new (a duplicate push is possible).')
@@ -1611,6 +1635,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     dryRun: deps.dryRun,
     readAt,
     etDate: todayEt,
+    dataThrough,
     campaign: header(campaign),
     status: status.ok ? status.value : null,
     statusError: status.ok ? null : status.error,
@@ -1683,6 +1708,8 @@ export interface PostflightResult {
   dryRun: boolean
   readAt: string
   etDate: string
+  /** The last ET day the numbers cover: the as-of day under --as-of (the clock is its end), else the last closed day before etDate. */
+  dataThrough: string
   stage: PostflightStage
   campaign: CampaignHeader
   status: CampaignStatus | null
@@ -1749,6 +1776,8 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     dryRun: deps.dryRun,
     readAt,
     etDate: todayEt,
+    // --as-of: the clock is the end of the as-of day, so that whole day is covered. Otherwise the last closed day.
+    dataThrough: deps.asOf ? deps.asOf.etDate : closedDataThrough(todayEt),
     stage: opts.stage,
     campaign: header(campaign),
     status: status.ok ? status.value : null,
@@ -1919,7 +1948,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
       nonPromoOutcomesStillPlaying: base.promoSplit.beacon?.nonPromo['still-playing'] ?? null,
       nonPromoAccountsInWindow: base.promoSplit.accounts?.nonPromoInWindow ?? null,
     },
-    notes: [...(asOfNote ? [asOfNote] : []), ...(read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`]), ...base.recommendations],
+    notes: [...(asOfNote ? [asOfNote] : []), ...(read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`]), ...base.recommendations, dataThroughNote(base.dataThrough)],
   }
   if (base.cohort) {
     Object.assign(rec.counts, {

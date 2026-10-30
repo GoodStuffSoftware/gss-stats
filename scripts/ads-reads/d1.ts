@@ -9,7 +9,7 @@
 // tags, exclusion constants, timestamps) — still escaped properly, and anything that is not a
 // finite number or a string is refused.
 
-import { redactedFirstLine } from '../../src/lib/adsRedact'
+import { redactedErrorLine } from '../../src/lib/adsRedact'
 import { stripSqlLiterals } from '../../src/lib/adsStore'
 import type { WranglerRunner } from './wrangler'
 
@@ -101,7 +101,7 @@ export function createD1Select(run: WranglerRunner, database: string = BEACON_DB
     const final = inlineBinds(sql, binds)
     assertReadOnlySql(final)
     const res = await run(['d1', 'execute', database, '--remote', '--json', '--command', final])
-    if (res.code !== 0) throw new Error(`wrangler d1 execute failed (exit ${res.code}): ${redactedFirstLine(res.stderr || res.stdout)}`)
+    if (res.code !== 0) throw new Error(`wrangler d1 execute failed (exit ${res.code}): ${redactedErrorLine([res.stderr, res.stdout])}`)
     return parseD1Json(res.stdout) as T[]
   }
 }
