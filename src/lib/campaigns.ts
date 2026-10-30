@@ -422,8 +422,8 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   },
   // ── Flight 4: Android installs, spend-only ──────────────────────────────────────────────
   // A Google Ads App campaign for the Play app com.bestsudoku.app. Its result is the Play installs
-  // Google reports (conversion action 7756366796); Google's counts cannot be joined to the site's own. Once the
-  // app release that reads the Play Install Referrer ships, installs are labelled F4_ANDROID_TAG and the tagged
+  // Google reports (conversion action 7756366796); Google's counts cannot be joined to the site's own. From
+  // Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z) installs are labelled F4_ANDROID_TAG and the tagged
   // rows give the site counts (`tagged`); before it no row carries the tag. Registered
   // spend-only with NO read plan (ADS_READ_PLANS): the morning and post-flight reads and the kill
   // rules never run on it, and the sync pulls its daily spend but not placements
@@ -446,7 +446,7 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
     measurabilityNote: 'App install campaign: Google counts the Play installs. The site\'s own counts come only from installs the app labels with the F4 tag, from the app release on.',
     tagged: { note: 'Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled.' },
     notes:
-      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag until the app release that reads the referrer ships, so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
+      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag before Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z), so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
 ]
 

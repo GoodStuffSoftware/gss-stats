@@ -1710,7 +1710,7 @@ to end).
 (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with the utm tag
 `sudoku_funnel_f4_android` (`F4_ANDROID_TAG`; the Play Install Referrer, no click id kept), the way the F3 Play-direct
 arm's are labelled, so rows with that tag are the site's own count of those installs; Google's install counts still cannot
-be joined to them one for one. No row carries the tag until the app release that reads the referrer ships, so installs before
+be joined to them one for one. No row carries the tag before Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z), so installs before
 it are unlabelled. It is registered
 spend-only with **no read plan** (`ADS_READ_PLANS`): the morning and post-flight reads and the kill
 rules never run on it, and the morning read's default campaign still comes from the read plans only.
