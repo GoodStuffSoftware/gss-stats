@@ -19,6 +19,7 @@ import {
   channelOf,
   newlyCrossedThresholds,
   nextThreshold,
+  postflightDueDate,
   readPlanFor,
   reportLabelFor,
   liveStagedReadPlans,
@@ -484,7 +485,31 @@ describe('runbook LEGS table', () => {
   })
   it('step 0.2 and Part B derive the flight 3 reports from the dates: wrapup on end + 7, day15 on end + 15', () => {
     expect(RUNBOOK).toMatch(/`wrapup` when DATE is Flight end \+ 7 and `day15` when DATE is Flight end \+ 15/)
-    expect(RUNBOOK).not.toMatch(/\| F3 (apps|search) \| (wrapup|day15) \|/) // no hand-written Part B rows
+  })
+  it('the explicit F3 rows of the Part B table are exactly the derivation: wrapup on flight end + 7, day15 on flight end + 15, for every arm', () => {
+    const start = RUNBOOK.indexOf('| DATE (ET) | CAMPAIGN |')
+    expect(start).toBeGreaterThan(-1)
+    const rows: string[][] = []
+    for (const l of RUNBOOK.slice(start).split('\n').slice(2)) {
+      if (!l.startsWith('|')) break
+      rows.push(l.split('|').slice(1, -1).map((c) => c.trim()))
+    }
+    const labels = { apps: 'F3 apps', search: 'F3 search', appsPlay: 'F3 apps play' } as const
+    const want: string[] = []
+    for (const arm of STAGED_ARMS) {
+      const end = STAGED_FLIGHT_3_DATES[arm].flightEnd
+      expect(end, arm).toBeTruthy() // every arm is live; a staged arm would need no rows
+      for (const stage of ['wrapup', 'day15'] as const) {
+        expect(postflightDueDate(stage, end!), `${arm} ${stage}`).toBe(addDays(end!, stage === 'wrapup' ? 7 : 15)) // the CLI's own rule
+        want.push([postflightDueDate(stage, end!), STAGED_FLIGHT_3[arm].ids.campaignId, labels[arm], stage].join('|'))
+      }
+    }
+    const got = rows.filter((r) => /^F3 /.test(r[2])).map((r) => r.slice(0, 4).join('|'))
+    expect(got.slice().sort()).toEqual(want.slice().sort())
+    expect(got).toHaveLength(6) // no duplicate row for an arm and stage
+    // the table stays in date order, so "table order" is the run order
+    const dates = rows.map((r) => r[0])
+    expect(dates).toEqual(dates.slice().sort())
   })
   it('the activation steps are the dates plus the manual steps; the old hand edits are gone', () => {
     const i = RUNBOOK.indexOf('### To activate flight 3')

@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The daily ads routine can no longer skip a Flight 3 follow-up read.** The week-after and day-15 reads for the three Flight 3 arms are now written out as dated rows in the routine's runbook (a test checks them against the flight end dates), after the 10-30 run missed the Apps and Apps Play week-after reads; those two were taken by hand.
+
 ## [0.75.7] — 2026-10-30
 
 ### Fixed

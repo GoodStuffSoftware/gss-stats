@@ -103,9 +103,14 @@ activate flight 3"); there is no `live` flip and no placeholder.
 One report per row. Each row is one campaign at one stage on one date; a date can hold several
 rows (they run one after another). LABEL is the report name used in subjects and pushes. Stage
 dates come from the CLI itself (flight end + 7 for wrapup, + 15 for day15, ...); this table
-only says which ones the routine runs. Flight 3's reports are not rows here: for a live `by-date`
-arm, REPORTS also holds `wrapup` on its flight end + 7 and `day15` on its flight end + 15 (LABEL
-`F3 apps`, `F3 search` or `F3 apps play`), derived from the row's Flight end. The return windows are cumulative `/return/<uc>/` bucket
+only says which ones the routine runs. Flight 3's reports are written out below as explicit rows
+(the F3 rows): each is the arm's `wrapup` on its flight end + 7 or `day15` on its flight end + 15 (the
+CLI's own due dates, from the Flight end cell of the arm's legs-table row and its `STAGED_FLIGHT_3_DATES`
+entry). For a live `by-date` arm, REPORTS also derives the same two reports from the row's Flight
+end (LABEL `F3 apps`, `F3 search` or `F3 apps play`). The explicit rows are authoritative and must
+match that derivation (a test fails if they differ); a report that is both a row and derived runs once.
+A row whose "What it adds" starts with `DONE` was already run by hand on its date and is not run again, and neither is its derived twin.
+The return windows are cumulative `/return/<uc>/` bucket
 counts, so each read shows every bucket the flight has reached.
 
 | DATE (ET) | CAMPAIGN | LABEL | STAGE | What it adds |
@@ -116,7 +121,13 @@ counts, so each read shows every bucket the flight has reached.
 | 2026-10-17 | 24316608605 | F2 apps | wrapup | F2 apps returns, day 2-7 read (same maturing caveat) |
 | 2026-10-25 | 24311309184 | F2 search | day15 | F2 search returns, day 8-14 read (flight end + 15; 10-24 is the last day a 10-10 arrival can return in it) |
 | 2026-10-25 | 24316608605 | F2 apps | day15 | F2 apps returns, day 8-14 read |
+| 2026-10-30 | 24358792494 | F3 apps | wrapup | DONE by hand 2026-10-30 (the 10-30 routine run missed it): F3 apps returns, day 2-7 read (flight end 10-23 + 7) |
+| 2026-10-30 | 24369758153 | F3 apps play | wrapup | DONE by hand 2026-10-30 (same miss): F3 apps play returns, day 2-7 read (flight end 10-23 + 7) |
 | 2026-11-01 | 24279250691 | BSK retest | day30 | flight 1 day 30 |
+| 2026-11-07 | 24358792494 | F3 apps | day15 | F3 apps returns, day 8-14 read (flight end 10-23 + 15) |
+| 2026-11-07 | 24369758153 | F3 apps play | day15 | F3 apps play returns, day 8-14 read (flight end 10-23 + 15) |
+| 2026-11-13 | 24358792551 | F3 search | wrapup | F3 search returns, day 2-7 read (flight end 11-06 + 7) |
+| 2026-11-21 | 24358792551 | F3 search | day15 | F3 search returns, day 8-14 read (flight end 11-06 + 15) |
 | 2026-12-01 | 24279250691 | BSK retest | day60 | flight 1 day 60 |
 | 2026-12-03 | 24279250691 | BSK retest | december | flight 1 December |
 
@@ -455,8 +466,8 @@ before 2026-10-29 may still hold `ADS_ROUTINE_MODE=SHADOW`; it changes nothing).
   Flight start and Flight end both hold a YYYY-MM-DD date and whose read window (Flight start + 1
   .. Flight end + 1) contains DATE (zero, one or more). A `by-date` row with `-` dates, and a row
   with any other status (`past`), is never in ARMS, whatever else it says.
-- REPORTS = the Part B rows whose DATE is today (zero, one or more), each with its CAMPAIGN,
-  LABEL and STAGE, plus for each `by-date` row with both dates filled its derived reports:
+- REPORTS = the Part B rows whose DATE is today (zero, one or more; skip a row whose "What it adds" starts with `DONE`, and its derived twin), each with its CAMPAIGN,
+  LABEL and STAGE (the F3 rows included), plus for each `by-date` row with both dates filled its derived reports:
   `wrapup` when DATE is Flight end + 7 and `day15` when DATE is Flight end + 15 (CAMPAIGN the
   row's id, LABEL `F3 apps`, `F3 search` or `F3 apps play`). Exception: if a routine-fire payload is present and its whole text is
   exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
