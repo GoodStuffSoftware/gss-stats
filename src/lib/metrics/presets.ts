@@ -282,11 +282,13 @@ export const CAMPAIGN_COST: CardSpec = {
         // Inline on purpose: "stale — sync pending" stays visible under the date, as it was.
         { id: 'through', label: { metric: true }, data: { metric: 'campaign.spendThrough' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'no-spend-day-yet' } }, captionMode: 'inline' },
         { id: 'synced', label: { metric: true }, data: { metric: 'campaign.lastSync' }, display: { as: 'ago' }, gating: { whenEmpty: { note: 'not-synced-yet' } }, ...COMPACT },
-        { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
-        { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, ...COMPACT },
+        // Whole-flight spend over tagged-only counts reads far too high for Flight 4 (tagged counts start at the app release), so the
+        // three cost-over-site-count rows are left off a campaign that names an installActionId (Google's cost per install is on the scorecard).
+        { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
+        { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
         // Stored spend over the stored Google Ads clicks, and over the tagged completed games.
         { id: 'cpc', label: { metric: true }, data: { ratio: 'campaign.avgCpc' }, display: { as: 'currency' }, ...COMPACT },
-        { id: 'cpg', label: { metric: true }, data: { ratio: 'campaign.costPerComplete' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'cpg', label: { metric: true }, data: { ratio: 'campaign.costPerComplete' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
       ],
     },
   ],
@@ -351,7 +353,7 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
       ],
     },
   ],
-  // Why a spend-only arm (Flight 4) has no card here: it writes no beacon rows (repeat.tracked drops it).
+  // Why a spend-only arm (Flight 4) has no card here: it is spend-only, so repeat.tracked drops it; its tagged counts are on the Campaign scorecard.
   captions: ['funnel-spend-only-arms'],
 }
 

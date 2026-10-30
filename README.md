@@ -641,9 +641,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   membership, and known verification/household traffic, lifecycle email and the app's own manual
   production checks (`utm_campaign=manual_check`, `/return/manual_check/` paths) are excluded
   server-side. Two
-  campaigns have no beacon rows at all (the September Play-direct arm, whose ads go straight to the
-  Play Store, and Flight 4, an App install campaign); each is shown spend-only rather than an
-  empty funnel.
+  campaigns are spend-only, shown without a funnel card: the September Play-direct arm, whose ads go straight to the
+  Play Store and which has no beacon rows at all, and Flight 4, an App install campaign, whose only
+  rows are the installs the app labels with its own tag (from the app release; the Campaign scorecard reads them).
 - **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
   the card picker as the `retention-verdict` preset (a table, one row per campaign arm plus
   "Organic (web)": the verdict, the days 2-7 return rate with its 90% lower and upper bounds,
@@ -1454,7 +1454,7 @@ lacks the pin, pin it in the same PR as the registration.
   `campaignStatusOn(campaign, todayEt)` (`upcoming` before `flightStart` or with no start yet,
   `active` from the start day through `flightEnd`, `closed` after), and the `status` on a `CAMPAIGNS`
   entry is a live getter for today in ET. Anything holding an injected date calls the function with
-  it. The ads sync writes the derived status to the `ads_campaigns` row whenever it writes data (so that row can lag the in-app status); nothing reads that column back. The Campaign scorecard and the Funnel per campaign both take their campaigns, order and badge from the registry on the card's ET day (both badges are `campaign.statusToday`: "flighting today" inside the flight, otherwise `campaign.status`), so the registry order is the order on both cards: Flight 3's arms sit before Flight 4. The funnel lists beacon-tracked campaigns only (`repeat.tracked`): a spend-only arm (Play-direct, Flight 4) writes no beacon rows, so it has no funnel card, and the card's `funnel-spend-only-arms` caption names those arms and points to the scorecard. On the scorecard a spend-only arm's card shows its flight dates plus Spend and Clicks (Google Ads) from the ads store (`Gating.forSpendOnly`), or one line saying no Google Ads data is stored; Google-reported installs and cost per install appear only where the campaign has an `installActionId` (Flight 4). A tab opened before a deploy keeps its old copy of the registry until it is reloaded. Cron syncs of a closed flight pull through `flightEnd` + 3 days; the post-flight reads pull through yesterday (`uncapped`), so stray spend after the end is still seen. A spend day newer than the latest stored conversion day has no install figure yet (the extras pass stores conversions apart from spend).
+  it. The ads sync writes the derived status to the `ads_campaigns` row whenever it writes data (so that row can lag the in-app status); nothing reads that column back. The Campaign scorecard and the Funnel per campaign both take their campaigns, order and badge from the registry on the card's ET day (both badges are `campaign.statusToday`: "flighting today" inside the flight, otherwise `campaign.status`), so the registry order is the order on both cards: Flight 3's arms sit before Flight 4. The funnel lists beacon-tracked campaigns only (`repeat.tracked`): a spend-only arm (Play-direct, Flight 4) has no funnel card, and the card's `funnel-spend-only-arms` caption names those arms and points to the scorecard. (Flight 4 is spend-only but `tagged`, so it does write rows once the app labels installs: see the Flight 4 section.) On the scorecard a spend-only arm's card shows its flight dates plus Spend and Clicks (Google Ads) from the ads store (`Gating.forSpendOnly`), or one line saying no Google Ads data is stored; Google-reported installs and cost per install appear only where the campaign has an `installActionId` (Flight 4). A tab opened before a deploy keeps its old copy of the registry until it is reloaded. Cron syncs of a closed flight pull through `flightEnd` + 3 days; the post-flight reads pull through yesterday (`uncapped`), so stray spend after the end is still seen. A spend day newer than the latest stored conversion day has no install figure yet (the extras pass stores conversions apart from spend).
   Installs and cost per install: registry metrics `campaign.adsInstalls` (Google's conversions on the
   campaign's `installActionId`, summed over the stored spend days, attribution window) and
   `campaign.costPerAdsInstall` (stored spend over those installs, a ratio of sums, no data at 0
@@ -1721,8 +1721,9 @@ the Google Ads rows (Installs, Cost / install, Spend, Clicks). The entry's `tagg
 `hasBeaconRows`) is what lifts the spend-only beacon ruling for those chips; the three site-install rows (Installs,
 Cost / arrival, Install rate) stay off it (`Gating.notForInstallAction`, because Google's count sits there) and the chips carry the
 caption in `tagged.note` ("Tagged counts start at the app release; installs before it are unlabelled."). When the app release
-date is known, the go-live hooks in at `tagged` in `src/lib/campaigns.ts` (a later `liveAt` beside `note` for the chips'
-first day); until then the counts are 0 or absent. The entry sets
+date is known, the go-live hooks in at `tagged` in `src/lib/campaigns.ts` (a future change would add a go-live instant beside `note` for the chips'
+first day); until then the counts read 0. The Cost card's cost-per-arrival, per-sign-in and per-game rows follow the same rule as the three
+web-install rows (`Gating.notForInstallAction`), and the Overview "At a glance" card gets a Tagged arrivals tile for Flight 4 while it flights. The entry sets
 `noPlacements: true`, so the hourly sync (the `gss-stats-sync` Worker) pulls its daily spend but never
 the placement report (an App campaign has no placement report, so the pull is skipped rather than risked), and a
 skipped pull is never counted as a missing day. Every other campaign pulls exactly as before.

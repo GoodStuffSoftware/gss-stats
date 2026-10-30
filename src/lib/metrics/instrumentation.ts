@@ -2,7 +2,7 @@
 // go-live gating"). Rules are DATA on each metric (lib/metrics/metrics.ts); this module turns
 // them into a measured interval I for one request's window W = [a, b):
 //
-//   1. beaconMeasurable   a spend-only campaign has no beacon rows at all  → unmeasured 'spend-only'
+//   1. beaconMeasurable   a spend-only campaign with no tagged rows (hasBeaconRows) → unmeasured 'spend-only'
 //   2. liveAt / liveOnEtDate   I starts at the go-live (null = not live → unmeasured 'not-live');
 //      `against: 'flight'` compares with the campaign's SERVING window: a flight that ended
 //      before the go-live is unmeasured outright (returnBeaconNotInstrumented /

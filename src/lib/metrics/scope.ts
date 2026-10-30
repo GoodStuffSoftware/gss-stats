@@ -253,6 +253,7 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
     case 'campaigns': {
       let list = repeat.ids?.length ? repeat.ids.map((id) => campaignById(id)).filter((c): c is CampaignFlight => !!c) : CAMPAIGNS
       if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(campaignStatusOn(c, ctx.todayEt)))
+      // Deliberately not hasBeaconRows: a tagged spend-only arm (Flight 4) still has no funnel/country/returns card of its own.
       if (repeat.tracked) list = list.filter((c) => c.measurement !== 'spend-only')
       if (repeat.flightingToday) list = list.filter((c) => flightDayIndex(c, ctx.todayEt) != null)
       const out: ScopeInstance[] = list.map((campaign) => (ctx.ads?.[campaign.id] ? { kind: 'campaign', campaign, ads: ctx.ads[campaign.id] } : { kind: 'campaign', campaign }))

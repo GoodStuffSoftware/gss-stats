@@ -77,8 +77,8 @@ export interface CampaignFlight {
   /** Set when this campaign's ads bypass the beacon entirely (e.g. straight to a Play Store
    * listing, no web page in between) — spend is real but the funnel/arrivals numbers will
    * structurally read zero until something else starts tagging rows for its uc(s). The uc
-   * stays in `ucValues` regardless, so real rows count automatically the moment they exist —
-   * no code change needed here when that happens. */
+   * stays in `ucValues` regardless, so real rows count the moment they exist; set `tagged` (below) once
+   * the app labels them, so the Campaign scorecard reads them (hasBeaconRows). */
   measurement?: 'spend-only'
   /** Shown next to the funnel/arrivals numbers when `measurement === 'spend-only'`. */
   measurabilityNote?: string

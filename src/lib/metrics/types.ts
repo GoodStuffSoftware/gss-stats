@@ -201,7 +201,7 @@ export interface Gating {
    * every other campaign omits it, and it is never requested. For a figure that is shared by all
    * campaigns in the store (spend, clicks) but belongs on a card only next to the install rows. */
   needsInstallAction?: true
-  /** true: only a campaign registered `measurement: 'spend-only'` (no beacon rows: its card has no site numbers) has this
+  /** true: only a campaign registered `measurement: 'spend-only'` (its card has no funnel of its own: Play-direct has no beacon rows, Flight 4 only tagged ones) has this
    * item; every other campaign omits it, and it is never requested. For the Google Ads figures a spend-only card shows
    * in place of site numbers (Spend, Clicks). */
   forSpendOnly?: true

@@ -8,7 +8,7 @@ import { METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
 import { measuredInterval } from './instrumentation'
 import { ORGANIC_TRACKING_LIVE_AT, TOUR_TRACKING_LIVE_AT } from '../popupEvents'
 import { RATIOS, ratioSupportsOrganic } from './ratios'
-import { CAMPAIGN_RETURNS, CAMPAIGN_SCORECARD } from './presets'
+import { CAMPAIGN_COST, CAMPAIGN_RETURNS, CAMPAIGN_SCORECARD } from './presets'
 import {
   armIdOfScope,
   buildRequestSpec,
@@ -337,6 +337,19 @@ describe('the Campaign scorecard F4 card reads the tagged rows beside the Google
     expect(pills.title).toEqual({ bind: 'campaign.taggedNote' })
     expect(scopeField(sc(F4), 'campaign.taggedNote', TODAY)).toBe('Tagged counts start at the app release; installs before it are unlabelled.')
     for (const c of CAMPAIGNS.filter((x) => x.id !== F4)) expect(scopeField(sc(c.id), 'campaign.taggedNote', TODAY), c.id).toBeNull()
+  })
+
+  it('the Cost card leaves out cost per arrival, per sign-in and per game for F4 only, and keeps cost per click', () => {
+    const cost = CAMPAIGN_COST.sections.flatMap((s) => s.items)
+    const om = (cid: string, itemId: string) => {
+      const it = cost.find((i) => i.id === itemId)!
+      return unmeasuredByConfig(it.data, sc(cid), it.gating, TODAY)
+    }
+    for (const id of ['cpa', 'cps', 'cpg']) {
+      expect(om(F4, id), id).toBe(true)
+      expect(om(WEB, id), id).toBe(false)
+    }
+    expect(om(F4, 'cpc')).toBe(false)
   })
 
   it('Play-direct (tired of ads) is unchanged: no site chips, and the Ads rows still show', () => {
