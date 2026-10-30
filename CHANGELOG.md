@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.9] — 2026-10-30
+
 ### Added
 - **Ads readings now say which day they run through.** The readings log has a Data through column, and the Flight 3 rule readouts line adds the same date, so a read taken on a date is not mistaken for spend up to that date. A daily read covers the day before its read date, a post-flight read stops at the last day of the flight, and a lagging sync lowers it; counts still run to the read time.
 
