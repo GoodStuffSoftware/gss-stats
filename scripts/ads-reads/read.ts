@@ -375,7 +375,7 @@ interface SpendRead {
  * window; only changed rows are written) and today's partial numbers (never stored). The
  * restatement window is re-pulled on EVERY read (review M1): the Worker's 6 h cadence must not
  * let a read decide on a yesterday it pulled hours earlier, before Google's late data landed. */
-async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFlight, todayEt: string, source: SyncSource): Promise<SpendRead> {
+async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFlight, todayEt: string, source: SyncSource, limitEt?: string): Promise<SpendRead> {
   const sync = await syncAdsData(
     { ads: deps.ads, adsInitError: deps.adsInitError, store: deps.store },
     { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true, uncapped: true, restatementRecheckMs: 0 },
@@ -412,11 +412,14 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
   }
   if (!cs.fetchOk) return { section: { ...base, error: cs.error ?? 'ads daily: failed' }, stored: null, sync, campaignSync: cs }
 
-  const throughEt = cs.spendThrough
+  // An as-of read (limitEt) sees only the days it could have seen on its day: later stored days are dropped and today's partial is not read.
+  const throughEt = limitEt && cs.spendThrough && cs.spendThrough > limitEt ? limitEt : cs.spendThrough
   const stored: StoredSpend = {
     ...(cs.spend ?? { v: 1, campaignId: plan.campaignId, source: 'google-ads-api', apiVersion: '', customerId: '', fetchedAt: sync.startedAt, closedThroughEt: null, days: {} }),
   }
-  if (cs.today) stored.days = { ...stored.days, [todayEt]: cs.today }
+  if (limitEt) stored.days = Object.fromEntries(Object.entries(stored.days).filter(([d]) => d <= limitEt))
+  const today = limitEt ? null : cs.today
+  if (today) stored.days = { ...stored.days, [todayEt]: today }
   const cum = spendTotals(stored, throughEt ?? addEtDays(campaign.flightStart!, -1))
   const storeError = sync.campaignSyncError ?? (!cs.dailyOk ? cs.error : null)
   return {
@@ -429,7 +432,7 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
       throughEt,
       yesterday: throughEt ? { date: throughEt, ...(dayDollars(stored.days[throughEt]) ?? { cost: 0, impressions: 0, clicks: 0 }) } : null,
       cumulative: { cost: cum.cost, impressions: cum.impressions, clicks: cum.clicks, days: cum.days },
-      todayPartial: dayDollars(cs.today ?? undefined),
+      todayPartial: dayDollars(today ?? undefined),
       restated: cs.restated,
       storeWritten: !deps.dryRun && !storeError,
       storeError,
@@ -1360,7 +1363,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   // The shared sync first (morning read and backstop alike): fills every missing closed day,
   // re-pulls the restatement window, writes only changes. A no-op right after another sync.
-  const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read')
+  const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read', deps.asOf ? yesterdayEt : undefined)
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
   if (plan.channel !== 'search' && campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)

@@ -221,6 +221,25 @@ describe('a morning --as-of read', () => {
     expect(again.dedup.skipped.map((s) => s.kind)).toContain('daily')
     expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(1)
   })
+  it('spend already stored for the read day and later is not read: yesterday, cumulative and the hard cap stop at the day before', async () => {
+    const clock = resolveMorningClock({ 'as-of': '2026-10-19' }, REAL_NOW)!
+    const f = fx()
+    f.now = new Date(clock.nowMs).toISOString()
+    const day = (cost: number) => ({ costMicros: cost * 1_000_000, impressions: 100, clicks: 2 })
+    // The real store already holds 10-19 and 10-20 (synced after the read day); the as-of read must not see them.
+    f.store = { spend: { v: 1, campaignId: F3_SEARCH, source: 'google-ads-api', apiVersion: 'v', customerId: 'c', fetchedAt: '2026-10-21T10:00:00Z', closedThroughEt: '2026-10-20', days: { '2026-10-17': day(8.5), '2026-10-18': day(8.5), '2026-10-19': day(9), '2026-10-20': day(50) } } }
+    const deps = fixtureDeps(f, false)
+    deps.asOf = clock.asOf!
+    const r = await runMorningRead(deps, optsFor(F3_SEARCH))
+    expect(r.spend.throughEt).toBe('2026-10-18')
+    expect(r.spend.cumulative.cost).toBe(17)
+    expect(r.spend.yesterday?.date).toBe('2026-10-18')
+    expect(r.spend.todayPartial).toBeNull()
+    const [daily] = deps.store.written.readings.filter((x) => x.kind === 'daily')
+    expect(daily).toMatchObject({ spendThroughEt: '2026-10-18' })
+    expect(daily.counts.yesterdaySpend).toBe(8.5)
+    expect(JSON.stringify(daily.rules)).toContain('17.00')
+  })
   it('every beacon read of an as-of run stops at the read day midnight, the first-session ones too', async () => {
     const MIDNIGHT = Date.parse('2026-10-19T04:00:00Z')
     const clock = resolveMorningClock({ 'as-of': '2026-10-19' }, REAL_NOW)!
