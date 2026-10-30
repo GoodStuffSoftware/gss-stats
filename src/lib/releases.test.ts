@@ -152,8 +152,8 @@ describe('the flight 3 web releases', () => {
     expect(at('v1.99.3 web')).toBeGreaterThan(-1)
     expect(datedReleases().find((r) => r.version === 'v1.99.3 web')?.dateEt).toBe('2026-10-17')
   })
-  it('the Play markers are dated (v1.99.2 and v1.99.3 on 2026-10-17, v1.99.4 on 2026-10-18, v1.103.0 on 2026-10-26, v1.104.0 on 2026-10-27, v1.105.0 on 2026-10-28), v1.99.3 Play listed after v1.99.3 web (the later-timed one wins the same-day tie)', () => {
-    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }, { version: 'v1.99.3 Play', dateEt: '2026-10-17' }, { version: 'v1.99.4 Play', dateEt: '2026-10-18' }, { version: 'v1.103.0 Play', dateEt: '2026-10-26' }, { version: 'v1.104.0 Play', dateEt: '2026-10-27' }, { version: 'v1.105.0 Play', dateEt: '2026-10-28' }])
+  it('the Play markers are dated (v1.99.2 and v1.99.3 on 2026-10-17, v1.99.4 on 2026-10-18, v1.103.0 on 2026-10-26, v1.104.0 on 2026-10-27, v1.105.0 on 2026-10-28, v1.105.1 on 2026-10-29), v1.99.3 Play listed after v1.99.3 web (the later-timed one wins the same-day tie)', () => {
+    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }, { version: 'v1.99.3 Play', dateEt: '2026-10-17' }, { version: 'v1.99.4 Play', dateEt: '2026-10-18' }, { version: 'v1.103.0 Play', dateEt: '2026-10-26' }, { version: 'v1.104.0 Play', dateEt: '2026-10-27' }, { version: 'v1.105.0 Play', dateEt: '2026-10-28' }, { version: 'v1.105.1 Play', dateEt: '2026-10-29' }])
     expect(at('v1.99.3 Play')).toBeGreaterThan(at('v1.99.3 web'))
     expect(at('v1.99.3 web')).toBeGreaterThan(at('v1.99.2 Play'))
   })
