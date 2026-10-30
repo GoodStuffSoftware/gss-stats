@@ -320,7 +320,7 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
   const et = etMinuteLabel(Date.parse(r.readAt))
   const s = r.status
   return [
-    `${reportLabelFor(r.campaign.id)} ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
+    `${reportLabelFor(r.campaign.id)} ${kind}, ${et}, data through ${r.dataThrough}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
     `Campaign ${r.campaign.id} "${r.campaign.label}" (${r.campaign.ucValues.join(', ')}): ${s ? `${s.status}/${s.servingStatus}${s.dailyBudget != null ? `, budget ${money(s.dailyBudget)}/day` : ''}` : `status NOT READ (${r.statusError})`}`,
     ...measurementLinesAt(r.readAt),
   ]
@@ -634,7 +634,7 @@ export function jsonOnly(result: unknown): string {
 /** The report of a spend-only arm's daily line (read.ts runSpendOnlyDailyRead): the label, one INFO line per
  * closed day (newest last), what this run stored, and any day still waiting on the sync. No proposal exists. */
 export function formatSpendOnlyReport(r: SpendOnlyResult): string {
-  const out = [`${r.campaign.label}: daily line (${SPEND_ONLY_LABEL}); read ${r.etDate}${r.dryRun ? ' (dry run: nothing stored)' : ''}`]
+  const out = [`${r.campaign.label}: daily line (${SPEND_ONLY_LABEL}); read ${r.etDate}, data through ${r.dataThrough ?? 'none yet'}${r.dryRun ? ' (dry run: nothing stored)' : ''}`]
   out.push('INFO only: no rule, no verdict, no proposal; spend over the cap is information.')
   for (const l of r.lines) out.push(`  ${l.date} ${spendOnlyLineText(l, armShortName(r.campaign.label))}`)
   if (!r.lines.length) out.push('  no closed day stored yet')

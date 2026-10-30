@@ -26,7 +26,7 @@ import {
   type SyncRunRecord,
 } from '../../src/lib/adsStore'
 import { BEACON_DB, createD1Select, inlineBinds, parseD1Response } from './d1'
-import { redactedFirstLine } from '../../src/lib/adsRedact'
+import { redactedErrorLine } from '../../src/lib/adsRedact'
 import { unfinishedSyncAlert, UNFINISHED_SYNC_AFTER_MS, UNFINISHED_SYNC_LOOKBACK_MS } from '../../src/lib/adsFreshness'
 import type { WranglerRunner } from './wrangler'
 
@@ -45,7 +45,7 @@ export function wranglerAdsDb(run: WranglerRunner, database: string = ADS_DB_NAM
       const final = inlineBinds(stmt.sql, stmt.binds)
       assertAdsWriteSql(final)
       const res = await run(['d1', 'execute', database, '--remote', '--json', '--command', final])
-      if (res.code !== 0) throw new Error(`wrangler d1 execute ${database} failed (exit ${res.code}): ${redactedFirstLine(res.stderr || res.stdout)}`)
+      if (res.code !== 0) throw new Error(`wrangler d1 execute ${database} failed (exit ${res.code}): ${redactedErrorLine([res.stderr, res.stdout])}`)
       return { changes: parseD1Response(res.stdout).changes } // throws when D1 reports failure
     },
   }

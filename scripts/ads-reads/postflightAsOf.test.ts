@@ -9,7 +9,7 @@ import { runPostflightRead } from './read'
 import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
 import { campaignById } from '../../src/lib/campaigns'
 import { formatPostflightReport } from './report'
-import type { PostflightStage } from '../../src/lib/adsRules'
+import { dataThroughOf, type PostflightStage } from '../../src/lib/adsRules'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const RETEST = '24279250691'
@@ -65,6 +65,8 @@ describe.each(ARMS)('--as-of ($id)', (arm) => {
     expect(early.postFlightSpend?.value).toBe(70)
     expect(real.postFlightSpend?.value).toBe(190)
     expect(early.etDate).toBe('2026-10-17')
+    expect(early.dataThrough).toBe('2026-10-16') // no as-of mark here, just an early clock: the last closed day
+    expect(real.dataThrough).toBe('2026-10-28') // a live run: the last closed day before the read date
   })
 
   it('stores the reading under the stage date with the as-of in its notes, and read_at stays the real time', async () => {
@@ -80,6 +82,10 @@ describe.each(ARMS)('--as-of ($id)', (arm) => {
     expect(rows[0].notes[0]).toContain('end of 2026-10-17 ET')
     expect(r.readAt).toBe('2026-10-29T15:00:00.000Z')
     expect(r.notes[0]).toContain('As-of read')
+    // The numbers run through the end of the as-of day: that is the stored data-through, and the report prints it beside the date.
+    expect(r.dataThrough).toBe('2026-10-17')
+    expect(dataThroughOf(rows[0].notes)).toBe('2026-10-17')
+    expect(formatPostflightReport(r)).toContain('data through 2026-10-17')
     // A second as-of run of the same stage and day adds nothing.
     const again = await runPostflightRead(deps, { campaignId: arm.id, stage: 'wrapup', force: false })
     expect(again.dedup.skipped).toHaveLength(1)

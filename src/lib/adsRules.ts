@@ -1576,6 +1576,25 @@ export const NO_PAUSE_NOTE_PREFIX = 'no pause proposed: campaign '
 export function noPauseNote(state: ServingState, s?: { status: string | null; servingStatus: string | null } | null): string {
   return `${NO_PAUSE_NOTE_PREFIX}${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${s?.status ?? '?'}/${s?.servingStatus ?? '?'})`
 }
+/** Prefix of the reading note that records the last ET day the reading's numbers cover. `et_date`
+ * is the READ date; the spend and day counts run through the day before (the last closed day), so
+ * every reading (daily, threshold, health, post-flight) carries this note. The table has no
+ * column for it and no migration was made; `dataThroughOf` reads it back. */
+export const DATA_THROUGH_NOTE_PREFIX = 'data through '
+export const dataThroughNote = (dateEt: string): string => `${DATA_THROUGH_NOTE_PREFIX}${dateEt} ET`
+/** The last closed ET day a read on `etDate` covers: the day before, but not past the flight end. */
+export function closedDataThrough(etDate: string, flightEnd?: string | null): string {
+  const y = addDays(etDate, -1)
+  return flightEnd && y > flightEnd ? flightEnd : y
+}
+/** The YYYY-MM-DD a reading's data-through note names, or null for a row written before the note existed. */
+export function dataThroughOf(notes: readonly string[]): string | null {
+  for (const note of notes) {
+    const m = /^data through (\d{4}-\d{2}-\d{2}) ET$/.exec(note)
+    if (m) return m[1]
+  }
+  return null
+}
 /** What the readings panel shows in the Proposal column. */
 export function proposalLabel(r: { proposal: string | null; notes: readonly string[] }): string {
   if (r.proposal) return r.proposal
@@ -2326,7 +2345,7 @@ export function spendOnlyReading(campaignId: string, l: SpendOnlyLine, readAt: s
       cumulativeSpend: l.cumulativeSpend,
       hardCap: l.hardCap,
     },
-    notes: [l.label, spendOnlyLineText(l, arm)],
+    notes: [l.label, spendOnlyLineText(l, arm), dataThroughNote(l.date)],
   }
 }
 

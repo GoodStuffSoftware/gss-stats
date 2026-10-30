@@ -11,7 +11,7 @@
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
 import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, postflightDueDate, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
-import { campaignById, etMidnightUtcMs } from '../../src/lib/campaigns'
+import { campaignById, etMidnightUtcMs, etTimeUtcMs } from '../../src/lib/campaigns'
 import { addEtDays } from '../../src/lib/overview'
 import type { SearchSideRaw } from '../../src/lib/searchAdsSide'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
@@ -135,6 +135,20 @@ export function resolvePostflightClock(opts: Record<string, string | boolean | u
   const dueEt = postflightDueDate(stage, campaign.flightEnd)
   if (given < dueEt) throw new Error(`--as-of ${given} is before the ${stage} stage's due date ${dueEt} (flight ended ${campaign.flightEnd})`)
   return { campaignId, nowMs: Math.min(endOfEtDayMs(given), clockMs), asOf: { etDate: given, realNowMs: clockMs } }
+}
+
+const AS_OF_READ_TIME_ET = '08:05'
+/** morning-read `--as-of <read date>`: backfills a daily reading that never ran on its day (the clock is 08:05 ET of that day, the
+ * routine's usual time: yesterday is a closed day by then, and nothing from the read day itself is counted). The mark's etDate is the last day covered, so the
+ * beacon reads cut at the read day's midnight; the stored et_date is the read date, read_at stays the real time. null without the flag.
+ * Refused: a malformed date, today or a later day, and `--now` beside it. */
+export function resolveMorningClock(opts: Record<string, string | boolean | undefined>, clockMs: number): Pick<PostflightClock, 'nowMs' | 'asOf'> | null {
+  const given = opts['as-of']
+  if (given === undefined) return null
+  if (opts.now) throw new Error('--as-of and --now cannot be combined')
+  if (typeof given !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(given) || !isEtDate(given)) throw new Error(`--as-of must be an ET date as YYYY-MM-DD, got ${JSON.stringify(given)}`)
+  if (given >= etDateOf(clockMs)) throw new Error(`--as-of ${given} must be before today (${etDateOf(clockMs)} ET): a daily reading is for a day that has begun and passed`)
+  return { nowMs: etTimeUtcMs(given, AS_OF_READ_TIME_ET), asOf: { etDate: addEtDays(given, -1), realNowMs: clockMs } }
 }
 
 export function loadCfToken(file: string | undefined): string | null {

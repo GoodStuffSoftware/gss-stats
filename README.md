@@ -1237,6 +1237,7 @@ the routine and the dashboard can't disagree.
 ```powershell
 npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
 npm run ads:morning-read -- --campaign <id> --dry-run --cf-token-file <path>   # daily read; no writes
+npm run ads:morning-read -- --campaign <id> --as-of <YYYY-MM-DD> --cf-token-file <path>   # backfill a daily read that never ran on its day (clock = 08:05 ET of that date; see "What a stored reading says")
 npm run ads:morning-read -- --campaign <id> --window-end <YYYY-MM-DD> --dry-run ...   # pin the window end before the registered flight end (F3 Search week-1 final read: 2026-10-23)
 npm run ads:postflight-read -- --stage wrapup --campaign <id> --dry-run --cf-token-file <path>
 npm run ads:postflight-read -- --stage wrapup --campaign <id> --as-of <YYYY-MM-DD> --cf-token-file <path>   # backfill a stage read that never ran on its day (clock = end of that ET day)
@@ -1996,6 +1997,23 @@ run backfills; a rerun stores nothing, one row per campaign and day) and prints 
 push text; a day whose spend or install conversions are not synced yet is left for the next run
 instead of being stored as zero. The cloud routine runs it daily 2026-10-27 to 11-03
 ([runbook](docs/routines/ads-cloud-daily.md)).
+
+### What a stored reading says (`ads_readings`: verdict word and data through)
+
+- **`et_date` is the day the read RAN**, not the day its numbers end. A morning read on 10-29 stores `et_date` 2026-10-29 with numbers through 10-28.
+  The last day the numbers cover is the **data through** date: stored as a note, `data through YYYY-MM-DD ET` (the last note of the row; the table has no column for it and
+  needed no migration, `dataThroughOf()` in `src/lib/adsRules.ts` reads it back) and printed in the CLI report next to the read date. Rule per kind:
+  daily, threshold and health rows of a morning read: the day before the read date, never past the flight end; post-flight: the day before the read date, or the
+  as-of day itself under `--as-of` (its clock is the end of that day); the spend-only line: the day it describes (its `et_date` is the next day). Rows stored before
+  this change have no such note; read their data-through as `et_date` minus one day (`spend_through_et` on a daily row is the last day with a spend row).
+- **`proposal` carries the routine's verdict word.** The column only accepts `PROPOSE PAUSE` or `CONTINUE` (a table CHECK; anything else is stored as null). A daily
+  row stores `PROPOSE PAUSE` when kill rule 4 trips or the Flight 3 rules propose one, `CONTINUE` when the rules ran and found nothing to pause, and null when no rule
+  was evaluated (spend unread) or a rule tripped on a campaign that is not serving (the `no pause proposed` note says why). WATCH and INFO have no slot: the spend-only
+  arm's INFO line stays in its notes. `decision` stays null: it is for the call a human makes, not the routine.
+- `npm run ads:morning-read -- --campaign <id> --as-of <YYYY-MM-DD ET>` (live, not combined with `--now` or `--release-health-only`) backfills a daily read that never
+  ran on its day: the clock is 08:05 ET of that date, so the Ads range, the sync and the D1 beacon reads (cut at that date's midnight) cover only the days before it, and the
+  row is stored under that `et_date`. `read_at` stays the real time and the first note names the as-of. The campaign status, the Firebase counts and the diagnostics
+  sections are read as of the real moment, not date-bounded. A second run of the same day stores nothing (one row per campaign, day and kind).
 
 ## Live updates
 

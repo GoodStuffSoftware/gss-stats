@@ -533,7 +533,7 @@ empty and F4LINE is not due. Otherwise, for each campaign id ID in ARMS, in tabl
 Spend-only arm daily line (F4). When F4LINE is due (Step 0.2), also run, once, the same A1 command with `--campaign 24392866056` (output files
 `/tmp/am/24392866056.*`). The CLI builds the line from the stored spend and Google-reported
 install conversions (the campaign's `installActionId`), stores it in `ads_readings` (a rerun
-stores nothing new, and any closed day not yet stored is filled in) and returns it as `notify.text`,
+stores nothing new, and any closed day not yet stored is filled in; the row carries a `data through` note naming the day it describes, and no proposal) and returns it as `notify.text`,
 a line with verdict INFO. F4 is not in ARMS: skip A2 and A4 for it, propose nothing about it
 (spend at or over the $75 cap is information only), and add its `text=` value as one more push
 line after the arm lines. If `text=` is empty (a day's spend or installs are not synced yet) add no line; a

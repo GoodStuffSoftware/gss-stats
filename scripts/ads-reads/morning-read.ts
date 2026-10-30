@@ -14,13 +14,13 @@
 // stored spend and conversion rows (read.ts runSpendOnlyDailyRead): no Ads call, no rules, no proposal.
 
 import { MIN_COHORT } from '../../src/lib/popupEvents'
-import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId } from './cli'
+import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId, resolveMorningClock } from './cli'
 import { runMorningRead, runSpendOnlyDailyRead } from './read'
 import { formatMorningReport, formatSpendOnlyReport, jsonOnly, withJson } from './report'
 import { campaignById } from '../../src/lib/campaigns'
 import { ADS_READ_PLANS } from '../../src/lib/adsRules'
 
-const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only] [--window-end YYYY-MM-DD]`
+const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only] [--window-end YYYY-MM-DD] [--as-of YYYY-MM-DD]`
 
 async function main() {
   const opts = parseCli({
@@ -29,6 +29,7 @@ async function main() {
     'health-min-parent': { type: 'string', default: String(MIN_COHORT) },
     'health-parent-age-hours': { type: 'string', default: '24' },
     'window-end': { type: 'string' },
+    'as-of': { type: 'string' },
   })
   if (opts.help) {
     process.stdout.write(HELP + '\n')
@@ -43,12 +44,16 @@ async function main() {
 
   const fx = opts.fixture ? loadFixture(opts.fixture as string) : null
   if (fx && opts.now) fx.now = opts.now as string
-  const campaignId = resolveCampaignId(opts, 'morning', fx ? Date.parse(fx.now) : Date.now())
-  const deps = fx ? fixtureDeps(fx, !!opts['dry-run']) : await liveDeps(opts)
+  const clock = resolveMorningClock(opts, fx ? Date.parse(fx.now) : Date.now())
+  if (clock && (opts['release-health-only'])) throw new Error('--as-of cannot be combined with --release-health-only')
+  if (fx && clock) fx.now = new Date(clock.nowMs).toISOString()
+  const campaignId = resolveCampaignId(opts, 'morning', fx ? Date.parse(fx.now) : clock?.nowMs ?? Date.now())
+  const deps = fx ? fixtureDeps(fx, !!opts['dry-run']) : await liveDeps(opts, clock ?? undefined)
 
   // A spend-only install campaign (flight 4) has no read plan, rules or proposals: its daily line comes from the stored rows.
   const flight = campaignById(campaignId)
   if (flight?.measurement === 'spend-only' && flight.installActionId && !ADS_READ_PLANS[campaignId]) {
+    if (clock) throw new Error('--as-of does not apply to a spend-only campaign: its run already stores every closed day not yet stored')
     const so = await runSpendOnlyDailyRead(deps, { campaignId })
     process.stdout.write(opts['json-only'] ? jsonOnly(so) : withJson(formatSpendOnlyReport(so), so))
     return
