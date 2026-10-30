@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.7] — 2026-10-30
+
 ### Fixed
 - **The Flight 4 start has a labelled line on the timelines.** The Android build that starts Flight 4's tagged install counts (Best Sudoku 1.105.1 on Play) now draws as a dashed labelled line, like the other go-live moments, instead of a small tick.
 - **A timeline tick shows every release at that spot.** When a web and a Play release land on the same day, hovering the mark lists both, not just the first.
