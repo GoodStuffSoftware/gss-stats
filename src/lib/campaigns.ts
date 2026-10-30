@@ -82,6 +82,11 @@ export interface CampaignFlight {
   measurement?: 'spend-only'
   /** Shown next to the funnel/arrivals numbers when `measurement === 'spend-only'`. */
   measurabilityNote?: string
+  /** Set on a spend-only campaign whose installs the app labels itself (Play Install Referrer, utm_campaign = a
+   * `ucValues` tag, no click id kept): the site's own counts for the tag are real, read from tagged rows, so the
+   * metrics stop ruling the beacon counts out (hasBeaconRows). `note` is the caption the campaign's card shows over
+   * them (ScopePath campaign.taggedNote); it says when tagged counts start, so edit it when the app release's date is known. */
+  tagged?: { note: string }
   /** Where the ad sends people: a web page (beacon-measurable) or straight to the Play
    * listing. Synced into the gss-stats-ads `ads_campaigns` table (lib/adsStore.ts). */
   kind: 'web' | 'play-direct'
@@ -336,11 +341,11 @@ export function liveStagedCampaigns(dates: Record<StagedArm, StagedArmDates> = S
 // VERIFIED live 2026-09-25: `campaign='sudoku_tired_of_ads' AND ts >= <flightStart ET
 // midnight>` (no upper bound) → exactly 1,194 tagged hits, 353 tagged arrivals (visitor=
 // 'new') — matches the task brief's numbers exactly; the QA variant is excluded on purpose.
-/** Flight 4 (Android installs) sends no beacon rows, but `ucValues` must never be empty (an empty
- * array makes the `path IN ()` / `LIKE` SQL in scripts/ads-reads/beacon.ts and lib/metrics/facts.ts
- * invalid). This placeholder follows the `sudoku_<name>` tag convention and is a tag no link, app
- * or row carries. */
-export const F4_NO_BEACON_TAG = 'sudoku_f4_android_installs_no_beacon'
+/** Flight 4 (Android installs): the Best Sudoku app labels installs that come from Google Ads with this utm_campaign,
+ * read from the Play Install Referrer (the way the F3 Play-direct arm's installs are tagged, sudoku_funnel_f3_apps_play).
+ * No click id is kept. The proof of tracking is a tagged /return/<uc>/d0 first open. The app side ships in the next app
+ * release; until then no row carries it. Keep the value exactly: it matches the registry's naming. */
+export const F4_ANDROID_TAG = 'sudoku_funnel_f4_android'
 /** The hand-kept registry. `status` is not kept here: CAMPAIGNS derives it from the flight dates. */
 const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   {
@@ -417,8 +422,9 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   },
   // ── Flight 4: Android installs, spend-only ──────────────────────────────────────────────
   // A Google Ads App campaign for the Play app com.bestsudoku.app. Its result is the Play installs
-  // Google reports (conversion action 7756366796); it has no SDK, utm tag or install referrer, so
-  // it writes no beacon rows and Google's counts cannot be joined to the site's own. Registered
+  // Google reports (conversion action 7756366796); Google's counts cannot be joined to the site's own. Once the
+  // app release that reads the Play Install Referrer ships, installs are labelled F4_ANDROID_TAG and the tagged
+  // rows give the site counts (`tagged`); before it no row carries the tag. Registered
   // spend-only with NO read plan (ADS_READ_PLANS): the morning and post-flight reads and the kill
   // rules never run on it, and the sync pulls its daily spend but not placements
   // (noPlacements; lib/adsSync.ts pullsPlacements). The ads lead reads its installs from Google Ads.
@@ -427,7 +433,7 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   {
     id: '24392866056',
     label: 'Flight 4 — Android installs',
-    ucValues: [F4_NO_BEACON_TAG],
+    ucValues: [F4_ANDROID_TAG],
     flightStart: '2026-10-26',
     flightStartTimeEt: '12:00', // enabled at noon ET; Google stores the 09:14 creation time (the API takes only a midnight start)
     flightEnd: '2026-11-02',
@@ -437,11 +443,18 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
     installActionId: '7756366796',
     measurement: 'spend-only',
     noPlacements: true, // an App campaign has no placement report
-    measurabilityNote: 'App install campaign: Google counts the Play installs; it sends no visits to the site, so none of the site\'s own counts include it.',
+    measurabilityNote: 'App install campaign: Google counts the Play installs. The site\'s own counts come only from installs the app labels with the F4 tag, from the app release on.',
+    tagged: { note: 'Tagged counts start at the app release; installs before it are unlabelled.' },
     notes:
-      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796): no SDK, no utm tag, no install referrer, so no beacon rows. The tag in ucValues is a placeholder no row carries (it exists only because an empty ucValues breaks the beacon SQL). Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
+      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag until the app release that reads the referrer ships, so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
 ]
+
+/** True when the campaign's site counts (tagged arrivals, funnel steps, returns) can be read: every campaign except a
+ * spend-only one, unless it is `tagged` (its installs carry a tag the app writes into the beacon). */
+export function hasBeaconRows(c: Pick<CampaignFlight, 'measurement' | 'tagged'>): boolean {
+  return c.measurement !== 'spend-only' || c.tagged !== undefined
+}
 
 /** A flight's status on an ET date: 'upcoming' before flightStart (or with no start yet), 'active' from the start
  * day through flightEnd inclusive, 'closed' after. Attribution is unaffected: it has no upper bound. */

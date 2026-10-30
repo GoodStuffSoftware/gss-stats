@@ -16,6 +16,8 @@ export type ScopePath =
   | 'campaign.statusToday'
   | 'campaign.flight'
   | 'campaign.measurabilityNote'
+  /** The caption of a spend-only campaign whose installs the app tags (CampaignFlight.tagged): when tagged counts start; null otherwise. */
+  | 'campaign.taggedNote'
   /** The signed-out upsell fix (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT) as an ET minute, and
    * its flight day, when it falls in this campaign's flight (null otherwise, or while unset). */
   | 'campaign.upsellFixAt'
@@ -203,6 +205,9 @@ export interface Gating {
    * item; every other campaign omits it, and it is never requested. For the Google Ads figures a spend-only card shows
    * in place of site numbers (Spend, Clicks). */
   forSpendOnly?: true
+  /** true: a campaign that names a Google Ads install action (installActionId: Flight 4) omits this item, never requested: its
+   * installs are Google's count (the Installs (Google Ads) row), so the site's own install rows would read beside them as a second count. */
+  notForInstallAction?: true
 }
 
 /** RepeatSpec.limit for a readings repeat: the default and the cap (the readings endpoint's own). */

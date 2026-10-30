@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The Flight 4 card shows the app's own counts.** Installs the app labels with the new `sudoku_funnel_f4_android` tag now feed the same chips as the other flights (game-screen views and arrivals, completed a game, sign-in ask, accept, auth success, install prompt, return rate), beside the Google Ads rows. A short note says the tagged counts start at the app release and earlier installs are unlabelled.
+
 ## [0.75.5] — 2026-10-29
 
 ### Added

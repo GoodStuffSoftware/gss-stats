@@ -1707,13 +1707,22 @@ to end).
 **Flight 4 - Android installs** (campaign 24392866056, `kind: 'play-direct'`, `measurement: 'spend-only'`;
 `src/lib/campaigns.ts`) is a Google Ads **App** campaign for the Play app: $10 a day, US/English,
 2026-10-26 (noon ET) to 2026-11-02, about $75 in all. Its result is the Play installs Google reports
-(conversion action 7756366796). It has no SDK, utm tag or install referrer, so it writes **no beacon
-rows**, and Google's install counts cannot be joined to the site's own counts. It is registered
+(conversion action 7756366796). The Best Sudoku app labels installs from this campaign with the utm tag
+`sudoku_funnel_f4_android` (`F4_ANDROID_TAG`; the Play Install Referrer, no click id kept), the way the F3 Play-direct
+arm's are labelled, so rows with that tag are the site's own count of those installs; Google's install counts still cannot
+be joined to them one for one. No row carries the tag until the app release that reads the referrer ships, so installs before
+it are unlabelled. It is registered
 spend-only with **no read plan** (`ADS_READ_PLANS`): the morning and post-flight reads and the kill
 rules never run on it, and the morning read's default campaign still comes from the read plans only.
 The dashboard shows its spend (the $75 cap is in the registry); the ads lead reads its installs from Google Ads.
-Its `ucValues` holds one placeholder tag, `sudoku_f4_android_installs_no_beacon` (`F4_NO_BEACON_TAG`),
-that no row carries; it exists only because an empty `ucValues` breaks the beacon SQL. The entry sets
+On the Campaign scorecard its card shows the same tagged chips as the other flights (game-screen views and arrivals,
+completed a game, sign-in ask, accept, auth success, install prompt, return rate d2-7), read from the tagged rows, beside
+the Google Ads rows (Installs, Cost / install, Spend, Clicks). The entry's `tagged` flag (`CampaignFlight.tagged`,
+`hasBeaconRows`) is what lifts the spend-only beacon ruling for those chips; the three site-install rows (Installs,
+Cost / arrival, Install rate) stay off it (`Gating.notForInstallAction`, because Google's count sits there) and the chips carry the
+caption in `tagged.note` ("Tagged counts start at the app release; installs before it are unlabelled."). When the app release
+date is known, the go-live hooks in at `tagged` in `src/lib/campaigns.ts` (a later `liveAt` beside `note` for the chips'
+first day); until then the counts are 0 or absent. The entry sets
 `noPlacements: true`, so the hourly sync (the `gss-stats-sync` Worker) pulls its daily spend but never
 the placement report (an App campaign has no placement report, so the pull is skipped rather than risked), and a
 skipped pull is never counted as a missing day. Every other campaign pulls exactly as before.

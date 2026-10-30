@@ -547,8 +547,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     activeWhen: () => authErrorMarkedChanges().length > 0,
     appliesTo: (w: AutoCaveatWidget) => cardShowsAuthErrors(w.card),
   },
-  // The funnel per campaign lists beacon-tracked campaigns only (repeat.tracked): a spend-only arm
-  // (Flight 4) writes no beacon rows, so a funnel card for it would be all zeros. This caption says
+  // The funnel per campaign lists beacon-tracked campaigns only (repeat.tracked): a spend-only arm (Flight 4) has no funnel card of its own;
+  // its tagged counts, once the app labels installs, sit on its Campaign scorecard card. This caption says
   // why it is absent and where it is shown; the names come from the registry, never typed here.
   'funnel-spend-only-arms': {
     id: 'funnel-spend-only-arms',
@@ -556,7 +556,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
       const names = CAMPAIGNS.filter((c) => c.measurement === 'spend-only').map((c) => c.label)
       const many = names.length > 1
       const who = names.length ? (many ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]) : 'A spend-only campaign'
-      return `${who} ${many ? 'are' : 'is'} spend-only: no tagged arrivals or beacon rows, so no funnel card here. ${many ? 'Their' : 'Its'} spend and results are on the Campaign scorecard.`
+      return `${who} ${many ? 'are' : 'is'} spend-only: no funnel card here. ${many ? 'Their' : 'Its'} spend and results (and any tagged counts) are on the Campaign scorecard.`
     },
     kind: 'note',
     severity: 'info',

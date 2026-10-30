@@ -18,7 +18,7 @@
 //
 // Every instant is an EXISTING constant (lib/popupEvents.ts, lib/campaigns.ts) — never a copy.
 
-import { campaignStatusOn, classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../campaigns'
+import { campaignStatusOn, classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, hasBeaconRows, type CampaignFlight, type FunnelStepKey } from '../campaigns'
 import { addDays, etDateFast, etWallTimeMs } from '../etTime'
 import { comparisonGateForGoLive } from '../kpiFormat'
 
@@ -105,7 +105,7 @@ export function measuredInterval({ rules, window, campaign, seenInFlight, todayE
     let note: string | undefined
     switch (rule.kind) {
       case 'beaconMeasurable':
-        if (campaign?.measurement === 'spend-only') return unmeasured('spend-only')
+        if (campaign && !hasBeaconRows(campaign)) return unmeasured('spend-only')
         continue
       case 'liveAt':
         if (rule.atMs === null) return unmeasured(rule.reason ?? 'not-live')

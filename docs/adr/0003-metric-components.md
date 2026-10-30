@@ -489,7 +489,7 @@ For a request (metric M, campaign C if scoped, window W = [a, b)), the server co
 **measured interval** I:
 
 1. `beaconMeasurable`: a spend-only campaign makes every beacon-derived metric `unmeasured`
-   (reason `spend-only`).
+   (reason `spend-only`), unless it is `tagged` (`hasBeaconRows`: Flight 4, whose installs the app labels itself).
 2. `liveAt t` / `liveOnEtDate d`: I = [max(a, t), b). A null instant means not live, so
    `unmeasured`. With `against: 'flight'`, a flight whose serving window ended before t is
    `unmeasured` outright.
@@ -1177,7 +1177,10 @@ Registry and component additions (all generic):
   every campaign that is not `measurement: 'spend-only'` (never requested), so the scorecard's Spend and
   Clicks rows sit only on the cards that have no site numbers (Play-direct, Flight 4); Spend reads "no Google
   Ads data stored for this campaign" when the campaign has none. (`Gating.needsInstallAction`, which they
-  used in 0.74.1, still omits an item for a campaign without an `installActionId`.)
+  used in 0.74.1, still omits an item for a campaign without an `installActionId`.) `Gating.notForInstallAction` is the
+  opposite: it omits an item for a campaign that names an `installActionId`, so Flight 4's card keeps the tagged chips and
+  the Google Ads rows but not the web Installs, Cost / arrival and Install rate rows that would read beside Google's count.
+  The `campaign.taggedNote` field (a `tagged` campaign's caption, null for every other) is the pills section's title.
 - Nested scopes (a repeat keeps the instance it sits in), repeats over countries and over
   beacon-tracked campaigns only, a column repeat on `table` sections (`columns`, `columnLabel`,
   `rowsLabel`), a `columns` section layout, card `actions` and rendered card `captions`; a

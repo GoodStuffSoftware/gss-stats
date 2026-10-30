@@ -41,10 +41,10 @@ export const CAMPAIGN_SCORECARD: CardSpec = {
         { id: 'flight', label: { note: 'label.card.flight' }, data: { field: 'campaign.flight' }, display: { as: 'dateRange', days: true }, gating: { whenEmpty: { note: 'flight-pending' } } },
         { id: 'arrivals', label: { metric: true }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...COMPACT },
         { id: 'auth', label: { metric: true }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'installs', label: { metric: true }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'installs', label: { metric: true }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, gating: { notForInstallAction: true }, ...COMPACT },
         // "Return rate (d2-7): 12.1% (4/33)" — provisional while d2-7 returns can still arrive.
         { id: 'return', label: { metric: true }, data: { ratio: 'campaign.returnD2to7PerD0' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
-        { id: 'cpa', label: { metric: true }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'cpa', label: { metric: true }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
         // Google-reported installs and cost per install: only a campaign with an installActionId (Flight 4) has them, the rest omit the rows.
         { id: 'adsInstalls', label: { metric: true }, data: { metric: 'campaign.adsInstalls' }, display: { as: 'number' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
         { id: 'cpai', label: { metric: true }, data: { ratio: 'campaign.costPerAdsInstall' }, display: { as: 'currency' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
@@ -57,8 +57,10 @@ export const CAMPAIGN_SCORECARD: CardSpec = {
     {
       // The funnel pills, in FUNNEL_STEP_ORDER, with the bespoke body's step names
       // (FUNNEL_STEP_LABEL_IDS). Only accept/ask and install/prompt are valid proportions; every
-      // other step is a count, and game-screen views read against arrivals as a pair.
+      // other step is a count, and game-screen views read against arrivals as a pair. A spend-only campaign whose installs the
+      // app tags (Flight 4) captions them: when tagged counts start (campaign.taggedNote; no other campaign has one).
       layout: 'pills',
+      title: { bind: 'campaign.taggedNote' },
       items: [
         { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { ratio: 'campaign.gameViewsVsArrivals' }, display: { as: 'counts' }, ...COMPACT },
         { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...COMPACT },
@@ -67,7 +69,7 @@ export const CAMPAIGN_SCORECARD: CardSpec = {
         { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...COMPACT },
         { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...COMPACT },
         // Denominator: prompts shown from the install fix on (alignDenominator).
-        { id: 'install', label: { note: 'label.funnel.install' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, gating: { notForInstallAction: true }, ...COMPACT },
       ],
     },
   ],

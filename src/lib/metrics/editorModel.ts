@@ -177,6 +177,7 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.statusToday', label: 'Status (today)' },
     { value: 'campaign.flight', label: 'Flight dates' },
     { value: 'campaign.measurabilityNote', label: 'Measurability note' },
+    { value: 'campaign.taggedNote', label: 'Tagged-counts note' },
     { value: 'campaign.upsellFixAt', label: 'Upsell fix time' },
     { value: 'campaign.upsellFixFlightDay', label: 'Upsell fix flight day' },
     { value: 'campaign.returnTagShared', label: 'Shared return tag note' },

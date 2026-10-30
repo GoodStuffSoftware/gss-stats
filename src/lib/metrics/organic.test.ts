@@ -302,3 +302,58 @@ describe('the Campaign scorecard preset carries the Google-reported install rows
     for (const id of ['adsSpend', 'adsClicks']) expect(itemViewModel(items.find((i) => i.id === id)!, { status: 'ok', value: 5 }, sc, { todayEt: TODAY }).visible).toBe(false)
   })
 })
+
+describe('the Campaign scorecard F4 card reads the tagged rows beside the Google Ads rows', () => {
+  const F4 = '24392866056'
+  const PLAY_DIRECT = '24234347705'
+  const WEB = '24279250691'
+  const items = CAMPAIGN_SCORECARD.sections.flatMap((s) => s.items)
+  const sc = (id: string): ScopeInstance => ({ kind: 'campaign', campaign: campaignById(id)! }) as unknown as ScopeInstance
+  const omitted = (id: string, itemId: string) => {
+    const it = items.find((i) => i.id === itemId)!
+    return unmeasuredByConfig(it.data, sc(id), it.gating, TODAY)
+  }
+  // The chips the brief names, then the rows Google reports.
+  const CHIPS = ['arrivals', 'played', 'completed', 'ask', 'accept', 'authSuccess', 'installPrompt', 'return']
+  const GOOGLE = ['adsInstalls', 'cpai', 'adsSpend', 'adsClicks']
+
+  it('shows every tagged chip and every Google Ads row', () => {
+    for (const id of [...CHIPS, ...GOOGLE]) {
+      expect(omitted(F4, id), id).toBe(false)
+      const it = items.find((i) => i.id === id)!
+      expect(buildRequestSpec(it, sc(F4), TODAY), id).not.toBeNull()
+    }
+  })
+
+  it("leaves out the three web-install rows, which would read beside Google's own install count", () => {
+    for (const id of ['installs', 'cpa', 'install']) {
+      expect(omitted(F4, id), id).toBe(true)
+      expect(buildRequestSpec(items.find((i) => i.id === id)!, sc(F4), TODAY), id).toBeNull()
+    }
+  })
+
+  it('captions the chips with when tagged counts start, and no other card has a caption', () => {
+    const pills = CAMPAIGN_SCORECARD.sections.find((s) => s.layout === 'pills')!
+    expect(pills.title).toEqual({ bind: 'campaign.taggedNote' })
+    expect(scopeField(sc(F4), 'campaign.taggedNote', TODAY)).toBe('Tagged counts start at the app release; installs before it are unlabelled.')
+    for (const c of CAMPAIGNS.filter((x) => x.id !== F4)) expect(scopeField(sc(c.id), 'campaign.taggedNote', TODAY), c.id).toBeNull()
+  })
+
+  it('Play-direct (tired of ads) is unchanged: no site chips, and the Ads rows still show', () => {
+    for (const id of [...CHIPS, 'installs', 'cpa', 'install', 'adsInstalls', 'cpai']) expect(omitted(PLAY_DIRECT, id), id).toBe(true)
+    for (const id of ['adsSpend', 'adsClicks']) expect(omitted(PLAY_DIRECT, id), id).toBe(false)
+  })
+
+  it('a web campaign is unchanged: its install rows stay and the Ads rows stay out', () => {
+    for (const id of ['arrivals', 'installs', 'cpa', 'install', 'return']) expect(omitted(WEB, id), id).toBe(false)
+    for (const id of ['adsSpend', 'adsClicks']) expect(omitted(WEB, id), id).toBe(true)
+  })
+
+  it('validate rejects a notForInstallAction that is not true', () => {
+    const card = JSON.parse(JSON.stringify(CAMPAIGN_SCORECARD)) as CardSpec
+    expect(validateCard(card)).toEqual([])
+    const it = card.sections[0].items.find((i) => i.id === 'cpa')!
+    ;(it.gating as { notForInstallAction?: unknown }).notForInstallAction = false
+    expect(validateCard(card).join(' ')).toMatch(/notForInstallAction must be true/)
+  })
+})

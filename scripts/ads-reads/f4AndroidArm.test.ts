@@ -1,11 +1,12 @@
 // Flight 4 (Android installs, campaign 24392866056) is registered SPEND-ONLY with NO read plan:
-// Google counts its Play installs, it writes no beacon rows, and nothing reads or rules it. This
-// pins what that means: a never-empty placeholder tag, no read plan (so no morning or post-flight
-// default, no kill rules), no placement pull in the sync (and no "missing placement day"), and no
-// beacon-based readout. Fixture only: the made-up arm ids are registered at runtime and removed.
+// Google counts its Play installs and nothing reads or rules it. The app labels its own installs with
+// utm_campaign sudoku_funnel_f4_android (like the F3 Play-direct arm), so the Campaign scorecard's site chips read
+// the tagged rows (CampaignFlight.tagged), while the Ads side stays spend-only: no read plan (so no morning or
+// post-flight default, no kill rules) and no placement pull in the sync (and no "missing placement day").
+// Fixture only: the made-up arm ids are registered at runtime and removed.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ADS_READ_PLANS, buildReadPlan, channelOf, defaultReadCampaignId, readPlanFor, POSTFLIGHT_STAGES, RETEST_APPROVED_PLACEMENTS } from '../../src/lib/adsRules'
-import { CAMPAIGNS, assertOrganicReserved, campaignById, F4_NO_BEACON_TAG, parseReturnPath, type CampaignFlight } from '../../src/lib/campaigns'
+import { CAMPAIGNS, assertOrganicReserved, campaignById, F4_ANDROID_TAG, hasBeaconRows, parseReturnPath, type CampaignFlight } from '../../src/lib/campaigns'
 import { planCampaignSync, pullsPlacements, syncAdsData, campaignsConfigHash, type AdsMetricsSource } from '../../src/lib/adsSync'
 import { createSqlAdsStore, type PlacementDayRow } from '../../src/lib/adsStore'
 import { configRuling } from '../../src/lib/metrics/scope'
@@ -57,13 +58,16 @@ describe('the F4 registry entry', () => {
     expect(c.hardCapUsd).toBe(75)
     expect(c.noPlacements).toBe(true)
     expect(c.measurabilityNote).toMatch(/Google counts the Play installs/)
+    expect(c.tagged?.note).toBe('Tagged counts start at the app release; installs before it are unlabelled.')
+    expect(hasBeaconRows(c)).toBe(true)
+    expect(hasBeaconRows(campaignById(PLAY_DIRECT_SEPT)!)).toBe(false) // F3 Play direct stays ruled out of the beacon metrics
     expect(c.notes).toMatch(/829601920531/)
   })
-  it('never has an empty ucValues (an empty array breaks the beacon SQL) and uses a valid, unique, never-seen tag', () => {
+  it('never has an empty ucValues (an empty array breaks the beacon SQL) and uses a valid, unique tag', () => {
     for (const c of CAMPAIGNS) expect(c.ucValues.length, c.id).toBeGreaterThan(0)
-    expect(f4().ucValues).toEqual([F4_NO_BEACON_TAG])
-    expect(parseReturnPath(`/return/${F4_NO_BEACON_TAG}/d0`)).toEqual({ uc: F4_NO_BEACON_TAG, bucket: 'd0' }) // passes the tag shape the readers accept
-    for (const c of CAMPAIGNS.filter((x) => x.id !== F4)) expect(c.ucValues).not.toContain(F4_NO_BEACON_TAG)
+    expect(f4().ucValues).toEqual([F4_ANDROID_TAG])
+    expect(parseReturnPath(`/return/${F4_ANDROID_TAG}/d0`)).toEqual({ uc: F4_ANDROID_TAG, bucket: 'd0' }) // passes the tag shape the readers accept
+    for (const c of CAMPAIGNS.filter((x) => x.id !== F4)) expect(c.ucValues).not.toContain(F4_ANDROID_TAG)
     expect(() => assertOrganicReserved(CAMPAIGNS)).not.toThrow()
   })
 })
@@ -216,10 +220,15 @@ describe('F4 is never a baseline twin', () => {
 })
 
 describe('readers never show F4 as 0 arrivals', () => {
-  it('every beacon-based binding is ruled out by config (spend-only), exactly as for the September Play-direct arm', () => {
+  it('the September Play-direct arm stays ruled out of every beacon-based binding by config (spend-only)', () => {
     for (const binding of [{ metric: 'campaign.taggedArrivals' }, { metric: 'campaign.authSuccess' }, { metric: 'campaign.installs' }, { ratio: 'campaign.returnD2to7PerD0' }, { ratio: 'campaign.costPerArrival' }]) {
-      expect(configRuling(binding, { kind: 'campaign', campaign: f4() }, '2026-10-28'), JSON.stringify(binding)).toBe('spend-only')
-      expect(configRuling(binding, { kind: 'campaign', campaign: campaignById(PLAY_DIRECT_SEPT)! }, '2026-10-28')).toBe('spend-only')
+      expect(configRuling(binding, { kind: 'campaign', campaign: campaignById(PLAY_DIRECT_SEPT)! }, '2026-10-28'), JSON.stringify(binding)).toBe('spend-only')
+    }
+  })
+  it('F4 is not ruled out of the tagged beacon metrics (its tag is real), and a spend-only arm without tagged still is', () => {
+    for (const binding of [{ metric: 'campaign.taggedArrivals' }, { metric: 'campaign.authSuccess' }, { ratio: 'campaign.returnD2to7PerD0' }]) {
+      expect(configRuling(binding, { kind: 'campaign', campaign: f4() }, '2026-10-28'), JSON.stringify(binding)).not.toBe('spend-only')
+      expect(configRuling(binding, { kind: 'campaign', campaign: { ...f4(), tagged: undefined } }, '2026-10-28'), JSON.stringify(binding)).toBe('spend-only')
     }
   })
 })

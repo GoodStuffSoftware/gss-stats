@@ -360,7 +360,7 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24316608605"} 1`] = `
 exports[`fact SQL snapshots > campaignDaily {"campaignId":"24392866056"} 1`] = `
 {
   "binds": [
-    "sudoku_f4_android_installs_no_beacon",
+    "sudoku_funnel_f4_android",
     1793030400000,
     "lifecycle",
     "email_%",
@@ -512,7 +512,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24392866056"} 1
 {
   "binds": [
     1790439996000,
-    "sudoku_f4_android_installs_no_beacon",
+    "sudoku_funnel_f4_android",
     1793030400000,
     "lifecycle",
     "email_%",
@@ -655,7 +655,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24392866056"} 1`] =
   "binds": [
     "bestsudoku-web",
     "bestsudoku-app",
-    "/return/sudoku_f4_android_installs_no_beacon/%",
+    "/return/sudoku_funnel_f4_android/%",
     1793030400000,
     "lifecycle",
     "email_%",
