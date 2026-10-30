@@ -6,8 +6,5 @@
     "deckhand": {
       "source": { "source": "github", "repo": "msantoro12/deckhand" }
     }
-  },
-  "enabledPlugins": {
-    "deckhand@deckhand": true
   }
 }
