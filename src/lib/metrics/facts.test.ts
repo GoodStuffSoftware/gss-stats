@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayStarts, kpiDayWindows, ORGANIC_MATURITY_SQL, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
-import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
+import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, googleAdsCampaigns, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
@@ -44,7 +44,8 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   ],
   adsSpendDaily: [{}],
   adsInstallsDaily: [{}],
-  adsAssetDaily: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  // Asset rows come from the Google Ads sync, so only Google campaigns get one (Flight 5 is Microsoft).
+  adsAssetDaily: googleAdsCampaigns().map((c) => ({ campaignId: c.id })),
   featureDays: [
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: [], todayEt: '2026-09-26' },
     { since: '2026-09-20T04:00:00Z', until: '2026-09-27T04:00:00Z', sites: ['bestsudoku'], ownBrowser: 'Chrome', ownOS: 'Android', todayEt: '2026-09-26' },

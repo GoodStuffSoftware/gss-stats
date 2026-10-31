@@ -91,7 +91,8 @@ const STEPS = Object.keys(STEP_METRIC) as (keyof typeof STEP_METRIC)[]
 // equivalent to. Flight 2's two arms (registered 2026-10-03) are the only such campaigns; the test below
 // pins that list, so a campaign that loses its golden by accident fails loudly instead of being skipped.
 // A flight 3 arm that is live (its dates filled in STAGED_FLIGHT_3_DATES) joins the list: it is registered after the retirement too.
-const WITHOUT_GOLDEN = ['24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id)]
+// Flight 5 (Microsoft Ads search, 571882693) is registered after the retirement too.
+const WITHOUT_GOLDEN = ['24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id), '571882693']
 describe('/api/metrics ≡ /api/campaigns', () => {
   it('every measurable campaign has a golden, except the flight-2 arms registered after /api/campaigns was retired', () => {
     expect(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && !Object.hasOwn(CAMPAIGNS_GOLDEN, c.id)).map((c) => c.id)).toEqual(WITHOUT_GOLDEN)

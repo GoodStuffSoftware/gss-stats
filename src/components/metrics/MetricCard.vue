@@ -35,7 +35,7 @@ import { noteValueResolver } from '../../lib/valueTokens'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
 import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesAssets, usesF3Read, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
-import { CAMPAIGNS } from '../../lib/campaigns'
+import { googleAdsCampaigns } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
 import MetricCardInstance from './MetricCardInstance.vue'
@@ -269,7 +269,7 @@ const adsRefresh = computed(() => !!spec.value?.actions?.includes('ads-refresh')
 /** The campaigns the card shows (its instances'), else every configured campaign. */
 const actionCampaignIds = computed(() => {
   const ids = instances.value.map((s) => campaignOfScope(s)?.id).filter((id): id is string => !!id)
-  return ids.length ? [...new Set(ids)] : CAMPAIGNS.map((c) => c.id)
+  return ids.length ? [...new Set(ids)] : googleAdsCampaigns().map((c) => c.id)
 })
 function onAdsRefreshed(r: RefreshResult) {
   if (r.refreshed) reload()

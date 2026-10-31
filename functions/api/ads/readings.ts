@@ -15,7 +15,7 @@
 // claimed and never finished (killed mid-run). Read-only: this endpoint never calls the Google
 // Ads API.
 
-import { CAMPAIGNS, CAMPAIGN_SPEND } from '../../../src/lib/campaigns'
+import { CAMPAIGNS, CAMPAIGN_SPEND, googleAdsCampaigns } from '../../../src/lib/campaigns'
 import { resolveCampaignSpend } from '../../../src/lib/adsRules'
 import { freshnessOf } from '../../../src/lib/adsFreshness'
 import { parseCampaignIdsParam, readCampaignAssets, readFreshness, readReadings, readSpendSummaries, readSyncAlerts, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
@@ -29,7 +29,7 @@ const json = (data: unknown, status = 200): Response =>
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const url = new URL(ctx.request.url)
-  const ids = parseCampaignIdsParam(url.searchParams, CAMPAIGNS.map((c) => c.id))
+  const ids = parseCampaignIdsParam(url.searchParams, googleAdsCampaigns().map((c) => c.id))
   const limitRaw = Number(url.searchParams.get('limit'))
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(500, Math.floor(limitRaw)) : 50
   const wantsAssets = url.searchParams.get('assets') === '1'

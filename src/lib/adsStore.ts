@@ -17,7 +17,7 @@
 
 import type { CampaignFlight } from './campaigns'
 import { etDateFast } from './etTime'
-import { CAMPAIGNS, campaignStatusOn, STAGED_ARMS, type StagedArm } from './campaigns'
+import { CAMPAIGNS, campaignStatusOn, isGoogleAdsCampaign, STAGED_ARMS, type StagedArm } from './campaigns'
 import {
   microsToDollars,
   readingEntryKind,
@@ -1115,7 +1115,8 @@ export async function readSyncAlerts(db: D1Reader | undefined | null, nowMs: num
 
 /** spendThrough / lastSync / stale for every configured campaign. Fail soft: an unreadable
  * store yields "nothing stored" (and stale only for a campaign that should have data by now);
- * a missing ads_sync_runs table (before migration 0003) yields lastSync null. */
+ * a missing ads_sync_runs table (before migration 0003) yields lastSync null. A Microsoft Ads campaign (adsPlatform) is
+ * not in the map: the Google sync never stores it, so it can be neither fresh nor stale. */
 export async function readFreshness(db: D1Reader | undefined | null, nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): Promise<Map<string, AdsFreshness>> {
   let coverage: Record<string, unknown>[] = []
   let syncs: Record<string, unknown>[] = []
@@ -1133,7 +1134,7 @@ export async function readFreshness(db: D1Reader | undefined | null, nowMs: numb
   }
   const lastSync = new Map(syncs.map((r) => [String(r.campaign_id), str(r.last_sync)]))
   const out = new Map<string, AdsFreshness>()
-  for (const c of campaigns) {
+  for (const c of campaigns.filter(isGoogleAdsCampaign)) {
     const rows = coverage.filter((r) => String(r.campaign_id) === c.id).map((r) => ({ date: String(r.date), fetchedAt: str(r.fetched_at) }))
     out.set(c.id, freshnessOf(c, spendThroughFromRows(c.flightStart, rows, c.flightEnd), lastSync.get(c.id) ?? null, nowMs))
   }

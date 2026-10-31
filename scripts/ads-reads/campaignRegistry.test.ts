@@ -279,6 +279,11 @@ describe('resolveCampaignId (the CLI)', () => {
     // a closed campaign is a known one: its own refusal ("is closed") comes from readPlanFor, later
     expect(resolveCampaignId({ campaign: '24234347705' }, 'morning', Date.parse('2026-09-30T12:00:00Z'))).toBe('24234347705')
   })
+  it('a Microsoft Ads campaign is not a campaign the reads can run on: refused, never queried in Google Ads', () => {
+    expect(campaignById('571882693')?.adsPlatform).toBe('microsoft')
+    expect(() => resolveCampaignId({ campaign: '571882693' }, 'morning', Date.parse('2026-11-08T12:05:00Z'))).toThrow(/is not a registered campaign id/)
+    expect(() => resolveCampaignId({ campaign: '571882693' }, 'postflight', Date.parse('2026-11-14T12:05:00Z'), 'wrapup')).toThrow(/is not a registered campaign id/)
+  })
   it('a blank, boolean or unknown --campaign fails loudly, lists the registered ids, and never falls through to the default', () => {
     const now = Date.parse('2026-09-30T12:05:00Z') // a day the default WOULD resolve (to the retest)
     for (const bad of ['', ' ', '12345', 'abc', true] as const) {

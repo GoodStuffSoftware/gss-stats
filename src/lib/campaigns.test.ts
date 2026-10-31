@@ -36,8 +36,16 @@ import {
   parseGameCompletePath,
   ORGANIC_ARM_ID,
   assertOrganicReserved,
+  F5_MSFT_SEARCH_TAG,
+  hasBeaconRows,
+  isGoogleAdsCampaign,
+  googleAdsCampaigns,
   type CampaignFlight,
 } from './campaigns'
+import { campaignsConfigHash, cronShouldSync, liveFlightCampaigns, syncableCampaigns } from './adsSync'
+import { freshnessOf } from './adsFreshness'
+import { assertKnownCampaign, readPlanFor, resolveCampaignSpend, ADS_READ_PLANS } from './adsRules'
+import { readFreshness } from './adsStore'
 import { funnelStepLabel } from './notes'
 import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
 
@@ -608,5 +616,67 @@ describe('parseReturnPath: uc must match ^[a-z][a-z0-9_]{0,39}$ (review finding,
     expect(parseReturnPath(`/return/${tooLong}/d0`)).toBeNull()
     const maxLen = 'a' + 'b'.repeat(39) // 40 chars — the documented max
     expect(parseReturnPath(`/return/${maxLen}/d0`)?.uc).toBe(maxLen)
+  })
+})
+
+describe('Flight 5 — Microsoft Ads search (adsPlatform microsoft: never queried in Google Ads)', () => {
+  const F5 = '571882693'
+  const f5 = () => campaignById(F5)!
+  // The ET noon of a flight day: inside the flight, so a Google campaign in the same window would be live.
+  const during = Date.parse('2026-11-08T17:00:00Z')
+
+  it('is registered with its tag, flight dates and the flag', () => {
+    expect(f5()).toMatchObject({ label: 'Flight 5 — Microsoft search', ucValues: ['sudoku_funnel_f5_msft_search'], flightStart: '2026-11-07', flightEnd: '2026-11-13', kind: 'web', adsPlatform: 'microsoft' })
+    expect(F5_MSFT_SEARCH_TAG).toBe('sudoku_funnel_f5_msft_search')
+    expect(f5().measurement).toBeUndefined()
+    expect(hasBeaconRows(f5())).toBe(true)
+    expect(JSON.stringify(f5())).not.toMatch(/customer|account/i)
+  })
+
+  it('isGoogleAdsCampaign: true for every campaign but F5', () => {
+    expect(isGoogleAdsCampaign(f5())).toBe(false)
+    expect(isGoogleAdsCampaign({ adsPlatform: 'google' })).toBe(true)
+    expect(CAMPAIGNS.filter((c) => !isGoogleAdsCampaign(c)).map((c) => c.id)).toEqual([F5])
+    expect(googleAdsCampaigns().map((c) => c.id)).toEqual(CAMPAIGNS.filter((c) => c.id !== F5).map((c) => c.id))
+  })
+
+  it('the spend sync skips it and refuses it by name', () => {
+    expect(syncableCampaigns().map((c) => c.id)).not.toContain(F5)
+    expect(() => syncableCampaigns([F5])).toThrow(/not a syncable campaign: 571882693/)
+  })
+
+  it('its live flight does not wake the hourly sync, and does not change the Worker config hash', () => {
+    expect(liveFlightCampaigns(during).map((c) => c.id)).not.toContain(F5)
+    const onlyF5 = [f5()]
+    expect(liveFlightCampaigns(during, onlyF5)).toEqual([])
+    expect(cronShouldSync(during, onlyF5).run).toBe(false)
+    expect(campaignsConfigHash()).toBe(campaignsConfigHash(CAMPAIGNS.filter((c) => c.id !== F5)))
+  })
+
+  it('no Google Ads fetch or read plan can be built for it', () => {
+    expect(() => assertKnownCampaign(F5)).toThrow(/never queried in Google Ads/)
+    expect(() => readPlanFor(F5)).toThrow(/never queried in Google Ads/)
+    expect(ADS_READ_PLANS[F5]).toBeUndefined()
+  })
+
+  it('is never stale and has no freshness entry', async () => {
+    expect(freshnessOf(f5(), null, null, during)).toEqual({ spendThrough: null, lastSync: null, stale: false })
+    expect(freshnessOf({ flightStart: '2026-11-07', flightEnd: '2026-11-13' }, null, null, during).stale).toBe(true)
+    const map = await readFreshness(null, during)
+    expect(map.has(F5)).toBe(false)
+    expect(map.size).toBe(googleAdsCampaigns().length)
+  })
+
+  it('spend is unknown, not $0: no config total, no stored days', () => {
+    expect(CAMPAIGN_SPEND[F5]).toBeUndefined()
+    expect(resolveCampaignSpend(null, CAMPAIGN_SPEND[F5] ?? null)).toMatchObject({ spend: null, source: 'none' })
+    expect(costPer(CAMPAIGN_SPEND[F5] ?? null, 100)).toBeNull()
+  })
+
+  it('attributes by the tag from its flight start (12:00 ET)', () => {
+    const a = campaignAttributionClause(f5())
+    expect(a.sql).toContain('campaign')
+    expect(a.binds).toContain('sudoku_funnel_f5_msft_search')
+    expect(campaignAttributionStartMs(f5())).toBe(etTimeUtcMs('2026-11-07', '12:00'))
   })
 })

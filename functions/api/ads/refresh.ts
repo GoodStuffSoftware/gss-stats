@@ -9,7 +9,7 @@
 // lastSync / stale. The dashboard holds no Google Ads credential and never calls the Ads API.
 // Logic: src/lib/adsRefresh.ts.
 
-import { CAMPAIGNS } from '../../../src/lib/campaigns'
+import { googleAdsCampaigns } from '../../../src/lib/campaigns'
 import { refreshAds } from '../../../src/lib/adsRefresh'
 
 interface Env {
@@ -28,7 +28,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   } catch {
     body = {}
   }
-  const known = CAMPAIGNS.map((c) => c.id)
+  const known = googleAdsCampaigns().map((c) => c.id) // a Microsoft Ads campaign is not in the Google sync, so it is never asked for
   const asked = Array.isArray(body.campaignIds) ? body.campaignIds.filter((x): x is string => typeof x === 'string' && known.includes(x)) : []
   const result = await refreshAds({ db: ctx.env.gss_stats_ads, sync: ctx.env.ADS_SYNC, campaignIds: asked.length ? asked : known, nowMs: Date.now() })
   return json(result)

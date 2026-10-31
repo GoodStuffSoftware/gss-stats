@@ -51,7 +51,8 @@ describe('the registry statuses on 2026-10-28 (ET)', () => {
 describe('the scorecard and the funnel per campaign, from the registry', () => {
   const F4 = '24392866056'
   const PLAY_DIRECT = '24234347705' // spend-only too (no beacon rows)
-  const ORDER = ['24215315197', PLAY_DIRECT, '24279250691', '24316608605', '24311309184', '24358792494', '24358792551', '24369758153', F4]
+  const F5 = '571882693' // Microsoft Ads search, 11-07..11-13, a web campaign
+  const ORDER = ['24215315197', PLAY_DIRECT, '24279250691', '24316608605', '24311309184', '24358792494', '24358792551', '24369758153', F4, F5]
   const SPEND_ONLY = [PLAY_DIRECT, F4]
   const ids = (spec: CardSpec, todayEt: string) => resolveRepeat(spec.repeat, { todayEt }).flatMap((s) => (s.kind === 'campaign' ? [s.campaign.id] : []))
   const statusOf = (spec: CardSpec, todayEt: string, field: 'campaign.status' | 'campaign.statusToday') =>
@@ -68,6 +69,7 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
     '24358792551': ['upcoming', 'upcoming', 'active', 'active', 'active', 'closed'],
     '24369758153': ['upcoming', 'upcoming', 'active', 'closed', 'closed', 'closed'],
     [F4]: ['upcoming', 'upcoming', 'upcoming', 'active', 'closed', 'closed'],
+    [F5]: ['upcoming', 'upcoming', 'upcoming', 'upcoming', 'upcoming', 'active'],
   }
 
   it('the registry is in flight order, every Flight 3 arm before Flight 4', () => {

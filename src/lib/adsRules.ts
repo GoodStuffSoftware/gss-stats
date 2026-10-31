@@ -46,6 +46,7 @@ import {
   authSuccessRow,
   campaignById,
   computeFunnelCounts,
+  isGoogleAdsCampaign,
   ORGANIC_ARM_ID,
   parseReturnPath,
   RETURN_BUCKETS,
@@ -439,6 +440,8 @@ export function assertKnownCampaign(campaignId: string): CampaignFlight {
   if (!/^\d+$/.test(campaignId)) throw new Error(`invalid campaign id: ${JSON.stringify(campaignId)}`)
   const campaign = campaignById(campaignId)
   if (!campaign) throw new Error(`campaign ${campaignId} is not in lib/campaigns.ts CAMPAIGNS`)
+  // Every Google Ads fetch (lib/adsApi.ts) names its campaign through here: a Microsoft Ads id does not exist in Google Ads.
+  if (!isGoogleAdsCampaign(campaign)) throw new Error(`campaign ${campaignId} is a ${campaign.adsPlatform} Ads campaign: it is never queried in Google Ads`)
   return campaign
 }
 
@@ -449,6 +452,7 @@ export function readPlanFor(campaignId: string): { plan: AdsReadPlan; campaign: 
   if (CLOSED_CAMPAIGN_IDS.includes(campaignId)) throw new Error(`campaign ${campaignId} is closed; the routine never reads or touches it`)
   const plan = ADS_READ_PLANS[campaignId]
   const campaign = campaignById(campaignId)
+  if (campaign && !isGoogleAdsCampaign(campaign)) throw new Error(`campaign ${campaignId} is a ${campaign.adsPlatform} Ads campaign: no read plan, never queried in Google Ads`)
   if (!plan || !campaign) throw new Error(`no ads read plan for campaign ${campaignId}`)
   if (campaign.flightStart == null) throw new Error(`campaign ${campaignId} has no confirmed flightStart`)
   return { plan, campaign }

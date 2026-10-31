@@ -11,7 +11,7 @@
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
 import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, postflightDueDate, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
-import { campaignById, etMidnightUtcMs, etTimeUtcMs } from '../../src/lib/campaigns'
+import { campaignById, etMidnightUtcMs, etTimeUtcMs, isGoogleAdsCampaign } from '../../src/lib/campaigns'
 import { addEtDays } from '../../src/lib/overview'
 import type { SearchSideRaw } from '../../src/lib/searchAdsSide'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
@@ -82,17 +82,24 @@ export function campaignRefusal(given: string | boolean | null): string {
   return `--campaign ${given === null ? 'with no value' : JSON.stringify(given)} is not a registered campaign id (registered read plans: ${ids}); pass --campaign <id>`
 }
 
+/** A registered campaign that runs on Google Ads (a Microsoft Ads one is none: its id does not exist there). */
+function googleAdsCampaignById(id: string) {
+  const c = campaignById(id)
+  return c && isGoogleAdsCampaign(c) ? c : undefined
+}
+
 /** The campaign a read runs on: an explicit `--campaign <id>`, else the registry's default for
  * this kind of read on the read's own clock (src/lib/adsRules.ts defaultReadCampaignId; throws
  * a one-line error listing the registered ids when it cannot pick exactly one). `nowMs` is the
  * fixture's clock under --fixture, else the real one.
  * A flag that is given must be a known campaign: an empty value (an unset shell variable), a
  * boolean or an unknown id fails loudly, listing the registered ids; it never falls through to
- * the default. (A closed campaign is known: its own refusal, "is closed", comes later.) */
+ * the default. (A closed campaign is known: its own refusal, "is closed", comes later.) A Microsoft Ads campaign is not
+ * known here: the reads run on Google Ads, where its id does not exist. */
 export function resolveCampaignId(opts: Record<string, string | boolean | undefined>, kind: 'morning' | 'postflight', nowMs: number, stage?: PostflightStage): string {
   const given = opts.campaign
   if (given === undefined) return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
-  if (typeof given === 'string' && given && (ADS_READ_PLANS[given] || campaignById(given))) return given
+  if (typeof given === 'string' && given && (ADS_READ_PLANS[given] || googleAdsCampaignById(given))) return given
   throw new Error(campaignRefusal(given))
 }
 

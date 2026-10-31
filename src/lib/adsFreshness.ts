@@ -10,7 +10,7 @@
 //   stale         a flight day that should be stored by now is not: yesterday once it is
 //                 09:30 ET (the 08:00 ET morning read has synced by then), else the day before.
 
-import type { CampaignFlight } from './campaigns'
+import { isGoogleAdsCampaign, type CampaignFlight } from './campaigns'
 import { addDays, etDateFast, etHourFast, etWallTimeMs } from './etTime'
 
 /** An ET date plus `days` (same result as lib/overview.ts addEtDays). */
@@ -70,7 +70,9 @@ export function expectedThrough(c: Pick<CampaignFlight, 'flightStart' | 'flightE
   return last >= c.flightStart ? last : null
 }
 
-export function freshnessOf(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, spendThrough: string | null, lastSync: string | null, nowMs: number): AdsFreshness {
+export function freshnessOf(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd' | 'adsPlatform'>, spendThrough: string | null, lastSync: string | null, nowMs: number): AdsFreshness {
+  // A Microsoft Ads campaign has no synced spend by design, so it is never "stale".
+  if (!isGoogleAdsCampaign(c)) return { spendThrough, lastSync, stale: false }
   const expected = expectedThrough(c, nowMs)
   return { spendThrough, lastSync, stale: expected != null && (spendThrough == null || spendThrough < expected) }
 }

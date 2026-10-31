@@ -1444,7 +1444,7 @@ lacks the pin, pin it in the same PR as the registration.
 **2. Register the campaign**, two edits, both in `src/lib`:
 
 - **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
-  Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
+  Ads campaign id; `adsPlatform: 'microsoft'` for a Microsoft Ads campaign, which the Google steps below do not apply to: see Flight 5), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `kind`,
   `installActionId` (the Google conversion action id whose conversions are this campaign's installs;
   unset means the campaign has no install figure, never 0), `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
@@ -1730,6 +1730,32 @@ skipped pull is never counted as a missing day. Every other campaign pulls exact
 It is also not a baseline twin: `closedPlayDirectCampaigns` leaves out a `noPlacements` arm, so a later
 Play-direct read never prints it as the September twin once it is marked closed.
 Tests: `scripts/ads-reads/f4AndroidArm.test.ts`.
+
+### Flight 5: a Microsoft Ads campaign, not in the Google sync
+
+**Flight 5 - Microsoft search** (Microsoft campaign id 571882693, `adsPlatform: 'microsoft'`; `src/lib/campaigns.ts`) is a
+Microsoft Advertising Search test copied from the Google F3 Search campaign: it reaches Bing, Yahoo and DuckDuckGo, runs
+2026-11-07 to 2026-11-13 ET at $10 a day with Enhanced CPC $0.78, and its ads and four sitelinks (#/privacy, #/terms,
+#/support, #/about) carry `utm_source=bing&utm_medium=cpc&utm_campaign=sudoku_funnel_f5_msft_search`
+(`F5_MSFT_SEARCH_TAG`). The Microsoft Ads account number is not kept in this repo. Its site counts (arrivals, funnel, first
+finish, returns) come from the tag like any web campaign, so the Campaigns page, the scorecard and the flight charts show it
+from the registry entry alone; no layout change is needed.
+
+**The "not a Google Ads campaign" flag** is `CampaignFlight.adsPlatform` (unset = Google Ads; `isGoogleAdsCampaign(c)` and
+`googleAdsCampaigns()` are the tests every consumer uses). A Microsoft id does not exist in Google Ads, so it is skipped by:
+the spend sync (`syncableCampaigns`: naming it with `--only` is the "not a syncable campaign" error), the Worker's hourly
+cron (`liveFlightCampaigns`: its flight does not wake the sync), the Worker config hash (`campaignsConfigHash`: registering
+one does not make the deployed Worker look stale), the stale check (`freshnessOf` / `readFreshness`: never "stale"), every
+Google Ads fetch (`assertKnownCampaign` throws) and the read plans (`readPlanFor` throws; `--campaign 571882693` is refused by
+`ads:morning-read` and `ads:postflight-read`), the Refresh Google Ads spend button (`/api/ads/refresh`) and the readings log
+(`/api/ads/readings`). It has **no read plan and no row in the daily ads cloud routine**
+([`ads-cloud-daily.md`](docs/routines/ads-cloud-daily.md) is unchanged). The Google Ads rows of the scorecard (Installs, Cost /
+install, Spend, Clicks) are not shown for it: they gate on `installActionId` or `measurement: 'spend-only'`.
+
+**Where F5 spend comes from:** nothing in code. Spend, cost per arrival and average CPC read blank ("—", never $0) until the ads
+lead enters the week's total from the Microsoft Ads UI as `CAMPAIGN_SPEND['571882693']` in `src/lib/campaigns.ts` (the entry
+is absent until then); the cost card then labels the figure hand-entered. The registry's `measurabilityNote` says so on the
+cost card. Clicks and a daily series are not stored. Tests: `src/lib/campaigns.test.ts` (Flight 5 section) and `scripts/ads-reads/campaignRegistry.test.ts`.
 
 ### Play installs (`ads:play-sync`, table `ads_play_daily`)
 

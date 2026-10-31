@@ -137,8 +137,8 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
   const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
   const maxFlight = Math.max(...TRACKED.map(flight))
 
-  it('the configuration tracks Android, the retest, the two flight-2 arms and any live flight-3 arm; the longest is the F3 Search arm at 21 days (extended 10-23 and 10-26)', () => {
-    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id)])
+  it('the configuration tracks Android, the retest, the two flight-2 arms, any live flight-3 arm and Flight 5; the longest is the F3 Search arm at 21 days (extended 10-23 and 10-26)', () => {
+    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id), '571882693'])
     expect(maxFlight).toBe(21)
     expect(flight(retest)).toBeLessThan(maxFlight)
   })

@@ -32,7 +32,7 @@
 // Conversions and per-asset results (migration 0007) are NOT part of this sync: they have a
 // pass of their own, syncAdsExtras() at the end of this file, run in its own invocation.
 
-import { CAMPAIGNS, campaignById, campaignStatusOn, type CampaignFlight } from './campaigns'
+import { CAMPAIGNS, campaignById, campaignStatusOn, isGoogleAdsCampaign, type CampaignFlight } from './campaigns'
 import { channelOf, microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import {
   ASSET_CATALOG_ROWS_PER_STATEMENT,
@@ -202,10 +202,11 @@ const ZERO: SpendDay = { costMicros: 0, impressions: 0, clicks: 0 }
 const hasDelivery = (d: SpendDay | PlacementDayRow) => d.costMicros > 0 || d.impressions > 0 || d.clicks > 0
 const firstOf = (xs: (string | undefined)[]) => xs.filter((x): x is string => !!x).sort()[0]
 
-/** Campaigns the sync covers: every configured campaign with a flight start, or the given ids
- * (an unknown id is an error — never a silent no-op). */
+/** Campaigns the sync covers: every configured Google Ads campaign with a flight start, or the given ids
+ * (an unknown id is an error — never a silent no-op). A Microsoft Ads campaign (adsPlatform) is not one: its id is not in
+ * Google Ads, so naming it is the same error. */
 export function syncableCampaigns(ids?: readonly string[]): CampaignFlight[] {
-  const all = CAMPAIGNS.filter((c) => c.flightStart != null)
+  const all = CAMPAIGNS.filter((c) => c.flightStart != null && isGoogleAdsCampaign(c))
   if (!ids?.length) return all
   const unknown = ids.filter((id) => !all.some((c) => c.id === id))
   if (unknown.length) throw new Error(`not a syncable campaign: ${unknown.join(', ')}`)
@@ -1501,10 +1502,11 @@ export function setBuildSha(sha: string | null | undefined): void {
 /** FNV-1a of the campaign definitions the sync uses, over every field it writes to ads_campaigns
  * (review I1): the dashboard compares it with its own and flags a Worker built from other ones.
  * A non-display campaign's channel (channelOf) is appended to its tuple, since it decides
- * whether the sync pulls placements, and so is `noPlacements`; a display-only config hashes exactly as before. */
+ * whether the sync pulls placements, and so is `noPlacements`; a display-only config hashes exactly as before.
+ * A Microsoft Ads campaign is left out: the Worker never syncs it, so registering one does not make a deployed Worker "drift". */
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
   const s = JSON.stringify(
-    campaigns.map((c) => {
+    campaigns.filter(isGoogleAdsCampaign).map((c) => {
       const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
       const channel = channelOf(c.id)
       if (channel !== 'display') t.push(channel)
@@ -1525,10 +1527,11 @@ export function workerInfo(): { gitSha: string | null; campaignsHash: string } {
 
 // ── The gss-stats-sync Worker's schedule and on-demand guard (workers/sync/) ──────────────
 /** Campaigns in a live flight today (ET): from the first flight day through the day after the
- * last one (so the last day is pulled once it has closed); a flight past that day never counts. */
+ * last one (so the last day is pulled once it has closed); a flight past that day never counts. A Microsoft Ads
+ * campaign never counts: there is nothing to pull for it, so its flight does not wake the hourly sync. */
 export function liveFlightCampaigns(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): CampaignFlight[] {
   const todayEt = etDateFast(nowMs)
-  return campaigns.filter((c) => c.flightStart != null && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
+  return campaigns.filter((c) => isGoogleAdsCampaign(c) && c.flightStart != null && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
 }
 /** The ET hour of the daily pass outside a flight: 03:xx, once yesterday counts as closed
  * (lib/adsFreshness.ts CLOSED_AFTER_ET). */

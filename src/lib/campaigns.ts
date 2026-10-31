@@ -43,7 +43,7 @@ export function etHourFromMs(ms: number): number {
 
 // ── Campaign registry ────────────────────────────────────────────────────────────────
 export interface CampaignFlight {
-  id: string // Google Ads campaign id
+  id: string // Google Ads campaign id (a Microsoft Ads campaign id when adsPlatform is 'microsoft')
   label: string
   /** Every `campaign` column value attributed to this flight (see ATTRIBUTION above). */
   ucValues: string[]
@@ -95,6 +95,12 @@ export interface CampaignFlight {
    * as missing a placement pull. Unset (every other campaign) = the pull runs for a display
    * campaign, exactly as before. Do not set it on a campaign that has stored placement rows. */
   noPlacements?: boolean
+  /** Which ad platform runs the campaign. Unset (or 'google') = Google Ads, exactly as before. 'microsoft' = a Microsoft
+   * Advertising campaign: `id` is a Microsoft id that does not exist in Google Ads, so nothing may query Google Ads with it
+   * (see isGoogleAdsCampaign: the spend sync, the freshness and staleness checks, the morning and post-flight reads and their
+   * status lookup, the refresh button). Its site counts come from its `ucValues` tag like any web campaign; its spend has no
+   * source in code and stays blank ("—", never $0) until someone enters the total in CAMPAIGN_SPEND. */
+  adsPlatform?: 'google' | 'microsoft'
   /** Google Ads daily budget in USD, as built (for pacing lines only). */
   dailyBudgetUsd?: number
   /** Cumulative-spend hard stop in USD, when the build spec set one. */
@@ -346,6 +352,8 @@ export function liveStagedCampaigns(dates: Record<StagedArm, StagedArmDates> = S
  * No click id is kept. The proof of tracking is a tagged /return/<uc>/d0 first open. The app side ships in the next app
  * release; until then no row carries it. Keep the value exactly: it matches the registry's naming. */
 export const F4_ANDROID_TAG = 'sudoku_funnel_f4_android'
+/** Flight 5 (Microsoft Advertising search): the utm_campaign on its ads and sitelinks. */
+export const F5_MSFT_SEARCH_TAG = 'sudoku_funnel_f5_msft_search'
 /** The hand-kept registry. `status` is not kept here: CAMPAIGNS derives it from the flight dates. */
 const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
   {
@@ -448,7 +456,35 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
     notes:
       '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag before Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z), so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
+  // ── Flight 5: Microsoft Advertising search, not a Google Ads campaign ───────────────────
+  // A Microsoft Ads Search test copied from the Google F3 Search campaign (Microsoft campaign id 571882693; the Microsoft
+  // account number is not kept in this public repo). It reaches Bing, Yahoo and DuckDuckGo. adsPlatform 'microsoft' keeps it out
+  // of every Google Ads query (the spend sync, the morning and post-flight reads, the stale check, the refresh button), and
+  // there is no read plan or cloud-routine row for it. Its spend is entered by hand: the ads lead records the week's total in
+  // CAMPAIGN_SPEND from the Microsoft Ads UI after the flight, and until then spend reads blank, never $0.
+  {
+    id: '571882693',
+    label: 'Flight 5 — Microsoft search',
+    ucValues: [F5_MSFT_SEARCH_TAG],
+    flightStart: '2026-11-07',
+    flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET), as the other search arms
+    flightEnd: '2026-11-13', // 7 serving days
+    kind: 'web',
+    adsPlatform: 'microsoft',
+    dailyBudgetUsd: 10,
+    hardCapUsd: 70,
+    servingHoursEt: [12, 23],
+    measurabilityNote: 'Microsoft Ads campaign: not in the Google Ads sync. Spend is entered by hand after the flight, so it reads blank until then.',
+    notes:
+      'Microsoft Advertising Search test (Bing, Yahoo, DuckDuckGo), copied from the Google F3 Search campaign: utm bing / cpc / sudoku_funnel_f5_msft_search on the ads and on four sitelinks (#/privacy, #/terms, #/support, #/about). 2026-11-07 .. 2026-11-13 ET, $10/day, Enhanced CPC $0.78 (Microsoft Search has no manual CPC). The site counts come from the tag. Not in the Google Ads sync, reads or rules (adsPlatform microsoft); no read plan. The spend for the week is entered by hand in CAMPAIGN_SPEND from the Microsoft Ads UI.',
+  },
 ]
+
+/** True when the campaign runs on Google Ads, so its id may be queried there. False for a Microsoft Ads campaign
+ * (adsPlatform 'microsoft'): every consumer that calls the Google Ads API, or reads what that sync stores, skips it. */
+export function isGoogleAdsCampaign(c: Pick<CampaignFlight, 'adsPlatform'>): boolean {
+  return c.adsPlatform == null || c.adsPlatform === 'google'
+}
 
 /** True when the campaign's site counts (tagged arrivals, funnel steps, returns) can be read: every campaign except a
  * spend-only one, unless it is `tagged` (its installs carry a tag the app writes into the beacon). */
@@ -471,6 +507,12 @@ function withDerivedStatus(c: Omit<CampaignFlight, 'status'>): CampaignFlight {
   return out
 }
 export const CAMPAIGNS: CampaignFlight[] = CAMPAIGN_REGISTRY.map(withDerivedStatus)
+
+/** The campaigns on Google Ads (every one but a Microsoft campaign): what the spend sync, its refresh button and the
+ * readings log cover. A live view of CAMPAIGNS, so a test that scopes CAMPAIGNS is followed. */
+export function googleAdsCampaigns(): CampaignFlight[] {
+  return CAMPAIGNS.filter(isGoogleAdsCampaign)
+}
 
 export function campaignById(id: string): CampaignFlight | undefined {
   return CAMPAIGNS.find((c) => c.id === id)
@@ -1235,6 +1277,7 @@ export const CAMPAIGN_SPEND: Record<string, number | null> = {
   '24279250691': null,
   '24316608605': null,
   '24311309184': null,
+  // Flight 5 (Microsoft Ads, id 571882693) is deliberately absent: its spend is entered here by hand once known, never synced.
 }
 /** spend / count, or null (never NaN/Infinity/a fabricated cost) when spend is unset or
  * count is 0. */
