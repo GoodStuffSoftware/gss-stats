@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.11] — 2026-10-31
+
 ### Added
 - **Flight 5, the Microsoft search test, is on the Campaigns page.** It is registered with its tag `sudoku_funnel_f5_msft_search` for 2026-11-07 to 2026-11-13 ET, so its arrivals, funnel and returns show from the tag; its spend reads blank until the week's total is entered by hand, and it is kept out of every Google Ads sync, read and refresh.
 
