@@ -8,7 +8,7 @@
 //     event-beacon exclusion lift, the prefilters and the bind count are what a request gets.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { breakdownColumnExpr, onRequestPost, RING_EXCLUDED_DIMS, EVENT_DIMS, GEO_DIMS, statementTooLarge } from './geo'
+import { breakdownColumnExpr, derivedColumns, onRequestPost, RING_EXCLUDED_DIMS, EVENT_DIMS, GEO_DIMS, statementTooLarge } from './geo'
 import type { CacheLike } from '../_lib/edgeCache'
 import {
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
@@ -455,14 +455,21 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(statementTooLarge('SELECT 1', 100)).toBeNull()
   })
 
-  it('refuses a statement over 90,000 bytes of SQL with a clear 400 (16 pop-up outcome filters)', async () => {
-    const { body, calls } = await post({
-      dimension: 'device',
-      constraints: Array.from({ length: 16 }, () => ({ field: 'popupOutcome', value: 'shown' })),
-      ...range,
-    })
-    expect(body.error).toMatch(/too large \(\d+ bytes; at most 90000\)/)
-    expect(calls).toHaveLength(0)
+  // 16 pop-up outcome filters inline restate the popupOutcome CASE 16 times and pass the cap; read from one
+  // derived-table column (geo.ts derivedColumns) the same chart fits and loads.
+  it('refuses a statement over 90,000 bytes of SQL with a clear 400 (16 pop-up outcome filters, inline form)', async () => {
+    const chart = { dimension: 'device', constraints: Array.from({ length: 16 }, () => ({ field: 'popupOutcome', value: 'shown' })), ...range }
+    derivedColumns.on = false
+    try {
+      const { body, calls } = await post(chart)
+      expect(body.error).toMatch(/too large \(\d+ bytes; at most 90000\)/)
+      expect(calls).toHaveLength(0)
+    } finally {
+      derivedColumns.on = true
+    }
+    const { body, calls } = await post(chart)
+    expect(body.error).toBeUndefined()
+    expect(calls).toHaveLength(1)
   })
 
   it('a failing D1 query returns a generic error, never the D1 message', async () => {

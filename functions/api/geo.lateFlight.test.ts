@@ -142,7 +142,8 @@ describe('late flight attribution', () => {
     const base = sqliteD1(db)
     const probe = {
       ...base,
-      prepare: (sql: string) => base.prepare(sql.replaceAll('FROM hits WHERE ', 'FROM hits WHERE rr_hits() AND ').replaceAll('FROM flight_reg WHERE ', 'FROM flight_reg WHERE rr_reg() AND ')),
+      // A derived-dim statement reads hits through a flattened derived table (geo.ts derivedColumns): count its rows there.
+      prepare: (sql: string) => base.prepare(sql.replaceAll('FROM hits WHERE ', 'FROM hits WHERE rr_hits() AND ').replaceAll(') AS hits WHERE ', ') AS hits WHERE rr_hits() AND ').replaceAll('FROM flight_reg WHERE ', 'FROM flight_reg WHERE rr_reg() AND ')),
     } as unknown as ReturnType<typeof sqliteD1>
     const measure = async (body: Record<string, unknown>, late: boolean) => {
       hitsRows = 0
