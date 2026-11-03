@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.76.3] — 2026-11-03
+
+### Added
+- **Ready for the daily-visit rows.** Best Sudoku's coming `/visit/day/new` and `/visit/day/returning` rows (one per device per Eastern day) are kept out of page views and screen views, can be charted with Include event beacons, and are counts only: no hour, place or device split.
+
 ## [0.76.2] — 2026-11-03
 
 ### Changed

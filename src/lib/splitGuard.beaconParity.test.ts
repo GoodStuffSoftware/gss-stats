@@ -25,6 +25,7 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/signin-prompt/first-finish', // the first-finish sign-in ask (ruling 2026-10-24): the beacon mirrors these three too
       '/signin-eligible/earned/first-finish',
       '/popup-outcome/signin-prompt/first-finish/%',
+      '/visit/%', // daily-visit beacon (approved 2026-11-02): the beacon repo mirrors this line and its pin
     ])
   })
 })
@@ -67,6 +68,9 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/popup-outcome/signin-prompt/first-finish/signed-in',
       '/popup-outcome/signin-prompt/first-finish/still-playing',
       '/popup-outcome/signin-prompt/first-finish/x',
+      '/visit/day/new',
+      '/visit/day/returning',
+      '/VISIT/Day/New',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -97,6 +101,9 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/signin-prompt/accept',
       '/signin-prompt/first-finish/x',
       '/signin-prompt/first-finished',
+      '/visit',
+      '/visitor/x',
+      '/visits/day/new',
       '/signin-eligible/earned',
       '/signin-eligible/earned/placement',
       '/signin-eligible/earned/first-finish/x',

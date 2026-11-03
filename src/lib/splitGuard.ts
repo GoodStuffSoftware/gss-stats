@@ -162,6 +162,9 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/signin-prompt/first-finish',
   '/signin-eligible/earned/first-finish',
   '/popup-outcome/signin-prompt/first-finish/%',
+  // Best Sudoku daily-visit beacon (approved 2026-11-02): `/visit/day/new` and `/visit/day/returning`, once per
+  // device per Eastern day. Counts only, like `/return`: per-ET-day totals stay allowed, no hour, place or device split.
+  '/visit/%',
 ]
 
 /** Path prefixes of the pop-up rows /api/popups, the metrics pop-up facts and the routine's site-wide
@@ -201,7 +204,7 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
   'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
-  'tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel, first-finish and first-finish sign-in ask rows, ' +
+  'tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel, first-finish, first-finish sign-in ask and daily-visit rows, ' +
   'which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */

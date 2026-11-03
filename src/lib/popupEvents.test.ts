@@ -528,7 +528,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 23 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 24 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -555,6 +555,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/ab/ask-order',
       '/coach',
       '/game/first-finish',
+      '/visit',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
@@ -585,6 +586,24 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     expect(sql).toContain("path NOT LIKE '/game/start/%'")
     // The include side (the event reads) is the exact inverse: it picks the prefix up.
     expect(popupIncludeClause().sql).toContain("path LIKE '/game/start/%'")
+  })
+  // Best Sudoku daily-visit beacon (approved 2026-11-02): one row per device per ET day. Fixture rows: it
+  // never counts as a page view or screen view, has its own family, and a look-alike page still counts.
+  it('daily-visit rows are events with their own family, never page views', () => {
+    for (const p of ['/visit/day/new', '/visit/day/returning']) {
+      expect(isPopupEventPath(p), p).toBe(true)
+      expect(pathFamilyOf(p), p).toBe('visit')
+      expect(isSplitRefusedPath(p), p).toBe(true)
+    }
+    for (const p of ['/visitors', '/visit-us', '/visits/day/new', '/x/visit/day/new']) {
+      expect(isPopupEventPath(p), p).toBe(false)
+      expect(pathFamilyOf(p), p).toBe('page')
+    }
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' AND ')).toContain("path <> '/visit' AND path NOT LIKE '/visit/%'")
+    expect(popupIncludeClause().sql).toContain("path LIKE '/visit/%'")
+    expect(pathFamilySqlCase()).toContain("WHEN path = '/visit' OR path LIKE '/visit/%' THEN 'visit'")
   })
   it('there is exactly one tutorial-complete family and one option for it (no shadowed duplicate)', () => {
     expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'tutorial-complete')).toHaveLength(1)

@@ -1036,7 +1036,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 `/install`, `/popup-outcome`, `/return`, `/funnel`, `/ab/ask-order`, `/coach`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`, which
 includes `/tour/exit-at/<stage>`, `/game/tutorial-complete`, `/game/first-move`, `/game/abandon`,
-`/welcome-signed-in` and `/game/start/<difficulty>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/welcome-signed-in`, `/game/start/<difficulty>` and the daily-visit rows `/visit/day/<new|returning>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`). `/api/popups` counts
 only the pop-up events among them (the sign-in, first-50, upsell, install and pop-up-outcome
@@ -1057,7 +1057,7 @@ and the UTC `date`, whose count minus `dateEt`'s for the same day would give an 
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…`, `/ab/ask-order/…` and `/funnel/…` rows out entirely, and any row whose
+`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…`, `/ab/ask-order/…`, `/funnel/…` and `/visit/…` rows out entirely, and any row whose
 path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
 too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
@@ -1067,7 +1067,7 @@ start (`/game/start/<difficulty>`), a tour skip (the exact path `/tour/skip`) an
 (`/tour/exit-at/<stage>`, sent only right after a skip) are counted by path, by ET day and by web
 or app site in the geo charts (with "Include event beacons" on), and in the morning read's
 first-session funnel; `/api/popups` never counts them. `/tour/start` and `/tour/complete` are not
-part of the rule. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
+part of the rule. The Best Sudoku daily-visit beacon (`/visit/day/new` or `/visit/day/returning`, path family `visit`, approved 2026-11-02) is sent at most once per device per Eastern day, gated on the device by localStorage, with no id, date or count in the row. It is an event (never a page view, screen view or new-device arrival) and counts only like `/return`: per-ET-day totals and the web/app site split are allowed, never an hour, place or device split. One row is one device on one Eastern day, so clearing storage or a second device counts again. It is ready ahead of the app release; no release marker or measurement-change entry exists until the date is known. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
 `/coach/closed-at/<tip>`, `/coach/tour-opened`; tip is place, wheel, notes, hint or clash) is an event family (path family
 `coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and

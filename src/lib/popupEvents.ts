@@ -119,6 +119,11 @@ export const POPUP_EVENT_PREFIXES = [
   '/coach',
   // Once-per-device first finish (see FIRST_FINISH_PATH): an event, never a screen view, and count-only (splitGuard.ts).
   FIRST_FINISH_PATH,
+  // Best Sudoku daily-visit beacon (approved 2026-11-02, not yet shipped): `/visit/day/new` or
+  // `/visit/day/returning`, at most once per device per Eastern day, gated on the device by localStorage.
+  // No id, date or count in the row. An event, never a screen view or a "new device" arrival, and
+  // count-only (splitGuard.ts). One row is one device on one ET day.
+  '/visit',
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -216,6 +221,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/ab/ask-order': 'ab-ask-order',
   '/coach': 'coach',
   [FIRST_FINISH_PATH]: 'game-first-finish',
+  '/visit': 'visit',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -268,6 +274,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'ab-ask-order', label: 'Ask-order A/B twin (duplicate rows)' },
   { value: 'coach', label: 'Coach strip (tips shown / dismissed / closed, tour opened)' },
   { value: 'game-first-finish', label: 'First finish (once per device)' },
+  { value: 'visit', label: 'Daily visit (one device on one Eastern day)' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
