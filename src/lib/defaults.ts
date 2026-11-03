@@ -230,7 +230,7 @@ function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
 // The Traffic page's visitors group: a note saying what is and is not counted, and the daily count of new devices.
 // Both are ordinary editor widgets (a note tile and a beacon line with two AND'ed filters per series).
 export const VISITORS_NOTE_TEXT =
-  "Unique and returning visitors per day start with the next Best Sudoku release (a once-a-day row per device, approved 11-02). 'Returning' beacon rows are later screen views, not returning people."
+  "Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day). 'Returning' beacon rows are later screen views, not returning people."
 export const NEW_DEVICES_CAPTION =
   "**New devices:** the first beacon from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
 export function visitorsGroupWidgets(y: number): Widget[] {
