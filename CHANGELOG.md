@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.76.1] — 2026-11-03
+
 ### Fixed
 - **Closed ad-spend days keep converging to Google's final cost.** Every day of a Google Ads flight is now re-read once a day while the flight runs and for 14 days after it ends, so invalid-click credits that Google applies days later reach the daily spend table and the stats site (Flight 4's 10-27 sat $2.43 high).
 
