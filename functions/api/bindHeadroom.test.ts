@@ -34,7 +34,7 @@ const MIN_ROOM_CAMPAIGNS = 5
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
-/** A full calendar year: every flight's window falls inside it, so no per-flight clause is cut away. */
+/** A full calendar year: every real flight's window falls inside it (the fakes run on to 2099). */
 const WIDE = { since: '2026-01-01', until: '2026-12-31' }
 const OWN = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
 

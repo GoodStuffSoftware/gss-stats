@@ -34,11 +34,13 @@ the real handler on real SQLite and requires identical answers.
 
 ## Numbers
 
-| Ring | Inline | Derived table |
+Heaviest ring the headroom test finds, at 10 fake campaigns:
+
+| Measure | Inline | Derived table |
 |---|---|---|
-| Heaviest swept ring, 5 fakes (sub-day / aligned windows) | 88,664 B | about 36 KB |
-| Heaviest swept ring, 10 fakes | 89,734 B | 43,084 B (year window, now swept) |
-| Per added two-uc campaign | about 214 B | about 276 B (year window) |
+| Sub-day and day-aligned windows (the old sweep) | 89,734 B | about 37 KB |
+| With a full-year window (swept from now on) | over 90,000 B, refused | 43,084 B |
+| Per added two-uc campaign | about 214 B | about 276 B |
 
 At 10 fakes the heaviest ring holds about 169 more two-uc campaigns.
 

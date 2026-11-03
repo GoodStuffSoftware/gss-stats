@@ -305,7 +305,7 @@ export const derivedColumns = { on: true }
 function derivedColumnSet() {
   const cols = new Map<string, string>() // column -> the dim's '' expression
   const col = (d: string): string | null => {
-    if (!derivedColumns.on || !(d in DERIVED_FILTER_LABEL)) return null
+    if (!derivedColumns.on || !Object.hasOwn(DERIVED_FILTER_LABEL, d)) return null
     const name = `_${d}`
     if (!cols.has(name)) cols.set(name, breakdownColumnExpr(d, ''))
     return name

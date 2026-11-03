@@ -90,6 +90,8 @@ function fixture(): HitRow[] {
       os: pick(['Android', 'iOS', 'Windows']),
       region: household ? 'North Carolina' : pick(['Ohio', 'Texas', '']),
       screenw: household ? 412 : pick([0, 390, 800, 1200, 1600]),
+      // Map mode reads only rows with a location: about half have one, from a few made-up points.
+      ...(rnd() < 0.5 ? pick([{ lat: '39.96', lon: '-83.00', city: 'Columbus' }, { lat: '30.27', lon: '-97.74', city: 'Austin' }, { lat: '35.78', lon: '-78.64', city: 'Raleigh' }]) : {}),
       medium: rnd() < 0.05 ? 'lifecycle' : '',
     }
   }
@@ -148,7 +150,8 @@ const VALUE: Record<string, string> = {
 const drill = (field: string, value = VALUE[field]) => ({ field, value })
 const SITES = { sites: ['bestsudoku-web', 'bestsudoku-app', 'elsewhere'] }
 
-/** The heaviest ring the bind headroom sweep finds (bindHeadroom.test.ts), with its 16 pathFamily filters. No row can
+/** The heaviest ring the bind headroom sweep found before the derived table (bindHeadroom.test.ts now finds the same 8 dims
+ * heaviest with 16 flightDay filters, which the single-dim and ring bodies below also drill), with 16 pathFamily filters. No row can
  * be in it: a landing arrival is a /return/ row, which no pop-up or key-event dim describes (and hourEt's guard drops). */
 const HEAVIEST = ['popupOutcome', 'popupFamily', 'keyEvent', 'featureStep', 'hourEt', 'pathFamily', 'flightDay', 'landingTag']
 const sixteen = (field: string, value?: string) => Array.from({ length: 16 }, (_, i) => drill(field, value ?? `${field}-${i}`))
@@ -276,6 +279,14 @@ describe('derived columns', () => {
         expect(now.json.rows.length, `${name} returns rows`).toBeGreaterThan(0)
         expect(now.json).toEqual(old.json)
       }
+    }
+    // Map mode, through the derived table, finds located rows too.
+    for (const constraints of [[drill('pathFamily', 'install')], [drill('screenwBucket', '768-1023'), drill('keyEvent')], sixteen('pathFamily', 'install')]) {
+      const body = { dimension: 'points', constraints, includeEventBeacons: true }
+      const p = await post(body, true, true)
+      expect(p.sql, JSON.stringify(body)).toContain(DERIVED_TABLE)
+      expect(p.json.rows.length, `points ${JSON.stringify(constraints)} returns rows`).toBeGreaterThan(0)
+      expect(p.json).toEqual((await post(body, false, true)).json)
     }
     const now = await post({ ...HEAVY.heaviest, includeEventBeacons: true }, true, true)
     const old = await post({ ...HEAVY.heaviest, includeEventBeacons: true }, false, true)
