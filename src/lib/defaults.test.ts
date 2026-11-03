@@ -807,7 +807,7 @@ describe('Traffic page: visitors group', () => {
 
   it('its caption says what is counted and what is not (devices, not people or unique visitors)', () => {
     const cap = find('bsk-new-daily').caption!
-    expect(cap).toMatch(/first beacon from a new browser or app install/)
+    expect(cap).toMatch(/first page view from a new browser or app install/)
     expect(cap).toMatch(/counts again/)
     expect(cap).toMatch(/not unique visitors per day/)
   })

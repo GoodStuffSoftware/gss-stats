@@ -535,7 +535,7 @@ function moveRing(idx: number, dir: -1 | 1) {
 }
 
 // ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
-// series its own date query narrowed by one filter, on the left or right axis. ─────────────────
+// series its own date query narrowed by one or two filters, on the left or right axis. ─────────────────
 const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
 // A line over a non-date axis may break down into one line per value (lib/charts.ts); a date
 // axis draws its lines from `series` instead, so it offers no breakdown there.
@@ -572,6 +572,8 @@ const isShareChart = computed(() => draft.type === 'doughnut' || draft.type === 
 const showSharesChecked = computed(() => widgetShowsShares(draft))
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
+// The second filter pair is a free-text value, so it leaves out the feature step (that field needs its step picker).
+const SERIES_FIELDS_PAIR2 = SERIES_FIELDS.filter((d) => d.key !== 'featureStep')
 function addSeries() {
   const list: LineSeries[] = (draft.series ??= [])
   list.push({ label: `Series ${list.length + 1}`, axis: 'left', style: 'solid' })
@@ -1211,7 +1213,7 @@ function resetToDefault() {
         </label>
       </div>
 
-      <!-- Beacon line chart on dates: draw several series, each narrowed by one filter. -->
+      <!-- Beacon line chart on dates: draw several series, each narrowed by one or two filters. -->
       <div class="field" v-if="canUseSeries">
         <label>Series <span class="hint">— none = one line of everything the chart counts</span></label>
         <div class="series-list">
@@ -1240,10 +1242,10 @@ function resetToDefault() {
               aria-label="Series filter value"
               @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value)"
             />
-            <template v-if="s.filter?.[0]?.field">
+            <div v-if="s.filter?.[0]?.field" class="series-pair2">
               <select :value="s.filter?.[1]?.field ?? ''" aria-label="Series second filter field" @change="setSeriesFilter(idx, 'field', ($event.target as HTMLSelectElement).value, 1)">
                 <option value="">(and nothing else)</option>
-                <option v-for="d in SERIES_FIELDS" :key="d.key" :value="d.key">and {{ d.label }}</option>
+                <option v-for="d in SERIES_FIELDS_PAIR2" :key="d.key" :value="d.key">and {{ d.label }}</option>
               </select>
               <input
                 v-if="s.filter?.[1]?.field"
@@ -1253,7 +1255,7 @@ function resetToDefault() {
                 aria-label="Series second filter value"
                 @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value, 1)"
               />
-            </template>
+            </div>
             <select v-model="s.axis" aria-label="Axis">
               <option value="left">Left axis</option>
               <option value="right">Right axis</option>
@@ -1310,6 +1312,13 @@ function resetToDefault() {
   padding: 8px;
   border: 1px solid rgb(var(--line));
   border-radius: 10px;
+}
+/* the optional second filter pair gets its own full-width row, so it cannot squeeze the label and first pair */
+.series-row > .series-pair2 {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
 /* label on its own row (with the remove button), then field + value, then axis + style */
 .series-row > input:first-child {

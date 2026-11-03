@@ -232,7 +232,7 @@ function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
 export const VISITORS_NOTE_TEXT =
   "Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day). 'Returning' beacon rows are later screen views, not returning people."
 export const NEW_DEVICES_CAPTION =
-  "**New devices:** the first beacon from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
+  "**New devices:** the first page view from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
 export function visitorsGroupWidgets(y: number): Widget[] {
   return [
     w({
@@ -764,7 +764,7 @@ export function overviewPageIsUncustomized(p: DashboardPage): boolean {
 }
 // "Overall timeline" (CONFIG_VERSION 9, owner 2026-09-27: "it's still a line chart"): the
 // STANDARD line chart, not a bespoke panel. Five series over the beacon's date axis, each a date
-// query narrowed by one filter (Widget.series): page views and tagged arrivals on the left axis;
+// query narrowed by one or two filters (Widget.series): page views and tagged arrivals on the left axis;
 // sign-ins, installs and raw install signals on the right. Release and go-live markers and the
 // campaign-flight bands are its overlay options (lib/timelineOverlay.ts), all editable in the
 // normal chart editor. Colors match the former panel's.

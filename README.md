@@ -495,7 +495,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   hovering or tapping a marker line or a band's name shows its date and note (every marker on that same day, when a web and a Play release share one), and a collapsed
   "Markers and bands" list under the chart holds every item in range for keyboard and touch. A
   beacon line chart can also draw several **series** (`Widget.series`): each is its own date
-  query narrowed by one field = value filter (e.g. `keyEvent = install`), on the left or right
+  query narrowed by one or two field = value filters (e.g. `keyEvent = install`), on the left or right
   axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"
   (`excludeKnownTraffic`) applies the campaigns endpoint's `EXCLUSIONS` to a beacon chart.
 - **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
