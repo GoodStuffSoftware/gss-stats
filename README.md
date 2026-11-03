@@ -1177,13 +1177,17 @@ the row, built only from those modules' own constants — never request input �
 literal passed through `sqlLit` (inlined rather than bound because a two-dimension chart would
 otherwise pass D1's 100-bound-parameter cap). The three that read the campaign registry
 (`campaignFlight`, `flightDay`, `arrival`) look it up in one `flight_reg` table stated once at the
-start of the statement (`withFlightRegistry`), not once per use, so a registered campaign adds
-about 0.2 KB to the worst-case statement and no bound parameter: the 90,000-byte statement cap
-holds about 48 campaigns for the heaviest ring the headroom test sweeps (the 8 costliest dims with 16 filters; API-only, the chart
-editor stops at 5 dims) and about 19 with realistic campaigns, which have more ad groups and longer names and cost about 0.63 KB each
-(a typical 5-dim ring holds about 280 more). The old per-use copy held 10 on a lighter ring (`bindHeadroom.test.ts` guards the heaviest
-ring with 15 two-ad-group campaigns of room left). They filter exactly like a column — the same
-whitelisted expression is compared as `(<expr>) = ?`, the value always bound. A
+start of the statement (`withFlightRegistry`), not once per use. Each derived dimension a
+statement uses is computed once, as a column of a derived table in its `FROM`
+(`(SELECT hits.*, <expr> AS _<dim> FROM hits) AS hits`; SQLite flattens it into the same index
+range scan), and every ring key, blank test and filter reads that column, so a further filter
+costs a column name rather than another copy of the expression
+([ADR 0006](docs/adr/0006-geo-derived-columns.md)). A registered campaign adds about 0.28 KB to the
+worst-case statement and no bound parameter: the heaviest ring the headroom test sweeps (the 8
+costliest dims with 16 filters over a full year; API-only, the chart editor stops at 5 dims) is
+about 40 KB today against the 90,000-byte statement cap and holds about 190 two-ad-group campaigns
+(`bindHeadroom.test.ts` guards it with 10 fake campaigns plus 5 of room). They filter exactly like a
+column — the whitelisted expression's column is compared as `(<column>) = ?`, the value always bound. A
 dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
 the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`
 bucket), `lat`/`lon` (map-mode coordinates only), and `in_app` (declared in gss-beacon's

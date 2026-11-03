@@ -12,29 +12,30 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 
 /** Binds a statement may carry: D1's limit is 100, and ten stay free. */
 const HEADROOM_CEILING = 90
-/** Fake campaigns registered on top of the real ones (5 today), each with two short uc values. The flight dims (campaignFlight,
- * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so a worst-case
- * geo ring carries 81 binds at any count and grows about 0.21 KB per added campaign. The byte cap is what campaigns hit, never
- * the bind cap. The byte-heaviest ring the sweep finds is the RING_DIMS_HARD_CAP (8) costliest dims, measured one by one,
- * then improved by swaps (popupFamily, popupOutcome, keyEvent, flightDay, pathFamily, arrival, hourEt, campaignFlight; API-only, the UI stops at 5
- * dims) with 16 pathFamily filters: 80.9 KB at 5 campaigns. It holds about 43 more two-uc campaigns (48 in all). With
- * realistic ones (4 ucs, ~38-char names, about 0.63 KB each) it holds about 14 more (about 19 in all). Typical rings hold far
- * more: a 5-dim UI ring (referrer, gameMode, gameDifficulty, campaignFlight, flightDay, with 16 flightDay filters) is 30.7 KB
- * at 5 campaigns and holds about 280 more.
- * Measured by bisecting BIND_EXTRA (two-uc fakes, MIN_ROOM_CAMPAIGNS = 5): the room test first goes red at BIND_EXTRA=39
- * (44 campaigns in all), and the byte and no-refusal tests first go red at BIND_EXTRA=44 (49 in all: 43 extra is 89,924 B and
- * fits, 44 is 90,136 B and is refused). The default EXTRA = 5 (was 10 until 0.76.3, when the /visit/ pathFamily branch took about 0.9 KB of the ring) plus MIN_ROOM_CAMPAIGNS = 5 puts the tripwire at 10 two-uc
- * campaigns (about 5 realistic ones) of room left on today's registry: the room test reads red when the registry plus EXTRA
- * fakes leaves under 5 of room, i.e. when the real ring has under 15. Keep that in mind before reading "48 campaigns" as comfortable. */
-const EXTRA = Number(process.env.BIND_EXTRA ?? 5)
+/** Fake campaigns registered on top of the real ones (10 today, 14 uc values), each with two short uc values. The flight dims
+ * (campaignFlight, flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts),
+ * so a worst-case geo ring carries 81 binds at any count. The byte cap is what campaigns hit, never the bind cap. Each derived
+ * dim is computed once, as a column of a derived table in the FROM (geo.ts derivedColumns, docs/adr/0006), so a filter, ring
+ * key or blank test costs a column name rather than a restated expression. The byte-heaviest ring the sweep finds is the
+ * RING_DIMS_HARD_CAP (8) costliest dims, measured one by one, then improved by swaps: [popupOutcome, popupFamily, pathFamily,
+ * featureStep, hourEt, landingTag, flightDay, keyEvent] (API-only, the UI stops at 5 dims) with 16 flightDay filters over a
+ * full calendar year with event beacons on: 40,320 B today and 43,084 B with the 10 fakes, about 276 B per added two-uc
+ * campaign. At 10 fakes it holds about 169 more two-uc campaigns (about 189 in all); realistic ones (4 ucs, ~38-char names)
+ * cost about 3x as much, so about 55 more. Before the derived table the same ring was 88,664 B at 5 fakes and 89,734 B at
+ * 10 (sub-day and aligned windows; the year window was not swept), which is why EXTRA had dropped to 5 in 0.76.3.
+ * The default EXTRA = 10 plus MIN_ROOM_CAMPAIGNS = 5 reads red when the registry plus 10 fakes leaves under 5 campaigns of
+ * room, i.e. when the real ring has under 15: a long way off, so a red here means a builder regressed, not that campaigns
+ * piled up. */
+const EXTRA = Number(process.env.BIND_EXTRA ?? 10)
 /** The fewest further campaigns the worst-case ring must still hold after the EXTRA fakes (the extrapolated headroom test
- * below). At the default EXTRA=5 the ring has room for about 33 more, so a floor of 5 goes red once today's registry leaves
- * under about 15 two-uc campaigns of room (about 5 realistic ones at 3x cost): early enough to act on, with slack for a
- * filter or two added later. */
+ * below). At the default EXTRA=10 the ring has room for about 169 more, so a floor of 5 goes red only once a builder or the
+ * registry eats nearly all of it: early enough to act on, with slack for a filter or two added later. */
 const MIN_ROOM_CAMPAIGNS = 5
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
+/** A full calendar year: every flight's window falls inside it, so no per-flight clause is cut away. */
+const WIDE = { since: '2026-01-01', until: '2026-12-31' }
 const OWN = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
 
 interface Worst {
@@ -197,11 +198,11 @@ async function measure(extra: number, ringDims?: string[]): Promise<Measured> {
 
   // The byte-heaviest legal ring, found on principle rather than by hand. Step 1: every ring-eligible dim's own byte cost, as the
   // extra bytes of the 2-dim ring [dim, partner] over the cheapest ring [region, country], worst over every heavy filter set and
-  // the four window / eventBeacons variants. Step 2: the RING_DIMS_HARD_CAP costliest dims form one ring, swept over the same
+  // the six window / eventBeacons variants (sub-day, day-aligned and a full calendar year). Step 2: the RING_DIMS_HARD_CAP costliest dims form one ring, swept over the same
   // variants. The reviewer's ring runs as its own case. Costs are not strictly additive (popupFamily and popupOutcome share a
   // prefilter), so the explicit ring is the cross-check: the guard also asserts the principled ring is at least as heavy.
   const variants: [string, Record<string, unknown>][] = []
-  for (const win of [SUB_DAY, ALIGNED]) for (const includeEventBeacons of [true, false]) variants.push([`${win === SUB_DAY ? 'sub-day' : 'aligned'}, eventBeacons=${includeEventBeacons}`, { ...common, ...win, includeEventBeacons }])
+  for (const [wname, win] of [['sub-day', SUB_DAY], ['aligned', ALIGNED], ['year', WIDE]] as const) for (const includeEventBeacons of [true, false]) variants.push([`${wname}, eventBeacons=${includeEventBeacons}`, { ...common, ...win, includeEventBeacons }])
   const ringBytes = async (dims: string[], v: Record<string, unknown>, constraints: unknown[]) => run(m.geo.onRequestPost, { ...v, constraints, dimension: dims[0], dims })
   let dimCosts: Measured['dimCosts'] = []
   const givenRing = ringDims !== undefined

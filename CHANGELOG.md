@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Charts with many filters stay well under the size cap.** Each derived breakdown is worked out once per query instead of once per filter, so the heaviest chart query is less than half its old size, filter combinations that were refused as too large now load, and every number is unchanged.
+
 ## [0.76.3] — 2026-11-03
 
 ### Added

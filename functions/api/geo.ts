@@ -12,7 +12,7 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
-import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
+import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter, sqlLit } from '../../src/lib/popupEvents'
 import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions, LATE_FLIGHT_DIMS, lateFlightInputs, lateFlightSqlCase } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
@@ -122,8 +122,8 @@ export function ringBlankExclusion(dim: string): string {
 // keeps among an exact-count tie is unspecified, and the two query PLANS being compared here
 // (a bare GROUP BY vs. one wrapped in a subquery) aren't guaranteed to break ties the same way,
 // even reading the identical data. The caller (onRequestPost below) always supplies a full order.
-export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string, late?: LateFlight | null): string {
-  return withFlightRegistry(`SELECT k, c, SUM(c) OVER () AS total FROM (${groupedCountsSql([[col, 'k']], [['COUNT(*)', 'c']], whereSql, late)}) ORDER BY ${orderBy} LIMIT ?`)
+export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string, late?: LateFlight | null, from = 'hits'): string {
+  return withFlightRegistry(`SELECT k, c, SUM(c) OVER () AS total FROM (${groupedCountsSql([[col, 'k']], [['COUNT(*)', 'c']], whereSql, late, from)}) ORDER BY ${orderBy} LIMIT ?`)
 }
 
 // ── Late flight attribution: count first, attribute after (lib/campaigns.ts lateFlightSqlCase) ──
@@ -147,13 +147,14 @@ export interface LateFlight {
  * the two through the real handler; also the one-line revert). */
 export const flightAttribution = { late: true }
 /** `SELECT <keys>, <counts> FROM hits WHERE <where> GROUP BY <keys>` (the old inner aggregate, byte for
- * byte) without `late`; with it, the two-stage form above. Stage 2 re-sums the counts. */
-export function groupedCountsSql(keys: [string, string][], counts: [string, string][], whereSql: string, late?: LateFlight | null): string {
+ * byte) without `late`; with it, the two-stage form above. Stage 2 re-sums the counts. `from` is what the
+ * (stage-1) scan reads: `hits`, or the derived table of DerivedColumns.from(). */
+export function groupedCountsSql(keys: [string, string][], counts: [string, string][], whereSql: string, late?: LateFlight | null, from = 'hits'): string {
   const list = (xs: [string, string][]) => xs.map(([e, a]) => `${e} AS ${a}`)
-  if (!late) return `SELECT ${[...list(keys), ...list(counts)].join(', ')} FROM hits WHERE ${whereSql} GROUP BY ${keys.map(([, a]) => a).join(', ')}`
+  if (!late) return `SELECT ${[...list(keys), ...list(counts)].join(', ')} FROM ${from} WHERE ${whereSql} GROUP BY ${keys.map(([, a]) => a).join(', ')}`
   const early = keys.filter(([, a]) => !late.lateAliases.has(a))
   const inputAliases = late.inputs.map((i) => i.slice(i.lastIndexOf(' AS ') + 4))
-  const inner = `SELECT ${[...list(early), ...late.inputs, ...list(counts)].join(', ')} FROM hits WHERE ${whereSql} GROUP BY ${[...early.map(([, a]) => a), ...inputAliases].join(', ')}`
+  const inner = `SELECT ${[...list(early), ...late.inputs, ...list(counts)].join(', ')} FROM ${from} WHERE ${whereSql} GROUP BY ${[...early.map(([, a]) => a), ...inputAliases].join(', ')}`
   const outerKeys = keys.map(([e, a]) => (late.lateAliases.has(a) ? `${e} AS ${a}` : a))
   const sums = counts.map(([, a]) => `SUM(${a}) AS ${a}`)
   const lw = late.where.length ? ` WHERE ${late.where.join(' AND ')}` : ''
@@ -175,17 +176,17 @@ const splitAlias = (col: string): [string, string] => {
  * date bucket, one count per series (`s<i>`, the step's own match, so two series that share a path each count it), and
  * each series' total over every bucket (`t<i>`, before LIMIT, as `total` above). `stepSql[i]` is featureStepFilterSql's
  * literal for series i, never request text. Grouped by the date key alone. */
-export function buildStepSeriesSql(col: string, stepSql: readonly string[], whereSql: string, late?: LateFlight | null): string {
+export function buildStepSeriesSql(col: string, stepSql: readonly string[], whereSql: string, late?: LateFlight | null, from = 'hits'): string {
   const sums: [string, string][] = stepSql.map((s, i) => [`SUM(CASE WHEN ${s} THEN 1 ELSE 0 END)`, `s${i}`])
   const outer = stepSql.map((_, i) => `s${i}, SUM(s${i}) OVER () AS t${i}`).join(', ')
-  return withFlightRegistry(`SELECT k, ${outer} FROM (${groupedCountsSql([[col, 'k']], sums, whereSql, late)}) ORDER BY k DESC LIMIT ?`)
+  return withFlightRegistry(`SELECT k, ${outer} FROM (${groupedCountsSql([[col, 'k']], sums, whereSql, late, from)}) ORDER BY k DESC LIMIT ?`)
 }
 
 // `cols` are `<expr> AS k<i>`, in groupBy's order.
-export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string, late?: LateFlight | null): string {
+export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string, late?: LateFlight | null, from = 'hits'): string {
   const grouped = late
-    ? groupedCountsSql(cols.map(splitAlias), [['COUNT(*)', 'c']], whereSql, late)
-    : `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}`
+    ? groupedCountsSql(cols.map(splitAlias), [['COUNT(*)', 'c']], whereSql, late, from)
+    : `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM ${from} WHERE ${whereSql} GROUP BY ${groupBy}`
   return withFlightRegistry(`SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (${grouped}) ORDER BY c DESC, ${groupBy} LIMIT ?`)
 }
 
@@ -266,20 +267,73 @@ const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight', 'arrival', 
 // still leads with `ts >= ? AND ts < ?`, so the `idx_hits_ts`/`idx_hits_site_ts` range-scan
 // applies exactly as it does for every other filter here, and a CASE with no subquery isn't
 // something SQLite can push into an index anyway — see docs/capacity.md's measurement.
-const DERIVED_FILTER_EXPR: Record<string, string> = {
-  screenwBucket: breakdownColumnExpr('screenwBucket', '(unknown)'),
-  pathFamily: breakdownColumnExpr('pathFamily', ''),
-  popupFamily: breakdownColumnExpr('popupFamily', ''),
-  popupOutcome: breakdownColumnExpr('popupOutcome', ''),
-  gameMode: breakdownColumnExpr('gameMode', ''),
-  gameDifficulty: breakdownColumnExpr('gameDifficulty', ''),
-  campaignFlight: breakdownColumnExpr('campaignFlight', ''),
-  arrival: breakdownColumnExpr('arrival', ''),
-  keyEvent: breakdownColumnExpr('keyEvent', ''),
-  hourEt: breakdownColumnExpr('hourEt', ''),
-  flightDay: breakdownColumnExpr('flightDay', ''),
-  landingTag: breakdownColumnExpr('landingTag', ''),
+/** Each filterable derived dim's filter label: the blank label its filter expression uses. */
+const DERIVED_FILTER_LABEL: Record<string, string> = {
+  screenwBucket: '(unknown)',
+  pathFamily: '',
+  popupFamily: '',
+  popupOutcome: '',
+  gameMode: '',
+  gameDifficulty: '',
+  campaignFlight: '',
+  arrival: '',
+  keyEvent: '',
+  hourEt: '',
+  flightDay: '',
+  landingTag: '',
 }
+const DERIVED_FILTER_EXPR: Record<string, string> = Object.fromEntries(Object.entries(DERIVED_FILTER_LABEL).map(([d, label]) => [d, breakdownColumnExpr(d, label)]))
+
+// ── Derived columns: each derived expression stated once per statement (MAX_SQL_BYTES) ──────────────
+// One statement can use a derived dim's CASE several times: as a key, as its blank test, and once per drill
+// filter on it (up to MAX_CONSTRAINTS). Inlined, the byte-heaviest ring repeated the pathFamily CASE 18 times
+// and each pop-up CASE twice, about 77% of an 88 KB statement. Instead, each filterable derived dim used by a
+// statement (the DERIVED_FILTER_LABEL dims) is one named column `_<dim>` of a derived table over `hits`:
+//   FROM (SELECT hits.*, <dim's '' expression> AS _<dim>, ... FROM hits) AS hits
+// and the key, the blank test and every filter read the column. The derived table is a plain projection, so
+// SQLite flattens it into the outer query: each column reference is the same per-row expression, the index
+// range scan and rows read are unchanged, and the result is the inline form's (geo.derivedColumns.test.ts
+// pins results and query plans against the inline form through the handler). A labelled key ('(none)',
+// '(unknown)') relabels the '' form's blanks: each of these CASEs returns its blank label only where its ''
+// form returns '', and a non-empty value everywhere else (the same test checks that row by row).
+// featureStep, date and dateEt keep the inline form: a statement states each of them once.
+/** `{ on: false }` puts every statement back on the inline form, byte for byte (the parity test compares the
+ * two; also the one-line revert). */
+export const derivedColumns = { on: true }
+/** The derived expressions of one statement: `key` / `blank` / `filter` give the text to use, `from` the
+ * table to scan (call it last, once every expression is in). */
+function derivedColumnSet() {
+  const cols = new Map<string, string>() // column -> the dim's '' expression
+  const col = (d: string): string | null => {
+    if (!derivedColumns.on || !(d in DERIVED_FILTER_LABEL)) return null
+    const name = `_${d}`
+    if (!cols.has(name)) cols.set(name, breakdownColumnExpr(d, ''))
+    return name
+  }
+  const labelled = (d: string, name: string, label: string) =>
+    breakdownColumnExpr(d, label) === breakdownColumnExpr(d, '') ? name : `CASE WHEN ${name} = '' THEN ${sqlLit(label)} ELSE ${name} END`
+  return {
+    /** breakdownColumnExpr(d, label). */
+    key(d: string, label: string): string {
+      const name = col(d)
+      return name ? labelled(d, name, label) : breakdownColumnExpr(d, label)
+    },
+    /** ringBlankExclusion(d). */
+    blank(d: string): string {
+      const name = col(d)
+      return name ? `${name} <> ''` : ringBlankExclusion(d)
+    },
+    /** The bound equality filter on derived dim `d` (one `?`). */
+    filter(d: string): string {
+      const name = col(d)
+      return `(${name ? labelled(d, name, DERIVED_FILTER_LABEL[d]) : DERIVED_FILTER_EXPR[d]}) = ?`
+    },
+    from(): string {
+      return cols.size ? `(SELECT hits.*, ${[...cols].map(([name, e]) => `${e} AS ${name}`).join(', ')} FROM hits) AS hits` : 'hits'
+    },
+  }
+}
+type DerivedColumns = ReturnType<typeof derivedColumnSet>
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -345,7 +399,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const stepSeries: string[] | null =
     Array.isArray(body.stepSeries) && body.stepSeries.length ? (body.stepSeries as unknown[]).map((v) => (typeof v === 'string' ? v : '')) : null
   if (stepSeries && stepSeries.length > MAX_STEP_SERIES) return json({ error: `too many series (at most ${MAX_STEP_SERIES})` }, 400)
-  const drillClause = (w: string[], b: any[], late: LateFlight | null = null) => {
+  const drillClause = (w: string[], b: any[], late: LateFlight | null, dc: DerivedColumns) => {
     for (const c of constraints) {
       const derivedExpr = DERIVED_FILTER_EXPR[c.field]
       if (late && LATE_FLIGHT_DIMS.has(c.field)) {
@@ -359,8 +413,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       } else if (derivedExpr) {
         // The CASE expression already produces the exact label string for every row, including
         // its own blank/default bucket ('(unknown)' / 'page') — a plain bound equality matches
-        // correctly with no separate blank-value branch needed.
-        w.push(`(${derivedExpr}) = ?`)
+        // correctly with no separate blank-value branch needed. (Read from the statement's
+        // derived column, see derivedColumnSet.)
+        w.push(dc.filter(c.field))
         b.push(c.value)
       } else if (c.field === 'screenw' && (c.value === '(unknown)' || c.value === '(direct)' || c.value === '(none)')) {
         // screenw is INTEGER; its blank sentinel is 0, never the empty STRING '' a TEXT
@@ -566,14 +621,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (isPoints) {
     const w: string[] = [...tsWindow.terms, "lat <> ''"]
     const b: any[] = [...tsWindow.binds]
+    const dc = derivedColumnSet()
     eventRowsClause(w, b) // events, not screen views — excluded unless opted in
     splitGuardClause(w, b) // map mode: always on
     knownTrafficClause(w, b)
     siteClause(w, b)
-    drillClause(w, b)
+    drillClause(w, b, null, dc)
     excludeOwnClause(w, b)
     selfReferralClause([], w, b) // points mode has no group-by dim, so this is always inert
-    const sql = withFlightRegistry(`SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`)
+    const sql = withFlightRegistry(`SELECT lat, lon, city, region, country, COUNT(*) AS c FROM ${dc.from()} WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`)
     b.push(Math.min(limit, 2000))
     const tooLarge = statementTooLarge(sql, b.length)
     if (tooLarge) return tooLarge
@@ -613,19 +669,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ringDims.forEach((d, i) => {
       if (isLate(d)) late!.lateAliases.add(`k${i}`)
     })
-    const cols = ringDims.map((d, i) => `${isLate(d) ? lateFlightSqlCase(d, emptyLabelFor(d)) : breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
+    const dc = derivedColumnSet()
+    const cols = ringDims.map((d, i) => `${isLate(d) ? lateFlightSqlCase(d, emptyLabelFor(d)) : dc.key(d, emptyLabelFor(d))} AS k${i}`)
     // Ring mode has always EXCLUDED a dimension's blank rows outright (never bucketed them
     // under a label the way single-dim breakdown does) — ringBlankExclusion is the
     // type-correct version of that per-dim test (screenw is INTEGER; every other ring
     // dimension is TEXT).
-    const w: string[] = [...tsWindow.terms, ...ringDims.filter((d) => !isLate(d)).map(ringBlankExclusion)]
+    const w: string[] = [...tsWindow.terms, ...ringDims.filter((d) => !isLate(d)).map((d) => dc.blank(d))]
     for (const d of ringDims) if (isLate(d)) late!.where.push(`(${lateFlightSqlCase(d, '')}) <> ''`)
     const b: any[] = [...tsWindow.binds]
     eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
     splitGuardClause(w, b)
     knownTrafficClause(w, b)
     siteClause(w, b)
-    drillClause(w, b, late)
+    drillClause(w, b, late, dc)
     excludeOwnClause(w, b)
     selfReferralClause(ringDims, w, b) // inert unless 'referrer' is one of the ring dims
     if (late) b.push(...late.binds) // stage 2's filters follow every stage-1 term in the statement
@@ -638,7 +695,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ringDims.length <= 2 ? Math.min(limit * 4, 1000) : Math.min(limit * 4 * (ringDims.length - 1), 4000)
     // One statement: the inner GROUP BY scans `hits` once; SUM(c) OVER () sums every group's
     // count (not just the fetched top-N) into `total`, replacing the old second COUNT(*) scan.
-    const sql = buildMergedRingSql(cols, whereSql, groupBy, late)
+    const sql = buildMergedRingSql(cols, whereSql, groupBy, late, dc.from())
     const tooLarge = statementTooLarge(sql, b.length + 1)
     if (tooLarge) return tooLarge
     let r: any
@@ -668,18 +725,19 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const late = newLate()
   const dimLate = !!late && LATE_FLIGHT_DIMS.has(dim)
   if (dimLate) late!.lateAliases.add('k')
-  const col = dimLate ? lateFlightSqlCase(dim, emptyLabelFor(dim)) : breakdownColumnExpr(dim, emptyLabelFor(dim))
+  const dc = derivedColumnSet()
+  const col = dimLate ? lateFlightSqlCase(dim, emptyLabelFor(dim)) : dc.key(dim, emptyLabelFor(dim))
   const where = [...tsWindow.terms]
   const binds: any[] = [...tsWindow.binds]
   if (BLANK_DROPPED_DIMS.has(dim)) {
     if (dimLate) late!.where.push(`(${lateFlightSqlCase(dim, '')}) <> ''`)
-    else where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
+    else where.push(dc.blank(dim)) // see EVENT_DIMS
   }
   eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
   splitGuardClause(where, binds)
   knownTrafficClause(where, binds)
   siteClause(where, binds)
-  drillClause(where, binds, late)
+  drillClause(where, binds, late, dc)
   excludeOwnClause(where, binds)
   selfReferralClause([dim], where, binds) // inert unless this IS the referrer chart
 
@@ -690,7 +748,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const stepSql = stepSeries.map(featureStepFilterSql)
     where.push(`(${[...new Set(stepSql)].join(' OR ')})`)
     if (late) binds.push(...late.binds) // stage 2's filters follow every stage-1 term
-    const sql = buildStepSeriesSql(col, stepSql, where.join(' AND '), late)
+    const sql = buildStepSeriesSql(col, stepSql, where.join(' AND '), late, dc.from())
     const tooLarge = statementTooLarge(sql, binds.length + 1)
     if (tooLarge) return tooLarge
     let r: any
@@ -719,7 +777,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const orderBy = isDateDim(dim) ? 'k DESC' : 'c DESC, k ASC'
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
-  const sql = buildMergedBreakdownSql(col, whereSql, orderBy, late)
+  const sql = buildMergedBreakdownSql(col, whereSql, orderBy, late, dc.from())
   const tooLarge = statementTooLarge(sql, binds.length + 1)
   if (tooLarge) return tooLarge
 

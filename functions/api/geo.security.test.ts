@@ -169,7 +169,9 @@ describe('onRequestPost — dimension whitelist rejection (real handler, real SQ
     // exclusion is bypassed here only because 'install' rows ARE what's being filtered FOR —
     // includeEventBeacons is still false, but drillClause runs independently of popupExcludeClause,
     // proving the constraint itself works against the real CASE expression).
-    expect(calls[0].sql).toMatch(/\(CASE .* END\) = \?/)
+    // The CASE is stated once, as a column of the derived table, and the filter binds against that column.
+    expect(calls[0].sql).toMatch(/CASE .* END AS _pathFamily FROM hits\) AS hits/)
+    expect(calls[0].sql).toMatch(/\(_pathFamily\) = \?/)
     expect(calls[0].binds).toContain('install')
     expect(body.totals.pageviews).toBe(0) // excluded by the standing popup-event filter (includeEventBeacons defaults off)
   })
