@@ -760,7 +760,7 @@ describe('Traffic page: known test and household traffic', () => {
   it('every Traffic card hides known traffic, like the Overview glance does', () => {
     const ws = defaultBestSudokuLaunchWidgets()
     expect(ws.length).toBeGreaterThan(0)
-    for (const wd of ws) expect({ id: wd.id, excludeKnownTraffic: wd.excludeKnownTraffic }).toEqual({ id: wd.id, excludeKnownTraffic: true })
+    for (const wd of ws.filter((x) => x.type !== 'note')) expect({ id: wd.id, excludeKnownTraffic: wd.excludeKnownTraffic }).toEqual({ id: wd.id, excludeKnownTraffic: true })
   })
 
   it('the Pageviews card says "Last 1d" is 24 hours and the glance is since midnight', () => {
@@ -773,7 +773,7 @@ describe('Traffic page: known test and household traffic', () => {
     const cfg = defaultConfig()
     const out = normalizeConfig(JSON.parse(JSON.stringify(cfg)))
     const traffic = out.pages.find((p) => p.id === 'bsk-launch')!
-    expect(traffic.widgets.every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
+    expect(traffic.widgets.filter((wd) => wd.type !== 'note').every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
   })
 
   it('a saved Traffic card without the setting is not rewritten on load (the saved layout is fixed in KV)', () => {
@@ -782,7 +782,45 @@ describe('Traffic page: known test and household traffic', () => {
     traffic.widgets = traffic.widgets.map((wd) => ({ ...wd, excludeKnownTraffic: undefined }))
     const out = normalizeConfig(cfg)
     expect(out.pages.find((p) => p.id === 'bsk-launch')!.widgets.some((wd) => wd.excludeKnownTraffic)).toBe(false)
-    expect(defaultBestSudokuLaunchPage().widgets.every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
+    expect(defaultBestSudokuLaunchPage().widgets.filter((wd) => wd.type !== 'note').every((wd) => wd.excludeKnownTraffic === true)).toBe(true)
+  })
+})
+
+describe('Traffic page: visitors group', () => {
+  const find = (id: string) => defaultBestSudokuLaunchWidgets().find((wd) => wd.id === id)!
+
+  it('has a note that says unique and returning visitors are not shown yet, and why', () => {
+    const note = find('bsk-visitors-note')
+    expect(note.type).toBe('note')
+    expect(note.note).toMatch(/start with the next Best Sudoku release/)
+    expect(note.note).toMatch(/not returning people/)
+  })
+
+  it('draws new devices per day as one beacon line per app, each narrowed to visitor = new and its own site', () => {
+    const card = find('bsk-new-daily')
+    expect(card).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', excludeKnownTraffic: true })
+    expect(card.series!.map((s) => s.filter)).toEqual([
+      [{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-web' }],
+      [{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-app' }],
+    ])
+  })
+
+  it('its caption says what is counted and what is not (devices, not people or unique visitors)', () => {
+    const cap = find('bsk-new-daily').caption!
+    expect(cap).toMatch(/first beacon from a new browser or app install/)
+    expect(cap).toMatch(/counts again/)
+    expect(cap).toMatch(/not unique visitors per day/)
+  })
+
+  it('asks for a year of days so a long range is not cut to 90', () => {
+    expect(find('bsk-new-daily').limit).toBeGreaterThanOrEqual(365)
+  })
+
+  it('survives normalizeConfig (both filter pairs of each series are kept)', () => {
+    const out = normalizeConfig(JSON.parse(JSON.stringify(defaultConfig())))
+    const card = out.pages.find((p) => p.id === 'bsk-launch')!.widgets.find((wd) => wd.id === 'bsk-new-daily')!
+    expect(card.series![1].filter).toEqual([{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-app' }])
+    expect(out.pages.find((p) => p.id === 'bsk-launch')!.widgets.find((wd) => wd.id === 'bsk-visitors-note')!.note).toBe(find('bsk-visitors-note').note)
   })
 })
 

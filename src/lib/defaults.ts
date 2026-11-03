@@ -227,6 +227,48 @@ const TRAFFIC_WINDOW_CAPTION =
 function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
   return gw({ excludeKnownTraffic: true, ...p })
 }
+// The Traffic page's visitors group: a note saying what is and is not counted, and the daily count of new devices.
+// Both are ordinary editor widgets (a note tile and a beacon line with two AND'ed filters per series).
+export const VISITORS_NOTE_TEXT =
+  "Unique and returning visitors per day start with the next Best Sudoku release (a once-a-day row per device, approved 11-02). 'Returning' beacon rows are later screen views, not returning people."
+export const NEW_DEVICES_CAPTION =
+  "**New devices:** the first beacon from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
+export function visitorsGroupWidgets(y: number): Widget[] {
+  return [
+    w({
+      id: 'bsk-visitors-note',
+      title: 'Unique and returning visitors',
+      type: 'note',
+      dimension: '',
+      metric: 'pageviews',
+      limit: 1,
+      longText: true,
+      note: VISITORS_NOTE_TEXT,
+      fit: 'content',
+      x: 0,
+      y,
+      w: 12,
+      h: 3,
+    }),
+    bw({
+      id: 'bsk-new-daily',
+      title: 'New devices per day',
+      type: 'line',
+      dimension: 'dateEt',
+      limit: 365,
+      markers: 'releases',
+      series: [
+        { label: 'Web: new browsers', filter: [{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-web' }], axis: 'left', style: 'solid', color: 0 },
+        { label: 'App: new installs', filter: [{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-app' }], axis: 'left', style: 'solid', color: 1 },
+      ],
+      caption: NEW_DEVICES_CAPTION,
+      x: 0,
+      y: y + 3,
+      w: 12,
+      h: 8,
+    }),
+  ]
+}
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return factoryWidgets([
     bw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, caption: TRAFFIC_WINDOW_CAPTION, x: 0, y: 0, w: 3, h: 3 }),
@@ -241,6 +283,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     bw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
     bw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
     bw({ id: 'bsk-map', title: 'Pageview map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
+    ...visitorsGroupWidgets(40),
   ])
 }
 // The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.
