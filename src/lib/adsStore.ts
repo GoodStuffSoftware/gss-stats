@@ -479,7 +479,8 @@ export interface SyncRunRecord {
   /** The ones whose daily metrics synced (lastSync is read from here). */
   campaignsOk: string[]
   /** The ones whose closed days were pulled through the end of their window (the restatement
-   * window was re-checked): the recheck cadence reads this. */
+   * window was re-checked): the recheck cadence reads this. Plus `repull:<id>` for each whose daily
+   * whole-flight re-read completed (adsSync FLIGHT_REPULL_KEY_PREFIX). */
   campaignsPulled: string[]
   daysFetched: number
   daysChanged: number

@@ -8,7 +8,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SpendDay, ReadingRecord } from '../../src/lib/adsRules'
 import { createSqlAdsStore, readFreshness, readSyncAlerts, type PlacementDayRow, type SqlStatement } from '../../src/lib/adsStore'
-import { capPlan, planCampaignSync, syncAdsData, syncWindow, type AdsMetricsSource } from '../../src/lib/adsSync'
+import { capPlan, FLIGHT_REPULL_DAYS_AFTER_END, flightRepullRange, planCampaignSync, syncAdsData, syncWindow, syncableCampaigns, type AdsMetricsSource } from '../../src/lib/adsSync'
 import { campaignById } from '../../src/lib/campaigns'
 import { count, MIGRATIONS_DIR, migrationFiles, openMigratedSqlite, sqliteAdsDb, sqliteD1 } from './sqliteDb'
 
@@ -159,7 +159,7 @@ describe('syncAdsData: gap fill, restatements, the no-op rerun', () => {
     ]) // and never today's open day
     expect(r.campaigns[0]).toMatchObject({ spendThrough: '2026-09-29', daysFetched: 4, daysChanged: 4, pulled: true })
     const run = sqlite.prepare('SELECT source, status, campaigns, campaigns_ok, campaigns_pulled, days_fetched, days_changed FROM ads_sync_runs').get() as Record<string, unknown>
-    expect(run).toMatchObject({ source: 'ads-sync', status: 'ok', campaigns: `["${RETEST}"]`, campaigns_ok: `["${RETEST}"]`, campaigns_pulled: `["${RETEST}"]`, days_fetched: 4, days_changed: 4 })
+    expect(run).toMatchObject({ source: 'ads-sync', status: 'ok', campaigns: `["${RETEST}"]`, campaigns_ok: `["${RETEST}"]`, campaigns_pulled: `["${RETEST}","repull:${RETEST}"]`, days_fetched: 4, days_changed: 4 })
   })
 
   it('a second run right after is a true no-op: no Google call, no write at all, not even a run row', async () => {
@@ -212,7 +212,8 @@ describe('syncAdsData: gap fill, restatements, the no-op rerun', () => {
     adapter.writes.length = 0
     const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4.2), '2026-09-27': day(13.1), '2026-09-28': day(11), '2026-09-29': day(12.9), '2026-09-30': day(13), '2026-10-01': day(12.5), '2026-10-02': day(9) } })
     const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-03'), dryRun: false, source: 'morning-read' })
-    expect(r.campaigns[0].fetched).toEqual({ since: '2026-09-28', until: '2026-10-02' })
+    // the missing day through the end, plus the daily whole-flight re-read (09-26..09-27 cost only)
+    expect(r.campaigns[0].fetched).toEqual({ since: '2026-09-26', until: '2026-10-02' })
     expect(r.campaigns[0].changedDates).toEqual(['2026-09-28', '2026-09-30', '2026-10-01', '2026-10-02']) // 09-29 unchanged, not rewritten
     expect(r.campaigns[0].spendThrough).toBe('2026-10-02')
     expect(count(sqlite, 'ads_daily_metrics', 'campaign_id = ?', RETEST)).toBe(7)
@@ -420,8 +421,9 @@ describe('per-run caps: finish over later runs', () => {
     expect(first.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-28', until: '2026-09-30' }, deferred: true, pulled: true, spendThrough: null })
     const second = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01') + 60_000, dryRun: false, source: 'worker-cron', maxDays: 3 })
     expect(second).toMatchObject({ status: 'ok' })
-    // the older gap; the recent window was re-checked a minute ago, so it is not due
-    expect(second.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-27' }, pulled: false, spendThrough: '2026-09-30' })
+    // the older gap, then the daily flight re-read's cost-only range for the rest; the recent window
+    // was re-checked a minute ago, so it is not due (and the first run, capped, did not re-read the flight)
+    expect(second.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-30' }, pulled: false, repulled: true, spendThrough: '2026-09-30' })
     expect(count(sqlite, 'ads_daily_metrics')).toBe(5)
   })
   it('I3: a capped full re-pull says it covered only the newest days and is not resumed', async () => {
@@ -610,6 +612,104 @@ describe('killed sync runs are surfaced (review I2)', () => {
     expect(r.runRecorded).toBe(true)
     expect((await readSyncAlerts(d1, t2 + 20 * 60_000)).map((a) => a.source)).toEqual(['worker-cron'])
     expect(await readSyncAlerts(undefined, t2)).toEqual([]) // no binding: fail soft
+  })
+})
+
+describe('the daily whole-flight re-read (Google lowers closed days for invalid clicks after the restatement window)', () => {
+  const truth = (): Record<string, SpendDay> => ({ '2026-09-26': day(4.2), '2026-09-27': day(13.1), '2026-09-28': day(11), '2026-09-29': day(12.9), '2026-09-30': day(13), '2026-10-01': day(12.5), '2026-10-02': day(9) })
+  const dailyCalls = (ads: ReturnType<typeof fakeAds>) => ads.calls.filter((c) => c.kind === 'daily').map((c) => [c.since, c.until])
+  const base = { campaignIds: [RETEST], dryRun: false, source: 'worker-cron' as const }
+
+  it('a day older than the restatement window in a live flight is re-read once per ET day in ONE range query, not every hour', async () => {
+    const { sqlite, store } = setup()
+    const ads = fakeAds({ [RETEST]: truth() }, { [RETEST]: [pl('2026-09-27', 'mobileapp::2-a', 13.1)] })
+    await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-01') })
+    // the very first sync pulled the whole flight so far, so it counts as the day's re-read
+    expect((sqlite.prepare("SELECT campaigns_pulled AS p FROM ads_sync_runs WHERE status <> 'running'").get() as { p: string }).p).toBe(`["${RETEST}","repull:${RETEST}"]`)
+    ads.calls.length = 0
+    // hourly ticks the same ET day: nothing is due (the restatement window is re-checked every 6 h only)
+    const sameDay = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-01') + HOUR, maxDays: 3 })
+    expect(sameDay.nothingDue).toBe(true)
+    expect(ads.calls).toEqual([])
+    // Google credits invalid clicks on 09-27 (outside the 3-day restatement window)
+    ads.daily[RETEST]['2026-09-27'] = day(10.4)
+    // next ET day: the restatement window (09-29..10-01) plus ONE cost-only query for 09-26..09-28
+    const next = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02'), maxDays: 3 })
+    expect(dailyCalls(ads)).toEqual([['2026-09-29', '2026-10-01'], ['2026-09-26', '2026-09-28']])
+    expect(ads.calls.filter((c) => c.kind === 'placements').map((c) => [c.since, c.until])).toEqual([['2026-09-29', '2026-10-01']]) // the re-read is cost only
+    expect(next.campaigns[0]).toMatchObject({ changedDates: ['2026-09-27', '2026-10-01'], repulled: true, restated: [{ date: '2026-09-27', before: 13.1, after: 10.4 }] })
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(10_400_000)
+    expect(count(sqlite, 'ads_daily_metrics', 'campaign_id = ?', RETEST)).toBe(6)
+    // an hour later: not due again; and even a forced restatement re-check is only the 3 recent days
+    ads.calls.length = 0
+    const later = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02') + HOUR, maxDays: 3 })
+    expect(later.nothingDue).toBe(true)
+    const forced = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02') + 2 * HOUR, maxDays: 3, restatementRecheckMs: 0 })
+    expect(forced.nothingDue).toBe(false)
+    expect(dailyCalls(ads)).toEqual([['2026-09-29', '2026-10-01']])
+  })
+
+  it('a re-read that failed is retried by the next tick, and not marked done', async () => {
+    const { sqlite, store } = setup()
+    const ads = fakeAds({ [RETEST]: truth() })
+    await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-01') })
+    ads.daily[RETEST]['2026-09-27'] = day(10.4)
+    ads.state.failDaily = true
+    const failed = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02') })
+    expect(failed.campaigns[0]).toMatchObject({ repulled: false, fetchOk: false })
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(13_100_000)
+    ads.state.failDaily = false
+    const retry = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02') + HOUR })
+    expect(retry.campaigns[0]).toMatchObject({ repulled: true })
+    expect(retry.campaigns[0].changedDates).toContain('2026-09-27')
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(10_400_000)
+  })
+
+  it('goes on for 14 days after the flight end, then stops: later runs cost no API call', async () => {
+    expect(FLIGHT_REPULL_DAYS_AFTER_END).toBe(14)
+    const { sqlite, store } = setup()
+    const ads = fakeAds({ [RETEST]: truth() })
+    await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-03') })
+    ads.daily[RETEST]['2026-09-28'] = day(9.5)
+    ads.calls.length = 0
+    // flight end 10-02 + 14 = 10-16: still re-read, as one query for the whole flight (the closed
+    // campaign has no restatement window left)
+    const last = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-16') })
+    expect(dailyCalls(ads)).toEqual([['2026-09-26', '2026-10-02']])
+    expect(last.campaigns[0]).toMatchObject({ changedDates: ['2026-09-28'], repulled: true })
+    expect(costOf(sqlite, RETEST, '2026-09-28')).toBe(9_500_000)
+    // 10-17: the flight is left alone
+    ads.daily[RETEST]['2026-09-29'] = day(8)
+    ads.calls.length = 0
+    const after = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-17') })
+    expect(after.nothingDue).toBe(true)
+    expect(ads.calls).toEqual([])
+    expect(costOf(sqlite, RETEST, '2026-09-29')).toBe(12_900_000)
+  })
+
+  it('flightRepullRange: once per ET day after the 03:00 ET close, from the flight start to the flight end or the last closed day', () => {
+    const c = { flightStart: '2026-09-26', flightEnd: '2026-10-02' }
+    const win = (until: string) => ({ since: c.flightStart, until })
+    const at0305 = (d: string) => Date.parse(`${d}T07:05:00Z`) // 03:05 EDT
+    expect(flightRepullRange(c, win('2026-10-01'), '2026-10-02', at0305('2026-10-02'), null)).toEqual({ since: '2026-09-26', until: '2026-10-01' })
+    // never before the flight starts, never after flight end + 14 days
+    expect(flightRepullRange(c, win('2026-09-25'), '2026-09-26', at0305('2026-09-26'), null)).toBeNull()
+    expect(flightRepullRange(c, win('2026-10-05'), '2026-10-16', at0305('2026-10-16'), null)).toEqual({ since: '2026-09-26', until: '2026-10-02' })
+    expect(flightRepullRange(c, win('2026-10-05'), '2026-10-17', at0305('2026-10-17'), null)).toBeNull()
+    // done since the latest 03:00 ET close: not due; done yesterday afternoon: due (the 03:05 tick); before 03:00 ET the boundary is yesterday's
+    expect(flightRepullRange(c, win('2026-10-01'), '2026-10-02', at0305('2026-10-02') + HOUR, '2026-10-02T07:06:00.000Z')).toBeNull()
+    expect(flightRepullRange(c, win('2026-10-01'), '2026-10-02', at0305('2026-10-02'), '2026-10-01T22:00:00.000Z')).not.toBeNull()
+    expect(flightRepullRange(c, win('2026-10-01'), '2026-10-02', Date.parse('2026-10-02T05:00:00Z'), '2026-10-01T08:00:00.000Z')).toBeNull()
+    // a plan carries it
+    const plan = planCampaignSync({ id: 'x', ...c }, [], '2026-10-02', { nowMs: at0305('2026-10-02') })
+    expect(plan.repull).toEqual({ since: '2026-09-26', until: '2026-10-01' })
+  })
+
+  it('a Microsoft Ads flight is never re-read: not syncable, no plan', () => {
+    const c = { id: 'm', flightStart: '2026-11-07', flightEnd: '2026-11-13', adsPlatform: 'microsoft' as const }
+    expect(flightRepullRange(c, { since: c.flightStart, until: '2026-11-09' }, '2026-11-10', Date.parse('2026-11-10T13:00:00Z'), null)).toBeNull()
+    expect(planCampaignSync(c, [], '2026-11-10', { nowMs: Date.parse('2026-11-10T13:00:00Z') }).repull).toBeNull()
+    expect(syncableCampaigns().some((x) => x.adsPlatform === 'microsoft')).toBe(false)
   })
 })
 
