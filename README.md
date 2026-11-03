@@ -1337,7 +1337,7 @@ npm run typecheck:scripts
   per spec section 14a's "two separate short tests"; beacon rows are split at the exact
   instant, and the fix day's spend is shown apart). **A sign-in is its base row only:** the
   status row `/auth/success/<provider>/<new|existing|unknown>` is sent ALONGSIDE the base row
-  `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
+  `/auth/success/<provider>` (providers `google`, `email` and `apple`), so every auth-success count — the
   tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
   new-client sign-in twice. Kill rule 3's asks include the tutorial ask
@@ -2021,7 +2021,7 @@ proposal, and spend at or over the cap is information only. `npm run ads:morning
 24392866056` stores every closed day since the flight start that is not yet stored (so the first
 run backfills; a rerun stores nothing, one row per campaign and day) and prints the line as the
 push text; a day whose spend or install conversions are not synced yet is left for the next run
-instead of being stored as zero. The cloud routine runs it daily 2026-10-27 to 11-03
+instead of being stored as zero. The cloud routine runs it daily 2026-10-27 to 11-10
 ([runbook](docs/routines/ads-cloud-daily.md)).
 
 ### What a stored reading says (`ads_readings`: verdict word and data through)
