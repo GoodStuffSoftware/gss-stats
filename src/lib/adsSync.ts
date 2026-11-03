@@ -14,6 +14,9 @@
 //  - the most recent RESTATEMENT_DAYS closed days (Google restates them), but only when the
 //    campaign's last pull is older than the recheck interval (default 6 h) — so a tick right
 //    after another sync is a no-op that never builds the Ads client or refreshes a token;
+//  - once per ET day (after the 03:00 ET close), the WHOLE flight in one cost-only date-range query
+//    while the flight runs and FLIGHT_REPULL_DAYS_AFTER_END days after it: Google keeps lowering
+//    closed days for invalid clicks long after the restatement window;
 //  - today's partial numbers when the caller asks (returned, never stored).
 // syncAdsData() then pulls at most two ranges per due campaign, NEWEST FIRST: the restatement
 // window whole, then any older gap (at most `maxDays` closed days per run across campaigns,
@@ -66,6 +69,14 @@ export const RESTATEMENT_DAYS = 3
 export const CLOSED_CAMPAIGN_GRACE_DAYS = 3
 /** Re-pull the restatement window at most this often per campaign. */
 export const RESTATEMENT_RECHECK_MS = 6 * 3_600_000
+/** Google keeps lowering a closed day for invalid-click credits long after the restatement
+ * window: every day of a flight is re-read once per ET day while the flight runs and for this many
+ * days after its flight end, so the daily table converges to Google's final per-day cost. After
+ * that the flight is left alone. */
+export const FLIGHT_REPULL_DAYS_AFTER_END = 14
+/** campaigns_pulled marks the daily flight re-read with this prefix + the campaign id (a key of its
+ * own: the restatement re-check cadence reads the bare id). */
+export const FLIGHT_REPULL_KEY_PREFIX = 'repull:'
 
 export interface AdsMetricsSource {
   daily(campaignId: string, since: string, until: string): Promise<Record<string, SpendDay>>
@@ -135,6 +146,11 @@ export interface CampaignSyncPlan {
   restatementDays: string[]
   /** Whether the restatement window is due this run (cadence). */
   restatementDue: boolean
+  /** The whole-flight re-read when it is due (flight start through min(flight end, last closed
+   * day)): a cost-only date-range query, not counted against the per-run day cap. Null = not
+   * due, or the campaign is outside its re-read period (flight start .. flight end + 14 days) or
+   * is not a Google Ads campaign. */
+  repull: SyncRange | null
   /** Today's partial read, when asked for and the campaign is not closed. */
   today: string | null
   /** The per-run day cap shortened `ranges` (newest days kept); the rest waits for a later run. */
@@ -166,6 +182,8 @@ export interface CampaignSyncResult {
   dailyOk: boolean
   /** The pull reached the end of the window (the restatement window was re-checked). */
   pulled: boolean
+  /** The daily whole-flight re-read (plan.repull) completed: every day of it was pulled and stored. */
+  repulled?: boolean
   deferred: boolean
   /** Last closed day stored contiguously from the flight start (after this run's writes). */
   spendThrough: string | null
@@ -227,10 +245,10 @@ export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>,
 
 /** Pure: what to pull for one campaign, given its stored rows and its last pull. */
 export function planCampaignSync(
-  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'>,
+  c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'> & Partial<Pick<CampaignFlight, 'adsPlatform'>>,
   rows: readonly StoredDayRow[],
   todayEt: string,
-  opts: { full?: boolean; includeToday?: boolean; uncapped?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; restatementRecheckMs?: number } = {},
+  opts: { full?: boolean; includeToday?: boolean; uncapped?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; lastRepullAt?: string | null; restatementRecheckMs?: number } = {},
 ): CampaignSyncPlan {
   // Before 03:00 ET yesterday cannot be stored as closed yet (lib/adsFreshness.ts
   // CLOSED_AFTER_ET), so it is not due at all: a flight's hourly cron pulls it once, at 03:05 ET,
@@ -241,7 +259,7 @@ export function planCampaignSync(
   const lastClosed = addDays(todayEt, beforeClose ? -2 : -1)
   const window = fullWindow && fullWindow.until > lastClosed ? (fullWindow.since <= lastClosed ? { since: fullWindow.since, until: lastClosed } : null) : fullWindow
   const today = opts.includeToday && (opts.uncapped || campaignStatusOn(c, todayEt) !== 'closed') && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
-  const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
+  const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, repull: null, today, deferred: false }
   if (!window) return none
   const byDate = new Map(rows.map((r) => [r.date, r]))
   const requiredUntil = window.until < c.flightEnd ? window.until : c.flightEnd
@@ -275,7 +293,30 @@ export function planCampaignSync(
     missingPlacementDays,
     restatementDays,
     restatementDue,
+    repull: flightRepullRange(c, window, todayEt, opts.nowMs ?? Date.now(), opts.lastRepullAt ?? null),
   }
+}
+
+/** Pure: the whole-flight re-read of a Google Ads campaign, or null when it is not due. Due once
+ * per ET day: when the last completed re-read (`lastRepullAt`, from the sync runs) is older than
+ * the latest 03:00 ET close boundary, so the 03:05 ET tick does it, in a live flight and in the
+ * FLIGHT_REPULL_DAYS_AFTER_END days after it; a failed re-read is retried by the next tick. The
+ * range is flight start through min(flight end, last closed day). */
+export function flightRepullRange(
+  c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'> & Partial<Pick<CampaignFlight, 'adsPlatform'>>,
+  window: SyncRange | null,
+  todayEt: string,
+  nowMs: number,
+  lastRepullAt: string | null,
+): SyncRange | null {
+  if (!window || c.flightStart == null || !isGoogleAdsCampaign(c)) return null
+  if (todayEt < c.flightStart || todayEt > addDays(c.flightEnd, FLIGHT_REPULL_DAYS_AFTER_END)) return null
+  const until = window.until < c.flightEnd ? window.until : c.flightEnd
+  if (c.flightStart > until) return null
+  const todayClose = etWallTimeMs(todayEt, CLOSED_AFTER_ET)
+  const boundary = nowMs >= todayClose ? todayClose : etWallTimeMs(addDays(todayEt, -1), CLOSED_AFTER_ET)
+  const last = lastRepullAt ? Date.parse(lastRepullAt) : NaN
+  return !Number.isFinite(last) || last < boundary ? { since: c.flightStart, until } : null
 }
 
 /** The per-run day cap, NEWEST FIRST (review L2): the recent window before any older gap, and
@@ -427,11 +468,12 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
       placements: pullsPlacements(c.id, opts) ? opts.placements : false,
       nowMs: opts.now,
       lastPullAt: snap.lastPulls.get(c.id) ?? null,
+      lastRepullAt: snap.lastPulls.get(FLIGHT_REPULL_KEY_PREFIX + c.id) ?? null,
       restatementRecheckMs: opts.restatementRecheckMs,
     })
     if (plan.ranges.length && budget !== Infinity) budget = capPlan(plan, budget)
     snap.plans.set(c.id, plan)
-    if (plan.fetch || plan.today || plan.deferred) snap.due = true
+    if (plan.fetch || plan.today || plan.deferred || plan.repull) snap.due = true
   }
   return snap
 }
@@ -480,6 +522,7 @@ async function syncOne(
     fetchOk: true,
     dailyOk: true,
     pulled: false,
+    repulled: false,
     deferred: plan.deferred,
     spendThrough: contiguousThrough(c.flightStart, new Set(closedStored.map((r) => r.date)), c.flightEnd),
     spend: rowsToStoredSpend(c.id, closedStored),
@@ -488,7 +531,7 @@ async function syncOne(
     error: null,
   }
   const fail = (error: string, outcome = 'failed') => Object.assign(res, { fetchOk: false, dailyOk: false, outcome, error })
-  if (!plan.ranges.length && !plan.today) return res
+  if (!plan.ranges.length && !plan.today && !plan.repull) return res
 
   let ads: AdsMetricsSource
   try {
@@ -522,13 +565,23 @@ async function syncOne(
   const restFirst = plan.restatementDays[0]
   const restLast = plan.restatementDays[plan.restatementDays.length - 1]
   const isRecent = (r: SyncRange) => !!restFirst && r.until >= restFirst && r.since <= restLast
-  const queue = [...plan.ranges]
+  // `costOnly` = the daily flight re-read: the daily query only, no placements.
+  type QueuedRange = SyncRange & { costOnly?: boolean }
+  const queue: QueuedRange[] = [...plan.ranges]
+  // The flight re-read adds ONE cost-only range for the days the planned ranges (after the day
+  // cap) leave out: usually the flight up to the restatement window. Nothing extra when they cover
+  // it, and none while a day cap still holds a backlog back (the backlog goes first; the re-read follows).
+  const repullDays = plan.repull ? etDateRange(plan.repull.since, plan.repull.until) : []
+  const plannedDays = new Set(plan.ranges.flatMap((r) => etDateRange(r.since, r.until)))
+  const repullGap = repullDays.filter((d) => !plannedDays.has(d))
+  if (repullGap.length && !plan.deferred) queue.push({ since: repullGap[0], until: repullGap[repullGap.length - 1], costOnly: true })
+  const doneDays = new Set<string>()
   let first = true
-  const split = (r: SyncRange, why: string): boolean => {
+  const split = (r: QueuedRange, why: string): boolean => {
     const days = etDateRange(r.since, r.until)
     if (days.length < 2) return false
     const mid = days[Math.floor((days.length - 1) / 2)]
-    queue.unshift({ since: addDays(mid, 1), until: r.until }, { since: r.since, until: mid })
+    queue.unshift({ since: addDays(mid, 1), until: r.until, costOnly: r.costOnly }, { since: r.since, until: mid, costOnly: r.costOnly })
     res.warnings.push(`ads daily: ${r.since}..${r.until} ${why}; pulled again in halves to find the day`)
     return true
   }
@@ -586,7 +639,7 @@ async function syncOne(
     let placementsCovered = false
     let placementWrites: PlacementDayRow[] = []
     let rangePlacements: PlacementDayRow[] = []
-    if (pullsPlacements(c.id, opts)) {
+    if (pullsPlacements(c.id, opts) && !range.costOnly) {
       const pl = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
       const old = pl.ok ? await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until)) : null
       if (!pl.ok || !old || !old.ok) {
@@ -644,7 +697,8 @@ async function syncOne(
         }
       }
     }
-    res.ranges.push(range)
+    res.ranges.push({ since: range.since, until: range.until })
+    for (const day of etDateRange(range.since, range.until)) doneDays.add(day)
     res.daysFetched += etDateRange(range.since, range.until).length
     res.daysChanged += d.rows.length
     res.changedDates.push(...d.rows.map((r) => r.date))
@@ -661,6 +715,7 @@ async function syncOne(
   }
 
   res.fetched = spanOf(res.ranges)
+  res.repulled = repullDays.length > 0 && repullDays.every((d) => doneDays.has(d))
   res.error = errors[0] ?? null
   res.changedDates.sort()
   if (res.ranges.length) {
@@ -783,7 +838,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
       finishedAt: result.finishedAt,
       campaigns: snap.campaigns.map((c) => c.id),
       campaignsOk: result.campaigns.filter((r) => r.dailyOk).map((r) => r.campaignId),
-      campaignsPulled: result.campaigns.filter((r) => r.pulled).map((r) => r.campaignId),
+      campaignsPulled: [...result.campaigns.filter((r) => r.pulled).map((r) => r.campaignId), ...result.campaigns.filter((r) => r.repulled).map((r) => FLIGHT_REPULL_KEY_PREFIX + r.campaignId)],
       daysFetched: result.daysFetched,
       daysChanged: result.daysChanged,
       placementRowsFetched: result.placementRowsFetched,

@@ -1850,9 +1850,18 @@ the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudfla
    around it are written. An empty response (no rows, no total) never overwrites stored spend.
    A stored placement row with spend that a response leaves out fails the placement pull within
    the last 3 days; on an older day it is kept as stored and reported as a warning;
-4. writes **only rows that changed**; a run with nothing due makes no Google call and writes
+4. **re-reads the whole flight once a day.** Google keeps lowering a closed day for invalid-click
+   credits long after the 3-day window, so every day of a Google Ads flight (flight start through
+   its flight end or the last closed day) is read again once per ET day, at the first sync after
+   03:00 ET, while the flight runs and for 14 days after its flight end
+   (`FLIGHT_REPULL_DAYS_AFTER_END`); then the flight is left alone. It is one cost-only date-range
+   query per campaign (no placements; days another range of the run already covers are left out),
+   it does not count against the Worker's per-run day cap, a failed one is retried by the next
+   tick, and it is marked done in `campaigns_pulled` as `repull:<campaign id>` (a run row is
+   appended; `ads_readings` is never touched). Microsoft Ads flights are not synced at all;
+5. writes **only rows that changed**; a run with nothing due makes no Google call and writes
    nothing at all, so a second run right after another is a true no-op;
-5. records each run that did something in `ads_sync_runs` (start/finish, campaigns, days fetched
+6. records each run that did something in `ads_sync_runs` (start/finish, campaigns, days fetched
    and changed, status, a redacted error).
 
 Today's still-open day is never stored. The Ads client (plain `fetch`) and the store
@@ -1934,7 +1943,8 @@ none adds a data source of its own.
 - **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day
   after the last) every tick checks what is due: yesterday once, at 03:05 ET (before 03:00 ET it
   cannot close yet, so it is not due), a retry after a failure, and the restatement window once
-  its last pull is 6 h old. Outside a flight only the 03:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
+  its last pull is 6 h old. Outside a flight only the 03:05 ET tick checks, which is also the
+  daily whole-flight re-read for the 14 days after a flight ends (above). A tick with nothing due reads two small queries and stops: no
   claim, no secret read, no token refresh, no write. A second cron, `20,50 8-11 * * *` UTC, runs only
   the conversions-and-assets pass ([below](#daily-conversions-and-per-asset-results-syncadsextras)).
 - **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
