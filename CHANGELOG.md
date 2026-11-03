@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **New devices per day on the Traffic page.** A line of the first beacon from each new browser or app install, split web and app, with a note that unique and returning visitors per day start with the next Best Sudoku release.
+- **A series line can be narrowed by two filters.** The chart editor takes a second field and value for a series, so a line can be, for example, new devices on the web app only.
+
 ## [0.75.11] — 2026-10-31
 
 ### Added

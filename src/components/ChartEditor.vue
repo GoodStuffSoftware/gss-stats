@@ -580,12 +580,26 @@ function removeSeries(idx: number) {
   draft.series?.splice(idx, 1)
   if (!draft.series?.length) draft.series = undefined
 }
-function setSeriesFilter(idx: number, part: 'field' | 'value', v: string) {
+// A series is narrowed by up to two field = value pairs, and both must hold (pair 0, and an optional pair 1):
+// e.g. new devices (visitor = new) on the web app only (site = bestsudoku-web). Clearing the first pair's field
+// clears both; setting a pair keeps the other.
+function setSeriesFilter(idx: number, part: 'field' | 'value', v: string, pair = 0) {
   const s = draft.series?.[idx]
   if (!s) return
-  const cur = s.filter?.[0] ?? { field: '', value: '' }
-  const next = { ...cur, [part]: v }
-  s.filter = next.field ? [next] : undefined
+  const pairs = [...(s.filter ?? [])]
+  const next = { ...(pairs[pair] ?? { field: '', value: '' }), [part]: v }
+  if (pair === 0) {
+    if (!next.field) {
+      s.filter = undefined
+      return
+    }
+    pairs[0] = next
+  } else if (!next.field) {
+    pairs.length = Math.min(pairs.length, 1)
+  } else {
+    pairs[1] = next
+  }
+  s.filter = pairs.length ? pairs : undefined
 }
 // A Feature step series value is picked from the known steps, never typed (editor tools T7). A stored value that
 // names no step (saved before the picker, or a step since removed) is shown as unknown and blocks Save until it is
@@ -1226,6 +1240,20 @@ function resetToDefault() {
               aria-label="Series filter value"
               @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value)"
             />
+            <template v-if="s.filter?.[0]?.field">
+              <select :value="s.filter?.[1]?.field ?? ''" aria-label="Series second filter field" @change="setSeriesFilter(idx, 'field', ($event.target as HTMLSelectElement).value, 1)">
+                <option value="">(and nothing else)</option>
+                <option v-for="d in SERIES_FIELDS" :key="d.key" :value="d.key">and {{ d.label }}</option>
+              </select>
+              <input
+                v-if="s.filter?.[1]?.field"
+                type="text"
+                :value="s.filter?.[1]?.value ?? ''"
+                placeholder="value"
+                aria-label="Series second filter value"
+                @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value, 1)"
+              />
+            </template>
             <select v-model="s.axis" aria-label="Axis">
               <option value="left">Left axis</option>
               <option value="right">Right axis</option>
