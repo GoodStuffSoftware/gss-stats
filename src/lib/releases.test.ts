@@ -62,8 +62,8 @@ describe('the flight 3 web releases', () => {
     expect(at('v1.99.0')).toBe(-1)
   })
   it('the release panel picks the newest: v1.99.4 Play (10-18 15:15:55Z, listed after v1.99.4 web 14:57:49Z so it wins the same-day tie) is newest; v1.99.3 Play (10-17 06:09:41Z, listed after v1.99.3 web 05:58:55Z so it wins that same-day tie); v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
-    expect(newest(datedReleases())?.version).toBe('v1.105.1 Play')
-    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.105.1 Play')
+    expect(newest(datedReleases())?.version).toBe('v1.106.0 Play')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.106.0 Play')
     expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
     expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
     expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 Play')
@@ -115,6 +115,26 @@ describe('the flight 3 web releases', () => {
     expect(MEASUREMENT_CHANGES.some((c) => c.id.startsWith('v1.105.1'))).toBe(false)
     expect(releaseSubjectOn('2026-10-30')?.version).toBe('v1.105.0 web') // 10-29 is not a full day yet
     expect(releaseSubjectOn('2026-10-31')?.version).toBe('v1.105.1 Play')
+  })
+  it('v1.106.0 web (22:59:14Z) and v1.106.0 Play (23:11:46Z, 1106000) are markers on the ET day 2026-11-01 (EST), web listed first so the later-timed Play entry wins the tie; Play changes how Flight 4 d0 counts, so it is a labelled (major) line and web stays a tick', () => {
+    const web = datedReleases().find((r) => r.version === 'v1.106.0 web')!
+    const play = datedReleases().find((r) => r.version === 'v1.106.0 Play')!
+    expect(web).toMatchObject({ dateEt: '2026-11-01' })
+    expect(play).toMatchObject({ dateEt: '2026-11-01' })
+    expect(play.major).toBe(true)
+    expect(web.major).toBeFalsy()
+    expect(at('v1.106.0 Play')).toBeGreaterThan(at('v1.106.0 web'))
+    expect(at('v1.106.0 web')).toBeGreaterThan(at('v1.105.1 Play'))
+    expect(web.note).toContain('22:59:14Z')
+    expect(play.note).toContain('23:11:46Z')
+    expect(play.note).toContain('23:12:07Z')
+    expect(play.note).toContain('1106000')
+    expect(play.note).toContain('/return/<campaign>/d0')
+    expect(play.note).toContain('/welcome')
+    expect(RELEASES.filter((r) => r.version.startsWith('v1.106.0')).map((r) => r.version)).toEqual(['v1.106.0 web', 'v1.106.0 Play'])
+    expect(MEASUREMENT_CHANGES.some((c) => c.id.startsWith('v1.106.0'))).toBe(false)
+    expect(releaseSubjectOn('2026-11-02')?.version).toBe('v1.105.1 Play') // 11-01 is not a full day yet
+    expect(releaseSubjectOn('2026-11-03')?.version).toBe('v1.106.0 Play')
   })
   it('v1.105.0 Play (21:55:45Z) and v1.105.0 web (21:58:36Z) are markers dated 2026-10-28, web listed after Play because it went live later and so wins the same-day tie; the one counting change is a hidden measurement entry that mints no marker of its own', () => {
     const web = datedReleases().find((r) => r.version === 'v1.105.0 web')!

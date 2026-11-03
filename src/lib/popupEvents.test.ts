@@ -542,6 +542,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/complete-deferred/',
       '/auth/success/google/',
       '/auth/success/email/',
+      '/auth/success/apple/',
       '/auth/error',
       '/auth/redirect',
       '/tour',

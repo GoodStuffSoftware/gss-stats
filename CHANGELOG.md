@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The Best Sudoku v1.106.0 release is marked on the timeline.** The web build and the Play build (the labelled go-live line) are marked on 2026-11-01; the Play build sends the Flight 4 first-open row as soon as the install referrer is read, so the share of tagged first opens should rise from there.
+
+### Changed
+- **Flight 4 now runs to 2026-11-09 with a $145 cap.** Its end moved a week with the daily budget unchanged, so the card, its status and the daily line follow the new dates.
+
+### Fixed
+- **Apple sign-ins are counted.** The auth-success count, the new-versus-existing split and the Feature health sign-in step now include Sign in with Apple beside Google and email.
+
 ## [0.75.11] — 2026-10-31
 
 ### Added

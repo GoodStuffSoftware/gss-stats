@@ -224,7 +224,7 @@ describe('the F4 registry entry and the code path', () => {
   it('carries installActionId 7756366796, and no read code hardcodes it', () => {
     const f4 = campaignById('24392866056')!
     expect(f4.installActionId).toBe('7756366796')
-    expect(f4.hardCapUsd).toBe(75)
+    expect(f4.hardCapUsd).toBe(145)
     for (const rel of ['../../src/lib/adsRules.ts', './read.ts', './report.ts', './morning-read.ts']) {
       const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
       expect(src, rel).not.toContain('7756366796')

@@ -283,6 +283,22 @@ export const RELEASES: ReleaseMarker[] = [
     note: 'Play production 03:31:18Z 10-30 (1105001); old and new Android builds mix until updates spread. Fresh installs from this build on are labelled with their campaign tag, so Flight 4 (sudoku_funnel_f4_android) tagged counts start here; installs before it are unlabelled.',
     major: true, // a go-live moment (Flight 4's tagged counts start): a labelled line, not a tick. The web entry above stays a tick.
   },
+  // v1.106.0: two changes. (a) The Android d0 send order: /return/<campaign>/d0 now goes out as soon as the Play Install Referrer is read
+  // (it used to wait on a later step), so the share of Flight 4 first opens that arrive tagged should rise from here. (b) A new
+  // `/welcome` screen-view path, shown once per device at app start. Web went live 12m32s BEFORE Play, so web is listed first and
+  // the later-timed Play entry wins the same-day tie (the ET day is 11-01, EST after the clocks went back). Web stays a tick; Play is
+  // a go-live moment because it changes how Flight 4 d0 counts, so it is a labelled line.
+  {
+    version: 'v1.106.0 web',
+    dateEt: '2026-11-01', // web live 2026-11-01T22:59:14Z = 17:59:14 ET
+    note: 'Web live 22:59:14Z 11-01. New /welcome screen view, shown once per device at app start. The d0 send-order fix does nothing on the web (no Install Referrer there).',
+  },
+  {
+    version: 'v1.106.0 Play',
+    dateEt: '2026-11-01', // Play production 2026-11-01T23:11:46Z = 18:11:46 ET (full rollout 23:12:07Z, versionCode 1106000)
+    note: 'Play production 23:11:46Z 11-01, full rollout 23:12:07Z (1106000); old and new Android builds mix until updates spread. /return/<campaign>/d0 now sends as soon as the install referrer is read, so the share of Flight 4 (sudoku_funnel_f4_android) first opens counted with the tag should rise from here. Also a new /welcome screen view, shown once per device at app start.',
+    major: true, // a go-live moment (it changes how Flight 4 d0 counts): a labelled line, not a tick. The web entry above stays a tick.
+  },
 ]
 
 /** The first WHOLE ET day the once-per-device first-finish rows (FIRST_FINISH_PATH, lib/popupEvents.ts) exist: the day after the

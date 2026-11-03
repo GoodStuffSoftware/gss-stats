@@ -95,7 +95,7 @@ export const FEATURES: readonly FeatureDef[] = [
       { id: 'shown', label: 'Shown', match: { prefix: ['/signin-prompt/'], except: ['/signin-prompt/accept', '/signin-prompt/dismiss'] } },
       { id: 'accept', label: 'Accepted', match: { exact: ['/signin-prompt/accept'] }, ratioOf: { per: 'shown' } },
       { id: 'dismiss', label: 'Declined', match: { exact: ['/signin-prompt/dismiss'] }, ratioOf: { per: 'shown' } },
-      { id: 'signed-in', label: 'Signed in', match: { prefix: ['/auth/success/google/', '/auth/success/email/'] }, ratioOf: { per: 'accept' } },
+      { id: 'signed-in', label: 'Signed in', match: { prefix: ['/auth/success/google/', '/auth/success/email/', '/auth/success/apple/'] }, ratioOf: { per: 'accept' } },
     ],
   },
   {

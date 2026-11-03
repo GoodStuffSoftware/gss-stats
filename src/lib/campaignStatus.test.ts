@@ -31,13 +31,23 @@ describe('the registry statuses on 2026-10-28 (ET)', () => {
     expect(campaignById('24316608605')!.status).toBe('closed') // F2 arm, ended 10-10
     expect(campaignById('24311309184')!.status).toBe('closed') // F2 arm, ended 10-10
     expect(campaignById('24358792551')!.status).toBe('active') // F3 Search, 10-17..11-06
-    expect(campaignById('24392866056')!.status).toBe('active') // F4, 10-26..11-02
+    expect(campaignById('24392866056')!.status).toBe('active') // F4, 10-26..11-09
   })
-  it('it moves with the date: F4 is closed on 11-03, and the day turns at ET midnight, not UTC', () => {
-    at('2026-11-03T16:00:00Z')
+  it('it moves with the date: F4 is closed on 11-10, and the day turns at ET midnight, not UTC', () => {
+    at('2026-11-10T16:00:00Z')
     expect(campaignById('24392866056')!.status).toBe('closed')
-    at('2026-11-03T03:30:00Z') // 23:30 ET on 11-02: still the last day
+    at('2026-11-10T03:30:00Z') // 22:30 ET on 11-09 (EST): still the last day
     expect(campaignById('24392866056')!.status).toBe('active')
+    at('2026-11-03T16:00:00Z') // the old end (11-02) has passed: the extended flight still runs
+    expect(campaignById('24392866056')!.status).toBe('active')
+  })
+  it('F4 (to 11-09) and the Microsoft F5 (11-07..11-13) overlap on 11-07..11-09: both active together, F4 closes first', () => {
+    for (const day of ['2026-11-07', '2026-11-08', '2026-11-09']) {
+      expect(campaignStatusOn(campaignById('24392866056')!, day), day).toBe('active')
+      expect(campaignStatusOn(campaignById('571882693')!, day), day).toBe('active')
+    }
+    expect(campaignStatusOn(campaignById('24392866056')!, '2026-11-10')).toBe('closed')
+    expect(campaignStatusOn(campaignById('571882693')!, '2026-11-10')).toBe('active')
   })
   it('every registered campaign agrees with the derivation', () => {
     at('2026-10-28T16:00:00Z')
@@ -68,7 +78,7 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
     '24358792494': ['upcoming', 'upcoming', 'active', 'closed', 'closed', 'closed'],
     '24358792551': ['upcoming', 'upcoming', 'active', 'active', 'active', 'closed'],
     '24369758153': ['upcoming', 'upcoming', 'active', 'closed', 'closed', 'closed'],
-    [F4]: ['upcoming', 'upcoming', 'upcoming', 'active', 'closed', 'closed'],
+    [F4]: ['upcoming', 'upcoming', 'upcoming', 'active', 'active', 'closed'],
     [F5]: ['upcoming', 'upcoming', 'upcoming', 'upcoming', 'upcoming', 'active'],
   }
 

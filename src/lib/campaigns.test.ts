@@ -221,9 +221,11 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(classifyFunnelPath('/game')).toBe('played')
     expect(classifyFunnelPath('/auth/success/google')).toBe('authSuccess')
     expect(classifyFunnelPath('/auth/success/email')).toBe('authSuccess')
-    // v1.95.5 exact-shape fix: only the two real base providers count — a look-alike
+    expect(classifyFunnelPath('/auth/success/apple')).toBe('authSuccess') // Sign in with Apple: the app sends this base row
+    // v1.95.5 exact-shape fix: only the real base providers count — a look-alike
     // provider (never shipped) and the new/existing suffix are NOT authSuccess.
-    expect(classifyFunnelPath('/auth/success/apple')).toBeNull()
+    expect(classifyFunnelPath('/auth/success/facebook')).toBeNull()
+    expect(classifyFunnelPath('/auth/success/apple/new')).toBeNull()
     expect(classifyFunnelPath('/auth/success/google/new')).toBeNull()
     expect(classifyFunnelPath('/signin-prompt/placement')).toBe('ask')
     expect(classifyFunnelPath('/signin-prompt/streak')).toBe('ask')
@@ -309,7 +311,9 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(isAuthSuccessPath('/auth/success/google/new')).toBe(false)
     expect(isAuthSuccessPath('/auth/success/email/existing')).toBe(false)
     expect(isAuthSuccessPath('/auth/success/email/unknown')).toBe(false)
-    expect(isAuthSuccessPath('/auth/success/apple')).toBe(false) // not a real provider, still not a prefix match
+    expect(isAuthSuccessPath('/auth/success/apple')).toBe(true)
+    expect(isAuthSuccessPath('/auth/success/apple/existing')).toBe(false)
+    expect(isAuthSuccessPath('/auth/success/facebook')).toBe(false) // not a real provider, still not a prefix match
   })
   it('one sign-in fires a base row AND a new/existing suffix row (same event, v1.95.5) — authSuccess counts it once', () => {
     const counts = computeFunnelCounts(

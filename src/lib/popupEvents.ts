@@ -68,6 +68,7 @@ export const POPUP_EVENT_PREFIXES = [
   // AUTH_SUCCESS_PROVIDERS.
   '/auth/success/google/',
   '/auth/success/email/',
+  '/auth/success/apple/',
   // v1.89.0 (live 2026-09-22, see AUTH_ERROR_REDIRECT_LIVE_AT_ET below): a sign-in FAILURE
   // beacon, `/auth/error/<slug>` — one row per failed attempt. `<slug>` is open-ended
   // (best-sudoku's AUTH_ERROR_SLUGS table grows over time; an unmapped code sends `other`),
@@ -202,6 +203,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/complete-deferred/': 'game-complete-deferred',
   '/auth/success/google/': 'auth-status',
   '/auth/success/email/': 'auth-status',
+  '/auth/success/apple/': 'auth-status',
   '/auth/error': 'auth-error',
   '/auth/redirect': 'auth-redirect',
   '/tour': 'tour',

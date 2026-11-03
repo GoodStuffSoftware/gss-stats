@@ -96,6 +96,8 @@ describe('the config list', () => {
     expect(stepMatches(shown, '/signin-prompt/dismiss')).toBe(false)
     const signedIn = FEATURES.find((f) => f.id === 'signin')!.steps.find((s) => s.id === 'signed-in')!.match
     expect(stepMatches(signedIn, '/auth/success/google/new')).toBe(true)
+    expect(stepMatches(signedIn, '/auth/success/apple/existing')).toBe(true)
+    expect(stepMatches(signedIn, '/auth/success/apple')).toBe(false)
     expect(stepMatches(signedIn, '/auth/success/google')).toBe(false) // the base row is a page view
   })
 

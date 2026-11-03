@@ -444,17 +444,17 @@ const CAMPAIGN_REGISTRY: Omit<CampaignFlight, 'status'>[] = [
     ucValues: [F4_ANDROID_TAG],
     flightStart: '2026-10-26',
     flightStartTimeEt: '12:00', // enabled at noon ET; Google stores the 09:14 creation time (the API takes only a midnight start)
-    flightEnd: '2026-11-02',
+    flightEnd: '2026-11-09', // moved from 2026-11-02 on 2026-11-02 (Mike); overlaps Flight 5 (11-07..11-13)
     kind: 'play-direct',
     dailyBudgetUsd: 10,
-    hardCapUsd: 75,
+    hardCapUsd: 145,
     installActionId: '7756366796',
     measurement: 'spend-only',
     noPlacements: true, // an App campaign has no placement report
     measurabilityNote: 'App install campaign: Google counts the Play installs. The site\'s own counts come only from installs the app labels with the F4 tag, from the app release on.',
     tagged: { note: 'Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled.' },
     notes:
-      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-02 23:59:59 ET; planned total about $75. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag before Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z), so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
+      '"Best Sudoku - App - Android installs - F4 Android", ad group 201032355786, ad 829601920531. Google Ads App campaign (MULTI_CHANNEL), optimized for installs with no target CPI, Play app com.bestsudoku.app, $10/day, US/en. Went live 2026-10-26 12:00 ET (enabled at noon; Google stores the 09:14 creation time as its start because the API only accepts a midnight start); ends 2026-11-09 23:59:59 ET (extended from 2026-11-02 on 2026-11-02, Mike; the daily budget stays $10); planned total about $145. Its result is Google-reported Play installs (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with utm_campaign sudoku_funnel_f4_android (Play Install Referrer, no click id kept), the way the F3 Play-direct arm\'s are labelled; the proof of tracking is a tagged /return/<uc>/d0 first open. No row carries the tag before Best Sudoku 1.105.1 on Android (full Play rollout 2026-10-30T03:31:18Z), so installs before it are unlabelled. Spend-only, no read plan: its daily line (spend, impressions, clicks, installs, cost per install, cumulative spend of the cap; info only) is stored by ads:morning-read from the stored daily rows and conversions.',
   },
   // ── Flight 5: Microsoft Advertising search, not a Google Ads campaign ───────────────────
   // A Microsoft Ads Search test copied from the Google F3 Search campaign (Microsoft campaign id 571882693; the Microsoft
@@ -1091,17 +1091,18 @@ export function isGameCompleteDeferredPath(path: string): boolean {
  * path there), so classified here directly. ONE matcher for the whole codebase.
  *
  * Every sign-in sends the BASE row `/auth/success/<provider>` exactly once; the provider is
- * exactly `google` or `email`. From v1.95.5 (live 2026-09-26T19:43:02Z, lib/adsRules.ts
+ * `google`, `email` or `apple` (Sign in with Apple, web or the native iOS sheet; the app sends
+ * `/auth/success/apple` and `/auth/success/apple/<status>`). From v1.95.5 (live 2026-09-26T19:43:02Z, lib/adsRules.ts
  * AUTH_NEW_EXISTING_LIVE_AT) it ALSO sends `/auth/success/<provider>/<new|existing|unknown>`,
  * alongside the base row for the SAME sign-in, never instead of it. So a sign-in is counted from
  * the base row only (an exact match), and the new/existing split only from the three-segment
  * rows; a prefix match would count each new-client sign-in twice. */
-export const AUTH_SUCCESS_PROVIDERS = ['google', 'email'] as const
+export const AUTH_SUCCESS_PROVIDERS = ['google', 'email', 'apple'] as const
 export const AUTH_SUCCESS_STATUSES = ['new', 'existing', 'unknown'] as const
 export type AuthSuccessStatus = (typeof AUTH_SUCCESS_STATUSES)[number]
 /** The base rows, one per sign-in (= AUTH_SUCCESS_PROVIDERS under /auth/success/). */
-export const AUTH_SUCCESS_PATHS = ['/auth/success/google', '/auth/success/email'] as const
-const AUTH_STATUS_RE = /^\/auth\/success\/(google|email)\/(new|existing|unknown)$/
+export const AUTH_SUCCESS_PATHS = ['/auth/success/google', '/auth/success/email', '/auth/success/apple'] as const
+const AUTH_STATUS_RE = /^\/auth\/success\/(google|email|apple)\/(new|existing|unknown)$/
 /** A sign-in (the base row), never its status row: every auth-success count uses this
  * (lib/metrics/metrics.ts, lib/adsRules.ts summarizeTaggedRows, classifyFunnelPath). */
 export function isAuthSuccessBase(path: string): boolean {
@@ -1109,7 +1110,7 @@ export function isAuthSuccessBase(path: string): boolean {
 }
 /** v0.6.1's name for the same matcher (kept so both call sites read the same function). */
 export const isAuthSuccessPath = isAuthSuccessBase
-/** 'base' for `/auth/success/<google|email>` (one per sign-in), the status for the suffixed row
+/** 'base' for `/auth/success/<google|email|apple>` (one per sign-in), the status for the suffixed row
  * that rides alongside it, null for anything else (other providers or shapes included). */
 export function authSuccessRow(path: string): 'base' | AuthSuccessStatus | null {
   if (isAuthSuccessBase(path)) return 'base'

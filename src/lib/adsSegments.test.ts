@@ -29,11 +29,13 @@ describe('/auth/success: one sign-in = one BASE row; the status row rides alongs
     expect(authSuccessKind('/auth/success/google/new')).toBe('new')
     expect(authSuccessKind('/auth/success/email/existing')).toBe('existing')
     expect(authSuccessKind('/auth/success/google/unknown')).toBe('unknown')
-    expect(AUTH_SUCCESS_PROVIDERS).toEqual(['google', 'email'])
+    expect(authSuccessKind('/auth/success/apple')).toBe('base')
+    expect(authSuccessKind('/auth/success/apple/new')).toBe('new')
+    expect(AUTH_SUCCESS_PROVIDERS).toEqual(['google', 'email', 'apple'])
     expect(AUTH_SUCCESS_STATUSES).toEqual(['new', 'existing', 'unknown'])
     for (const p of ['/auth/success/google/new/', '/auth/success/google/other', '/auth/success/google/new/x', '/auth/success/', '/auth/successful', '/auth/redirect/google']) expect(authSuccessKind(p)).toBeNull()
-    // providers are exactly google and email, for the base row and the status row alike
-    for (const p of ['/auth/success/apple', '/auth/success/apple/new', '/auth/success/Google']) expect(authSuccessKind(p)).toBeNull()
+    // providers are exactly google, email and apple, for the base row and the status row alike
+    for (const p of ['/auth/success/facebook', '/auth/success/facebook/new', '/auth/success/Google', '/auth/success/Apple']) expect(authSuccessKind(p)).toBeNull()
   })
   it('ONE matcher: v0.6.1 isAuthSuccessPath is the same function, over the same paths as the providers', () => {
     expect(isAuthSuccessPath).toBe(isAuthSuccessBase)
