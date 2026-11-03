@@ -182,6 +182,10 @@ export interface CampaignSyncResult {
   dailyOk: boolean
   /** The pull reached the end of the window (the restatement window was re-checked). */
   pulled: boolean
+  /** The cost-only ranges of the daily flight re-read that completed. Kept out of `ranges`: the
+   * reads treat every day of `ranges` as having fresh placement rows (scripts/ads-reads/read.ts),
+   * and these pulled none. */
+  repullRanges?: SyncRange[]
   /** The daily whole-flight re-read (plan.repull) completed: every day of it was pulled and stored. */
   repulled?: boolean
   deferred: boolean
@@ -576,6 +580,7 @@ async function syncOne(
   const repullGap = repullDays.filter((d) => !plannedDays.has(d))
   if (repullGap.length && !plan.deferred) queue.push({ since: repullGap[0], until: repullGap[repullGap.length - 1], costOnly: true })
   const doneDays = new Set<string>()
+  const repullRanges: SyncRange[] = []
   let first = true
   const split = (r: QueuedRange, why: string): boolean => {
     const days = etDateRange(r.since, r.until)
@@ -697,7 +702,7 @@ async function syncOne(
         }
       }
     }
-    res.ranges.push({ since: range.since, until: range.until })
+    ;(range.costOnly ? repullRanges : res.ranges).push({ since: range.since, until: range.until })
     for (const day of etDateRange(range.since, range.until)) doneDays.add(day)
     res.daysFetched += etDateRange(range.since, range.until).length
     res.daysChanged += d.rows.length
@@ -714,11 +719,12 @@ async function syncOne(
     if (plan.recheck && range.since === plan.recheck.since && range.until === plan.recheck.until && (!pullsPlacements(c.id, opts) || placementsCovered)) res.pulled = true
   }
 
-  res.fetched = spanOf(res.ranges)
+  res.fetched = spanOf([...res.ranges, ...repullRanges])
+  res.repullRanges = repullRanges
   res.repulled = repullDays.length > 0 && repullDays.every((d) => doneDays.has(d))
   res.error = errors[0] ?? null
   res.changedDates.sort()
-  if (res.ranges.length) {
+  if (res.ranges.length || repullRanges.length) {
     res.spend = rowsToStoredSpend(c.id, [...after.values()])
     res.spendThrough = contiguousThrough(c.flightStart, closedNow, c.flightEnd)
   }
@@ -850,7 +856,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
         ...Object.fromEntries(
           result.campaigns.map((r) => [
             r.campaignId,
-            { fetched: r.fetched, ranges: r.ranges, days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome, ...(r.warnings.length ? { warnings: r.warnings } : {}) },
+            { fetched: r.fetched, ranges: r.ranges, ...(r.repullRanges?.length ? { repullRanges: r.repullRanges } : {}), days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome, ...(r.warnings.length ? { warnings: r.warnings } : {}) },
           ]),
         ),
       },

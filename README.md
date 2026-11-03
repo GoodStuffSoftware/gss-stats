@@ -1850,7 +1850,7 @@ the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudfla
    `ads:sync`, and on **every** morning, backstop and post-flight read (a read never decides on
    a yesterday pulled hours earlier); only a pull of all 3 days counts as a re-check. A day counts as **closed** once it was pulled at or after 03:00
    ET the next day (Google still adds late data just after midnight). A closed campaign is
-   covered through its flight end and then costs no API call;
+   covered through its flight end and then costs only the daily re-read in step 4 (for 14 days), after that no API call;
 3. stores a day the API returns nothing for as zero only when Google's **range total** (one
    aggregate query, made only when a day came back empty) agrees with the daily rows: a
    never-stored flight day becomes $0, and a stored day Google credited in full is restated to

@@ -640,6 +640,10 @@ describe('the daily whole-flight re-read (Google lowers closed days for invalid 
     expect(next.campaigns[0]).toMatchObject({ changedDates: ['2026-09-27', '2026-10-01'], repulled: true, restated: [{ date: '2026-09-27', before: 13.1, after: 10.4 }] })
     expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(10_400_000)
     expect(count(sqlite, 'ads_daily_metrics', 'campaign_id = ?', RETEST)).toBe(6)
+    // the cost-only range is NOT in `ranges`: the reads treat every day of `ranges` as having fresh placement rows
+    expect(next.campaigns[0].ranges).toEqual([{ since: '2026-09-29', until: '2026-10-01' }])
+    expect(next.campaigns[0].repullRanges).toEqual([{ since: '2026-09-26', until: '2026-09-28' }])
+    expect(next.campaigns[0].fetched).toEqual({ since: '2026-09-26', until: '2026-10-01' })
     // an hour later: not due again; and even a forced restatement re-check is only the 3 recent days
     ads.calls.length = 0
     const later = await syncAdsData({ ads: ads.src, store }, { ...base, now: nineEt('2026-10-02') + HOUR, maxDays: 3 })
