@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.75.12] — 2026-11-03
+
 ### Added
 - **The Best Sudoku v1.106.0 release is marked on the timeline.** The web build and the Play build (the labelled go-live line) are marked on 2026-11-01; the Play build sends the Flight 4 first-open row as soon as the install referrer is read, so the share of tagged first opens should rise from there.
 
