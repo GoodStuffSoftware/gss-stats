@@ -248,7 +248,7 @@ export function visitorsGroupWidgets(y: number): Widget[] {
       x: 0,
       y,
       w: 12,
-      h: 3,
+      h: 1,
     }),
     bw({
       id: 'bsk-new-daily',
@@ -263,7 +263,7 @@ export function visitorsGroupWidgets(y: number): Widget[] {
       ],
       caption: NEW_DEVICES_CAPTION,
       x: 0,
-      y: y + 3,
+      y: y + 1,
       w: 12,
       h: 8,
     }),
