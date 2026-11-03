@@ -27,9 +27,9 @@ async function saved(w: VueWrapper) {
 describe('ChartEditor: a series with two filter pairs', () => {
   it('shows both pairs of each series', () => {
     const w = open(card())
-    const fields = w.findAll('select[aria-label="Series filter field"]').map((s) => (s.element as HTMLSelectElement).value)
-    const second = w.findAll('select[aria-label="Series second filter field"]').map((s) => (s.element as HTMLSelectElement).value)
-    const secondValues = w.findAll('input[aria-label="Series second filter value"]').map((s) => (s.element as HTMLInputElement).value)
+    const fields = w.findAll('select[aria-label="Series filter field"]').map((s) => (s.element as unknown as HTMLSelectElement).value)
+    const second = w.findAll('select[aria-label="Series second filter field"]').map((s) => (s.element as unknown as HTMLSelectElement).value)
+    const secondValues = w.findAll('input[aria-label="Series second filter value"]').map((s) => (s.element as unknown as HTMLInputElement).value)
     expect(fields).toEqual(['visitor', 'visitor'])
     expect(second).toEqual(['site', 'site'])
     expect(secondValues).toEqual(['bestsudoku-web', 'bestsudoku-app'])
