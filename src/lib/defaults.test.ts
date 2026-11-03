@@ -789,11 +789,12 @@ describe('Traffic page: known test and household traffic', () => {
 describe('Traffic page: visitors group', () => {
   const find = (id: string) => defaultBestSudokuLaunchWidgets().find((wd) => wd.id === id)!
 
-  it('has a note that says unique and returning visitors are not shown yet, and why', () => {
-    const note = find('bsk-visitors-note')
-    expect(note.type).toBe('note')
-    expect(note.note).toMatch(/start with the next Best Sudoku release/)
-    expect(note.note).toMatch(/not returning people/)
+  it('has no separate note tile: the card caption carries the not-yet-shown notice', () => {
+    expect(defaultBestSudokuLaunchWidgets().some((wd) => wd.id === 'bsk-visitors-note')).toBe(false)
+    const cap = find('bsk-new-daily').caption!
+    expect(cap.startsWith('Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day).')).toBe(true)
+    expect(cap).toMatch(/'Returning' beacon rows are later screen views, not returning people./)
+    expect(find('bsk-new-daily').y).toBe(40)
   })
 
   it('draws new devices per day as one beacon line per app, each narrowed to visitor = new and its own site', () => {
@@ -820,7 +821,6 @@ describe('Traffic page: visitors group', () => {
     const out = normalizeConfig(JSON.parse(JSON.stringify(defaultConfig())))
     const card = out.pages.find((p) => p.id === 'bsk-launch')!.widgets.find((wd) => wd.id === 'bsk-new-daily')!
     expect(card.series![1].filter).toEqual([{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-app' }])
-    expect(out.pages.find((p) => p.id === 'bsk-launch')!.widgets.find((wd) => wd.id === 'bsk-visitors-note')!.note).toBe(find('bsk-visitors-note').note)
   })
 })
 

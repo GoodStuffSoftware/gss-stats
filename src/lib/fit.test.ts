@@ -115,13 +115,13 @@ describe('a layout without fit loads exactly as before', () => {
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(13)
   })
 
-  it('the production layout gets no fit key; the factory layout fits only "Today at a glance" and the Traffic visitors note; the same geometry', () => {
+  it('the production layout gets no fit key; the factory layout fits only "Today at a glance"; the same geometry', () => {
     const prod = normalizeConfig(clone(PROD_V9))
     for (const p of prod.pages) for (const w of p.widgets) expect(w.fit, `${p.id}/${w.id}`).toBeUndefined()
     expect(JSON.stringify(prod)).not.toContain('"fit"')
     for (const cfg of [defaultConfig(), normalizeConfig(clone(defaultConfig()))]) {
       for (const p of cfg.pages) for (const w of p.widgets) {
-        if (w.id === 'ow-kpis' || w.id === 'bsk-visitors-note') expect(w.fit, `${p.id}/${w.id}`).toBe('content')
+        if (w.id === 'ow-kpis') expect(w.fit, `${p.id}/${w.id}`).toBe('content')
         else expect(w.fit, `${p.id}/${w.id}`).toBeUndefined()
       }
     }
@@ -171,7 +171,7 @@ describe('persistence: save and reload keeps fit', () => {
     expect(back.fit).toBe('content')
     expect(back.h).toBe(7) // the last fitted height is kept as an ordinary saved h
     // and every other widget is untouched
-    for (const w of allWidgets(reloaded)) if (w.id !== fitted.id && w.id !== 'ow-kpis' && w.id !== 'bsk-visitors-note') expect(w.fit).toBeUndefined()
+    for (const w of allWidgets(reloaded)) if (w.id !== fitted.id && w.id !== 'ow-kpis') expect(w.fit).toBeUndefined()
   })
 
   it('turning it off and saving stores no fit key at all', () => {

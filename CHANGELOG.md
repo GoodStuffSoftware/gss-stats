@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.76.2] — 2026-11-03
+
+### Changed
+- **The Traffic page's visitors note is folded into the New devices per day card.** The separate one-line note tile (a gap on desktop, text under its menu on a phone) is gone; its text opens the card's caption and the card moves up.
+
 ## [0.76.1] — 2026-11-03
 
 ### Fixed

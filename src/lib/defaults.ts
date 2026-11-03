@@ -227,29 +227,13 @@ const TRAFFIC_WINDOW_CAPTION =
 function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
   return gw({ excludeKnownTraffic: true, ...p })
 }
-// The Traffic page's visitors group: a note saying what is and is not counted, and the daily count of new devices.
-// Both are ordinary editor widgets (a note tile and a beacon line with two AND'ed filters per series).
-export const VISITORS_NOTE_TEXT =
-  "Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day). 'Returning' beacon rows are later screen views, not returning people."
+// The Traffic page's visitors group: the daily count of new devices, an ordinary editor beacon line with two AND'ed
+// filters per series. Its caption carries what is and is not counted (there is no separate note tile: every card has a
+// 3-row minimum, so a one-line note left a gap).
 export const NEW_DEVICES_CAPTION =
-  "**New devices:** the first page view from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
+  "Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day). 'Returning' beacon rows are later screen views, not returning people. **New devices:** the first page view from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
 export function visitorsGroupWidgets(y: number): Widget[] {
   return [
-    w({
-      id: 'bsk-visitors-note',
-      title: 'Unique and returning visitors',
-      type: 'note',
-      dimension: '',
-      metric: 'pageviews',
-      limit: 1,
-      longText: true,
-      note: VISITORS_NOTE_TEXT,
-      fit: 'content',
-      x: 0,
-      y,
-      w: 12,
-      h: 1,
-    }),
     bw({
       id: 'bsk-new-daily',
       title: 'New devices per day',
@@ -263,7 +247,7 @@ export function visitorsGroupWidgets(y: number): Widget[] {
       ],
       caption: NEW_DEVICES_CAPTION,
       x: 0,
-      y: y + 1,
+      y,
       w: 12,
       h: 8,
     }),
