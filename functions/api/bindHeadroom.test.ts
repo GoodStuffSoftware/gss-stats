@@ -23,12 +23,12 @@ const HEADROOM_CEILING = 90
  * at 5 campaigns and holds about 280 more.
  * Measured by bisecting BIND_EXTRA (two-uc fakes, MIN_ROOM_CAMPAIGNS = 5): the room test first goes red at BIND_EXTRA=39
  * (44 campaigns in all), and the byte and no-refusal tests first go red at BIND_EXTRA=44 (49 in all: 43 extra is 89,924 B and
- * fits, 44 is 90,136 B and is refused). The default EXTRA = 10 plus MIN_ROOM_CAMPAIGNS = 5 puts the tripwire at 15 two-uc
+ * fits, 44 is 90,136 B and is refused). The default EXTRA = 5 (was 10 until 0.76.3, when the /visit/ pathFamily branch took about 0.9 KB of the ring) plus MIN_ROOM_CAMPAIGNS = 5 puts the tripwire at 10 two-uc
  * campaigns (about 5 realistic ones) of room left on today's registry: the room test reads red when the registry plus EXTRA
  * fakes leaves under 5 of room, i.e. when the real ring has under 15. Keep that in mind before reading "48 campaigns" as comfortable. */
-const EXTRA = Number(process.env.BIND_EXTRA ?? 10)
+const EXTRA = Number(process.env.BIND_EXTRA ?? 5)
 /** The fewest further campaigns the worst-case ring must still hold after the EXTRA fakes (the extrapolated headroom test
- * below). At the default EXTRA=10 the ring has room for about 33 more, so a floor of 5 goes red once today's registry leaves
+ * below). At the default EXTRA=5 the ring has room for about 33 more, so a floor of 5 goes red once today's registry leaves
  * under about 15 two-uc campaigns of room (about 5 realistic ones at 3x cost): early enough to act on, with slack for a
  * filter or two added later. */
 const MIN_ROOM_CAMPAIGNS = 5

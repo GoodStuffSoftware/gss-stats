@@ -555,7 +555,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/ab/ask-order',
       '/coach',
       '/game/first-finish',
-      '/visit',
+      '/visit/',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
@@ -595,15 +595,15 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       expect(pathFamilyOf(p), p).toBe('visit')
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
-    for (const p of ['/visitors', '/visit-us', '/visits/day/new', '/x/visit/day/new']) {
+    for (const p of ['/visit', '/visitors', '/visit-us', '/visits/day/new', '/x/visit/day/new']) {
       expect(isPopupEventPath(p), p).toBe(false)
       expect(pathFamilyOf(p), p).toBe('page')
     }
     const w: string[] = []
     popupExcludeClause(w, [])
-    expect(w.join(' AND ')).toContain("path <> '/visit' AND path NOT LIKE '/visit/%'")
+    expect(w.join(' AND ')).toContain("path NOT LIKE '/visit/%'")
     expect(popupIncludeClause().sql).toContain("path LIKE '/visit/%'")
-    expect(pathFamilySqlCase()).toContain("WHEN path = '/visit' OR path LIKE '/visit/%' THEN 'visit'")
+    expect(pathFamilySqlCase()).toContain("WHEN path LIKE '/visit/%' THEN 'visit'")
   })
   it('there is exactly one tutorial-complete family and one option for it (no shadowed duplicate)', () => {
     expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'tutorial-complete')).toHaveLength(1)

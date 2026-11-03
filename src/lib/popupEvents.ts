@@ -123,7 +123,7 @@ export const POPUP_EVENT_PREFIXES = [
   // `/visit/day/returning`, at most once per device per Eastern day, gated on the device by localStorage.
   // No id, date or count in the row. An event, never a screen view or a "new device" arrival, and
   // count-only (splitGuard.ts). One row is one device on one ET day.
-  '/visit',
+  '/visit/',
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -221,7 +221,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/ab/ask-order': 'ab-ask-order',
   '/coach': 'coach',
   [FIRST_FINISH_PATH]: 'game-first-finish',
-  '/visit': 'visit',
+  '/visit/': 'visit',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
