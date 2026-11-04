@@ -65,7 +65,7 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 
 ## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
-Flight 4 (campaign 24392866056, Android installs, 2026-10-26 to 11-09, $145 cap) is spend-only and has no read plan, so it is not a leg (no table row, no A2 analysis, no kill rules, no proposals). It still gets a daily INFO line while DATE is 2026-10-27 through 2026-11-10: see "Spend-only arm daily line (F4)" under Part A.
+Flight 4 (campaign 24392866056, Android installs, 2026-10-26 to 11-09, $205 cap; daily budget $10 to 11-03, $18 from 11-04) is spend-only and has no read plan, so it is not a leg (no table row, no A2 analysis, no kill rules, no proposals). It still gets a daily INFO line while DATE is 2026-10-27 through 2026-11-10: see "Spend-only arm daily line (F4)" under Part A.
 
 Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md); its read
 plan, rules and checks are in "Flight 3" below. Its two rows are `by-date`: the arm's dates in code decide when it is read (see below).
@@ -535,7 +535,7 @@ Spend-only arm daily line (F4). When F4LINE is due (Step 0.2), also run, once, t
 install conversions (the campaign's `installActionId`), stores it in `ads_readings` (a rerun
 stores nothing new, and any closed day not yet stored is filled in; the row carries a `data through` note naming the day it describes, and no proposal) and returns it as `notify.text`,
 a line with verdict INFO. F4 is not in ARMS: skip A2 and A4 for it, propose nothing about it
-(spend at or over the $145 cap is information only), and add its `text=` value as one more push
+(spend at or over the $205 cap is information only), and add its `text=` value as one more push
 line after the arm lines. If `text=` is empty (a day's spend or installs are not synced yet) add no line; a
 failed F4 read is `F4 daily read did not run: REASON`. Only this F4 read running makes the run
 non-empty on such a date.

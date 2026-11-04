@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.76.5] — 2026-11-04
+
+### Changed
+- **Flight 4's budget is $18 a day from 11-04, with a $205 cap.** The Android installs campaign went from $10 to $18 a day on 2026-11-04 (end date unchanged, 11-09), so its planned total is about $200 and its daily line now counts spend against $205; the earlier days stay at $10 in the campaign's notes.
+
 ## [0.76.4] — 2026-11-03
 
 ### Changed

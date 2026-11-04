@@ -53,11 +53,13 @@ describe('the F4 registry entry', () => {
     expect(c.status).toBe('active')
     expect(c.flightStart).toBe('2026-10-26')
     expect(c.flightStartTimeEt).toBe('12:00')
-    expect(c.flightEnd).toBe('2026-11-09') // moved from 11-02 on 11-02; budget stays $10 a day, so the cap is $75 + 7 x $10
-    expect(c.dailyBudgetUsd).toBe(10)
-    expect(c.hardCapUsd).toBe(145)
+    expect(c.flightEnd).toBe('2026-11-09') // moved from 11-02 on 11-02
+    expect(c.dailyBudgetUsd).toBe(18) // raised from $10 on 2026-11-04 (the current number; the history is in the notes)
+    expect(c.hardCapUsd).toBe(205) // $10 x 9 days + $18 x 6 days = $198 projected, plus headroom
     expect(c.notes).toContain('ends 2026-11-09 23:59:59 ET')
-    expect(c.notes).toContain('planned total about $145')
+    expect(c.notes).toContain('planned total about $200')
+    expect(c.notes).toContain('$10/day from the start through 2026-11-03 and $18/day from 2026-11-04')
+    expect(c.notes).toContain('hard cap $205')
     expect(c.noPlacements).toBe(true)
     expect(c.measurabilityNote).toMatch(/Google counts the Play installs/)
     expect(c.tagged?.note).toBe('Tagged counts start 2026-10-29 11:31 PM ET (Best Sudoku 1.105.1 on Android); installs before it are unlabelled.')

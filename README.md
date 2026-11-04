@@ -1719,8 +1719,8 @@ to end).
 ### Flight 4: an App install campaign, spend-only
 
 **Flight 4 - Android installs** (campaign 24392866056, `kind: 'play-direct'`, `measurement: 'spend-only'`;
-`src/lib/campaigns.ts`) is a Google Ads **App** campaign for the Play app: $10 a day, US/English,
-2026-10-26 (noon ET) to 2026-11-09 (extended from 11-02 on 11-02), about $145 in all. Its result is the Play installs Google reports
+`src/lib/campaigns.ts`) is a Google Ads **App** campaign for the Play app: $10 a day through 2026-11-03 and $18 a day from 2026-11-04 (Mike, 11-04; the registry's `dailyBudgetUsd` holds the current $18 and nothing reads it for Flight 4's per-day math, since it has no read plan, so the earlier days are not misreported), US/English,
+2026-10-26 (noon ET) to 2026-11-09 (extended from 11-02 on 11-02), about $200 in all (`hardCapUsd` 205). The budget raise is a campaign note only, not a timeline marker: `releases.ts` marks Best Sudoku releases and `measurementChanges.ts` marks changes to how we count, and a budget change is neither. Its result is the Play installs Google reports
 (conversion action 7756366796). The Best Sudoku app labels installs from this campaign with the utm tag
 `sudoku_funnel_f4_android` (`F4_ANDROID_TAG`; the Play Install Referrer, no click id kept), the way the F3 Play-direct
 arm's are labelled, so rows with that tag are the site's own count of those installs; Google's install counts still cannot
@@ -1728,7 +1728,7 @@ be joined to them one for one. No row carries the tag before Best Sudoku 1.105.1
 it are unlabelled. It is registered
 spend-only with **no read plan** (`ADS_READ_PLANS`): the morning and post-flight reads and the kill
 rules never run on it, and the morning read's default campaign still comes from the read plans only.
-The dashboard shows its spend (the $145 cap is in the registry); the ads lead reads its installs from Google Ads.
+The dashboard shows its spend (the $205 cap is in the registry); the ads lead reads its installs from Google Ads.
 On the Campaign scorecard its card shows the same tagged chips as the other flights (game-screen views and arrivals,
 completed a game, sign-in ask, accept, auth success, install prompt, return rate d2-7), read from the tagged rows, beside
 the Google Ads rows (Installs, Cost / install, Spend, Clicks). The entry's `tagged` flag (`CampaignFlight.tagged`,
