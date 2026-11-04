@@ -801,7 +801,7 @@ describe('Traffic page: visitors group', () => {
   it('draws visitors per day from the visit rows: unique (path family), returning and new (exact paths), web and app each', () => {
     const card = find('bsk-visitors-day')
     expect(card).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', includeEventBeacons: true, excludeKnownTraffic: true })
-    expect(card.series!.map((s) => [s.label, s.filter[0].value, s.filter[1].value])).toEqual([
+    expect(card.series!.map((s) => [s.label, s.filter![0].value, s.filter![1].value])).toEqual([
       ['Web: unique visitors', 'visit', 'bestsudoku-web'],
       ['App: unique visitors', 'visit', 'bestsudoku-app'],
       ['Web: returning', '/visit/day/returning', 'bestsudoku-web'],
