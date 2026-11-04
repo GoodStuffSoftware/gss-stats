@@ -30,6 +30,8 @@ const ANDROID_1103 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.103.0 Android'
 const ANDROID_1103_DATE = ANDROID_1103.dateEt
 const V1105 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.105.0')!
 const V1105_DATE = V1105.dateEt
+const V1107 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.107.0')!
+const V1107_DATE = V1107.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
@@ -37,6 +39,7 @@ beforeEach(() => {
   V1993_PLAY.dateEt = null
   ANDROID_1103.dateEt = null
   V1105.dateEt = null
+  V1107.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
@@ -44,6 +47,7 @@ const DAY = '2099-01-10' // after every real release, so the timeline order test
 afterEach(() => {
   ANDROID_1103.dateEt = ANDROID_1103_DATE
   V1105.dateEt = V1105_DATE
+  V1107.dateEt = V1107_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -293,6 +297,24 @@ describe('Android 1.103.0 sign-in cancel move (authErrorOnly entry)', () => {
     expect(cardShowsAuthErrors(undefined)).toBe(false)
     expect(cardShowsAuthErrors({ preset: 'no-such-preset' })).toBe(false)
     expect(autoCaveatIds(widget({ type: 'line' }))).not.toContain(AE_NOTE_ID)
+  })
+})
+
+describe('1.107.0 daily visit rows change (errorRowsOnly entry)', () => {
+  it('is dated 2026-11-04 and names the web start, the Play update and the app start in plain words', () => {
+    expect(V1107_DATE).toBe('2026-11-04')
+    expect(V1107.errorRowsOnly).toBe(true)
+    expect(V1107.note).toContain('web from 18:48Z on 11-04')
+    expect(V1107.note).toContain('the app from the Play update 2026-11-04 19:04Z as devices take it')
+  })
+
+  it('dated: marked, but in no auth, coach or report-line consumer and with no timeline marker of its own', () => {
+    V1107.dateEt = V1107_DATE
+    expect(markedChanges().some((c) => c.id === 'v1.107.0')).toBe(true)
+    expect(authMarkedChanges().some((c) => c.id === 'v1.107.0')).toBe(false)
+    expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.107.0')
+    expect(coachMeasurementNote('2099-03-01') ?? '').not.toContain('v1.107.0')
+    expect(RELEASES.some((r) => r.version === 'v1.107.0')).toBe(false)
   })
 })
 

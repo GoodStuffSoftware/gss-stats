@@ -809,7 +809,7 @@ describe('Traffic page: visitors group', () => {
       ['Web: new', '/visit/day/new', 'bestsudoku-web'],
       ['App: new', '/visit/day/new', 'bestsudoku-app'],
     ])
-    expect(card.caption).toMatch(/2026-11-04 on the web (1.107.0)/)
+    expect(card.caption).toContain('2026-11-04 on the web (1.107.0)')
   })
 
   it('draws new devices per day as one beacon line per app, each narrowed to visitor = new and its own site', () => {
