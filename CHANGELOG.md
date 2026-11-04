@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.77.1] — 2026-11-04
+
+### Changed
+- **Paywall shown per day is easier to read.** Four lines by reason, web and app together, instead of eight; both new Traffic cards now say known own and household traffic is excluded.
+
 ## [0.77.0] — 2026-11-04
 
 ### Added

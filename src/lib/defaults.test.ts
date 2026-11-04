@@ -25,7 +25,7 @@ import {
   beaconizeWidget,
 } from './defaults'
 import { POPUP_KIND_OPTIONS } from './catalog'
-import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
+import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT, UPSELL_REASONS } from './popupEvents'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 import { widgetsWithV16Caveats } from './__fixtures__/autoCaveats'
 
@@ -839,12 +839,9 @@ describe('Traffic page: purchases group', () => {
     ])
   })
 
-  it('draws the paywall per site and reason, each a two-pair filter', () => {
+  it('draws the paywall by reason, both sites together, each an exact-path filter', () => {
     const series = find('bsk-paywall-daily').series!
-    expect(series).toHaveLength(8)
-    for (const s of series) expect(s.filter).toHaveLength(2)
-    expect(series[0].filter).toEqual([{ field: 'path', value: '/upsell/shown/cadence' }, { field: 'site', value: 'bestsudoku-web' }])
-    expect(series[7].filter).toEqual([{ field: 'path', value: '/upsell/shown/upgrade-tap' }, { field: 'site', value: 'bestsudoku-app' }])
+    expect(series.map((s) => s.filter)).toEqual(UPSELL_REASONS.map((r) => [{ field: 'path', value: `/upsell/shown/${r}` }]))
   })
 
   it('the purchases caption says what a row is and what is missing', () => {
@@ -852,7 +849,7 @@ describe('Traffic page: purchases group', () => {
     expect(cap).toMatch(/one completed purchase/)
     expect(cap).toMatch(/counts as web/)
     expect(cap).toMatch(/14-day trial/)
-    expect(cap).toMatch(/test purchases are excluded/)
+    expect(cap).toMatch(/own and household traffic is excluded/)
   })
 })
 

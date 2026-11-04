@@ -256,9 +256,9 @@ export function visitorsGroupWidgets(y: number): Widget[] {
 // The Traffic page's purchases group (under the visitors group): ordinary editor beacon lines, one series per place, each
 // narrowed by an exact path and its site. They include event beacons (a /funnel or /upsell row is never a page view).
 export const PURCHASES_CAPTION =
-  "Each row is one completed purchase where it happened: a web checkout (Stripe) or Google Play in the app. A web purchase by someone who also has the app counts as web. New devices get a 14-day trial before the paywall, so installs from the 10-26 ads cannot reach it before about 11-09. Opted-out and consent-pending visitors send nothing. Mike's own test purchases are excluded."
+  "Each row is one completed purchase where it happened: a web checkout (Stripe) or Google Play in the app. A web purchase by someone who also has the app counts as web. New devices get a 14-day trial before the paywall, so installs from the 10-26 ads cannot reach it before about 11-09. Opted-out and consent-pending visitors send nothing. Known own and household traffic is excluded."
 export const PAYWALL_CAPTION =
-  'Each row is one paywall screen shown, by site and by the reason it opened (cadence, limit, daily-locked, upgrade-tap). It counts screens, not people: guests and repeat views count too.'
+  'Each row is one paywall screen shown, on the web and in the app together, by the reason it opened (cadence, limit, daily-locked, upgrade-tap). It counts screens, not people: guests and repeat views count too. Known own and household traffic is excluded.'
 export function purchasesGroupWidgets(y: number): Widget[] {
   const place = (label: string, path: string, site: string, color: number) => ({
     label,
@@ -293,10 +293,7 @@ export function purchasesGroupWidgets(y: number): Widget[] {
       limit: 365,
       includeEventBeacons: true,
       markers: 'releases',
-      series: [
-        ...UPSELL_REASONS.map((r, i) => place(`Web: ${r}`, `/upsell/shown/${r}`, WEB, i * 2)),
-        ...UPSELL_REASONS.map((r, i) => place(`App: ${r}`, `/upsell/shown/${r}`, APP, i * 2 + 1)),
-      ],
+      series: UPSELL_REASONS.map((r, i) => ({ label: r, filter: [{ field: 'path', value: `/upsell/shown/${r}` }], axis: 'left' as const, style: 'solid' as const, color: i * 2 })),
       caption: PAYWALL_CAPTION,
       x: 0,
       y: y + 8,
