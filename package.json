@@ -1,10 +1,6 @@
 {
   "name": "gss-stats",
-<<<<<<< HEAD
-  "version": "0.76.5",
-=======
   "version": "0.77.0",
->>>>>>> 3c28086 (feat(traffic): purchases per day and paywall shown per day on the Traffic page (0.77.0))
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
