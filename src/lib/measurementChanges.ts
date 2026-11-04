@@ -27,6 +27,10 @@
 // timeline marker (the plain v1.105.0 web and Play markers already mark the release) and stays out of the
 // auth-success caveat, the sign-in failure caveat, the coach readouts and the generic report lines.
 //
+// v1.107.0 (errorRowsOnly, the flag for an entry that only moves row counts and mints no marker): the once-per-device-per-Eastern-day
+// visit rows /visit/day/new and /visit/day/returning start. Web from 2026-11-04 18:48Z; the app from the Play update 2026-11-04 19:04Z
+// as devices take it. The plain v1.107.0 web and Play markers (lib/releases.ts) mark the release.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -84,6 +88,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     id: 'v1.105.0',
     dateEt: '2026-10-28', // web live 2026-10-28T21:58:36Z = 17:58:36 ET; Play production 21:55:45Z = 17:55:45 ET (full rollout, versionCode 1105000). Same day as the plain v1.105.0 markers in lib/releases.ts
     note: 'from web 21:58:36Z and Play 21:55:45Z on 10-28, a single transient sw.js update-check failure no longer counts as an error row (it goes to /app/error/sw-update-transient); a second consecutive failure still files a row, so sw-update error rows fall while older clients keep filing them until they update',
+    errorRowsOnly: true,
+  },
+  {
+    id: 'v1.107.0',
+    dateEt: '2026-11-04', // web live 2026-11-04T18:48:40Z = 13:48 ET; Play full rollout about 19:04:43Z (1107000). Same day as the plain v1.107.0 markers in lib/releases.ts
+    note: 'daily visit rows start: web from 18:48Z on 11-04, the app from the Play update 2026-11-04 19:04Z as devices take it, one row per device per Eastern day (/visit/day/new on a first day, /visit/day/returning after that), so the Visitors per day card is blank before and fills in as the app updates',
     errorRowsOnly: true,
   },
 ]

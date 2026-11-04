@@ -71,13 +71,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   agree. The windows still differ, by definition: Traffic's "1d" is the last 24 hours, the glance is today
   since ET midnight, which the Pageviews card's caption says (a new Traffic page only: Reset keeps a page's existing cards). A layout saved before this keeps its cards as
   saved (no layout version bump, nothing is rewritten on load); the setting is changed in the chart editor.
-  Below those, the visitors group is a note and **New devices per day** (a beacon line on ET days, one
+  Below those, the visitors group is **Visitors per day** (event beacons on; web and app each: unique = the `visit` path family,
+  returning = `/visit/day/returning`, new = `/visit/day/new`; one row per device per Eastern day, started 2026-11-04 on the web with
+  Best Sudoku 1.107.0 and on the app as devices take the Play update; no id is sent) and **New devices per day** (a beacon line on ET days, one
   series for `bestsudoku-web` and one for `bestsudoku-app`, each `visitor = new` AND its site, so it
   follows the page's date range and site filter; it asks for up to 365 days). A device counts once per
   browser or install: cleared storage, a private window or a new browser counts again. It is not unique
-  visitors per day (the beacon has no per-day device marker) and the 'returning' beacon rows are later
-  screen views, not returning people; unique and returning per day need a once-a-day row per device in
-  a later Best Sudoku release. Cloudflare's zone and RUM figures are not used: the Best Sudoku web app
+  visitors per day and the 'returning' beacon rows are later screen views, not returning people; unique
+  and returning per day are on the Visitors per day card. Cloudflare's zone and RUM figures are not used: the Best Sudoku web app
   is served from Firebase Hosting, outside the Cloudflare zone, so they would not see it. A series line
   takes up to two filter pairs in the chart editor (both must hold).
   Under it, the purchases group is two more ordinary beacon lines (event beacons on, known traffic hidden, the

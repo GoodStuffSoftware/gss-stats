@@ -231,9 +231,45 @@ function bw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
 // filters per series. Its caption carries what is and is not counted (there is no separate note tile: every card has a
 // 3-row minimum, so a one-line note left a gap).
 export const NEW_DEVICES_CAPTION =
-  "Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day). 'Returning' beacon rows are later screen views, not returning people. **New devices:** the first page view from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
+  "Unique and returning visitors per day are on the Visitors per day card above (one row per device per Eastern day). On this card, 'returning' beacon rows are later screen views, not returning people. **New devices:** the first page view from a new browser or app install. Clearing storage, a private window or a new browser counts again, and one person on two devices counts twice. Opted-out and consent-pending visitors never count. Days are Eastern. This is not unique visitors per day, and not a count of returning people."
+export const VISITORS_DAY_CAPTION =
+  'One row per device per Eastern day. **Unique** is the devices seen that day, **returning** is devices that had visited before, **new** is a device on its first day. Clearing storage counts again, and a second device counts again. Opted-out and consent-pending visitors send nothing. Started 2026-11-04 on the web (1.107.0); the app joins as devices take the update. Known own and household traffic is excluded.'
 export function visitorsGroupWidgets(y: number): Widget[] {
+  const visitSeries = (label: string, filter: { field: string; value: string }, site: string, style: 'solid' | 'dashed' | 'dotted', color: number) => ({
+    label,
+    filter: [filter, { field: 'site', value: site }],
+    axis: 'left' as const,
+    style,
+    color,
+  })
+  const WEB = 'bestsudoku-web'
+  const APP = 'bestsudoku-app'
+  const family = { field: 'pathFamily', value: 'visit' }
+  const returning = { field: 'path', value: '/visit/day/returning' }
+  const fresh = { field: 'path', value: '/visit/day/new' }
   return [
+    bw({
+      id: 'bsk-visitors-day',
+      title: 'Visitors per day',
+      type: 'line',
+      dimension: 'dateEt',
+      limit: 365,
+      includeEventBeacons: true,
+      markers: 'releases',
+      series: [
+        visitSeries('Web: unique visitors', family, WEB, 'solid', 0),
+        visitSeries('App: unique visitors', family, APP, 'solid', 1),
+        visitSeries('Web: returning', returning, WEB, 'dashed', 0),
+        visitSeries('App: returning', returning, APP, 'dashed', 1),
+        visitSeries('Web: new', fresh, WEB, 'dotted', 0),
+        visitSeries('App: new', fresh, APP, 'dotted', 1),
+      ],
+      caption: VISITORS_DAY_CAPTION,
+      x: 0,
+      y,
+      w: 12,
+      h: 8,
+    }),
     bw({
       id: 'bsk-new-daily',
       title: 'New devices per day',
@@ -247,7 +283,7 @@ export function visitorsGroupWidgets(y: number): Widget[] {
       ],
       caption: NEW_DEVICES_CAPTION,
       x: 0,
-      y,
+      y: y + 8,
       w: 12,
       h: 8,
     }),
@@ -317,7 +353,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     bw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
     bw({ id: 'bsk-map', title: 'Pageview map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
     ...visitorsGroupWidgets(40),
-    ...purchasesGroupWidgets(48),
+    ...purchasesGroupWidgets(56),
   ])
 }
 // The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.

@@ -792,9 +792,24 @@ describe('Traffic page: visitors group', () => {
   it('has no separate note tile: the card caption carries the not-yet-shown notice', () => {
     expect(defaultBestSudokuLaunchWidgets().some((wd) => wd.id === 'bsk-visitors-note')).toBe(false)
     const cap = find('bsk-new-daily').caption!
-    expect(cap.startsWith('Unique and returning visitors per day start with the next Best Sudoku release (one row per device per day).')).toBe(true)
-    expect(cap).toMatch(/'Returning' beacon rows are later screen views, not returning people./)
-    expect(find('bsk-new-daily').y).toBe(40)
+    expect(cap.startsWith('Unique and returning visitors per day are on the Visitors per day card above')).toBe(true)
+    expect(cap).toMatch(/'returning' beacon rows are later screen views, not returning people./)
+    expect(find('bsk-visitors-day').y).toBe(40)
+    expect(find('bsk-new-daily').y).toBe(48)
+  })
+
+  it('draws visitors per day from the visit rows: unique (path family), returning and new (exact paths), web and app each', () => {
+    const card = find('bsk-visitors-day')
+    expect(card).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', includeEventBeacons: true, excludeKnownTraffic: true })
+    expect(card.series!.map((s) => [s.label, s.filter[0].value, s.filter[1].value])).toEqual([
+      ['Web: unique visitors', 'visit', 'bestsudoku-web'],
+      ['App: unique visitors', 'visit', 'bestsudoku-app'],
+      ['Web: returning', '/visit/day/returning', 'bestsudoku-web'],
+      ['App: returning', '/visit/day/returning', 'bestsudoku-app'],
+      ['Web: new', '/visit/day/new', 'bestsudoku-web'],
+      ['App: new', '/visit/day/new', 'bestsudoku-app'],
+    ])
+    expect(card.caption).toMatch(/2026-11-04 on the web (1.107.0)/)
   })
 
   it('draws new devices per day as one beacon line per app, each narrowed to visitor = new and its own site', () => {
@@ -828,8 +843,8 @@ describe('Traffic page: purchases group', () => {
   const find = (id: string) => defaultBestSudokuLaunchWidgets().find((wd) => wd.id === id)!
 
   it('sits under the New devices card, on the same page', () => {
-    expect(find('bsk-purchases-daily')).toMatchObject({ x: 0, y: 48, w: 12, type: 'line', dataset: 'geo', dimension: 'dateEt', includeEventBeacons: true, excludeKnownTraffic: true })
-    expect(find('bsk-paywall-daily')).toMatchObject({ x: 0, y: 56, w: 12, type: 'line', includeEventBeacons: true, excludeKnownTraffic: true })
+    expect(find('bsk-purchases-daily')).toMatchObject({ x: 0, y: 56, w: 12, type: 'line', dataset: 'geo', dimension: 'dateEt', includeEventBeacons: true, excludeKnownTraffic: true })
+    expect(find('bsk-paywall-daily')).toMatchObject({ x: 0, y: 64, w: 12, type: 'line', includeEventBeacons: true, excludeKnownTraffic: true })
   })
 
   it('counts web purchases on the web site and Play purchases on the app, by exact path', () => {

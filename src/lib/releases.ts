@@ -299,6 +299,21 @@ export const RELEASES: ReleaseMarker[] = [
     note: 'Play production 23:11:46Z 11-01, full rollout 23:12:07Z (1106000); old and new Android builds mix until updates spread. /return/<campaign>/d0 now sends as soon as the install referrer is read, so the share of Flight 4 (sudoku_funnel_f4_android) first opens counted with the tag should rise from here. Also a new /welcome screen view, shown once per device at app start.',
     major: true, // a go-live moment (it changes how Flight 4 d0 counts): a labelled line, not a tick. The web entry above stays a tick.
   },
+  // v1.107.0: the once-per-device-per-Eastern-day visit rows (/visit/day/new, /visit/day/returning) start, the sign-in ask wording
+  // changes, and Android caps the Play install-referrer length (Flight 4). Web is a plain tick; Play is a go-live moment (the app
+  // starts sending the visit rows), a labelled line. The one counting change (v1.107.0 in lib/measurementChanges.ts, errorRowsOnly)
+  // mints no marker of its own: these two mark the release.
+  {
+    version: 'v1.107.0 web',
+    dateEt: '2026-11-04', // web live 2026-11-04T18:48:40Z = 13:48:40 ET (deploy started 18:43:12Z)
+    note: 'Web live 18:48:40Z 11-04. Daily visit rows start on the web: one row per device per Eastern day, split into new and returning. The sign-in ask wording changed.',
+  },
+  {
+    version: 'v1.107.0 Play',
+    dateEt: '2026-11-04', // Play production full rollout about 2026-11-04T19:04:43Z = 14:04 ET (versionCode 1107000)
+    note: 'Play production about 19:04:43Z 11-04 (1107000); old and new Android builds mix until updates spread. Android daily visit rows start as devices update to 1107000. Also the Flight 4 install-referrer length cap fix (Android) and the sign-in ask wording change.',
+    major: true, // a go-live moment (the app starts sending the daily visit rows): a labelled line, not a tick. The web entry above stays a tick.
+  },
 ]
 
 /** The first WHOLE ET day the once-per-device first-finish rows (FIRST_FINISH_PATH, lib/popupEvents.ts) exist: the day after the

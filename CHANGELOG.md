@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.0] — 2026-11-04
+
+### Added
+- **Visitors per day on the Traffic page.** Above New devices per day: unique, returning and new devices per Eastern day, web and app, from Best Sudoku's new once-a-day visit rows; it started 2026-11-04 on the web (1.107.0) and the app joins as devices take the Play update.
+- **v1.107.0 release markers.** Web at 2026-11-04 18:48Z and Play at about 19:04Z (a labelled line), noting that the daily visit rows start there.
+
+### Changed
+- **New devices per day caption** now points to the Visitors per day card for unique and returning.
+
 ## [0.77.1] — 2026-11-04
 
 ### Changed
