@@ -1,6 +1,6 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, GroupMeta, LineSeries, Widget } from '../types'
 import { relativeRange, SINCE_FIRST_CAMPAIGN, SINCE_FIRST_UNTIL_LAST_CAMPAIGN } from './range'
-import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
+import { POPUPS, POPUP_RATE_SPECS, UPSELL_REASONS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
 import { LANDING_TAG_NOTE, LANDING_TAG_NOTE_LEGACY } from './landingTags'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
@@ -253,6 +253,58 @@ export function visitorsGroupWidgets(y: number): Widget[] {
     }),
   ]
 }
+// The Traffic page's purchases group (under the visitors group): ordinary editor beacon lines, one series per place, each
+// narrowed by an exact path and its site. They include event beacons (a /funnel or /upsell row is never a page view).
+export const PURCHASES_CAPTION =
+  "Each row is one completed purchase where it happened: a web checkout (Stripe) or Google Play in the app. A web purchase by someone who also has the app counts as web. New devices get a 14-day trial before the paywall, so installs from the 10-26 ads cannot reach it before about 11-09. Opted-out and consent-pending visitors send nothing. Mike's own test purchases are excluded."
+export const PAYWALL_CAPTION =
+  'Each row is one paywall screen shown, by site and by the reason it opened (cadence, limit, daily-locked, upgrade-tap). It counts screens, not people: guests and repeat views count too.'
+export function purchasesGroupWidgets(y: number): Widget[] {
+  const place = (label: string, path: string, site: string, color: number) => ({
+    label,
+    filter: [{ field: 'path', value: path }, { field: 'site', value: site }],
+    axis: 'left' as const,
+    style: 'solid' as const,
+    color,
+  })
+  const WEB = 'bestsudoku-web'
+  const APP = 'bestsudoku-app'
+  return [
+    bw({
+      id: 'bsk-purchases-daily',
+      title: 'Purchases per day',
+      type: 'line',
+      dimension: 'dateEt',
+      limit: 365,
+      includeEventBeacons: true,
+      markers: 'releases',
+      series: [place('Web (Stripe)', '/funnel/purchase/web', WEB, 0), place('App (Google Play)', '/funnel/purchase/play', APP, 1)],
+      caption: PURCHASES_CAPTION,
+      x: 0,
+      y,
+      w: 12,
+      h: 8,
+    }),
+    bw({
+      id: 'bsk-paywall-daily',
+      title: 'Paywall shown per day',
+      type: 'line',
+      dimension: 'dateEt',
+      limit: 365,
+      includeEventBeacons: true,
+      markers: 'releases',
+      series: [
+        ...UPSELL_REASONS.map((r, i) => place(`Web: ${r}`, `/upsell/shown/${r}`, WEB, i * 2)),
+        ...UPSELL_REASONS.map((r, i) => place(`App: ${r}`, `/upsell/shown/${r}`, APP, i * 2 + 1)),
+      ],
+      caption: PAYWALL_CAPTION,
+      x: 0,
+      y: y + 8,
+      w: 12,
+      h: 8,
+    }),
+  ]
+}
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return factoryWidgets([
     bw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, caption: TRAFFIC_WINDOW_CAPTION, x: 0, y: 0, w: 3, h: 3 }),
@@ -268,6 +320,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     bw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
     bw({ id: 'bsk-map', title: 'Pageview map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
     ...visitorsGroupWidgets(40),
+    ...purchasesGroupWidgets(48),
   ])
 }
 // The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.

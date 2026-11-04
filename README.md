@@ -80,6 +80,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   a later Best Sudoku release. Cloudflare's zone and RUM figures are not used: the Best Sudoku web app
   is served from Firebase Hosting, outside the Cloudflare zone, so they would not see it. A series line
   takes up to two filter pairs in the chart editor (both must hold).
+  Under it, the purchases group is two more ordinary beacon lines (event beacons on, known traffic hidden, the
+  page's date range): **Purchases per day** (`/funnel/purchase/web` on `bestsudoku-web`, `/funnel/purchase/play`
+  on `bestsudoku-app`, one row per completed purchase where it happened) and **Paywall shown per day** (the four
+  `/upsell/shown/<reason>` rows per site, screens shown, not people). A total since the rows began is not a
+  stat-card option (a stat cannot filter by path); the Features page's Money funnel card shows purchases against checkouts.
   Beacon data has no visit count, so the v4 beacon re-point (`beaconizeWidget`) retitles a "Visits" card
   "Pageviews" rather than leave a second, identical "Visits" card.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has

@@ -824,6 +824,38 @@ describe('Traffic page: visitors group', () => {
   })
 })
 
+describe('Traffic page: purchases group', () => {
+  const find = (id: string) => defaultBestSudokuLaunchWidgets().find((wd) => wd.id === id)!
+
+  it('sits under the New devices card, on the same page', () => {
+    expect(find('bsk-purchases-daily')).toMatchObject({ x: 0, y: 48, w: 12, type: 'line', dataset: 'geo', dimension: 'dateEt', includeEventBeacons: true, excludeKnownTraffic: true })
+    expect(find('bsk-paywall-daily')).toMatchObject({ x: 0, y: 56, w: 12, type: 'line', includeEventBeacons: true, excludeKnownTraffic: true })
+  })
+
+  it('counts web purchases on the web site and Play purchases on the app, by exact path', () => {
+    expect(find('bsk-purchases-daily').series!.map((s) => [s.label, s.filter])).toEqual([
+      ['Web (Stripe)', [{ field: 'path', value: '/funnel/purchase/web' }, { field: 'site', value: 'bestsudoku-web' }]],
+      ['App (Google Play)', [{ field: 'path', value: '/funnel/purchase/play' }, { field: 'site', value: 'bestsudoku-app' }]],
+    ])
+  })
+
+  it('draws the paywall per site and reason, each a two-pair filter', () => {
+    const series = find('bsk-paywall-daily').series!
+    expect(series).toHaveLength(8)
+    for (const s of series) expect(s.filter).toHaveLength(2)
+    expect(series[0].filter).toEqual([{ field: 'path', value: '/upsell/shown/cadence' }, { field: 'site', value: 'bestsudoku-web' }])
+    expect(series[7].filter).toEqual([{ field: 'path', value: '/upsell/shown/upgrade-tap' }, { field: 'site', value: 'bestsudoku-app' }])
+  })
+
+  it('the purchases caption says what a row is and what is missing', () => {
+    const cap = find('bsk-purchases-daily').caption!
+    expect(cap).toMatch(/one completed purchase/)
+    expect(cap).toMatch(/counts as web/)
+    expect(cap).toMatch(/14-day trial/)
+    expect(cap).toMatch(/test purchases are excluded/)
+  })
+})
+
 describe('beaconizeWidget: no "Visits" title on a page-views count', () => {
   const visits = (over: Partial<Widget>): Widget => widget({ id: 'kpi-visits', title: 'Visits', type: 'stat', dataset: 'rum', metric: 'visits', ...over })
 
