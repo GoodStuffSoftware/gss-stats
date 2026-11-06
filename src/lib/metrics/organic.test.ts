@@ -8,7 +8,7 @@ import { METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
 import { measuredInterval } from './instrumentation'
 import { ORGANIC_TRACKING_LIVE_AT, TOUR_TRACKING_LIVE_AT } from '../popupEvents'
 import { RATIOS, ratioSupportsOrganic } from './ratios'
-import { CAMPAIGN_COST, CAMPAIGN_RETURNS, CAMPAIGN_SCORECARD } from './presets'
+import { CAMPAIGN_COST, CAMPAIGN_COUNTRY, CAMPAIGN_FUNNEL, CAMPAIGN_RETURNS, CAMPAIGN_SCORECARD } from './presets'
 import {
   armIdOfScope,
   buildRequestSpec,
@@ -350,6 +350,27 @@ describe('the Campaign scorecard F4 card reads the tagged rows beside the Google
       expect(om(WEB, id), id).toBe(false)
     }
     expect(om(F4, 'cpc')).toBe(false)
+  })
+
+  it('the funnel, country and returns cards cover F4: tagged-counts note on top, Google installs for the site Install row, cost per install on the Cost card', () => {
+    const rows = (spec: typeof CAMPAIGN_FUNNEL) => spec.sections.flatMap((s) => s.items)
+    const om = (spec: typeof CAMPAIGN_FUNNEL, cid: string, itemId: string) => {
+      const it = rows(spec).find((i) => i.id === itemId)!
+      return unmeasuredByConfig(it.data, sc(cid), it.gating, TODAY)
+    }
+    for (const spec of [CAMPAIGN_FUNNEL, CAMPAIGN_COUNTRY, CAMPAIGN_RETURNS]) {
+      expect(spec.sections[0].title, 'taggedNote title').toEqual({ bind: 'campaign.taggedNote' })
+      expect(resolveRepeat(spec.repeat, { todayEt: TODAY }).some((s) => s.kind === 'campaign' && s.campaign.id === F4)).toBe(true)
+      expect(resolveRepeat(spec.repeat, { todayEt: TODAY }).some((s) => s.kind === 'campaign' && s.campaign.id === PLAY_DIRECT)).toBe(false)
+    }
+    for (const spec of [CAMPAIGN_FUNNEL, CAMPAIGN_COUNTRY]) {
+      expect(om(spec, F4, 'install'), 'site Install row').toBe(true)
+      expect(om(spec, WEB, 'install'), 'site Install row').toBe(false)
+    }
+    expect(om(CAMPAIGN_FUNNEL, F4, 'adsInstalls')).toBe(false)
+    expect(om(CAMPAIGN_FUNNEL, WEB, 'adsInstalls')).toBe(true)
+    expect(om(CAMPAIGN_COST, F4, 'cpai')).toBe(false)
+    expect(om(CAMPAIGN_COST, WEB, 'cpai')).toBe(true)
   })
 
   it('Play-direct (tired of ads) is unchanged: no site chips, and the Ads rows still show', () => {

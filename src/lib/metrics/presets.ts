@@ -283,7 +283,7 @@ export const CAMPAIGN_COST: CardSpec = {
         { id: 'through', label: { metric: true }, data: { metric: 'campaign.spendThrough' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'no-spend-day-yet' } }, captionMode: 'inline' },
         { id: 'synced', label: { metric: true }, data: { metric: 'campaign.lastSync' }, display: { as: 'ago' }, gating: { whenEmpty: { note: 'not-synced-yet' } }, ...COMPACT },
         // Whole-flight spend over tagged-only counts reads far too high for Flight 4 (tagged counts start at the app release), so the
-        // three cost-over-site-count rows are left off a campaign that names an installActionId (Google's cost per install is on the scorecard).
+        // three cost-over-site-count rows are left off a campaign that names an installActionId (Google's cost per install is on the scorecard and the last row here).
         { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
         { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
         // Stored spend over the stored Google Ads clicks, and over the tagged completed games.

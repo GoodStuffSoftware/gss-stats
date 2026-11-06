@@ -122,6 +122,6 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
     const text = noteRawText('funnel-spend-only-arms')
     for (const id of NO_FUNNEL) expect(text).toContain(campaignById(id)!.label)
     expect(text).not.toContain(campaignById(F4)!.label)
-    expect(text).toContain('Cost card')
+    expect(text).toContain('Cost per arrival / auth success card')
   })
 })

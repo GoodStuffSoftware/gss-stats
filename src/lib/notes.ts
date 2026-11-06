@@ -556,7 +556,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
       const names = CAMPAIGNS.filter((c) => c.measurement === 'spend-only' && !hasBeaconRows(c)).map((c) => c.label)
       const many = names.length > 1
       const who = names.length ? (many ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]) : 'A spend-only campaign'
-      return `${who} ${many ? 'are' : 'is'} spend-only with no tagged rows: no funnel card here. ${many ? 'Their' : 'Its'} spend and results are on the Cost card.`
+      return `${who} ${many ? 'are' : 'is'} spend-only with no tagged rows: no funnel card here. ${many ? 'Their' : 'Its'} spend is on the Cost per arrival / auth success card.`
     },
     kind: 'note',
     severity: 'info',
