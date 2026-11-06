@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.1] — 2026-11-06
+
+### Fixed
+- **Flight 4 on the Campaigns page.** Its Android installs campaign now has a card in Funnel per campaign, Arrivals & funnel by country and Return visits, each opening with the note that tagged counts start 2026-10-29; the funnel shows Google-reported installs in place of the site Install row, and the Cost card shows cost per install.
+- **"Beacon-tracked only" repeat option** now drops only the spend-only campaigns that carry no tagged rows (Play-direct), so Flight 4 also appears in the retention and engagement cards when you add them.
+
 ## [0.78.0] — 2026-11-04
 
 ### Added

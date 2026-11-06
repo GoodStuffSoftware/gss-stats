@@ -289,6 +289,8 @@ export const CAMPAIGN_COST: CardSpec = {
         // Stored spend over the stored Google Ads clicks, and over the tagged completed games.
         { id: 'cpc', label: { metric: true }, data: { ratio: 'campaign.avgCpc' }, display: { as: 'currency' }, ...COMPACT },
         { id: 'cpg', label: { metric: true }, data: { ratio: 'campaign.costPerComplete' }, display: { as: 'currency' }, gating: { notForInstallAction: true }, ...COMPACT },
+        // Flight 4's own cost figure: spend over Google-reported installs (the three site-count costs above are left off its card). Other campaigns omit it.
+        { id: 'cpai', label: { metric: true }, data: { ratio: 'campaign.costPerAdsInstall' }, display: { as: 'currency' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
       ],
     },
   ],
@@ -315,9 +317,13 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
   sections: [
     {
       layout: 'rows',
+      // A spend-only arm whose installs the app tags (Flight 4) says when its tagged counts start (campaign.taggedNote; no other campaign has one).
+      title: { bind: 'campaign.taggedNote' },
       items: [
         { id: 'hits', label: { metric: true }, data: { ratio: 'campaign.taggedHitsVsArrivals' }, display: { as: 'counts' }, ...NOT_STARTED_LABEL },
-        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...COMPACT, gating: { whenNotStarted: 'label', notForInstallAction: true } },
+        // Flight 4's installs are Google's count: the site's own install rows are left off its card (notForInstallAction) and this row is its install figure.
+        { id: 'adsInstalls', label: { metric: true }, data: { metric: 'campaign.adsInstalls' }, display: { as: 'number' }, gating: { whenEmpty: 'omit' }, ...COMPACT },
       ],
     },
     {
@@ -330,14 +336,14 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
         { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
         { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
         { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
-        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...COMPACT, gating: { whenNotStarted: 'label', notForInstallAction: true } },
       ],
     },
     {
       layout: 'pills',
       items: [
         { id: 'acceptRate', label: { note: 'label.card.acceptOfAsks' }, data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
-        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
+        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...COMPACT, gating: { whenNotStarted: 'label', notForInstallAction: true } },
       ],
     },
     {
@@ -353,7 +359,7 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
       ],
     },
   ],
-  // Why a spend-only arm (Flight 4) has no card here: it is spend-only, so repeat.tracked drops it; its tagged counts are on the Campaign scorecard.
+  // Why a spend-only arm with no tagged rows (Play-direct) has no card here: repeat.tracked drops it. Flight 4 is spend-only but tagged, so it has a card.
   captions: ['funnel-spend-only-arms'],
 }
 
@@ -373,6 +379,7 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
   sections: [
     {
       layout: 'table',
+      title: { bind: 'campaign.taggedNote' },
       columns: { over: 'countries' },
       rowsLabel: { note: 'label.card.step' },
       items: [
@@ -382,7 +389,7 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
         { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
-        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...COMPACT, gating: { whenNotStarted: 'label', notForInstallAction: true } },
       ],
     },
   ],
@@ -411,6 +418,7 @@ export const CAMPAIGN_RETURNS: CardSpec = {
   sections: [
     {
       layout: 'rows',
+      title: { bind: 'campaign.taggedNote' },
       items: [
         { id: 'shared', label: { note: 'label.card.returnTag' }, data: { field: 'campaign.returnTagShared' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
         { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, gating: { whenZero: 'omit' }, ...COMPACT },

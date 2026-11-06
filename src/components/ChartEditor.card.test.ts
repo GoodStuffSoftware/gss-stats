@@ -10,7 +10,7 @@ import ChartEditor from './ChartEditor.vue'
 import ChartCard from './ChartCard.vue'
 import { __resetMetricsStateForTests } from '../composables/useMetrics'
 import { normalizeConfig } from '../lib/defaults'
-import { CAMPAIGNS } from '../lib/campaigns'
+import { CAMPAIGNS, hasBeaconRows } from '../lib/campaigns'
 import { presetById } from '../lib/metrics/presets'
 import type { CardSpec } from '../lib/metrics/types'
 import type { DashboardConfig, GlobalFilters, Widget } from '../types'
@@ -202,8 +202,8 @@ describe('Cancel leaves the widget unchanged', () => {
 describe('a campaign card honours the widget\'s campaign selection', () => {
   const funnelWidget: Widget = { id: 'cw-funnel', i: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 10 }
   const RETEST = '24279250691'
-  // The funnel preset draws one card per beacon-tracked campaign (Play-direct is spend-only, so it has none).
-  const TRACKED_TITLES = CAMPAIGNS.filter((c) => c.measurement !== 'spend-only').map((c) => c.label)
+  // The funnel preset draws one card per campaign with beacon rows (Play-direct is spend-only with no tagged rows, so it has none; Flight 4 is tagged, so it has one).
+  const TRACKED_TITLES = CAMPAIGNS.filter(hasBeaconRows).map((c) => c.label)
   const campaignBoxes = (w: VueWrapper) => w.findAll('.campaign-list .campaign-row').filter((r) => /Android launch|US\+CA web retest|Play-direct/.test(r.text()))
   const titles = (w: VueWrapper) => w.findAll('.metric-card .mc-title').map((t) => t.text())
 

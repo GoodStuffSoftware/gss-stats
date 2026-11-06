@@ -234,7 +234,7 @@ export interface RepeatSpec {
    * `limit` it keeps the top N. Unset: most impressions first. */
   sortBy?: AssetSortField
   status?: ('closed' | 'active' | 'upcoming')[]
-  /** Campaigns only: beacon-tracked ones (not `measurement: 'spend-only'`). */
+  /** Campaigns only: beacon-tracked ones, those whose site counts can be read (lib/campaigns.ts hasBeaconRows): not a `measurement: 'spend-only'` campaign, unless it is `tagged` (Flight 4). */
   tracked?: boolean
   /** Campaigns only: append the web-only organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID)
    * after the campaigns. Not a campaign, so the ids/status/tracked/flightingToday filters never

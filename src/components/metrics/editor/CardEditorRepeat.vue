@@ -210,7 +210,7 @@ const emptyText = computed<Label | undefined>({
       <label><input type="checkbox" v-model="flightingToday" /> Flighting today only</label>
     </div>
     <div class="field check">
-      <label><input type="checkbox" v-model="tracked" /> Beacon-tracked only (skip spend-only campaigns)</label>
+      <label><input type="checkbox" v-model="tracked" /> Beacon-tracked only (skip spend-only campaigns that carry no tagged rows)</label>
     </div>
     <div class="field check">
       <label><input type="checkbox" v-model="organic" /> Add an "organic" row (traffic no campaign drove)</label>

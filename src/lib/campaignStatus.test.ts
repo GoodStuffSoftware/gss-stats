@@ -64,6 +64,7 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
   const F5 = '571882693' // Microsoft Ads search, 11-07..11-13, a web campaign
   const ORDER = ['24215315197', PLAY_DIRECT, '24279250691', '24316608605', '24311309184', '24358792494', '24358792551', '24369758153', F4, F5]
   const SPEND_ONLY = [PLAY_DIRECT, F4]
+  const NO_FUNNEL = [PLAY_DIRECT] // spend-only with no tagged rows; F4 is spend-only but tagged, so it has a funnel card
   const ids = (spec: CardSpec, todayEt: string) => resolveRepeat(spec.repeat, { todayEt }).flatMap((s) => (s.kind === 'campaign' ? [s.campaign.id] : []))
   const statusOf = (spec: CardSpec, todayEt: string, field: 'campaign.status' | 'campaign.statusToday') =>
     Object.fromEntries(resolveRepeat(spec.repeat, { todayEt }).flatMap((s) => (s.kind === 'campaign' ? [[s.campaign.id, scopeField(s, field, todayEt)]] : [])))
@@ -93,7 +94,7 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
       for (const id of ORDER) {
         expect(campaignStatusOn(campaignById(id)!, d), `${id} ${d}`).toBe(EXPECTED[id][i])
         expect(score[id], `scorecard ${id} ${d}`).toBe(EXPECTED[id][i])
-        expect(funnel[id], `funnel ${id} ${d}`).toBe(SPEND_ONLY.includes(id) ? undefined : EXPECTED[id][i])
+        expect(funnel[id], `funnel ${id} ${d}`).toBe(NO_FUNNEL.includes(id) ? undefined : EXPECTED[id][i])
       }
     })
   })
@@ -106,20 +107,21 @@ describe('the scorecard and the funnel per campaign, from the registry', () => {
       for (const id of ORDER) {
         const want = EXPECTED[id][i] === 'active' ? 'flighting today' : EXPECTED[id][i]
         expect(score[id], `scorecard ${id} ${d}`).toBe(want)
-        expect(funnel[id], `funnel ${id} ${d}`).toBe(SPEND_ONLY.includes(id) ? undefined : want)
+        expect(funnel[id], `funnel ${id} ${d}`).toBe(NO_FUNNEL.includes(id) ? undefined : want)
       }
     })
   })
-  it('the scorecard lists every campaign in registry order; the funnel the same order without the spend-only arms', () => {
+  it('the scorecard lists every campaign in registry order; the funnel the same order without the arm that has no tagged rows (Play-direct)', () => {
     for (const d of DATES) {
       expect(ids(CAMPAIGN_SCORECARD, d)).toEqual(ORDER)
-      expect(ids(CAMPAIGN_FUNNEL, d)).toEqual(ORDER.filter((id) => !SPEND_ONLY.includes(id)))
+      expect(ids(CAMPAIGN_FUNNEL, d)).toEqual(ORDER.filter((id) => !NO_FUNNEL.includes(id)))
     }
   })
-  it('the funnel says why F4 has no card, naming the spend-only arms from the registry', () => {
+  it('the funnel says why Play-direct has no card, naming it from the registry (F4 is tagged, so it has one)', () => {
     expect(CAMPAIGN_FUNNEL.captions).toContain('funnel-spend-only-arms')
     const text = noteRawText('funnel-spend-only-arms')
-    for (const id of SPEND_ONLY) expect(text).toContain(campaignById(id)!.label)
-    expect(text).toContain('Campaign scorecard')
+    for (const id of NO_FUNNEL) expect(text).toContain(campaignById(id)!.label)
+    expect(text).not.toContain(campaignById(F4)!.label)
+    expect(text).toContain('Cost card')
   })
 })
