@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MEASUREMENT_CHANGES } from './measurementChanges'
 import { ALWAYS_SHOWN_RUNTIME_NOTE_IDS, allChartNotes, canHideCaveatId, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
 import { autoCaveatIds, cardSplitsByCountry, getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
@@ -11,9 +11,13 @@ import type { StatsResponse, Widget } from '../types'
 // These tests pin the layout/notes with no counting-change marker active; the live entries carry real dates, so blank them here.
 const LIVE_DATES = MEASUREMENT_CHANGES.map((c) => c.dateEt)
 beforeEach(() => {
+  // The range notice drops the year for the current year; pin the clock so the Jul-Sep 2026 notice reads the same after New Year.
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-10T16:00:00Z'))
   for (const c of MEASUREMENT_CHANGES) c.dateEt = null
 })
 afterEach(() => {
+  vi.useRealTimers()
   MEASUREMENT_CHANGES.forEach((c, i) => (c.dateEt = LIVE_DATES[i]))
 })
 

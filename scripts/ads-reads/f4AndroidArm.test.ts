@@ -4,7 +4,7 @@
 // the tagged rows (CampaignFlight.tagged), while the Ads side stays spend-only: no read plan (so no morning or
 // post-flight default, no kill rules) and no placement pull in the sync (and no "missing placement day").
 // Fixture only: the made-up arm ids are registered at runtime and removed.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ADS_READ_PLANS, buildReadPlan, channelOf, defaultReadCampaignId, readPlanFor, POSTFLIGHT_STAGES, RETEST_APPROVED_PLACEMENTS } from '../../src/lib/adsRules'
 import { CAMPAIGNS, assertOrganicReserved, campaignById, F4_ANDROID_TAG, hasBeaconRows, parseReturnPath, type CampaignFlight } from '../../src/lib/campaigns'
 import { planCampaignSync, pullsPlacements, syncAdsData, campaignsConfigHash, type AdsMetricsSource } from '../../src/lib/adsSync'
@@ -41,8 +41,16 @@ function unregister() {
     delete ADS_READ_PLANS[id]
   }
 }
-beforeEach(unregister)
-afterEach(unregister)
+// CAMPAIGNS[].status is read live from the ET date, so pin the clock inside the F4 flight (2026-10-26 .. 2026-11-09).
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-03T16:00:00Z'))
+  unregister()
+})
+afterEach(() => {
+  unregister()
+  vi.useRealTimers()
+})
 
 describe('the F4 registry entry', () => {
   it('is a spend-only Play-direct arm with the brief\'s ids, dates, budget and cap', () => {
@@ -51,6 +59,9 @@ describe('the F4 registry entry', () => {
     expect(c.kind).toBe('play-direct')
     expect(c.measurement).toBe('spend-only')
     expect(c.status).toBe('active')
+    vi.setSystemTime(new Date('2026-11-10T16:00:00Z')) // the day after flightEnd
+    expect(c.status).toBe('closed')
+    vi.setSystemTime(new Date('2026-11-03T16:00:00Z'))
     expect(c.flightStart).toBe('2026-10-26')
     expect(c.flightStartTimeEt).toBe('12:00')
     expect(c.flightEnd).toBe('2026-11-09') // moved from 11-02 on 11-02
