@@ -5,7 +5,8 @@ CREATE TABLE hits (
   country TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', postal TEXT DEFAULT '',
   continent TEXT DEFAULT '', timezone TEXT DEFAULT '', lat TEXT DEFAULT '', lon TEXT DEFAULT '',
   colo TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '',
-  os TEXT DEFAULT '', lang TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new'
+  os TEXT DEFAULT '', lang TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', refpath TEXT DEFAULT '', source TEXT DEFAULT '',
+  medium TEXT DEFAULT '', campaign TEXT DEFAULT ''
 );
 INSERT INTO hits (ts,site,path,referrer,country,region,city,postal,lat,lon,org,device,browser,os,lang,visitor) VALUES
  (strftime('%s','now')*1000,'starrupture','/','reddit.com','US','California','Los Angeles','90012','34.05','-118.24','Spectrum','desktop','Chrome','Windows','en-US','new'),
