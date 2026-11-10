@@ -26,6 +26,7 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/signin-eligible/earned/first-finish',
       '/popup-outcome/signin-prompt/first-finish/%',
       '/visit/%', // daily-visit beacon (approved 2026-11-02): the beacon repo mirrors this line and its pin
+      '/review-prompt/%', // store-review request beacon (native installs): the beacon repo mirrors this line and its pin
     ])
   })
 })
@@ -71,6 +72,8 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/visit/day/new',
       '/visit/day/returning',
       '/VISIT/Day/New',
+      '/review-prompt/requested',
+      '/Review-Prompt/Requested',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -104,6 +107,9 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/visit',
       '/visitor/x',
       '/visits/day/new',
+      '/review-prompt',
+      '/review-prompts/requested',
+      '/review',
       '/signin-eligible/earned',
       '/signin-eligible/earned/placement',
       '/signin-eligible/earned/first-finish/x',

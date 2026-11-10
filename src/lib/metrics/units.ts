@@ -48,5 +48,6 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   'ab-ask-order': 'row', // provisional A/B twin rows: duplicates, counted nowhere
   'game-first-finish': 'device', // once per device, ever (per campaign tag window): one row is one person who finished
   visit: 'device', // one row is one device on one Eastern day (a device counts again on a later day)
+  'review-prompt': 'device', // once per device, ever: one row is one device that asked for a store review
   coach: 'row', // one row per coach-strip tip shown / dismissed / closed-at, or tour-opened tap
 }

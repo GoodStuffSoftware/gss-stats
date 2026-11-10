@@ -124,6 +124,10 @@ export const POPUP_EVENT_PREFIXES = [
   // No id, date or count in the row. An event, never a screen view or a "new device" arrival, and
   // count-only (splitGuard.ts). One row is one device on one ET day.
   '/visit/',
+  // Best Sudoku store-review request (native Play and App Store installs only, never the web): `/review-prompt/requested`,
+  // once per device ever, after 30+ finished puzzles. Says only that the app asked; the OS may decline to show the card.
+  // An event, never a screen view or a "new device" arrival, and count-only (splitGuard.ts).
+  '/review-prompt/',
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -222,6 +226,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/coach': 'coach',
   [FIRST_FINISH_PATH]: 'game-first-finish',
   '/visit/': 'visit',
+  '/review-prompt/': 'review-prompt',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -275,6 +280,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'coach', label: 'Coach strip (tips shown / dismissed / closed, tour opened)' },
   { value: 'game-first-finish', label: 'First finish (once per device)' },
   { value: 'visit', label: 'Daily visit (one device on one Eastern day)' },
+  { value: 'review-prompt', label: 'Review prompt requested (once per device)' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────

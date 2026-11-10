@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { isSplitRefusedPath, refusedPathMatch } from './splitGuard'
+import { isSplitRefusedPath, refusedPathMatch, splitRefused } from './splitGuard'
 import {
   classifyPopupPath,
   LEGACY_REASON,
@@ -556,6 +556,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/coach',
       '/game/first-finish',
       '/visit/',
+      '/review-prompt/',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
@@ -604,6 +605,28 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     expect(w.join(' AND ')).toContain("path NOT LIKE '/visit/%'")
     expect(popupIncludeClause().sql).toContain("path LIKE '/visit/%'")
     expect(pathFamilySqlCase()).toContain("WHEN path LIKE '/visit/%' THEN 'visit'")
+  })
+  // Best Sudoku store-review request (native installs only): once per device ever. Fixture rows: never a page
+  // view or screen view, own family, counts only, and not mistaken for a web/app site split.
+  it('review-prompt rows are events with their own family, never page views', () => {
+    const p = '/review-prompt/requested'
+    expect(isPopupEventPath(p)).toBe(true)
+    expect(pathFamilyOf(p)).toBe('review-prompt')
+    expect(isSplitRefusedPath(p)).toBe(true)
+    for (const q of ['/review-prompt', '/review-prompts/requested', '/review', '/x/review-prompt/requested']) {
+      expect(isPopupEventPath(q), q).toBe(false)
+      expect(pathFamilyOf(q), q).toBe('page')
+    }
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' AND ')).toContain("path NOT LIKE '/review-prompt/%'")
+    expect(popupIncludeClause().sql).toContain("path LIKE '/review-prompt/%'")
+    expect(pathFamilySqlCase()).toContain("WHEN path LIKE '/review-prompt/%' THEN 'review-prompt'")
+    expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'review-prompt')).toHaveLength(1)
+    // The web/app site split stays allowed: `site` is not a refused dimension, so only hour, place and device splits drop the row.
+    expect(splitRefused({ points: false, fields: ['site'] })).toBe(false)
+    expect(splitRefused({ points: false, fields: ['dateEt', 'path'] })).toBe(false)
+    expect(splitRefused({ points: false, fields: ['hourEt'] })).toBe(true)
   })
   it('there is exactly one tutorial-complete family and one option for it (no shadowed duplicate)', () => {
     expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'tutorial-complete')).toHaveLength(1)

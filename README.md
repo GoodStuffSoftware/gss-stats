@@ -1064,7 +1064,7 @@ and the UTC `date`, whose count minus `dateEt`'s for the same day would give an 
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…`, `/ab/ask-order/…`, `/funnel/…` and `/visit/…` rows out entirely, and any row whose
+`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…`, `/ab/ask-order/…`, `/funnel/…`, `/visit/…` and `/review-prompt/…` rows out entirely, and any row whose
 path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
 too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
@@ -1074,7 +1074,7 @@ start (`/game/start/<difficulty>`), a tour skip (the exact path `/tour/skip`) an
 (`/tour/exit-at/<stage>`, sent only right after a skip) are counted by path, by ET day and by web
 or app site in the geo charts (with "Include event beacons" on), and in the morning read's
 first-session funnel; `/api/popups` never counts them. `/tour/start` and `/tour/complete` are not
-part of the rule. The Best Sudoku daily-visit beacon (`/visit/day/new` or `/visit/day/returning`, path family `visit`, approved 2026-11-02) is sent at most once per device per Eastern day, gated on the device by localStorage, with no id, date or count in the row. It is an event (never a page view, screen view or new-device arrival) and counts only like `/return`: per-ET-day totals and the web/app site split are allowed, never an hour, place or device split. One row is one device on one Eastern day, so clearing storage or a second device counts again. It is ready ahead of the app release; no release marker or measurement-change entry exists until the date is known. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
+part of the rule. The Best Sudoku daily-visit beacon (`/visit/day/new` or `/visit/day/returning`, path family `visit`, approved 2026-11-02) is sent at most once per device per Eastern day, gated on the device by localStorage, with no id, date or count in the row. It is an event (never a page view, screen view or new-device arrival) and counts only like `/return`: per-ET-day totals and the web/app site split are allowed, never an hour, place or device split. One row is one device on one Eastern day, so clearing storage or a second device counts again. It is ready ahead of the app release; no release marker or measurement-change entry exists until the date is known. Likewise the Best Sudoku store-review request (`/review-prompt/requested`, path family `review-prompt`, unit device) is sent once per device ever, only from native Play and App Store installs with 30+ finished puzzles, never the web: an event (never a page view, screen view or new-device arrival) and counts only like `/return`, with per-ET-day and web/app site totals allowed and no hour, place or device split. It says only that the app asked; the store may decline to show the card. No release marker or measurement-change entry exists until the date is known. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
 `/coach/closed-at/<tip>`, `/coach/tour-opened`; tip is place, wheel, notes, hint or clash) is an event family (path family
 `coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
@@ -1119,7 +1119,7 @@ ranges shorter than a day, these rows count zero. A range already on ET midnight
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
 so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B, paid-funnel,
-first-finish or first-finish sign-in ask rows here are counted over whole ET days." The pop-up metrics (`popupRangePath`) follow it for the first-finish
+first-finish, first-finish sign-in ask, daily-visit or review-prompt rows here are counted over whole ET days." The pop-up metrics (`popupRangePath`) follow it for the first-finish
 sign-in ask and carry the same note. A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since

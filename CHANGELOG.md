@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.2] — 2026-11-09
+
+### Added
+- **Ready for the store-review request row.** Best Sudoku's coming `/review-prompt/requested` row (once per device, native Play and App Store installs only) is kept out of page views and screen views, can be charted with Include event beacons, and is counts only: no hour, place or device split.
+
 ## [0.78.1] — 2026-11-06
 
 ### Fixed

@@ -29,6 +29,7 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/signin-eligible/earned/first-finish',
   '/popup-outcome/signin-prompt/first-finish/signed-in',
   '/visit/day/new',
+  '/review-prompt/requested',
 ]
 
 /** Every segment value a refused beacon is known to carry, plus junk ('x', '1', ''). */
