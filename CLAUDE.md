@@ -33,7 +33,7 @@ next semver version (`## [X.Y.Z] — YYYY-MM-DD`) and bumps `package.json` in th
 progress — record changes under `[Unreleased]`; the landing merge to `main` does the semver
 bump and changelog promotion (see Changelog).
 
-Mike doesn't review PRs (2026-10-06): the writer spawns its own parity reviewer, runs one fix round, then merges to main and verifies the deploy; Mike looks at the live result.
+Mike doesn't review PRs (2026-10-06). Review follows the agent-companion project tier (gss-stats: push, set 2026-11-10; `/ac tier show` prints the rule). The writer merges to main and verifies the deploy; Mike looks at the live result.
 
 Publishing (Mike, 2026-10-29: "You don't have to put stuff up on Dev unless I tell you just publish it so I can see the changes"): every change, large or small, publishes straight to production. The dev preview (https://dev.gss-stats.pages.dev) is used only when Mike asks for it. This replaces the 2026-10-27 rule that sent large dashboard changes to the preview first. When the change lands, give Mike a concrete look-at-X list: the page, tab or card to open, and what he should see.
 
