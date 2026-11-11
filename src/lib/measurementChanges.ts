@@ -31,6 +31,9 @@
 // visit rows /visit/day/new and /visit/day/returning start. Web from 2026-11-04 18:48Z; the app from the Play update 2026-11-04 19:04Z
 // as devices take it. The plain v1.107.0 web and Play markers (lib/releases.ts) mark the release.
 //
+// v1.108.0 (errorRowsOnly, no marker of its own): the store-review request rows /review-prompt/requested start. App only (Play and App
+// Store installs), never the web, once per device ever. The plain v1.108.0 web and Play markers (lib/releases.ts) mark the release.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -94,6 +97,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     id: 'v1.107.0',
     dateEt: '2026-11-04', // web live 2026-11-04T18:48:40Z = 13:48 ET; Play full rollout about 19:04:43Z (1107000). Same day as the plain v1.107.0 markers in lib/releases.ts
     note: 'daily visit rows start: web from 18:48Z on 11-04, the app from the Play update 2026-11-04 19:04Z as devices take it, one row per device per Eastern day (/visit/day/new on a first day, /visit/day/returning after that), so the Visitors per day card is blank before and fills in as the app updates',
+    errorRowsOnly: true,
+  },
+  {
+    id: 'v1.108.0',
+    dateEt: '2026-11-11', // web live 2026-11-11T17:28:26Z; Play production promotion 17:52:16Z (1108000), Play review pending then. Same day as the plain v1.108.0 markers in lib/releases.ts
+    note: 'review-request rows start: /review-prompt/requested, from the app only (Play and App Store installs, never the web), one row per device ever, from the 1.108.0 Play promotion 2026-11-11 17:52Z as devices update once Play review clears, so a chart of them is blank before and fills in slowly as the app updates',
     errorRowsOnly: true,
   },
 ]

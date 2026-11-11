@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.3] — 2026-11-11
+
+### Added
+- **v1.108.0 release markers.** Web at 2026-11-11 17:28Z and Play at 17:52Z (a labelled line; Play review was still pending, so devices update later), noting that the store-review request rows (`/review-prompt/requested`, app only, once per device) start there.
+
 ## [0.78.2] — 2026-11-09
 
 ### Added

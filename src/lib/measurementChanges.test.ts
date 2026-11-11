@@ -32,6 +32,8 @@ const V1105 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.105.0')!
 const V1105_DATE = V1105.dateEt
 const V1107 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.107.0')!
 const V1107_DATE = V1107.dateEt
+const V1108 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.0')!
+const V1108_DATE = V1108.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
@@ -40,6 +42,7 @@ beforeEach(() => {
   ANDROID_1103.dateEt = null
   V1105.dateEt = null
   V1107.dateEt = null
+  V1108.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
@@ -48,6 +51,7 @@ afterEach(() => {
   ANDROID_1103.dateEt = ANDROID_1103_DATE
   V1105.dateEt = V1105_DATE
   V1107.dateEt = V1107_DATE
+  V1108.dateEt = V1108_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -315,6 +319,25 @@ describe('1.107.0 daily visit rows change (errorRowsOnly entry)', () => {
     expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.107.0')
     expect(coachMeasurementNote('2099-03-01') ?? '').not.toContain('v1.107.0')
     expect(RELEASES.some((r) => r.version === 'v1.107.0')).toBe(false)
+  })
+})
+
+describe('1.108.0 review-request rows change (errorRowsOnly entry)', () => {
+  it('is dated 2026-11-11 and names the path, the app-only source and the once-per-device rule in plain words', () => {
+    expect(V1108_DATE).toBe('2026-11-11')
+    expect(V1108.errorRowsOnly).toBe(true)
+    expect(V1108.note).toContain('/review-prompt/requested')
+    expect(V1108.note).toContain('never the web')
+    expect(V1108.note).toContain('one row per device ever')
+  })
+
+  it('dated: marked, but in no auth, coach or report-line consumer and with no timeline marker of its own', () => {
+    V1108.dateEt = V1108_DATE
+    expect(markedChanges().some((c) => c.id === 'v1.108.0')).toBe(true)
+    expect(authMarkedChanges().some((c) => c.id === 'v1.108.0')).toBe(false)
+    expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.108.0')
+    expect(coachMeasurementNote('2099-03-01') ?? '').not.toContain('v1.108.0')
+    expect(RELEASES.some((r) => r.version === 'v1.108.0')).toBe(false)
   })
 })
 
