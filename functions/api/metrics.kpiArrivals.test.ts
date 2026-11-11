@@ -64,4 +64,16 @@ describe('the KPI arrivals tile (ADR 0003 slice 1, now the bsk-kpis card)', () =
     const r = await metrics([{ ts: Date.parse('2026-09-26T18:00:00Z'), site: 'bestsudoku-web', path: '/game', n: 3 }], [{ key: 'played', metric: 'bsk.gameViews', window: 'todaySoFar' }])
     expect(r.played.value).toBe(3)
   })
+
+  // Best Sudoku static landing page: an event family with no storage, so every row is visitor 'new'. A tagged one is a real arrival.
+  it('a /landing/ row carrying a campaign tag is a tagged arrival; an untagged one is not', async () => {
+    const r = await metrics(
+      [
+        { ts: Date.parse('2026-09-26T17:00:00Z'), site: 'bestsudoku-web', path: '/landing/sudoku-no-ads', visitor: 'new', campaign: RETEST, n: 3 },
+        { ts: Date.parse('2026-09-26T17:01:00Z'), site: 'bestsudoku-web', path: '/landing/sudoku-no-ads', visitor: 'new', campaign: '', n: 5 },
+      ],
+      [{ key: 'card', metric: 'campaign.taggedArrivals', params: { campaignId: RETEST_ID } }],
+    )
+    expect(r.card.value).toBe(3)
+  })
 })

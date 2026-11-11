@@ -154,12 +154,13 @@ const SITES = { sites: ['bestsudoku-web', 'bestsudoku-app', 'elsewhere'] }
  * heaviest with 16 flightDay filters, which the single-dim and ring bodies below also drill), with 16 pathFamily filters. No row can
  * be in it: a landing arrival is a /return/ row, which no pop-up or key-event dim describes (and hourEt's guard drops). */
 const HEAVIEST = ['popupOutcome', 'popupFamily', 'keyEvent', 'featureStep', 'hourEt', 'pathFamily', 'flightDay', 'landingTag']
-const sixteen = (field: string, value?: string) => Array.from({ length: 16 }, (_, i) => drill(field, value ?? `${field}-${i}`))
+const sixteen = (field: string, value?: string, n = 16) => Array.from({ length: n }, (_, i) => drill(field, value ?? `${field}-${i}`))
 /** Heavy rings that do return rows (asserted below): the heaviest with a flight dim in landingTag's place, and the landing
  * ring, each with 16 filters on one value; plus mixed drills. */
 const HEAVY: Record<string, Record<string, unknown>> = {
-  heaviest: { dimension: HEAVIEST[0], dims: HEAVIEST, constraints: sixteen('pathFamily') },
-  heavyInstallFlight: { dimension: HEAVIEST[0], dims: [...HEAVIEST.slice(0, 7), 'campaignFlight'], constraints: sixteen('pathFamily', 'install') },
+  // 15 filters, not 16: with the landing family in pathFamily's CASE, 16 inlined are 90175 bytes, over MAX_SQL_BYTES (90000) in the old inline form.
+  heaviest: { dimension: HEAVIEST[0], dims: HEAVIEST, constraints: sixteen('pathFamily', undefined, 15) },
+  heavyInstallFlight: { dimension: HEAVIEST[0], dims: [...HEAVIEST.slice(0, 7), 'campaignFlight'], constraints: sixteen('pathFamily', 'install', 15) },
   // Mixed drills, as many as the inline form still fits under MAX_SQL_BYTES (a pop-up filter inlined is about 8.5 KB).
   heavyInstallArrival: { dimension: HEAVIEST[0], dims: [...HEAVIEST.slice(0, 6), 'arrival'], constraints: [...sixteen('pathFamily', 'install').slice(0, 8), ...Array.from({ length: 3 }, () => drill('keyEvent')), drill('popupFamily')] },
   heavyLanding: { dimension: 'landingTag', dims: ['landingTag', 'flightDay', 'campaignFlight', 'arrival', 'pathFamily'], constraints: sixteen('pathFamily', 'return') },
@@ -292,7 +293,7 @@ describe('derived columns', () => {
     const old = await post({ ...HEAVY.heaviest, includeEventBeacons: true }, false, true)
     expect(now.json).toEqual(old.json)
     expect(now.sql.split('CASE WHEN path = \'/signin-prompt\'').length - 1, 'the pathFamily CASE is stated once').toBe(1)
-    expect(old.sql.split('CASE WHEN path = \'/signin-prompt\'').length - 1, 'inline: key, blank test and 16 filters').toBe(18)
+    expect(old.sql.split('CASE WHEN path = \'/signin-prompt\'').length - 1, 'inline: key, blank test and 15 filters').toBe(17)
     expect(bytes(now.sql) * 2).toBeLessThan(bytes(old.sql))
   })
 

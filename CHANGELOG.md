@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.5] — 2026-11-11
+
+### Added
+- **Ready for the no-ads landing page visit row.** Best Sudoku's coming `/landing/sudoku-no-ads` visit row is kept out of page views, new devices per day and the new-versus-returning charts (the page cannot tell new from returning), but it can still be split by hour, country, device and source, and a visit carrying a campaign tag counts as a tagged arrival.
+
 ## [0.78.4] — 2026-11-11
 
 ### Fixed

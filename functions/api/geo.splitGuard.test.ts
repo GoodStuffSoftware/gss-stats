@@ -421,3 +421,37 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
     }
   })
 })
+
+// Best Sudoku static landing page (`/landing/sudoku-no-ads`): an event family, but splittable like a page view. The page
+// has no storage and sends no `nv`, so every row is stored visitor='new'.
+describe('landing rows (/landing/…): out of page views and device counts, still splittable', () => {
+  const seed = () => {
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, country, visitor, device, source, medium) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    const row = (ts: number, path: string, country: string, source: string) => ins.run(ts, 'bestsudoku-web', path, country, 'new', 'mobile', source, source ? 'cpc' : '')
+    row(T, '/', 'US', '')
+    row(T + 1000, '/landing/sudoku-no-ads', 'US', 'google')
+    row(T + 2000, '/landing/sudoku-no-ads', 'US', 'google')
+    row(T + 3000, '/landing/sudoku-no-ads', 'CA', 'bing')
+  }
+  it('is not a page view', async () => {
+    seed()
+    const r = await post({ dimension: 'path', ...range })
+    expect(r.body.totals.pageviews).toBe(1)
+    expect(r.body.rows.map((x: any) => x.key.path)).toEqual(['/'])
+  })
+  it('is not a new device or a new-vs-returning row', async () => {
+    seed()
+    const r = await post({ dimension: 'visitor', ...range })
+    expect(r.body.rows).toEqual([expect.objectContaining({ key: { visitor: 'new' }, pageviews: 1 })])
+    // The "New devices per day" series: visitor = new on the web site.
+    const d = await post({ dimension: 'dateEt', constraints: [{ field: 'visitor', value: 'new' }, { field: 'site', value: 'bestsudoku-web' }], ...range })
+    expect(d.body.totals.pageviews).toBe(1)
+  })
+  it('can be split by country and by source when event beacons are on', async () => {
+    seed()
+    const c = await post({ dimension: 'country', includeEventBeacons: true, constraints: [{ field: 'pathFamily', value: 'landing' }], ...range })
+    expect(Object.fromEntries(c.body.rows.map((x: any) => [x.key.country, x.pageviews]))).toEqual({ US: 2, CA: 1 })
+    const s = await post({ dimension: 'source', includeEventBeacons: true, constraints: [{ field: 'pathFamily', value: 'landing' }], ...range })
+    expect(Object.fromEntries(s.body.rows.map((x: any) => [x.key.source, x.pageviews]))).toEqual({ google: 2, bing: 1 })
+  })
+})

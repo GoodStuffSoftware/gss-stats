@@ -557,6 +557,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/first-finish',
       '/visit/',
       '/review-prompt/',
+      '/landing/',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
@@ -627,6 +628,26 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     expect(splitRefused({ points: false, fields: ['site'] })).toBe(false)
     expect(splitRefused({ points: false, fields: ['dateEt', 'path'] })).toBe(false)
     expect(splitRefused({ points: false, fields: ['hourEt'] })).toBe(true)
+  })
+  // Best Sudoku static landing page (`/landing/sudoku-no-ads`): an event family that is NOT count-only. It has no storage,
+  // so it sends no `nv` and every row is stored visitor='new'.
+  it('landing rows are events with their own family, never page views, and stay splittable', () => {
+    const p = '/landing/sudoku-no-ads'
+    expect(isPopupEventPath(p)).toBe(true)
+    expect(pathFamilyOf(p)).toBe('landing')
+    expect(isSplitRefusedPath(p)).toBe(false)
+    for (const q of ['/landing', '/landings/x', '/sudoku-no-ads', '/x/landing/y']) {
+      expect(isPopupEventPath(q), q).toBe(false)
+      expect(pathFamilyOf(q), q).toBe('page')
+    }
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' AND ')).toContain("path NOT LIKE '/landing/%'")
+    expect(popupIncludeClause().sql).toContain("path LIKE '/landing/%'")
+    expect(pathFamilySqlCase()).toContain("WHEN path LIKE '/landing/%' THEN 'landing'")
+    expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'landing')).toEqual([{ value: 'landing', label: 'Landing page visit' }])
+    // Not on the refused-path list, so an hour, place or device split (which drops refused rows) keeps it, like a page view.
+    expect(refusedPathMatch().sql).not.toContain('/landing')
   })
   it('there is exactly one tutorial-complete family and one option for it (no shadowed duplicate)', () => {
     expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'tutorial-complete')).toHaveLength(1)

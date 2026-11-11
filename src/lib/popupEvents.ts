@@ -128,6 +128,11 @@ export const POPUP_EVENT_PREFIXES = [
   // once per device ever, after 30+ finished puzzles. Says only that the app asked; the OS may decline to show the card.
   // An event, never a screen view or a "new device" arrival, and count-only (splitGuard.ts).
   '/review-prompt/',
+  // Best Sudoku static landing page visit pixel (`/landing/sudoku-no-ads`, from the page's counts-only pixel; the page
+  // has no storage, so it sends no `nv` and the endpoint stores visitor='new' on every row). An event, never a page or
+  // screen view and never a "new device" or new-vs-returning row. Unlike the families above it is NOT count-only: like a
+  // page view it can be split by hour, place, device and source (not on the splitGuard.ts refused list).
+  '/landing/',
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -227,6 +232,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   [FIRST_FINISH_PATH]: 'game-first-finish',
   '/visit/': 'visit',
   '/review-prompt/': 'review-prompt',
+  '/landing/': 'landing',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -281,6 +287,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'game-first-finish', label: 'First finish (once per device)' },
   { value: 'visit', label: 'Daily visit (one device on one Eastern day)' },
   { value: 'review-prompt', label: 'Review prompt requested (once per device)' },
+  { value: 'landing', label: 'Landing page visit' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
