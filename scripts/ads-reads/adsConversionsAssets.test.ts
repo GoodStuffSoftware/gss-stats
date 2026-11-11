@@ -42,6 +42,7 @@ import {
 } from '../../src/lib/adsStore'
 import {
   extrasWindow,
+  FLIGHT_REPULL_DAYS_AFTER_END,
   RESTATEMENT_RECHECK_MS,
   syncableCampaigns,
   syncAdsExtras,
@@ -511,7 +512,7 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
   }
   const rows = (sqlite: ReturnType<typeof openMigratedSqlite>, sql: string, ...binds: string[]) => sqlite.prepare(sql).all(...binds).map((r) => ({ ...r }))
 
-  it('after the 6 h re-check it re-pulls only the restatement window: a restated count updates in place, a dropped action zero-fills, older days stay', async () => {
+  it('after the 6 h re-check it re-pulls the restatement window (assets) and, in the flight re-read period, every conversion day: a restated count updates in place, a dropped action zero-fills, older asset days stay', async () => {
     const { sqlite, store } = await seeded()
     const f3sDays = etDateRange('2026-10-17', '2026-10-27')
     const fake = fakeExtras({
@@ -524,7 +525,8 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
 
     const r1 = await run(t0)
     expect(r1.status).toBe('ok')
-    expect(fake.pulls()).toEqual(['assets 2026-10-17..2026-10-24', 'assets 2026-10-25..2026-10-27', 'conversions 2026-10-17..2026-10-24', 'conversions 2026-10-25..2026-10-27'])
+    // F3 Search is in its flight (10-17..11-06): its conversions re-check is the whole window, one range
+    expect(fake.pulls()).toEqual(['assets 2026-10-17..2026-10-24', 'assets 2026-10-25..2026-10-27', 'conversions 2026-10-17..2026-10-27'])
     expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets')]).toEqual([12, 11])
 
     // an hour later: everything stored, the re-check not due -> one state read, no pull
@@ -532,7 +534,7 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     const r2 = await run(t0 + 3_600_000)
     expect([r2.nothingDue, fake.calls.length - from]).toEqual([true, 0])
 
-    // Google restates 10-26 and drops action B from 10-27 (A stays); 10-20 changes too, outside the window
+    // Google restates 10-26 and drops action B from 10-27 (A stays); 10-20 changes too, outside the 3-day window
     const convs = fake.data.conversions[F3S]
     convs[convs.findIndex((r) => r.date === '2026-10-26')] = convDay('2026-10-26', A, 3)
     convs.splice(convs.findIndex((r) => r.conversionActionId === B), 1)
@@ -544,16 +546,16 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     from = fake.calls.length
     const r3 = await run(t0 + RESTATEMENT_RECHECK_MS)
     expect(r3.status).toBe('ok')
-    expect(fake.pulls(from)).toEqual(['assets 2026-10-25..2026-10-27', 'conversions 2026-10-25..2026-10-27'])
+    expect(fake.pulls(from)).toEqual(['assets 2026-10-25..2026-10-27', 'conversions 2026-10-17..2026-10-27'])
     expect(conv('2026-10-26', A)).toEqual({ conversions: 3, all_conversions: 3, fetched_at: r3.startedAt })
     expect(conv('2026-10-27', B)).toEqual({ conversions: 0, all_conversions: 0, fetched_at: r3.startedAt }) // zero-filled, kept
     expect(conv('2026-10-27', A)).toEqual({ conversions: 1, all_conversions: 1, fetched_at: r1.startedAt }) // unchanged: not rewritten
-    expect(conv('2026-10-20', A)).toEqual({ conversions: 1, all_conversions: 1, fetched_at: r1.startedAt }) // outside the window
+    expect(conv('2026-10-20', A)).toEqual({ conversions: 9, all_conversions: 9, fetched_at: r3.startedAt }) // conversions: the whole flight is re-pulled
     expect(asset('2026-10-25')).toEqual({ impressions: 150, fetched_at: r3.startedAt })
     expect(asset('2026-10-20')).toEqual({ impressions: 100, fetched_at: r1.startedAt })
     expect([count(sqlite, 'ads_daily_conversions'), count(sqlite, 'ads_daily_assets')]).toEqual([12, 11])
     const f3s3 = r3.campaigns.find((c) => c.campaignId === F3S)!
-    expect([f3s3.conversions.rowsChanged, f3s3.assets.rowsChanged]).toEqual([2, 1])
+    expect([f3s3.conversions.rowsChanged, f3s3.assets.rowsChanged]).toEqual([3, 1])
 
     // six hours on, Google answers no conversion rows over stored days: an error, nothing deleted
     fake.data.conversions[F3S] = []
@@ -565,6 +567,57 @@ describe('syncAdsExtras: restatement, the spend-only arm, run rows and the backf
     expect(f3s4.conversions.error).toBeTruthy()
     expect(f3s4.assets).toMatchObject({ ok: true, stale: false, rowsChanged: 0 })
     expect(all(sqlite, 'ads_daily_conversions', 'date, conversion_action_id').map((r) => ({ ...r }))).toEqual(before)
+  })
+
+  it('after the flight ends, every conversion day is re-pulled for FLIGHT_REPULL_DAYS_AFTER_END days: a restated early day is overwritten in place, never counted twice', async () => {
+    // Flight 4 (10-26..11-09), the 2026-11-11 reconcile: 10-27 was stored as 20 installs and was
+    // never re-pulled once it left the 3-day window; Google now says 13.
+    expect([campaignById(F4)!.flightStart, campaignById(F4)!.flightEnd, FLIGHT_REPULL_DAYS_AFTER_END]).toEqual(['2026-10-26', '2026-11-09', 14])
+    const { sqlite, store } = await seeded()
+    const days = etDateRange('2026-10-26', '2026-11-12')
+    const fake = fakeExtras({ conversions: { [F4]: days.map((d) => convDay(d, F4_ACTION, d === '2026-10-27' ? 20 : 10)) }, assets: {} })
+    const run = (now: number) => syncAdsExtras({ ads: fake.source, store }, opts(now, { campaignIds: [F4] }))
+    const installs = () => ({ ...sqlite.prepare('SELECT COUNT(*) AS n, COUNT(DISTINCT date) AS days, SUM(conversions) AS sum FROM ads_daily_conversions WHERE campaign_id = ? AND conversion_action_id = ?').get(F4, F4_ACTION) })
+    const conv = (date: string) => ({ ...sqlite.prepare('SELECT conversions, fetched_at FROM ads_daily_conversions WHERE campaign_id = ? AND date = ? AND conversion_action_id = ?').get(F4, date, F4_ACTION) })
+    const convPulls = (from: number) => fake.pulls(from, F4).filter((x) => x.startsWith('conversions'))
+
+    // 11-11 09:00 EST (closed through 11-10): the whole window is stored in one pull
+    const t1 = Date.parse('2026-11-11T14:00:00Z')
+    const r1 = await run(t1)
+    expect(r1.status).toBe('ok')
+    expect(convPulls(0)).toEqual(['conversions 2026-10-26..2026-11-10'])
+    expect(installs()).toEqual({ n: 16, days: 16, sum: 20 + 15 * 10 })
+
+    // Google restates 10-27 (20 -> 13) and 11-02 (10 -> 7), long outside the 3-day window
+    const restate = (date: string, n: number) => (fake.data.conversions[F4][fake.data.conversions[F4].findIndex((r) => r.date === date)] = convDay(date, F4_ACTION, n))
+    restate('2026-10-27', 13)
+    restate('2026-11-02', 7)
+    // the next day's tick re-pulls the whole window: both days overwritten, one row each
+    let from = fake.calls.length
+    const r2 = await run(t1 + 24 * 3_600_000)
+    expect(convPulls(from)).toEqual(['conversions 2026-10-26..2026-11-11'])
+    expect(r2.campaigns[0].conversions).toMatchObject({ ok: true, stale: false })
+    expect(conv('2026-10-27')).toEqual({ conversions: 13, fetched_at: r2.startedAt })
+    expect(conv('2026-11-02')).toEqual({ conversions: 7, fetched_at: r2.startedAt })
+    expect(installs()).toEqual({ n: 17, days: 17, sum: 13 + 7 + 15 * 10 })
+    // a second pull of the same numbers rewrites nothing and adds only the newly closed day
+    from = fake.calls.length
+    const r3 = await run(t1 + 48 * 3_600_000)
+    expect(convPulls(from)).toEqual(['conversions 2026-10-26..2026-11-12'])
+    expect(r3.campaigns[0].conversions.rowsChanged).toBe(1) // only the new day, 11-12
+    expect(installs()).toEqual({ n: 18, days: 18, sum: 13 + 7 + 16 * 10 })
+
+    // 11-23 (flight end + 14) is the last day of the re-pull; from 11-24 the flight is left alone
+    restate('2026-10-28', 4)
+    from = fake.calls.length
+    await run(Date.parse('2026-11-23T14:00:00Z'))
+    expect(convPulls(from)).toEqual(['conversions 2026-10-26..2026-11-12'])
+    expect(conv('2026-10-28').conversions).toBe(4)
+    restate('2026-10-29', 2)
+    from = fake.calls.length
+    const r5 = await run(Date.parse('2026-11-24T14:00:00Z'))
+    expect([r5.nothingDue, convPulls(from)]).toEqual([true, []])
+    expect(conv('2026-10-29').conversions).toBe(10)
   })
 
   it('includes the spend-only arm (F4): both kinds are pulled for it and its rows stored', async () => {

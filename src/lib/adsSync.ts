@@ -301,6 +301,13 @@ export function planCampaignSync(
   }
 }
 
+/** A campaign's flight re-read period at `todayEt`: from its first flight day through
+ * FLIGHT_REPULL_DAYS_AFTER_END days after its flight end. The cost sync re-reads every flight day
+ * once per ET day in it (flightRepullRange), and the extras pass re-pulls every conversion day in
+ * it (planExtrasKind `wholeFlight`). */
+export const inFlightRepullPeriod = (c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>, todayEt: string): boolean =>
+  c.flightStart != null && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, FLIGHT_REPULL_DAYS_AFTER_END)
+
 /** Pure: the whole-flight re-read of a Google Ads campaign, or null when it is not due. Due once
  * per ET day: when the last completed re-read (`lastRepullAt`, from the sync runs) is older than
  * the latest 03:00 ET close boundary, so the 03:05 ET tick does it, in a live flight and in the
@@ -314,7 +321,7 @@ export function flightRepullRange(
   lastRepullAt: string | null,
 ): SyncRange | null {
   if (!window || c.flightStart == null || !isGoogleAdsCampaign(c)) return null
-  if (todayEt < c.flightStart || todayEt > addDays(c.flightEnd, FLIGHT_REPULL_DAYS_AFTER_END)) return null
+  if (!inFlightRepullPeriod(c, todayEt)) return null
   const until = window.until < c.flightEnd ? window.until : c.flightEnd
   if (c.flightStart > until) return null
   const todayClose = etWallTimeMs(todayEt, CLOSED_AFTER_ET)
@@ -874,8 +881,11 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
 // per-asset delivery per ET day. Every syncable campaign gets both, spend-only arms included.
 // The window is the flight (flight start through flight end + RESTATEMENT_DAYS, by the registry's
 // dates), with the cost sync's close rule and restatement window; days already stored outside
-// that window are never pulled again. Each run is planned to its row and D1 statement budget
-// BEFORE anything is fetched (planExtrasRun). It runs in its OWN invocation (the Worker's EXTRAS_CRON; npm run
+// that window are never pulled again. Conversions are the exception while the flight runs and for
+// FLIGHT_REPULL_DAYS_AFTER_END days after it (inFlightRepullPeriod): their re-check window is the
+// WHOLE extras window, not just its last RESTATEMENT_DAYS, because Google keeps restating a day's
+// conversions (lag, adjustments) long after it; the re-pull overwrites each (day, action) row.
+// Each run is planned to its row and D1 statement budget BEFORE anything is fetched (planExtrasRun). It runs in its OWN invocation (the Worker's EXTRAS_CRON; npm run
 // ads:backfill after the cost backfill), never inside syncAdsData, so it adds no work to a
 // cost-sync invocation and cannot fail, delay or stale the cost data:
 //  - It never writes a cost row, a claim or a 'running' row. Its state (the closed days each
@@ -1090,7 +1100,8 @@ function runsOf(days: readonly string[]): SyncRange[] {
 }
 
 /** Pure: what one kind of one campaign needs, newest first: the restatement window (the last
- * RESTATEMENT_DAYS closed days of the extras window) when its re-check is due or any of it is
+ * RESTATEMENT_DAYS closed days of the extras window; with `wholeFlight`, in the flight re-read
+ * period, the whole extras window) when its re-check is due or any of it is
  * missing (a re-check split over runs resumes below the oldest day it has re-pulled), then each
  * run of days not yet covered. A covered day outside the restatement window
  * is never pulled again (a full re-pull, the backfill, takes the whole window). */
@@ -1098,14 +1109,15 @@ export function planExtrasKind(
   c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd'>,
   state: ExtrasKindState,
   todayEt: string,
-  opts: { nowMs: number; full?: boolean; restatementRecheckMs?: number },
+  opts: { nowMs: number; full?: boolean; restatementRecheckMs?: number; wholeFlight?: boolean },
 ): ExtrasKindPlan {
   const window = extrasWindow(c, todayEt, opts.nowMs)
   if (!window) return { window: null, ranges: [], recheck: null, missingDays: [], restatementDue: false, deferred: false }
   const covered = coveredDaysIn(state.covered, window)
   const days = etDateRange(window.since, window.until)
   const missingDays = days.filter((d) => !covered.has(d))
-  const restateFrom = addDays(todayEt, -RESTATEMENT_DAYS)
+  // Conversions (wholeFlight) in the flight re-read period: every day of the window is restatable.
+  const restateFrom = opts.wholeFlight && inFlightRepullPeriod(c, todayEt) ? window.since : addDays(todayEt, -RESTATEMENT_DAYS)
   const recentSince = restateFrom > window.since ? restateFrom : window.since
   const recent = recentSince <= window.until ? { since: recentSince, until: window.until } : null
   const recheckMs = opts.restatementRecheckMs ?? RESTATEMENT_RECHECK_MS
@@ -1416,7 +1428,7 @@ export async function syncAdsExtras(deps: ExtrasDeps, opts: ExtrasOptions): Prom
   const plans = new Map<string, Record<ExtrasKind, ExtrasKindPlan>>()
   const planOpts = { nowMs: opts.now, full: opts.full, restatementRecheckMs: opts.restatementRecheckMs }
   for (const c of campaigns)
-    plans.set(c.id, { conversions: planExtrasKind(c, kindStateOf(state, c.id, 'conversions'), todayEt, planOpts), assets: planExtrasKind(c, kindStateOf(state, c.id, 'assets'), todayEt, planOpts) })
+    plans.set(c.id, { conversions: planExtrasKind(c, kindStateOf(state, c.id, 'conversions'), todayEt, { ...planOpts, wholeFlight: true }), assets: planExtrasKind(c, kindStateOf(state, c.id, 'assets'), todayEt, planOpts) })
   const dueKinds = (id: string) => EXTRAS_KINDS.filter((k) => plans.get(id)![k].ranges.length > 0)
   // Least recently attempted first (never attempted before all), then in flight before ended (the
   // registry's dates: a status can be stale), then config order: a campaign that keeps failing

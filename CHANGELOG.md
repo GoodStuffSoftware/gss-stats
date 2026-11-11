@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.6] — 2026-11-11
+
+### Fixed
+- **Google-reported installs stay current after a flight.** Every day's install count is now read again from Google once a day while a flight runs and for 14 days after it ends, as cost already was, so cost per install matches Google instead of keeping early days' first counts.
+
 ## [0.78.5] — 2026-11-11
 
 ### Added
