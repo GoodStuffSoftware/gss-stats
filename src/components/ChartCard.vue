@@ -596,7 +596,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, fit: fitActive, 'view-only': viewOnly }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, 'has-notes': notes.length > 0, fit: fitActive, 'view-only': viewOnly }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -1060,6 +1060,18 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 }
 .state.error {
   color: #bc4749;
+}
+/* A canvas card with notes under it grows to hold them: the fixed 300px phone height (Dashboard.vue) left
+   only ~41px under the 220px body, so a long caption (the counts-only split caption is 6 lines at 390) was cut
+   off by the card's overflow:hidden. The body keeps its 220px, so the chart is the size it was. */
+@media (max-width: 700px) {
+  .chart-card.chart-card.needs-chart-height.has-notes:not(.tall-on-phone) {
+    height: auto;
+  }
+  .chart-card.needs-chart-height.has-notes:not(.tall-on-phone) .card-body {
+    flex: none;
+    height: 220px;
+  }
 }
 @media (max-width: 700px) {
   .chart-card.chart-card.needs-chart-height.tall-on-phone {

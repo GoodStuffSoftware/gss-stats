@@ -769,6 +769,12 @@ describe('Traffic page: known test and household traffic', () => {
     expect(views.caption).toMatch(/Today at a glance/)
   })
 
+  it('a factory stat card with a caption fits its content, so its title, number and caption cannot overlap', () => {
+    const stats = defaultConfig().pages.flatMap((p) => p.widgets).filter((wd) => wd.type === 'stat' && wd.caption)
+    expect(stats.map((wd) => wd.id)).toContain('bsk-views')
+    for (const wd of stats) expect({ id: wd.id, fit: wd.fit }).toEqual({ id: wd.id, fit: 'content' })
+  })
+
   it('the setting survives normalizeConfig on a stored Traffic page', () => {
     const cfg = defaultConfig()
     const out = normalizeConfig(JSON.parse(JSON.stringify(cfg)))

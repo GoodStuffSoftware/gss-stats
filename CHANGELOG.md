@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.78.4] — 2026-11-11
+
+### Fixed
+- **Captions fit on phones.** Chart and map notes are no longer cut off on narrow screens: a card with notes grows to show them in full, and the chart keeps its size.
+- **Traffic Pageviews card in the factory layout.** Its title, number and caption no longer overlap; the card now fits its content.
+
 ## [0.78.3] — 2026-11-11
 
 ### Added

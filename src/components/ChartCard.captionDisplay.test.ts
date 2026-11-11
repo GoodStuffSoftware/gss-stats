@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
+import chartCardSource from './ChartCard.vue?raw'
 import MetricCard from './metrics/MetricCard.vue'
 import { __resetMetricsStateForTests } from '../composables/useMetrics'
 import { CAPTION_AUTO_CHARS } from '../lib/captionDisplay'
@@ -196,5 +197,26 @@ describe('a metric card: its own captions and the release / measurement notes fo
     const bodies = w.findAll('[data-testid="caption-body"]')
     expect(bodies.length).toBe(2) // the card's captions, then the widget's own caption
     for (const b of bodies) expect(b.classes()).toContain('cc-folded')
+  })
+})
+
+describe('ChartCard: a canvas card with notes grows on a phone to hold them', () => {
+  // happy-dom has no layout, so this pins the wiring: the class a note adds, and the phone rule that keys on it.
+  it('a chart with a caption gets .has-notes, a chart without notes does not', async () => {
+    fetchStatsMock.mockResolvedValue(response())
+    const withNotes = await mountCard({ type: 'doughnut', dimension: 'country', caption: LONG })
+    expect(withNotes.get('.chart-card').classes()).toEqual(expect.arrayContaining(['needs-chart-height', 'has-notes']))
+    const without = await mountCard({ type: 'doughnut', dimension: 'country' })
+    expect(without.get('.chart-card').classes()).toContain('needs-chart-height')
+    expect(without.get('.chart-card').classes()).not.toContain('has-notes')
+  })
+
+  it('the phone CSS drops the fixed height for .has-notes canvas cards and keeps the chart body at 220px', () => {
+    const phone =
+      /@media \(max-width: 700px\)\s*\{\s*\.chart-card\.chart-card\.needs-chart-height\.has-notes:not\(\.tall-on-phone\)\s*\{([^}]*)\}\s*\.chart-card\.needs-chart-height\.has-notes:not\(\.tall-on-phone\) \.card-body\s*\{([^}]*)\}/.exec(chartCardSource)
+    expect(phone, 'the .has-notes phone rules').toBeTruthy()
+    expect(phone![1]).toMatch(/height:\s*auto/)
+    expect(phone![2]).toMatch(/flex:\s*none/)
+    expect(phone![2]).toMatch(/height:\s*220px/)
   })
 })
