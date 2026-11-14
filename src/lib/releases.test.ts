@@ -116,12 +116,12 @@ describe('the flight 3 web releases', () => {
     expect(releaseSubjectOn('2026-10-30')?.version).toBe('v1.105.0 web') // 10-29 is not a full day yet
     expect(releaseSubjectOn('2026-10-31')?.version).toBe('v1.105.1 Play')
   })
-  it('v1.107.0 web (18:48:40Z, a plain tick) and Play (19:04:43Z, 1107000, a labelled line) are markers on the ET day 2026-11-04, Play listed last; the one counting change (daily visit rows) is a hidden measurement entry that mints no marker of its own', () => {
+  it('v1.107.0 web (18:48:40Z, a labelled line: new sign-in copy) and Play (19:04:43Z, 1107000, a labelled line) are markers on the ET day 2026-11-04, Play listed last; the one counting change (daily visit rows) is a hidden measurement entry that mints no marker of its own', () => {
     const web = datedReleases().find((r) => r.version === 'v1.107.0 web')!
     const play = datedReleases().find((r) => r.version === 'v1.107.0 Play')!
     expect(web).toMatchObject({ dateEt: '2026-11-04' })
     expect(play).toMatchObject({ dateEt: '2026-11-04', major: true })
-    expect(web.major).toBeFalsy()
+    expect(web).toMatchObject({ major: true, label: 'v1.107.0 sign-in copy' })
     expect(at('v1.107.0 Play')).toBeGreaterThan(at('v1.107.0 web'))
     expect(at('v1.107.0 web')).toBeGreaterThan(at('v1.106.0 Play'))
     expect(web.note).toContain('18:48:40Z')
@@ -132,12 +132,12 @@ describe('the flight 3 web releases', () => {
     expect(change.note).toContain('Play update 2026-11-04 19:04Z')
     expect(releaseSubjectOn('2026-11-04')?.version).toBe('v1.106.0 Play') // 11-04 is not a full day yet
   })
-  it('v1.108.0 web (17:28:26Z, a plain tick) and Play (17:52:16Z promotion, 1108000, a labelled line) are markers on the ET day 2026-11-11, Play listed last; the review-request rows are a hidden measurement entry that mints no marker of its own', () => {
+  it('v1.108.0 web (17:28:26Z, a labelled line: no-ads) and Play (17:52:16Z promotion, 1108000, a labelled line) are markers on the ET day 2026-11-11, Play listed last; the review-request rows are a hidden measurement entry that mints no marker of its own', () => {
     const web = datedReleases().find((r) => r.version === 'v1.108.0 web')!
     const play = datedReleases().find((r) => r.version === 'v1.108.0 Play')!
     expect(web).toMatchObject({ dateEt: '2026-11-11' })
     expect(play).toMatchObject({ dateEt: '2026-11-11', major: true })
-    expect(web.major).toBeFalsy()
+    expect(web).toMatchObject({ major: true, label: 'v1.108.0 no-ads' })
     expect(at('v1.108.0 Play')).toBeGreaterThan(at('v1.108.0 web'))
     expect(at('v1.108.0 web')).toBeGreaterThan(at('v1.107.0 Play'))
     expect(web.note).toContain('17:28:26Z')

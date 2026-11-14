@@ -11,6 +11,7 @@
 // plugin only turns them into pixels. Every item also carries its date, label and note, which
 // the chart shows on hover/tap and in the accessible list under the chart (ChartCard.vue).
 import { datedReleases } from './releases'
+import { datedProductChanges } from './productChanges'
 import { CAMPAIGNS, campaignStatusOn, type CampaignFlight } from './campaigns'
 import {
   TRACKING_ACTIVATION_DATE_ET,
@@ -25,7 +26,7 @@ import {
 } from './popupEvents'
 import { etDateFast } from './etTime'
 
-export type OverlayKind = 'release' | 'minor-release' | 'go-live' | 'flight'
+export type OverlayKind = 'release' | 'minor-release' | 'go-live' | 'change' | 'flight'
 
 export interface OverlayItem {
   kind: OverlayKind
@@ -39,6 +40,7 @@ export interface OverlayItem {
 export interface OverlayOptions {
   releases?: boolean
   goLive?: boolean
+  changes?: boolean
   flights?: boolean
 }
 
@@ -58,7 +60,12 @@ export function goLiveItems(): OverlayItem[] {
 }
 
 export function releaseItems(): OverlayItem[] {
-  return datedReleases().map((r) => ({ kind: r.major ? 'release' : 'minor-release', date: r.dateEt, label: r.version, note: r.note }))
+  return datedReleases().map((r) => ({ kind: r.major ? 'release' : 'minor-release', date: r.dateEt, label: r.label ?? r.version, note: r.note }))
+}
+
+/** Product changes (lib/productChanges.ts), each on its Eastern day. */
+export function changeItems(): OverlayItem[] {
+  return datedProductChanges().map((c) => ({ kind: 'change', date: c.dateEt, label: c.label, note: c.note }))
 }
 
 /** A flight's band: closed flights end at flightEnd. An ACTIVE flight is open-ended (runs to the
@@ -81,8 +88,8 @@ export function flightItems(flights: CampaignFlight[] = CAMPAIGNS, todayEt: stri
 
 /** Every overlay item the options switch on, sorted by date (flights first on a tie). */
 export function overlayItems(opts: OverlayOptions, flights: CampaignFlight[] = CAMPAIGNS, todayEt?: string): OverlayItem[] {
-  const items = [...(opts.flights ? flightItems(flights, todayEt) : []), ...(opts.releases ? releaseItems() : []), ...(opts.goLive ? goLiveItems() : [])]
-  const order: Record<OverlayKind, number> = { flight: 0, release: 1, 'go-live': 2, 'minor-release': 3 }
+  const items = [...(opts.flights ? flightItems(flights, todayEt) : []), ...(opts.releases ? releaseItems() : []), ...(opts.goLive ? goLiveItems() : []), ...(opts.changes ? changeItems() : [])]
+  const order: Record<OverlayKind, number> = { flight: 0, release: 1, 'go-live': 2, change: 3, 'minor-release': 4 }
   return items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : order[a.kind] - order[b.kind]))
 }
 

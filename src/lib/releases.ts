@@ -56,6 +56,8 @@ export interface ReleaseMarker {
   // Gets a full labeled marker on the timeline. Unset/false = an unlabeled tick (still
   // present, just not competing for label space) — keeps a long release history legible.
   major?: boolean
+  // A short plain on-chart label for a labelled marker, where the version alone says too little. Unset = the version.
+  label?: string
 }
 
 export const RELEASES: ReleaseMarker[] = [
@@ -306,7 +308,9 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.107.0 web',
     dateEt: '2026-11-04', // web live 2026-11-04T18:48:40Z = 13:48:40 ET (deploy started 18:43:12Z)
-    note: 'Web live 18:48:40Z 11-04. Daily visit rows start on the web: one row per device per Eastern day, split into new and returning. The sign-in ask wording changed.',
+    note: 'Web live 18:48:40Z 11-04. New sign-in copy (the sign-in ask wording changed). Daily visit rows start on the web: one row per device per Eastern day, split into new and returning.',
+    label: 'v1.107.0 sign-in copy',
+    major: true, // a change Mike watches the numbers for: a labelled line, with the plain label above. Play (below) stays labelled by its version.
   },
   {
     version: 'v1.107.0 Play',
@@ -321,7 +325,9 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.108.0 web',
     dateEt: '2026-11-11', // web live 2026-11-11T17:28:26Z = 12:28:26 ET
-    note: 'Web live 17:28:26Z 11-11. Founders club badges on the signed-in leaderboard and friend rows, a no-ads landing page and a new welcome-screen promise line. The web never sends the review request row.',
+    note: 'Web live 17:28:26Z 11-11. The no-ads home title and landing page, and the paywall now says ad-free and shows the founders line. Also founders club badges on the signed-in leaderboard and friend rows and a new welcome-screen promise line. The web never sends the review request row.',
+    label: 'v1.108.0 no-ads',
+    major: true, // a change Mike watches the numbers for: a labelled line, with the plain label above. Play (below) stays labelled by its version.
   },
   {
     version: 'v1.108.0 Play',

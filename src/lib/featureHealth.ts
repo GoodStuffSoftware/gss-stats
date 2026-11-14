@@ -249,7 +249,7 @@ export function stepMayMatchRefused(match: StepMatch): boolean {
 /** The step values of a beacon date line whose every series is exactly one featureStep filter (a Features-page step chart,
  * or one built like it in the chart editor), in series order; null for any other widget. */
 export function featureStepSeriesOf(w: Pick<Widget, 'dataset' | 'dimension' | 'series'>): string[] | null {
-  const series = w.series ?? []
+  const series = (w.series ?? []).filter((s) => !s.ratio) // a ratio series is computed, never queried
   if (w.dataset !== 'geo' || !isDateDim(w.dimension) || !series.length) return null
   const values = series.map((s) => {
     const f = (s.filter ?? []).filter((x) => x.field && x.value)

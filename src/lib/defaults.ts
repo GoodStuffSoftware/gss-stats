@@ -1410,6 +1410,9 @@ function normWidget(x: any): Widget {
     markers: x.markers === 'releases' ? 'releases' : undefined,
     goLiveMarkers: x.goLiveMarkers === true || undefined,
     flightBands: x.flightBands === true || undefined,
+    // Product changes (lib/productChanges.ts) as markers, and the before/after readout's marker id (lib/beforeAfter.ts).
+    changeMarkers: x.changeMarkers === true || undefined,
+    compareAt: typeof x.compareAt === 'string' && /^[A-Za-z0-9 ._-]{1,40}$/.test(x.compareAt) ? x.compareAt : undefined,
     // A line with a breakdown: also each series' running total (dashed, right axis).
     cumulative: x.cumulative === true || undefined,
     // A doughnut / pie: an explicit true or false (absent = the dimension's default, catalog.ts widgetShowsShares).
@@ -1519,8 +1522,8 @@ function factoryWidgets(list: Widget[]): Widget[] {
 
 function normSeries(raw: any): LineSeries[] | undefined {
   if (!Array.isArray(raw)) return undefined
-  const out: LineSeries[] = raw
-    .filter((s: any) => s && typeof s === 'object')
+  const objs: any[] = raw.filter((s: any) => s && typeof s === 'object')
+  const out: LineSeries[] = objs
     .map((s: any, i: number) => {
       const filter = Array.isArray(s.filter)
         ? s.filter.filter((f: any) => f && typeof f.field === 'string' && f.field && typeof f.value === 'string').map((f: any) => ({ field: f.field, value: f.value }))
@@ -1533,7 +1536,15 @@ function normSeries(raw: any): LineSeries[] | undefined {
         ...(Number.isInteger(s.color) && s.color >= 0 ? { color: s.color } : {}),
       }
     })
-  return out.length ? out : undefined
+  // A ratio series (LineSeries.ratio: a percent of two other series, by position) must name two different, non-ratio
+  // series; one that does not is dropped, and the positions its removal shifts are remapped.
+  const real = (n: any): n is number => Number.isInteger(n) && n >= 0 && n < objs.length && !objs[n]?.ratio
+  const keep = objs.map((o) => !o.ratio || (real(o.ratio.num) && real(o.ratio.den) && o.ratio.num !== o.ratio.den))
+  const newPos = (n: number) => keep.slice(0, n).filter(Boolean).length
+  const done = out
+    .map((s, i) => (keep[i] && objs[i].ratio ? { ...s, axis: 'right' as const, ratio: { num: newPos(objs[i].ratio.num), den: newPos(objs[i].ratio.den) } } : s))
+    .filter((_, i) => keep[i])
+  return done.length ? done : undefined
 }
 function normAxisTitles(raw: any): { left?: string; right?: string } | undefined {
   if (!raw || typeof raw !== 'object') return undefined

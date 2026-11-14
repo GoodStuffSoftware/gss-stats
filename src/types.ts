@@ -108,6 +108,14 @@ export interface Widget {
   // marker and band is listed, with its date and note, under the chart.
   goLiveMarkers?: boolean
   flightBands?: boolean
+  // A date-dimension line/area chart: also draw the product changes that are neither releases nor
+  // counting changes (lib/productChanges.ts: an offer ending, a store-listing edit).
+  changeMarkers?: boolean
+  // A beacon series line chart: a "before and after" readout under the chart. The id of a marker
+  // (a labelled release's version, or a product change's id; lib/beforeAfter.ts compareTargets):
+  // the average per day on the equal run of complete days each side of its ET day, computed from the
+  // series already drawn (no extra query).
+  compareAt?: string
   // type 'line' with a breakdown: also draw each series' running total as a dashed line on a
   // right-hand axis (the campaigns flight-day chart's cumulative view).
   cumulative?: boolean
@@ -196,6 +204,9 @@ export interface LineSeries {
   axis?: 'left' | 'right'
   style?: 'solid' | 'dashed' | 'dotted'
   color?: number // index into lib/charts.ts PALETTE; default = the series' position
+  // A ratio series: per day, series `num` over series `den` (positions in this chart's series list, neither
+  // itself a ratio), as a percent on the right axis. It adds no query: both parts are series already fetched.
+  ratio?: { num: number; den: number }
 }
 
 // A drill-down constraint: filter every chart on a page to one value of a dimension.

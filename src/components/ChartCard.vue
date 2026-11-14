@@ -4,7 +4,9 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, pairRows, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, pairRows, rendersOwnBody, seriesRows, seriesDayModel, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { compareReadoutText, compareTarget } from '../lib/beforeAfter'
+import { etDateFast } from '../lib/etTime'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { dayTitle } from '../lib/glanceDay'
@@ -330,7 +332,7 @@ let liveSafeKey: string | null = null
 // the effective filters.
 const NON_REQUEST_FIELDS = new Set([
   'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'captionDisplay', 'isDefault',
-  'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'showShares', 'axisTitles', 'barMode',
+  'markers', 'goLiveMarkers', 'changeMarkers', 'compareAt', 'flightBands', 'cumulative', 'showShares', 'axisTitles', 'barMode',
   // grid-layout-plus writes `moved` onto every widget it lays out (after ChartCard's first load, so the
   // key would change under the answer's flag and never match again). It is the only field the library
   // adds in our configuration (`static` is touched only under restoreOnDrag, which Dashboard never sets).
@@ -524,10 +526,25 @@ const overlayList = computed(() => {
   return itemsInRange(overlayItems(widgetOverlayOptions(props.widget)), first, last).map((it) => ({
     key: `${it.kind}|${it.date}|${it.label}`,
     when: it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date,
-    kind: it.kind === 'flight' ? 'Campaign flight' : it.kind === 'go-live' ? 'Go-live' : 'Release',
+    kind: it.kind === 'flight' ? 'Campaign flight' : it.kind === 'go-live' ? 'Go-live' : it.kind === 'change' ? 'Product change' : 'Release',
     label: it.label,
     note: it.note,
   }))
+})
+
+// The "before and after" readout (Widget.compareAt): worked out from the series already on screen (the same per-day
+// values the chart plots), so it costs no query. Null for a chart without series, or a marker this build does not know.
+const compareText = computed(() => {
+  const w = props.widget
+  if (!w.compareAt || !w.series?.length || !seriesData.value || !hasLineSeries(w)) return null
+  const model = seriesDayModel(w, seriesData.value)
+  if (!model) return null
+  const series = w.series.map((s, i) => ({
+    label: s.label,
+    values: model.values[i],
+    ...(s.ratio ? { ratio: { num: model.values[s.ratio.num] ?? [], den: model.values[s.ratio.den] ?? [] } } : {}),
+  }))
+  return compareReadoutText(compareTarget(w.compareAt), model.days, series, etDateFast(Date.now()))
 })
 
 const chartConfig = computed(() => {
@@ -596,7 +613,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, 'has-notes': notes.length > 0, fit: fitActive, 'view-only': viewOnly }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, 'has-notes': notes.length > 0 || !!compareText, fit: fitActive, 'view-only': viewOnly }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -725,6 +742,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
+    <NoteBlock v-if="compareText" class="card-compare" data-testid="compare-readout" :text="compareText" />
     <CaptionCollapse v-if="notes.length" class="card-captions" :mode="widget.captionDisplay">
       <NoteBlock
         v-for="n in notes"
@@ -1123,6 +1141,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 }
 /* Attached captions: inside the card's own padding, and a long word or path wraps instead of
    running past the rounded border (it used to sit flush left and be clipped at phone width). */
+.card-compare {
+  padding: 2px 14px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card-compare :deep(.note-para) {
+  margin-top: 1px;
+}
 .card-captions {
   padding: 0 14px 10px;
   min-width: 0;

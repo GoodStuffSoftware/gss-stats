@@ -68,6 +68,20 @@ export function stepSeriesOf(widget: Widget): string[] | null {
  * featureStep series (stepSeriesOf) asks once instead: /api/geo answers every series from one
  * statement, each the same as its own query would be. */
 export async function fetchSeriesStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse[]> {
+  // A ratio series (LineSeries.ratio) adds no query: it is computed from two series already fetched. The answer
+  // keeps one entry per series, in order; a ratio's entry is its numerator's answer with no rows (the chart and
+  // the readout read the counts from the numerator series itself).
+  const all = widget.series ?? []
+  const queried = all.filter((s) => !s.ratio)
+  if (queried.length !== all.length) {
+    const got = queried.length ? await fetchSeriesStats({ ...widget, series: queried }, filters) : []
+    let next = 0
+    return all.map((s) => {
+      if (!s.ratio) return got[next++]
+      const num = all[s.ratio.num] && !all[s.ratio.num].ratio ? got[all.slice(0, s.ratio.num).filter((x) => !x.ratio).length] : got[0]
+      return { ...num, rows: [] }
+    })
+  }
   const base: Widget = { ...widget, series: undefined, breakdown: undefined, rings: undefined }
   const steps = stepSeriesOf(widget)
   if (steps) {

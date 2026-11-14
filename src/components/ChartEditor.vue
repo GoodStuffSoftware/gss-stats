@@ -32,6 +32,7 @@ import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
 import { CAPTION_AUTO_CHARS, captionDisplayOf } from '../lib/captionDisplay'
 import { rendersOwnBody } from '../lib/charts'
+import { compareTargets } from '../lib/beforeAfter'
 import CardEditor from './metrics/CardEditor.vue'
 import FilterPopover from './FilterPopover.vue'
 import { filterOverrideSummary } from '../lib/filterSummary'
@@ -578,10 +579,31 @@ function addSeries() {
   const list: LineSeries[] = (draft.series ??= [])
   list.push({ label: `Series ${list.length + 1}`, axis: 'left', style: 'solid' })
 }
-function removeSeries(idx: number) {
-  draft.series?.splice(idx, 1)
-  if (!draft.series?.length) draft.series = undefined
+// A ratio series (accepted / shown): a percent of one series over another, worked out from the two lines already
+// fetched, so it costs no query. It starts as the first series over the second.
+const plainSeries = computed(() => (draft.series ?? []).map((s, i) => ({ s, i })).filter((x) => !x.s.ratio))
+function addRatioSeries() {
+  const list: LineSeries[] = (draft.series ??= [])
+  const parts = plainSeries.value
+  list.push({ label: 'Rate', axis: 'right', style: 'dashed', ratio: { num: parts[1]?.i ?? 0, den: parts[0]?.i ?? 0 } })
 }
+function setRatioPart(idx: number, part: 'num' | 'den', v: string) {
+  const s = draft.series?.[idx]
+  if (s?.ratio) s.ratio = { ...s.ratio, [part]: Number(v) }
+}
+// Removing a series also removes any ratio built on it, and the positions after it shift down by one.
+function removeSeries(idx: number) {
+  const list = draft.series
+  if (!list) return
+  const gone = new Set<number>([idx])
+  list.forEach((s, i) => s.ratio && (s.ratio.num === idx || s.ratio.den === idx) && gone.add(i))
+  const shift = (n: number) => n - [...gone].filter((g) => g < n).length
+  draft.series = list.filter((_, i) => !gone.has(i)).map((s) => (s.ratio ? { ...s, ratio: { num: shift(s.ratio.num), den: shift(s.ratio.den) } } : s))
+  if (!draft.series.length) draft.series = undefined
+}
+// "Before and after" readout: any marker the readout knows, newest first (lib/beforeAfter.ts).
+const COMPARE_CHOICES = compareTargets()
+const compareUnknown = computed(() => !!draft.compareAt && !COMPARE_CHOICES.some((t) => t.id === draft.compareAt))
 // A series is narrowed by up to two field = value pairs, and both must hold (pair 0, and an optional pair 1):
 // e.g. new devices (visitor = new) on the web app only (site = bestsudoku-web). Clearing the first pair's field
 // clears both; setting a pair keeps the other.
@@ -860,11 +882,13 @@ function save() {
   if (!isDateLine.value) {
     draft.markers = undefined
     draft.goLiveMarkers = undefined
+    draft.changeMarkers = undefined
     draft.flightBands = undefined
   }
   if (!canUseSeries.value || !draft.series?.length) {
     draft.series = undefined
     draft.axisTitles = undefined
+    draft.compareAt = undefined
   } else {
     draft.series = draft.series.map((s, i) => ({ ...s, label: s.label.trim() || `Series ${i + 1}` }))
   }
@@ -1208,6 +1232,10 @@ function resetToDefault() {
           Show go-live markers (tracking starts, new beacons, install fix)
         </label>
         <label>
+          <input type="checkbox" :checked="!!draft.changeMarkers" data-testid="change-markers" @change="draft.changeMarkers = ($event.target as HTMLInputElement).checked || undefined" />
+          Show product changes (an offer ending, a store-listing fix)
+        </label>
+        <label>
           <input type="checkbox" :checked="!!draft.flightBands" @change="draft.flightBands = ($event.target as HTMLInputElement).checked || undefined" />
           Show campaign flights as shaded bands
         </label>
@@ -1217,7 +1245,24 @@ function resetToDefault() {
       <div class="field" v-if="canUseSeries">
         <label>Series <span class="hint">— none = one line of everything the chart counts</span></label>
         <div class="series-list">
-          <div v-for="(s, idx) in draft.series ?? []" :key="idx" class="series-row">
+          <template v-for="(s, idx) in draft.series ?? []" :key="idx">
+          <div v-if="s.ratio" class="series-row" data-testid="series-ratio-row">
+            <input type="text" v-model="s.label" placeholder="Label" aria-label="Series label" />
+            <select :value="s.ratio.num" aria-label="Ratio top line" data-testid="ratio-num" @change="setRatioPart(idx, 'num', ($event.target as HTMLSelectElement).value)">
+              <option v-for="p in plainSeries" :key="p.i" :value="p.i">{{ p.s.label || `Series ${p.i + 1}` }}</option>
+            </select>
+            <span class="hint">as a percent of</span>
+            <select :value="s.ratio.den" aria-label="Ratio bottom line" data-testid="ratio-den" @change="setRatioPart(idx, 'den', ($event.target as HTMLSelectElement).value)">
+              <option v-for="p in plainSeries" :key="p.i" :value="p.i">{{ p.s.label || `Series ${p.i + 1}` }}</option>
+            </select>
+            <select v-model="s.style" aria-label="Line style">
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
+            <button type="button" class="btn ring-btn danger" title="Remove series" @click="removeSeries(idx)">✕</button>
+          </div>
+          <div v-else class="series-row">
             <input type="text" v-model="s.label" placeholder="Label" aria-label="Series label" />
             <select :value="s.filter?.[0]?.field ?? ''" aria-label="Series filter field" @change="setSeriesFilter(idx, 'field', ($event.target as HTMLSelectElement).value)">
               <option value="">(all page views)</option>
@@ -1267,11 +1312,21 @@ function resetToDefault() {
             </select>
             <button type="button" class="btn ring-btn danger" title="Remove series" @click="removeSeries(idx)">✕</button>
           </div>
+          </template>
           <button type="button" class="btn" @click="addSeries">+ Add series</button>
+          <button v-if="plainSeries.length >= 2" type="button" class="btn" data-testid="add-ratio-series" title="A line that is one series as a percent of another, on the right axis" @click="addRatioSeries">+ Add ratio series</button>
         </div>
         <p v-if="unknownStepValues.length" class="hint error" role="alert" data-testid="series-unknown-step">
           {{ unknownStepValues.length === 1 ? 'This Feature step names' : 'These Feature steps name' }} no step: {{ unknownStepValues.map((v) => v || '(none picked)').join(', ') }}. Pick a step from the list, or remove the series, to save.
         </p>
+      </div>
+      <div class="field" v-if="canUseSeries && draft.series?.length">
+        <label for="compare-at">Before and after readout <span class="hint">— under the chart: the average per day each side of a marker (needs 3 whole days)</span></label>
+        <select id="compare-at" :value="draft.compareAt ?? ''" data-testid="compare-at" @change="draft.compareAt = ($event.target as HTMLSelectElement).value || undefined">
+          <option value="">None</option>
+          <option v-if="compareUnknown" :value="draft.compareAt">Unknown marker: {{ draft.compareAt }}</option>
+          <option v-for="t in COMPARE_CHOICES" :key="t.id" :value="t.id">{{ t.date }} · {{ t.label }}</option>
+        </select>
       </div>
       <div class="row" v-if="canUseSeries && draft.series?.length">
         <div class="field">

@@ -274,12 +274,12 @@ export function playActivationMarkerPlugin(index: number) {
 // formatted labels, not real date values — see formatKey).
 /** The overlay switches on a date-axis line chart (release markers, go-live markers, campaign
  * flight bands — see lib/timelineOverlay.ts). */
-export function widgetOverlayOptions(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'flightBands'>) {
-  return { releases: widget.markers === 'releases', goLive: !!widget.goLiveMarkers, flights: !!widget.flightBands }
+export function widgetOverlayOptions(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'changeMarkers' | 'flightBands'>) {
+  return { releases: widget.markers === 'releases', goLive: !!widget.goLiveMarkers, changes: !!widget.changeMarkers, flights: !!widget.flightBands }
 }
-export function widgetHasOverlay(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'flightBands'>): boolean {
+export function widgetHasOverlay(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'changeMarkers' | 'flightBands'>): boolean {
   const o = widgetOverlayOptions(widget)
-  return o.releases || o.goLive || o.flights
+  return o.releases || o.goLive || o.changes || o.flights
 }
 
 /** Draws a date-axis chart's overlay: shaded flight bands (labelled, one label row per overlap),
@@ -352,7 +352,7 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
         } else {
           ctx.strokeStyle = lineColor
           ctx.lineWidth = 1.2
-          ctx.setLineDash(p.item.kind === 'go-live' ? [2, 3] : [4, 3])
+          ctx.setLineDash(p.item.kind === 'go-live' ? [2, 3] : p.item.kind === 'change' ? [8, 3, 2, 3] : [4, 3])
           ctx.beginPath()
           ctx.moveTo(x, chartArea.top)
           ctx.lineTo(x, chartArea.bottom)
@@ -495,10 +495,17 @@ export function hasLineSeries(widget: Pick<Widget, 'type' | 'dataset' | 'dimensi
   return (widget.type === 'line' || widget.type === 'area') && widget.dataset === 'geo' && isDateDim(widget.dimension) && !!widget.series?.length
 }
 
-/** A line chart's series (Widget.series): each one is its own date query, filtered on a geo
- * field (e.g. keyEvent = 'install'), drawn on the left or right axis. `responses` is one
- * StatsResponse per series, in order. */
-export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]): ChartConfiguration | null {
+export interface SeriesDayModel {
+  /** The plotted days (YYYY-MM-DD), oldest first. */
+  days: string[]
+  /** Per series, one value per plotted day: the count, or for a ratio series the percent (null on a day the
+   * denominator is 0). Same order as widget.series. */
+  values: (number | null)[][]
+}
+
+/** What a series line chart plots, before any drawing: the plotted days and each series' value per day. One
+ * place, so the chart and the before/after readout (lib/beforeAfter.ts) read the same numbers. */
+export function seriesDayModel(widget: Widget, responses: StatsResponse[]): SeriesDayModel | null {
   const series = widget.series ?? []
   if (!series.length || responses.length !== series.length) return null
   const first = responses[0]
@@ -511,11 +518,34 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
   // A series the server cut to its limit only covers its newest days: start there too.
   const cuts = responses.map((r) => truncatedFrom(dim, r)).filter((c): c is string => !!c)
   const cutFrom = cuts.length ? cuts.reduce((a, b) => (a > b ? a : b)) : ''
-  const buckets = (firstData > 0 ? allDays.slice(firstData) : allDays).filter((d) => d >= cutFrom)
-  const hasRight = series.some((s) => s.axis === 'right')
+  const days = (firstData > 0 ? allDays.slice(firstData) : allDays).filter((d) => d >= cutFrom)
+  const counts: (number | null)[][] = byDay.map((m) => days.map((d) => m.get(d) ?? 0))
+  const values = series.map((s, i) => {
+    const r = s.ratio
+    if (!r) return counts[i]
+    const num = counts[r.num]
+    const den = counts[r.den]
+    if (!num || !den) return days.map(() => null)
+    return days.map((_, k) => (den[k]! > 0 ? (num[k]! / den[k]!) * 100 : null))
+  })
+  return { days, values }
+}
+
+/** A line chart's series (Widget.series): each one is its own date query, filtered on a geo
+ * field (e.g. keyEvent = 'install'), drawn on the left or right axis. `responses` is one
+ * StatsResponse per series, in order. */
+export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]): ChartConfiguration | null {
+  const series = widget.series ?? []
+  const model = seriesDayModel(widget, responses)
+  if (!model) return null
+  const { days: buckets, values } = model
+  const hasRatio = series.some((s) => s.ratio)
+  // A ratio series is a percent and always on the right axis; the axis shows a % only when every right-axis line is one.
+  const hasRight = series.some((s) => s.axis === 'right' || s.ratio)
+  const rightIsPercent = hasRatio && series.every((s) => !(s.axis === 'right' && !s.ratio))
   const narrow = isMobileViewport()
   const items = overlayItems(widgetOverlayOptions(widget))
-  const hasLabels = items.some((i) => i.kind === 'release' || i.kind === 'go-live')
+  const hasLabels = items.some((i) => i.kind === 'release' || i.kind === 'go-live' || i.kind === 'change')
   const dash = (style?: string) => (style === 'dashed' ? [4, 3] : style === 'dotted' ? [1, 3] : [])
   const axisTitle = (text?: string) => (text ? { display: !narrow, text, color: tickColor(), font: { family: 'Inter', size: 10 } } : { display: false })
   const scales: any = {
@@ -524,7 +554,13 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
     y: { position: 'left', beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, precision: 0 }, title: axisTitle(widget.axisTitles?.left) },
   }
   if (hasRight) {
-    scales.y2 = { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, precision: 0 }, title: axisTitle(widget.axisTitles?.right) }
+    scales.y2 = {
+      position: 'right',
+      beginAtZero: true,
+      grid: { drawOnChartArea: false },
+      ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, precision: 0, ...(rightIsPercent ? { callback: (v: number | string) => `${v}%` } : {}) },
+      title: axisTitle(widget.axisTitles?.right),
+    }
   }
   return {
     type: 'line',
@@ -534,16 +570,17 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
         const color = PALETTE[s.color ?? i] ?? PALETTE[i % PALETTE.length]
         return {
           label: s.label,
-          data: buckets.map((d) => byDay[i].get(d) ?? 0),
+          data: values[i],
           borderColor: color,
           backgroundColor: color,
-          yAxisID: s.axis === 'right' ? 'y2' : 'y',
+          yAxisID: s.axis === 'right' || s.ratio ? 'y2' : 'y',
           borderDash: dash(s.style),
           borderWidth: s.style === 'dotted' ? 1.5 : 2,
           tension: 0.2,
           pointRadius: 0,
           pointHitRadius: 16,
           fill: false,
+          ...(s.ratio ? { isRatio: true } : {}),
         }
       }),
     },
@@ -554,6 +591,8 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
       layout: { padding: { top: hasLabels ? (narrow ? 24 : 34) : 4 } },
       plugins: {
         legend: { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: narrow ? 10 : 11 }, boxWidth: narrow ? 8 : 10, boxHeight: narrow ? 8 : 10, padding: narrow ? 6 : 10 } },
+        // A ratio line reads as a percent in the tooltip (a day with nothing in the denominator shows no value).
+        ...(hasRatio ? { tooltip: { callbacks: { label: (c: any) => (c.dataset.isRatio ? `${c.dataset.label}: ${Math.round(c.parsed.y * 10) / 10}%` : `${c.dataset.label}: ${c.formatted}`) } } } : {}),
       },
       scales,
     },
