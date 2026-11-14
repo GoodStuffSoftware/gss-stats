@@ -385,8 +385,8 @@ describe('a ratio series on the series line chart', () => {
     expect(cfg.data.datasets[2]).toMatchObject({ data: [50, null, 25, 75], isRatio: true })
     expect(cfg.data.datasets[0].isRatio).toBeUndefined()
     expect(cfg.options.scales.y2.ticks.callback(30)).toBe('30%')
-    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[2], parsed: { y: 33.333 }, formatted: '33.3' })).toBe('Accept rate: 33.3%')
-    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[0], parsed: { y: 10 }, formatted: '10' })).toBe('Shown: 10')
+    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[2], parsed: { y: 33.333 }, formattedValue: '33.3' })).toBe('Accept rate: 33.3%')
+    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[0], parsed: { y: 10 }, formattedValue: '10' })).toBe('Shown: 10')
   })
 
   it('a chart without a ratio series is unchanged: no tooltip override, no % ticks, no isRatio', () => {
@@ -413,5 +413,20 @@ describe('a ratio series on the series line chart', () => {
       ],
     }
     expect(featureStepSeriesOf(steps)).toEqual(['signin.shown', 'signin.accept'])
+  })
+})
+
+describe('a plain date chart with only product changes on', () => {
+  it('leaves room above the plot for the change labels, as it does for release labels', () => {
+    const w: Widget = { id: 'p', i: 'p', title: 'Page views', type: 'line', dataset: 'geo', dimension: 'date', metric: 'pageviews', limit: 500, x: 0, y: 0, w: 6, h: 8, changeMarkers: true }
+    const r: StatsResponse = {
+      rows: [{ key: { date: '2026-11-08' }, pageviews: 3, visits: 3 }, { key: { date: '2026-11-09' }, pageviews: 4, visits: 4 }, { key: { date: '2026-11-10' }, pageviews: 5, visits: 5 }],
+      totals: { pageviews: 12, visits: 12 },
+      meta: { site: 'all', host: null, since: '2026-11-08', until: '2026-11-10', dimensions: ['date'], metric: 'pageviews' },
+    }
+    const cfg: any = buildChartConfig(w, r)
+    expect(cfg.options.layout.padding.top).toBeGreaterThanOrEqual(24)
+    const off: any = buildChartConfig({ ...w, changeMarkers: undefined }, r)
+    expect(off.options.layout?.padding?.top).toBeUndefined()
   })
 })

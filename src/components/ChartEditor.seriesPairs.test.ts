@@ -126,3 +126,15 @@ describe('ChartEditor: product changes, the before/after readout and a ratio ser
     expect(out!.compareAt).toBeUndefined()
   })
 })
+
+describe('ChartEditor: a ratio keeps its two parts different', () => {
+  it('choosing the bottom line as the top line swaps them instead of making a ratio of a line over itself', async () => {
+    const w = open(card())
+    await w.get('[data-testid="add-ratio-series"]').trigger('click')
+    await w.get('[data-testid="ratio-num"]').setValue('0') // was 1 over 0: the top is now the bottom's line
+    const out = await saved(w)
+    expect(out!.series![2].ratio).toEqual({ num: 0, den: 1 })
+    await w.get('[data-testid="ratio-den"]').setValue('0')
+    expect((await saved(w))!.series![2].ratio).toEqual({ num: 1, den: 0 })
+  })
+})

@@ -592,7 +592,7 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
       plugins: {
         legend: { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: narrow ? 10 : 11 }, boxWidth: narrow ? 8 : 10, boxHeight: narrow ? 8 : 10, padding: narrow ? 6 : 10 } },
         // A ratio line reads as a percent in the tooltip (a day with nothing in the denominator shows no value).
-        ...(hasRatio ? { tooltip: { callbacks: { label: (c: any) => (c.dataset.isRatio ? `${c.dataset.label}: ${Math.round(c.parsed.y * 10) / 10}%` : `${c.dataset.label}: ${c.formatted}`) } } } : {}),
+        ...(hasRatio ? { tooltip: { callbacks: { label: (c: any) => (c.dataset.isRatio ? `${c.dataset.label}: ${Math.round(c.parsed.y * 10) / 10}%` : `${c.dataset.label}: ${c.formattedValue}`) } } } : {}),
       },
       scales,
     },
@@ -1249,7 +1249,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        ...(overlay.length && overlay.some((i) => i.kind === 'release' || i.kind === 'go-live') ? { layout: { padding: { top: isMobileViewport() ? 24 : 34 } } } : {}),
+        ...(overlay.length && overlay.some((i) => i.kind === 'release' || i.kind === 'go-live' || i.kind === 'change') ? { layout: { padding: { top: isMobileViewport() ? 24 : 34 } } } : {}),
         plugins: noLegend,
         scales: baseScales(),
       },

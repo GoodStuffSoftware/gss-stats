@@ -589,7 +589,11 @@ function addRatioSeries() {
 }
 function setRatioPart(idx: number, part: 'num' | 'den', v: string) {
   const s = draft.series?.[idx]
-  if (s?.ratio) s.ratio = { ...s.ratio, [part]: Number(v) }
+  if (!s?.ratio) return
+  // A line over itself is no ratio (it would be dropped on reload): picking the other part's line swaps the two.
+  const other = part === 'num' ? 'den' : 'num'
+  const n = Number(v)
+  s.ratio = s.ratio[other] === n ? { ...s.ratio, [part]: n, [other]: s.ratio[part] } : { ...s.ratio, [part]: n }
 }
 // Removing a series also removes any ratio built on it, and the positions after it shift down by one.
 function removeSeries(idx: number) {
