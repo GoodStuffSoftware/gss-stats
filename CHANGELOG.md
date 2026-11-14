@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.79.0] — 2026-11-14
+
 ### Added
 - **Product changes on the daily charts.** A chart can now draw the changes that are not releases (the first-50 free days ending on 11-09, the Play listing text fix on 11-09) as dashed lines with a note, next to the release lines. The 1.107.0 sign-in copy and 1.108.0 no-ads web releases now show by name.
 - **Before and after readout.** A line chart can show, under it, each line's average per day before and after a chosen release or product change, over equal-length windows (the change day left out). It says so when fewer than 3 whole days have passed since the change.
