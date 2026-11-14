@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.79.1] — 2026-11-14
+
 ### Fixed
 - **Before and after counts whole days only.** On a rolling range the first day shown holds only part of a day; the readout no longer counts it as a "before" day, so it cannot print a rise that is only that missing part.
 - **Clear text when the change is older than the range.** A card whose change happened before the days shown now says to widen the range, instead of "too early to compare".
