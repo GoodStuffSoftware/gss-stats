@@ -499,7 +499,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   a checkbox in the chart editor ([`src/lib/timelineOverlay.ts`](src/lib/timelineOverlay.ts)).
   Close labels stagger into rows and drop out rather than overprint (fewer rows at phone width);
   hovering or tapping a marker line or a band's name shows its date and note (every marker on that same day, when a web and a Play release share one), and a collapsed
-  "Markers and bands" list under the chart holds every item in range for keyboard and touch. A
+  "Markers and bands" list under the chart holds every item in range for keyboard and touch.
+  **Product changes** (`changeMarkers`: dashed lines for changes that are not releases, listed in
+  [`src/lib/productChanges.ts`](src/lib/productChanges.ts), plus the releases flagged `major`)
+  and a **before/after readout** (`compareAt`: a release or product-change id; each series' average
+  per day over equal windows either side of it, the change day left out, and a "too early" line under 3
+  whole days after; [`src/lib/beforeAfter.ts`](src/lib/beforeAfter.ts)) are chart-editor options too, and need no
+  extra query. A series can be a **ratio** of two others (`LineSeries.ratio`, right axis, percent), pooled over
+  each window in the readout; a ratio line fetches nothing of its own. A
   beacon line chart can also draw several **series** (`Widget.series`): each is its own date
   query narrowed by one or two field = value filters (e.g. `keyEvent = install`), on the left or right
   axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"

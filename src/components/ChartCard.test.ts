@@ -266,3 +266,75 @@ describe('ChartCard — series charts OR the caption flags across every series',
     expect(texts.some((t) => t.includes(SPLIT_GUARD_CAPTION) || t.includes(REFUSED_WHOLE_DAYS_CAPTION))).toBe(false)
   })
 })
+
+// The "before and after" readout (Widget.compareAt) under a series chart: worked out from the series on screen.
+describe('ChartCard: the before and after readout', () => {
+  const day = (n: number) => new Date(Date.parse('2026-11-01T12:00:00Z') + n * 86_400_000).toISOString().slice(0, 10)
+  const resp = (count: (n: number) => number): StatsResponse => ({
+    rows: Array.from({ length: 14 }, (_, n) => ({ key: { date: day(n) }, pageviews: count(n), visits: count(n) })),
+    totals: { pageviews: 0, visits: 0 },
+    meta: { site: 'all', host: null, since: '2026-11-01T12:00:00Z', until: '2026-11-14T12:00:00Z', dimensions: ['date'], metric: 'pageviews' },
+  })
+  const seriesWidget = (over: Partial<Widget> = {}): Widget =>
+    baseWidget({ type: 'line', dataset: 'geo', dimension: 'date', limit: 500, w: 12, h: 8, series: [{ label: 'Web: new' }, { label: 'Accepted', filter: [{ field: 'path', value: '/x' }] }], ...over })
+  const readout = async (w: Widget, answer: StatsResponse[]) => {
+    vi.mocked(fetchSeriesStats).mockResolvedValueOnce(answer)
+    const c = mountCard(w)
+    await flushPromises()
+    await flushPromises()
+    return c.find('[data-testid="compare-readout"]')
+  }
+
+  it('shows avg per day before and after, per series, once 3 whole days have passed', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-14T20:00:00Z'), toFake: ['Date'] })
+    try {
+      const r = await readout(seriesWidget({ compareAt: 'first-50-ended' }), [resp((n) => (n < 8 ? 10 : 20)), resp(() => 1)])
+      expect(r.exists()).toBe(true)
+      expect(r.text()).toContain('Before and after First-50 days end (2026-11-09)')
+      expect(r.text()).toContain('Web: new, avg/day before: 10, after: 20 (+100%)')
+      expect(r.text()).toContain('Accepted, avg/day before: 1, after: 1 (no change)')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says it is too early when the marker is under 3 whole days old, with no numbers', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-11T20:00:00Z'), toFake: ['Date'] })
+    try {
+      const r = await readout(seriesWidget({ compareAt: 'first-50-ended' }), [resp(() => 3), resp(() => 3)])
+      expect(r.text()).toContain('too early to compare')
+      expect(r.text()).not.toContain('avg/day')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a chart with all-zero rows (the paywall card after 11-07) reads cleanly: no change, no NaN, no divide by zero', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-14T20:00:00Z'), toFake: ['Date'] })
+    try {
+      const zero = resp(() => 0)
+      const r = await readout(seriesWidget({ compareAt: 'first-50-ended' }), [zero, zero])
+      expect(r.exists()).toBe(true)
+      expect(r.text()).toContain('avg/day before: 0, after: 0 (no change)')
+      expect(r.text()).not.toContain('NaN')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('no readout without the option, and none for a marker this build does not know', async () => {
+    expect((await readout(seriesWidget(), [resp(() => 1), resp(() => 1)])).exists()).toBe(false)
+    expect((await readout(seriesWidget({ compareAt: 'gone-marker' }), [resp(() => 1), resp(() => 1)])).exists()).toBe(false)
+  })
+
+  it('lists a product change under the chart as a "Product change" when the option is on', async () => {
+    vi.mocked(fetchSeriesStats).mockResolvedValueOnce([resp(() => 1), resp(() => 1)])
+    const c = mountCard(seriesWidget({ changeMarkers: true }))
+    await flushPromises()
+    await flushPromises()
+    const list = c.find('.overlay-list')
+    expect(list.text()).toContain('Product change')
+    expect(list.text()).toContain('First-50 days end')
+    expect(list.text()).toContain('Play listing fix')
+  })
+})

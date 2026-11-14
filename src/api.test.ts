@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ADS_READINGS_TIMEOUT_MS, fetchAdsReadings, fetchStats, saveConfig } from './api'
+import { ADS_READINGS_TIMEOUT_MS, fetchAdsReadings, fetchSeriesStats, fetchStats, saveConfig } from './api'
 import { isAuthError, sessionExpired } from './session'
 import type { DashboardConfig, GlobalFilters, Widget } from './types'
 
@@ -152,5 +152,46 @@ describe('saveConfig results the save label is built from', () => {
   it('a 409 is "stale", not a failure', async () => {
     stubFetch(new Response('{"error":"stale"}', { status: 409 }), new Response('{}', { status: 200 }))
     await expect(saveConfig(cfg)).resolves.toBe('stale')
+  })
+})
+
+// A ratio series (LineSeries.ratio) is worked out from two series already fetched: it adds no request.
+describe('fetchSeriesStats: a ratio series adds no query', () => {
+  const reply = (series: number) =>
+    new Response(JSON.stringify({ rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site: 'all', host: null, since: '2026-11-01', until: '2026-11-04', dimensions: ['date'], metric: 'pageviews' }, tag: series }), { status: 200 })
+  const base = { id: 'r', i: 'r', title: 'x', type: 'line', dataset: 'geo', dimension: 'date', metric: 'pageviews', limit: 500 } as unknown as Widget
+
+  it('one request per counted series, one answer per series in order, the ratio keeping its numerator meta and no rows', async () => {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async () => reply(++n)))
+    const w = { ...base, series: [{ label: 'Shown', filter: [{ field: 'path', value: '/a' }] }, { label: 'Accepted', filter: [{ field: 'path', value: '/b' }] }, { label: 'Rate', ratio: { num: 1, den: 0 } }] } as Widget
+    const out = await fetchSeriesStats(w, filters)
+    expect(n).toBe(2)
+    expect(out).toHaveLength(3)
+    expect((out[2] as any).tag).toBe(2)
+    expect(out[2].rows).toEqual([])
+  })
+
+  it('a featureStep chart with a ratio still asks once (the step-series request), with the steps only', async () => {
+    const bodies: any[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_u: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify({ series: [0, 1].map(() => ({ rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site: 'all', host: null, since: '2026-11-01', until: '2026-11-04', dimensions: ['date'], metric: 'pageviews' } })) }), { status: 200 })
+      }),
+    )
+    const w = {
+      ...base,
+      series: [
+        { label: 'Shown', filter: [{ field: 'featureStep', value: 'signin.shown' }] },
+        { label: 'Accepted', filter: [{ field: 'featureStep', value: 'signin.accept' }] },
+        { label: 'Rate', ratio: { num: 1, den: 0 } },
+      ],
+    } as Widget
+    const out = await fetchSeriesStats(w, filters)
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0].stepSeries).toEqual(['signin.shown', 'signin.accept'])
+    expect(out).toHaveLength(3)
   })
 })

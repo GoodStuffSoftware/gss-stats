@@ -893,3 +893,39 @@ describe('beaconizeWidget: no "Visits" title on a page-views count', () => {
     expect(beaconizeWidget(visits({ metric: 'pageviews', title: 'Pageviews' })).title).toBe('Pageviews')
   })
 })
+
+describe('normWidget: product-change markers, the before/after marker and ratio series survive the whitelist', () => {
+  const load = (w: Partial<Widget>) => normalizeConfig(JSON.parse(JSON.stringify({ version: CONFIG_VERSION, activePageId: 'u', pages: [page({ id: 'u', name: 'Mine', widgets: [widget({ id: 'l', type: 'line', dataset: 'geo', dimension: 'date', ...w })] })] }))).pages[0].widgets[0]
+
+  it('keeps changeMarkers (true only) and compareAt (a short plain id only)', () => {
+    expect(load({ changeMarkers: true, compareAt: 'first-50-ended' })).toMatchObject({ changeMarkers: true, compareAt: 'first-50-ended' })
+    expect(load({ compareAt: 'v1.108.0 web' }).compareAt).toBe('v1.108.0 web')
+    const bad = load({ changeMarkers: 'yes' as any, compareAt: '<script>' })
+    expect(bad.changeMarkers).toBeUndefined()
+    expect(bad.compareAt).toBeUndefined()
+    expect(load({ compareAt: 'x'.repeat(41) }).compareAt).toBeUndefined()
+  })
+
+  it('keeps a ratio series (forced to the right axis) and drops one that names a missing, repeated or ratio series', () => {
+    const s = (label: string, extra: object = {}) => ({ label, axis: 'left', style: 'solid', ...extra })
+    const kept = load({ series: [s('Shown'), s('Accepted'), s('Rate', { ratio: { num: 1, den: 0 }, axis: 'left' })] as any })
+    expect(kept.series![2]).toEqual({ label: 'Rate', axis: 'right', style: 'solid', ratio: { num: 1, den: 0 } })
+    expect(load({ series: [s('A'), s('B'), s('R1', { ratio: { num: 1, den: 1 } })] as any }).series!.map((x) => x.label)).toEqual(['A', 'B'])
+    expect(load({ series: [s('A'), s('B'), s('R1', { ratio: { num: 1, den: 7 } })] as any }).series!.map((x) => x.label)).toEqual(['A', 'B'])
+    expect(load({ series: [s('A'), s('B'), s('R1', { ratio: { num: 1, den: 0 } }), s('R2', { ratio: { num: 2, den: 0 } })] as any }).series!.map((x) => x.label)).toEqual(['A', 'B', 'R1'])
+  })
+
+  it('remaps the positions a dropped ratio series shifts', () => {
+    const s = (label: string, extra: object = {}) => ({ label, axis: 'left', style: 'solid', ...extra })
+    const out = load({ series: [s('Bad', { ratio: { num: 9, den: 9 } }), s('A'), s('B'), s('R', { ratio: { num: 2, den: 1 } })] as any })
+    expect(out.series!.map((x) => x.label)).toEqual(['A', 'B', 'R'])
+    expect(out.series![2].ratio).toEqual({ num: 1, den: 0 })
+  })
+
+  it('a layout with none of them loads without gaining a key', () => {
+    const w = load({ markers: 'releases', series: [{ label: 'A', axis: 'left', style: 'solid' }] as any })
+    expect('changeMarkers' in w && w.changeMarkers !== undefined).toBe(false)
+    expect(w.compareAt).toBeUndefined()
+    expect(w.series![0]).toEqual({ label: 'A', axis: 'left', style: 'solid' })
+  })
+})

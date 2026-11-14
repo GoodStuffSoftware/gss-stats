@@ -2,10 +2,12 @@
 // buildSeriesLineConfig) that together replace the Overview's bespoke timeline panel.
 import { describe, expect, it } from 'vitest'
 import { flightItems, goLiveItems, itemsInRange, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
-import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, truncatedFrom, seriesRows, timelineOverlayPlugin } from './charts'
+import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, seriesDayModel, truncatedFrom, seriesRows, timelineOverlayPlugin } from './charts'
+import { compareReadoutText, compareTarget, compareTargets, compareWindows } from './beforeAfter'
+import { featureStepSeriesOf } from './featureHealth'
 import { timelineWidget, TIMELINE_SERIES } from './defaults'
 import type { CampaignFlight } from './campaigns'
-import type { StatsResponse } from '../types'
+import type { StatsResponse, Widget } from '../types'
 
 const days = (from: string, n: number) => Array.from({ length: n }, (_, i) => new Date(Date.parse(from + 'T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10))
 const flight = (date: string, endDate: string | undefined, label = 'f'): OverlayItem =>
@@ -242,5 +244,174 @@ describe('timelineOverlayPlugin tooltip', () => {
     const three = mk([rel('2026-10-28', 'a'), rel('2026-10-28', 'b', 'go-live'), rel('2026-10-28', 'c', 'release'), rel('2026-10-29', 'other')])
     expect(three.move(80).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-28 · a', '2026-10-28 · b', '2026-10-28 · c'])
     expect(three.move(110).filter((t) => t.startsWith('2026-'))).toEqual(['2026-10-29 · other'])
+  })
+})
+
+// ── Before and after readout (lib/beforeAfter.ts) ─────────────────────────────────────────────
+describe('compareWindows', () => {
+  const axis = days('2026-11-01', 14) // 11-01 .. 11-14
+
+  it('leaves the marker day out and takes equal runs: the most days both sides have', () => {
+    const w = compareWindows(axis, '2026-11-09', '2026-11-20')
+    // before 11-01..11-08 = 8 days, after 11-10..11-14 = 5 days: 5 each, the 5 days right before the marker
+    expect(w.before.map((i) => axis[i])).toEqual(['2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08'])
+    expect(w.after.map((i) => axis[i])).toEqual(['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14'])
+    expect(w.afterAvailable).toBe(5)
+    expect(w.beforeAvailable).toBe(8)
+  })
+
+  it('never counts today (a partial day) in the after run', () => {
+    const w = compareWindows(axis, '2026-11-09', '2026-11-14')
+    expect(w.after.map((i) => axis[i])).toEqual(['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'])
+    expect(w.before).toHaveLength(4)
+  })
+
+  it('clips to the range when the marker is near its start', () => {
+    const w = compareWindows(axis, '2026-11-03', '2026-11-20')
+    expect(w.before.map((i) => axis[i])).toEqual(['2026-11-01', '2026-11-02'])
+    expect(w.after).toHaveLength(2)
+  })
+})
+
+describe('compareReadoutText', () => {
+  const axis = days('2026-11-01', 14)
+  const target = { id: 'first-50-ended', label: 'First-50 days end', date: '2026-11-09' }
+  const flat = (v: (i: number) => number) => axis.map((_, i) => v(i))
+
+  it('says avg/day before, after and the percent change, per series, over equal windows', () => {
+    // before (11-04..11-08, indexes 3..7) = 10 each; after (11-10..11-14 but 11-14 is today so 11-10..11-13 = 4 days): windows are 4 and 4
+    const text = compareReadoutText(target, axis, [{ label: 'Web', values: flat((i) => (i < 8 ? 10 : 15)) }], '2026-11-14')!
+    expect(text).toContain('**Before and after First-50 days end (2026-11-09):** the 4 days each side, the marker day left out.')
+    expect(text).toContain('Web, avg/day before: 10, after: 15 (+50%)')
+  })
+
+  it('too few complete days after: says so and gives no numbers', () => {
+    const text = compareReadoutText(target, axis, [{ label: 'Web', values: flat(() => 4) }], '2026-11-11')!
+    expect(text).toBe('**Before and after First-50 days end (2026-11-09):** only 1 complete day after it so far (it takes 3), too early to compare.')
+    expect(compareReadoutText(target, axis, [{ label: 'Web', values: flat(() => 4) }], '2026-11-10')).toContain('only 0 complete days')
+  })
+
+  it('too few days before in the range: asks to widen it', () => {
+    const t = { ...target, date: '2026-11-03' }
+    const text = compareReadoutText(t, axis, [{ label: 'Web', values: flat(() => 4) }], '2026-11-20')!
+    expect(text).toContain('only 2 days before it in this range')
+    expect(text).not.toContain('avg/day')
+  })
+
+  it('handles series that are all zero: no change, and from zero', () => {
+    const zeros = compareReadoutText(target, axis, [{ label: 'Paywall', values: flat(() => 0) }], '2026-11-20')!
+    expect(zeros).toContain('Paywall, avg/day before: 0, after: 0 (no change)')
+    const rises = compareReadoutText(target, axis, [{ label: 'Paywall', values: flat((i) => (i > 8 ? 2 : 0)) }], '2026-11-20')!
+    expect(rises).toContain('avg/day before: 0, after: 2 (from zero)')
+    const drops = compareReadoutText(target, axis, [{ label: 'Paywall', values: flat((i) => (i > 8 ? 0 : 3)) }], '2026-11-20')!
+    expect(drops).toContain('avg/day before: 3, after: 0 (-100%)')
+  })
+
+  it('a ratio series pools the run (total over total), and reports points, not percent of a percent', () => {
+    const num = flat((i) => (i < 8 ? 1 : 3))
+    const den = flat((i) => (i < 8 ? 10 : 10))
+    const text = compareReadoutText(target, axis, [{ label: 'Accept rate', values: num.map((n, i) => (n / den[i]) * 100), ratio: { num, den } }], '2026-11-20')!
+    expect(text).toContain('Accept rate: before: 10%, after: 30% (+20 points)')
+  })
+
+  it('a ratio with nothing to divide by shows none, not NaN', () => {
+    const z = flat(() => 0)
+    const text = compareReadoutText(target, axis, [{ label: 'Rate', values: z.map(() => null), ratio: { num: z, den: z } }], '2026-11-20')!
+    expect(text).toContain('Rate: before: none, after: none')
+    expect(text).not.toContain('NaN')
+  })
+
+  it('an unknown marker gives no readout', () => {
+    expect(compareReadoutText(null, axis, [], '2026-11-20')).toBeNull()
+  })
+})
+
+describe('compareTargets', () => {
+  it('offers the labelled releases and the product changes, newest first, ids unique, and resolves each id', () => {
+    const t = compareTargets()
+    const ids = t.map((x) => x.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('v1.107.0 web')
+    expect(ids).toContain('v1.108.0 web')
+    expect(ids).toContain('first-50-ended')
+    expect(ids).toContain('play-listing-fixed')
+    expect(ids).toContain('v1.108.0 Play')
+    expect([...t.map((x) => x.date)].sort().reverse()).toEqual(t.map((x) => x.date))
+    expect(compareTarget('first-50-ended')).toMatchObject({ label: 'First-50 days end', date: '2026-11-09' })
+    expect(compareTarget('v1.107.0 web')).toMatchObject({ label: 'v1.107.0 sign-in copy', date: '2026-11-04' })
+    expect(compareTarget('nope')).toBeNull()
+    expect(compareTarget(undefined)).toBeNull()
+  })
+})
+
+// ── Ratio series (LineSeries.ratio) ───────────────────────────────────────────────────────────
+describe('a ratio series on the series line chart', () => {
+  const resp = (rows: [string, number][]): StatsResponse => ({
+    rows: rows.map(([date, c]) => ({ key: { date }, pageviews: c, visits: c })),
+    totals: { pageviews: 0, visits: 0 },
+    meta: { site: 'all', host: null, since: '2026-11-01', until: '2026-11-04', dimensions: ['date'], metric: 'pageviews' },
+  })
+  const widget: Widget = {
+    id: 'r',
+    i: 'r',
+    title: 'Sign-in ask',
+    type: 'line',
+    dataset: 'geo',
+    dimension: 'date',
+    metric: 'pageviews',
+    limit: 500,
+    x: 0,
+    y: 0,
+    w: 6,
+    h: 8,
+    series: [
+      { label: 'Shown', axis: 'left', style: 'solid' },
+      { label: 'Accepted', axis: 'left', style: 'solid' },
+      { label: 'Accept rate', axis: 'right', style: 'dashed', ratio: { num: 1, den: 0 } },
+    ],
+  }
+  const responses = [resp([['2026-11-01', 10], ['2026-11-02', 0], ['2026-11-03', 20], ['2026-11-04', 8]]), resp([['2026-11-01', 5], ['2026-11-03', 5], ['2026-11-04', 6]]), resp([])]
+
+  it('is accepted over shown per day as a percent, empty (a gap) on a day nothing was shown', () => {
+    const model = seriesDayModel(widget, responses)!
+    expect(model.days).toEqual(['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04'])
+    expect(model.values[0]).toEqual([10, 0, 20, 8])
+    expect(model.values[2]).toEqual([50, null, 25, 75])
+  })
+
+  it('draws it on the right axis with a % tick label, flagged for the tooltip; the counts stay on the left', () => {
+    const cfg: any = buildSeriesLineConfig(widget, responses)
+    expect(cfg.data.datasets.map((d: any) => d.yAxisID)).toEqual(['y', 'y', 'y2'])
+    expect(cfg.data.datasets[2]).toMatchObject({ data: [50, null, 25, 75], isRatio: true })
+    expect(cfg.data.datasets[0].isRatio).toBeUndefined()
+    expect(cfg.options.scales.y2.ticks.callback(30)).toBe('30%')
+    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[2], parsed: { y: 33.333 }, formatted: '33.3' })).toBe('Accept rate: 33.3%')
+    expect(cfg.options.plugins.tooltip.callbacks.label({ dataset: cfg.data.datasets[0], parsed: { y: 10 }, formatted: '10' })).toBe('Shown: 10')
+  })
+
+  it('a chart without a ratio series is unchanged: no tooltip override, no % ticks, no isRatio', () => {
+    const plain: Widget = { ...widget, series: widget.series!.slice(0, 2) }
+    const cfg: any = buildSeriesLineConfig(plain, responses.slice(0, 2))
+    expect(cfg.options.plugins.tooltip).toBeUndefined()
+    expect(cfg.options.scales.y2).toBeUndefined()
+    expect(cfg.data.datasets.some((d: any) => 'isRatio' in d)).toBe(false)
+  })
+
+  it('a right-axis count series next to the ratio keeps the plain tick labels (no % on counts)', () => {
+    const mixed: Widget = { ...widget, series: [...widget.series!.slice(0, 2).map((s, i) => (i === 0 ? { ...s, axis: 'right' as const } : s)), widget.series![2]] }
+    const cfg: any = buildSeriesLineConfig(mixed, responses)
+    expect(cfg.options.scales.y2.ticks.callback).toBeUndefined()
+  })
+
+  it('the ratio stays out of the step-series request: featureStepSeriesOf ignores it', () => {
+    const steps: Widget = {
+      ...widget,
+      series: [
+        { label: 'Shown', filter: [{ field: 'featureStep', value: 'signin.shown' }] },
+        { label: 'Accepted', filter: [{ field: 'featureStep', value: 'signin.accept' }] },
+        { label: 'Accept rate', axis: 'right', ratio: { num: 1, den: 0 } },
+      ],
+    }
+    expect(featureStepSeriesOf(steps)).toEqual(['signin.shown', 'signin.accept'])
   })
 })
