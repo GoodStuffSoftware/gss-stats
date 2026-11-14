@@ -302,7 +302,7 @@ export const RELEASES: ReleaseMarker[] = [
     major: true, // a go-live moment (it changes how Flight 4 d0 counts): a labelled line, not a tick. The web entry above stays a tick.
   },
   // v1.107.0: the once-per-device-per-Eastern-day visit rows (/visit/day/new, /visit/day/returning) start, the sign-in ask wording
-  // changes, and Android caps the Play install-referrer length (Flight 4). Web is a plain tick; Play is a go-live moment (the app
+  // changes, and Android caps the Play install-referrer length (Flight 4). Web is a labelled line (major, with a plain label); Play is a go-live moment (the app
   // starts sending the visit rows), a labelled line. The one counting change (v1.107.0 in lib/measurementChanges.ts, errorRowsOnly)
   // mints no marker of its own: these two mark the release.
   {
@@ -316,10 +316,10 @@ export const RELEASES: ReleaseMarker[] = [
     version: 'v1.107.0 Play',
     dateEt: '2026-11-04', // Play production full rollout about 2026-11-04T19:04:43Z = 14:04 ET (versionCode 1107000)
     note: 'Play production about 19:04:43Z 11-04 (1107000); old and new Android builds mix until updates spread. Android daily visit rows start as devices update to 1107000. Also the Flight 4 install-referrer length cap fix (Android) and the sign-in ask wording change.',
-    major: true, // a go-live moment (the app starts sending the daily visit rows): a labelled line, not a tick. The web entry above stays a tick.
+    major: true, // a go-live moment (the app starts sending the daily visit rows): a labelled line, not a tick.
   },
   // v1.108.0: founders club badges on the signed-in leaderboard and friend rows, a no-ads landing page, a new welcome-screen promise
-  // line, and the store-review request row (/review-prompt/requested) starts, native installs only. Web is a plain tick; Play is a
+  // line, and the store-review request row (/review-prompt/requested) starts, native installs only. Web is a labelled line (major, with a plain label); Play is a
   // go-live moment (the app starts sending the review rows), a labelled line. The one counting change (v1.108.0 in
   // lib/measurementChanges.ts, errorRowsOnly) mints no marker of its own: these two mark the release.
   {
@@ -333,7 +333,7 @@ export const RELEASES: ReleaseMarker[] = [
     version: 'v1.108.0 Play',
     dateEt: '2026-11-11', // Play production promotion 2026-11-11T17:52:16Z = 12:52 ET (versionCode 1108000); Play review still pending then
     note: 'Play production promotion 17:52:16Z 11-11 (1108000); Play review was still pending, so devices get it later and old and new Android builds mix until updates spread. The store-review request row (/review-prompt/requested) starts as devices update.',
-    major: true, // a go-live moment (the app starts sending the review request rows): a labelled line, not a tick. The web entry above stays a tick.
+    major: true, // a go-live moment (the app starts sending the review request rows): a labelled line, not a tick.
   },
 ]
 

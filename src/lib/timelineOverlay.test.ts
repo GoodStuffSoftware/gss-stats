@@ -2,7 +2,7 @@
 // buildSeriesLineConfig) that together replace the Overview's bespoke timeline panel.
 import { describe, expect, it } from 'vitest'
 import { flightItems, goLiveItems, itemsInRange, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
-import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, seriesDayModel, truncatedFrom, seriesRows, timelineOverlayPlugin } from './charts'
+import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, seriesDayModel, truncatedFrom, seriesRows, timelineOverlayPlugin, BAND_ROW_PX } from './charts'
 import { compareReadoutText, compareTarget, compareTargets, compareWindows } from './beforeAfter'
 import { featureStepSeriesOf } from './featureHealth'
 import { timelineWidget, TIMELINE_SERIES } from './defaults'
@@ -199,6 +199,35 @@ describe('series line chart (the Overall timeline as a standard line chart)', ()
   })
 })
 
+describe('band labels', () => {
+  // Draw the bands of a 14-day axis on a fake canvas and read back where each band name was printed.
+  const dates14 = days('2026-11-01', 14)
+  const draw = (flights: OverlayItem[]) => {
+    const plugin: any = timelineOverlayPlugin(dates14, flights)
+    const printed: { text: string; x: number; y: number }[] = []
+    const ctx: any = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * 5 }) : k === 'fillText' ? (text: string, x: number, y: number) => printed.push({ text, x, y }) : () => {}), set: () => true })
+    const chart: any = { ctx, chartArea: { left: 10, right: 410, top: 40, bottom: 300 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, height: 340 }
+    plugin.beforeDatasetsDraw(chart)
+    return printed
+  }
+  it('two flights that overlap in time (F3 and F4 on the untagged card) print on separate rows, a full text height apart', () => {
+    const p = draw([flight('2026-10-17', '2026-11-06', 'Flight 3'), flight('2026-10-26', '2026-11-09', 'Flight 4')])
+    const f3 = p.find((t) => t.text.startsWith('Flight 3'))!
+    const f4 = p.find((t) => t.text.startsWith('Flight 4'))!
+    expect(f3.y).not.toBe(f4.y)
+    expect(Math.abs(f3.y - f4.y)).toBeGreaterThanOrEqual(BAND_ROW_PX)
+    expect(BAND_ROW_PX).toBeGreaterThanOrEqual(13) // a 9px name needs room above the one below it
+  })
+  it('three overlapping flights use three rows, all inside the plot; one that starts after another ends reuses row 0', () => {
+    const p = draw([flight('2026-10-20', '2026-11-12', 'A'), flight('2026-10-22', '2026-11-12', 'B'), flight('2026-10-24', '2026-11-12', 'C')])
+    const ys = [...new Set(p.map((t) => t.y))].sort((a, b) => a - b)
+    expect(ys).toHaveLength(3)
+    expect(ys[0]).toBeGreaterThan(40)
+    const q = draw([flight('2026-10-20', '2026-11-03', 'early'), flight('2026-11-05', '2026-11-12', 'late')])
+    expect(new Set(q.map((t) => t.y)).size).toBe(1)
+  })
+})
+
 describe('timelineOverlayPlugin tooltip', () => {
   // A fake chart and canvas context: x = 20 + 30 * index, plot area 40..200 tall. fillText calls are recorded.
   const dates = days('2026-10-26', 5) // 10-26 .. 10-30
@@ -323,6 +352,60 @@ describe('compareReadoutText', () => {
 
   it('an unknown marker gives no readout', () => {
     expect(compareReadoutText(null, axis, [], '2026-11-20')).toBeNull()
+  })
+
+  it('a rolling range that starts mid-day: the partial first day is no "before" day (8d range, marker 11-09)', () => {
+    // 8d range on 11-14: plotted 11-06 .. 11-14, the 11-06 bucket is a few hours only (4 against a normal 10).
+    const eight = days('2026-11-06', 9)
+    const web = { label: 'Web', values: eight.map((d) => (d === '2026-11-06' ? 4 : 10)) }
+    // Counting the partial day as a whole one (the old behaviour) makes a flat series a 25% "rise" ((10+10+10)/3 vs (4+10+10)/3).
+    const old = compareReadoutText({ id: 'x', label: 'First-50 days end', date: '2026-11-09' }, eight, [web], '2026-11-14')!
+    expect(old).toContain('avg/day before: 8, after: 10 (+25%)')
+    const text = compareReadoutText({ id: 'x', label: 'First-50 days end', date: '2026-11-09' }, eight, [web], '2026-11-14', true)!
+    expect(text).toBe('**Before and after First-50 days end (2026-11-09):** only 2 days before it in this range (it takes 3); widen the range to compare.')
+    const w = compareWindows(eight, '2026-11-09', '2026-11-14', true)
+    expect(w.beforeAvailable).toBe(2)
+    expect(w.before.map((i) => eight[i])).toEqual(['2026-11-07', '2026-11-08'])
+  })
+
+  it('a partial first day is left out of the after run too', () => {
+    const range = days('2026-11-08', 8) // 11-08 .. 11-15
+    expect(compareWindows(range, '2026-11-07', '2026-11-20', false).afterAvailable).toBe(8)
+    expect(compareWindows(range, '2026-11-07', '2026-11-20', true).afterAvailable).toBe(7)
+  })
+
+  it('a marker before the whole plotted range says so, not "too early"', () => {
+    // 2d page range on 11-14: plotted 11-12 .. 11-14, the change was on 11-09.
+    const three = days('2026-11-12', 3)
+    const text = compareReadoutText({ id: 'x', label: 'First-50 days end', date: '2026-11-09' }, three, [{ label: 'Web', values: [5, 6, 7] }], '2026-11-14', true)!
+    expect(text).toBe('**Before and after First-50 days end (2026-11-09):** this change is before the shown range; widen the range to compare.')
+    expect(text).not.toContain('too early')
+  })
+
+  it('"too early" stays for a marker inside the range with fewer than 3 whole days after it', () => {
+    const text = compareReadoutText({ id: 'x', label: 'First-50 days end', date: '2026-11-09' }, days('2026-11-01', 12), [{ label: 'Web', values: Array(12).fill(5) }], '2026-11-11')!
+    expect(text).toContain('only 1 complete day after it so far (it takes 3), too early to compare.')
+  })
+})
+
+describe('seriesDayModel firstDayPartial', () => {
+  const mkResp = (since: string, until: string): StatsResponse => ({
+    rows: [
+      { key: { dateEt: '2026-11-06' }, pageviews: 4, visits: 4 },
+      { key: { dateEt: '2026-11-07' }, pageviews: 10, visits: 10 },
+    ],
+    totals: { pageviews: 14, visits: 14 },
+    meta: { site: 'all', host: null, since, until, dimensions: ['dateEt'], metric: 'pageviews' },
+  })
+  const widget = { ...timelineWidget({ x: 0, y: 0, w: 12, h: 12 }), series: [{ label: 'Web' }] }
+  it('is true when the range starts part-way through the first ET day (a rolling range)', () => {
+    expect(seriesDayModel(widget, [mkResp('2026-11-06T22:00:00.000Z', '2026-11-14T22:00:00.000Z')])!.firstDayPartial).toBe(true)
+  })
+  it('is false when the range starts on an ET midnight (a whole-day window), or the axis was trimmed to the first day with data', () => {
+    expect(seriesDayModel(widget, [mkResp('2026-11-06T05:00:00.000Z', '2026-11-14T22:00:00.000Z')])!.firstDayPartial).toBe(false)
+    const trimmed = seriesDayModel(widget, [mkResp('2026-11-04T22:00:00.000Z', '2026-11-14T22:00:00.000Z')])!
+    expect(trimmed.days[0]).toBe('2026-11-06')
+    expect(trimmed.firstDayPartial).toBe(false)
   })
 })
 

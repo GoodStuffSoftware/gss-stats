@@ -2,7 +2,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { DrillConstraint, GlobalFilters, Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES, datasetSupportsBreakdown, dimensionDefOf, dimensionTitle, widgetShowsShares } from './catalog'
 import { ringDims, isDateDim } from './rings'
-import { etDateFast } from './etTime'
+import { etDateFast, etWallTimeMs } from './etTime'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
 import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS, flightDayIndex, type CampaignFlight } from './campaigns'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from './adsRules'
@@ -288,6 +288,7 @@ export function widgetHasOverlay(widget: Pick<Widget, 'markers' | 'goLiveMarkers
  * nowhere is dropped, not overprinted), short ticks for minor releases. Hover or tap near a
  * marker line, or on a band's label strip, shows that item's date, name and note. `dates` are
  * the plotted category values (YYYY-MM-DD), in order. */
+export const BAND_ROW_PX = 14
 export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], narrow = false) {
   const dark = isDark()
   const lineColor = dark ? 'rgba(240,238,233,0.45)' : 'rgba(26,23,21,0.4)'
@@ -319,8 +320,9 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
         const color = PALETTE[(bandFlightIndex.get(b.item) ?? 0) % PALETTE.length]
         ctx.fillStyle = color + '22'
         ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top)
-        // A band's name sits in a strip at its bottom edge; an open-ended band gets an arrow.
-        const y = chartArea.bottom - 4 - b.row * 11
+        // A band's name sits in a strip at its bottom edge; an open-ended band gets an arrow. Bands that overlap in
+        // time take successive rows (layoutFlightBands), BAND_ROW_PX apart, so their names never print over each other.
+        const y = chartArea.bottom - 5 - b.row * BAND_ROW_PX
         const text = `${b.item.label}${b.clippedEnd && b.item.openEnded ? ' →' : ''}`
         let shown = text
         const room = right - left - 6
@@ -498,6 +500,10 @@ export function hasLineSeries(widget: Pick<Widget, 'type' | 'dataset' | 'dimensi
 export interface SeriesDayModel {
   /** The plotted days (YYYY-MM-DD), oldest first. */
   days: string[]
+  /** True when the range starts part-way through the first plotted day (a rolling range does), so that day holds
+   * only part of a day. False when the axis was trimmed to start at the first day with data, or the range starts
+   * on a day boundary (a featureStep query counts whole ET days). */
+  firstDayPartial: boolean
   /** Per series, one value per plotted day: the count, or for a ratio series the percent (null on a day the
    * denominator is 0). Same order as widget.series. */
   values: (number | null)[][]
@@ -528,7 +534,11 @@ export function seriesDayModel(widget: Widget, responses: StatsResponse[]): Seri
     if (!num || !den) return days.map(() => null)
     return days.map((_, k) => (den[k]! > 0 ? (num[k]! / den[k]!) * 100 : null))
   })
-  return { days, values }
+  const sinceMs = new Date(first.meta.since).getTime()
+  // A range start that is not a day boundary (ET midnight for dateEt, UTC midnight for date) leaves the first day part-filled.
+  const boundaryMs = !isFinite(sinceMs) ? NaN : dim === 'dateEt' ? etWallTimeMs(etDateFast(sinceMs)) : Date.parse(new Date(sinceMs).toISOString().slice(0, 10) + 'T00:00:00Z')
+  const firstDayPartial = !!days.length && days[0] === allDays[0] && isFinite(sinceMs) && sinceMs !== boundaryMs
+  return { days, firstDayPartial, values }
 }
 
 /** A line chart's series (Widget.series): each one is its own date query, filtered on a geo

@@ -503,9 +503,12 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   **Product changes** (`changeMarkers`: dashed lines for changes that are not releases, listed in
   [`src/lib/productChanges.ts`](src/lib/productChanges.ts), plus the releases flagged `major`)
   and a **before/after readout** (`compareAt`: a release or product-change id; each series' average
-  per day over equal windows either side of it, the change day left out, and a "too early" line under 3
-  whole days after; [`src/lib/beforeAfter.ts`](src/lib/beforeAfter.ts)) are chart-editor options too, and need no
-  extra query. A series can be a **ratio** of two others (`LineSeries.ratio`, right axis, percent), pooled over
+  per day over equal windows either side of it, the change day left out, only whole Eastern days counted (today,
+  and the first day of a rolling range that starts part-way through it, are left out), a "too early" line under 3
+  whole days after, and a "before the shown range" line when the change is older than every day plotted;
+  [`src/lib/beforeAfter.ts`](src/lib/beforeAfter.ts)) are chart-editor options too, and need no
+  extra query. A card with a readout needs about a week each side of its change, so it carries its own range
+  (`Widget.filters`, a copy of its page's filters with only `rangeRel` widened). A series can be a **ratio** of two others (`LineSeries.ratio`, right axis, percent), pooled over
   each window in the readout; a ratio line fetches nothing of its own. A
   beacon line chart can also draw several **series** (`Widget.series`): each is its own date
   query narrowed by one or two field = value filters (e.g. `keyEvent = install`), on the left or right

@@ -544,7 +544,7 @@ const compareText = computed(() => {
     values: model.values[i],
     ...(s.ratio ? { ratio: { num: model.values[s.ratio.num] ?? [], den: model.values[s.ratio.den] ?? [] } } : {}),
   }))
-  return compareReadoutText(compareTarget(w.compareAt), model.days, series, etDateFast(Date.now()))
+  return compareReadoutText(compareTarget(w.compareAt), model.days, series, etDateFast(Date.now()), model.firstDayPartial)
 })
 
 const chartConfig = computed(() => {

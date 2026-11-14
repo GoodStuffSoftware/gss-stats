@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Before and after counts whole days only.** On a rolling range the first day shown holds only part of a day; the readout no longer counts it as a "before" day, so it cannot print a rise that is only that missing part.
+- **Clear text when the change is older than the range.** A card whose change happened before the days shown now says to widen the range, instead of "too early to compare".
+- **Flight band names no longer crowd.** Where two flights overlap, their names sit on separate lines further apart.
+- **Readout cards show their own range.** The Traffic and Sign-in cards that carry a before and after readout now show 10 days (sign-in 14) whatever the page range is, so the readout has numbers; the "no ad tag" card's note says exactly what it counts.
+
 ## [0.79.0] — 2026-11-14
 
 ### Added
