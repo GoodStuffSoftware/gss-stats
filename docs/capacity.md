@@ -1,5 +1,7 @@
 # gss-stats capacity audit — 2026-09-26
 
+**Plan update (Mike, 2026-11-20): the account is on Workers Paid.** The 5M rows/day figures below are the Free plan's hard cap; on Paid, reads past the included amount are billed rather than refused, but the caution rules stand: local simulated bindings for development, at most one prod query per check, and no probe sweeps or reload loops against prod or the dev preview.
+
 > **Status (perf/d1-reads, 2026-09-26):** the two "clear waste" items this audit identifies
 > — `/api/sites`'s unbounded full-table scan (§4.2) and the total+grouped query pair on every
 > chart (§4.3) — have been fixed: see the "Capacity" section of [README.md](../README.md) and

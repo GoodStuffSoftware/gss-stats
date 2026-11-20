@@ -6,6 +6,8 @@
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
   "scripts": {
     "dev": "vite",
+    "dev:start": "node scripts/render/dev-server.mjs start",
+    "dev:stop": "node scripts/render/dev-server.mjs stop",
     "build": "vite build",
     "preview": "npm run build && wrangler pages dev",
     "deploy": "npm run build && wrangler pages deploy",

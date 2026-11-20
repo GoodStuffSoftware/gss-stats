@@ -2202,7 +2202,9 @@ variable, use **Run workflow** to ship what merged meanwhile.
 
 ## Capacity
 
-The account runs on **Workers Free**, where D1 caps reads at **5,000,000 rows/day, account-wide**
+**Plan update (Mike, 2026-11-20): the account is on Workers Paid.** The 5M rows/day figures in this README are the Free plan's hard cap; on Paid, reads past the included amount are billed rather than refused, but the caution rules stand: local simulated bindings for development, at most one prod query per check, and no probe sweeps or reload loops against prod or the dev preview.
+
+The account ran on **Workers Free** when this was written, where D1 capped reads at **5,000,000 rows/day, account-wide**
 (a hard failure, not throttling, once hit) — shared by `gss-geo` and `gss-stats-ads`. A 2026-09-26
 audit ([docs/capacity.md](docs/capacity.md)) found usage at ~29% of that cap on an ordinary day,
 driven entirely by query pattern against a table of well under 5,000 rows: `/api/sites` full-
@@ -2683,9 +2685,10 @@ every other worktree session shares. A worktree agent should instead:
 
 1. Create its own `.dev.vars` in its worktree (`Copy-Item .dev.vars.example .dev.vars`, or your
    own test values — never the main checkout's).
-2. Run `npx wrangler pages dev --port <own port> --ip 127.0.0.1` from its own worktree directory,
+2. Run `npm run dev:start -- --port <own port>` (`scripts/render/dev-server.mjs`: hidden, local simulated bindings only) from its own worktree directory,
    picking a port other than `8788` (which the main checkout's own manual `npm run preview` may be
    using).
+   Never start a server through a terminal, `start` without `/b`, `Start-Process` without `-WindowStyle Hidden`, or a Node spawn without `windowsHide: true`; stop your server when you are done. Stop it with `npm run dev:stop -- --port <own port>`.
 3. Pass that worktree's own explicit `url` and `tabId` to every `preview_*` tool call — never the
    default/no-`tabId` tab, which may belong to another session.
 

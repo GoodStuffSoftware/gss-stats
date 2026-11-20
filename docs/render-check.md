@@ -41,7 +41,10 @@ The layout to look at is the saved layout: export it once (`wrangler kv key get 
 
 One port per worktree, loopback only, in the background:
 
-    npx wrangler pages dev --port 8791 --ip localhost
+    npm run dev:start -- --port 8791     # hidden, detached; prints the URL once it answers
+    npm run dev:stop -- --port 8791      # when done
+
+Never start a server through a terminal, `start` without `/b`, `Start-Process` without `-WindowStyle Hidden`, or a Node spawn without `windowsHide: true`; stop your server when you are done. `node scripts/render/dev-server.mjs status` lists running servers; `--remote` is refused (local simulated bindings only).
 
 After a code edit run `npm run build` in that worktree and reload the page.
 
