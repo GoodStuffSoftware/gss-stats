@@ -28,7 +28,8 @@ export function reviewFlags(t: ReviewInput, ctx: ReviewContext): { needsReview: 
     if (t.rule?.review) return t.rule.reviewReason ?? 'rule'
     if (t.split.reason === 'ambiguous_store') return 'ambiguous_store'
     if (t.split.reason === 'amount_out_of_band') return 'amount_out_of_band'
-    if (t.aggregator && SPENDING_KINDS.includes(t.kind)) return 'hidden_merchant'
+    // A matching rule is the answer to "who is this": the merchant is no longer hidden.
+    if (t.aggregator && !t.rule && SPENDING_KINDS.includes(t.kind)) return 'hidden_merchant'
     if ((t.kind === 'transfer_external' || t.kind === 'transfer') && t.counterpartyLast4 && !t.counterpartyKnown) return 'transfer_to_unknown_account'
     if (ctx.sameDayAmounts.has(sameDayKey(t.accountId, t.postedDate, t.amountCents))) return 'possible_duplicate'
     if (t.confidence < 40 && t.kind === 'spend') return 'low_confidence'

@@ -241,3 +241,59 @@ describe('validation', () => {
     expect(p.txns[0]).toMatchObject({ kind: 'loan_payment', principalCents: 25_000, interestCents: 5000, bankRef: 'R-1' })
   })
 })
+
+describe('shapes seen on real statements (made-up names): one key per merchant, rules that can answer', () => {
+  type SeedRule = Omit<MerchantRule, 'id' | 'source' | 'active'>
+  const rl = (merchantKey: string, over: Partial<SeedRule> = {}): SeedRule =>
+    ({ merchantKey, storeNo: null, accountId: null, amountMinCents: null, amountMaxCents: null, setCategoryId: null, setKind: null,
+      debtAccountId: null, displayName: null, confidence: 90, review: false, reviewReason: null, ...over })
+  const run = (rows: ReturnType<typeof row>[], rules: SeedRule[] = []) =>
+    planImport({ importId: 'shapes', sourceLabel: 's', seed: { rules }, statements: [{ accountId: 'chk-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows }] }, emptyContext(), 'u', NOW)
+
+  it('card swipes with and without a time, and with a credit, share the merchant key and keep the store number', async () => {
+    const p = await run([
+      row('2026-11-03', -1500, 'POINT OF SALE DEBIT L123 DATE 11-03 BRAMBLEWOOD MARKET #0412 SPRINGFIELD NC'),
+      row('2026-11-04', -2500, 'POINT OF SALE DEBIT L124 TIME 03.02 PM DATE 11-04 BRAMBLEWOOD MARKET #0412 SPRINGFIELD NC'),
+      row('2026-11-05', 700, 'POINT OF SALE CREDIT L123 DATE 11-05 BRAMBLEWOOD MARKET #0412 SPRINGFIELD NC'),
+    ])
+    expect(p.txns.map((t) => t.merchantKey)).toEqual(['bramblewood-market', 'bramblewood-market', 'bramblewood-market'])
+    expect(p.txns.map((t) => t.storeNo)).toEqual(['0412', '0412', '0412'])
+    expect(p.txns.map((t) => t.kind)).toEqual(['spend', 'spend', 'refund'])
+    expect(p.txns[0].txnDate).toBe('2026-11-03')
+  })
+
+  it('a rule on an aggregator-prefixed key clears the hidden-merchant flag; without a rule the flag stays', async () => {
+    const lines = [row('2026-11-03', -1500, 'POINT OF SALE DEBIT L123 DATE 11-03 PAYPAL *EXAMPLE4US 402-555-0100')]
+    // The merchant after the processor prefix is visible, so it is not hidden (it is only uncategorised).
+    expect((await run(lines)).txns[0]).toMatchObject({ merchantKey: 'example4us', reviewReason: 'low_confidence' })
+    const hidden = row('2026-11-04', -1500, 'POINT OF SALE DEBIT L123 DATE 11-04 SQ *')
+    expect((await run([hidden])).txns[0]).toMatchObject({ merchantKey: 'sq', needsReview: true, reviewReason: 'hidden_merchant' })
+    expect((await run([hidden], [rl('sq', { setCategoryId: 'shopping' })])).txns[0]).toMatchObject({ needsReview: false, categoryId: 'shopping' })
+  })
+
+  it('per-payee person-to-person keys take a rule each; an unknown payee is still hidden', async () => {
+    const p = await run([
+      row('2026-11-03', -2000, 'POINT OF SALE DEBIT L123 VENMO *PAT EXAMPLEVISA DIRECTNY'),
+      row('2026-11-04', -3000, 'POINT OF SALE DEBIT L123 VENMO *LEE SAMPLEVISA DIRECTNY'),
+    ], [rl('venmo-pat', { setCategoryId: 'kids', displayName: 'Lessons' })])
+    expect(p.txns[0]).toMatchObject({ merchantKey: 'venmo-pat', merchantName: 'Lessons', categoryId: 'kids', needsReview: false })
+    expect(p.txns[1]).toMatchObject({ merchantKey: 'venmo-lee', needsReview: true, reviewReason: 'hidden_merchant' })
+  })
+
+  it('a toll-free-style name keeps its name', async () => {
+    const p = await run([row('2026-11-03', -2000, 'POINT OF SALE DEBIT L123 DATE 11-03 1-800-EXAMPLE.COM')])
+    expect(p.txns[0].merchantKey).toBe('1800examplecom')
+  })
+
+  it('a branch TRFR to an own account is a transfer; to an unknown account it is flagged, keyed by that account, and a rule can answer it', async () => {
+    const own = await run([row('2026-11-03', -5000, 'BRANCH TRFR TO DDA X0002')])
+    expect(own.txns[0]).toMatchObject({ kind: 'transfer', merchantKey: 'branch-trfr-to', needsReview: false })
+    const unknown = await run([row('2026-11-03', -5000, 'BRANCH TRFR TO DDA X0099'), row('2026-11-04', -5000, 'BRANCH TRFR TO DDA X0098')])
+    expect(unknown.txns.map((t) => t.merchantKey)).toEqual(['branch-trfr-to-0099', 'branch-trfr-to-0098'])
+    expect(unknown.txns.every((t) => t.needsReview && t.reviewReason === 'transfer_to_unknown_account')).toBe(true)
+    const ruled = await run([row('2026-11-03', -5000, 'BRANCH TRFR TO DDA X0099'), row('2026-11-04', -5000, 'BRANCH TRFR TO DDA X0098')],
+      [rl('branch-trfr-to-0099', { setKind: 'spend', setCategoryId: 'support', displayName: 'Support' })])
+    expect(ruled.txns[0]).toMatchObject({ kind: 'spend', categoryId: 'support', merchantName: 'Support', needsReview: false })
+    expect(ruled.txns[1]).toMatchObject({ kind: 'transfer_external', needsReview: true })
+  })
+})

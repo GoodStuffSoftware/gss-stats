@@ -55,3 +55,34 @@ describe('normalizeDescription', () => {
     }
   })
 })
+
+describe('normalizeDescription: card-swipe boilerplate, glued phones, bare store marker', () => {
+  it('strips the point-of-sale prefix, terminal code and a 12-hour time, keeping the purchase date', () => {
+    const a = norm('POINT OF SALE DEBIT L123 DATE 06-03 BRAMBLEWOOD MARKET #12 SPRINGFIELD')
+    expect(a.clean).toBe('BRAMBLEWOOD MARKET')
+    expect(a.purchaseMmdd).toBe('06-03')
+    expect(a.storeNo).toBe('12')
+    const b = norm('POINT OF SALE DEBIT L456 TIME 03.02 PM DATE 06-03 QUILLFEATHER CAFE')
+    expect(b.clean).toBe('QUILLFEATHER CAFE')
+    expect(b.purchaseMmdd).toBe('06-03')
+    expect(norm('POINT OF SALE DEBIT L456 TIME 11.40 AM DATE 06-03 QUILLFEATHER CAFE').clean).toBe('QUILLFEATHER CAFE')
+  })
+  it('turns a point-of-sale credit into a refund lead word', () => {
+    expect(norm('POINT OF SALE CREDIT L123 DATE 06-04 BRAMBLEWOOD MARKET').clean).toBe('REFUND BRAMBLEWOOD MARKET')
+  })
+  it('drops a terminal code that follows another label, but not a store code elsewhere', () => {
+    expect(norm('ONLINE TRANSFER CREDIT L123 TIME 09.15 AM').clean).toBe('ONLINE TRANSFER CREDIT')
+    expect(norm('PLANT L123 SUPPLY').clean).toBe('PLANT L123 SUPPLY')
+  })
+  it('drops a phone number glued to the last letters of the name', () => {
+    expect(norm('PAYPAL *EXAMPLECLOUD402-555-0100').clean).toBe('PAYPAL *EXAMPLECLOUD')
+    expect(norm('QUILLFEATHER CAFE555-123-4567').clean).toBe('QUILLFEATHER CAFE')
+  })
+  it('a "#" with no number starts the location, so the name is the same with and without it', () => {
+    const a = norm('DEPOT-Y # SPRINGFIELD NC')
+    expect(a.clean).toBe('DEPOT-Y')
+    expect(a.location).toBe('SPRINGFIELD NC')
+    expect(a.storeNo).toBeNull()
+    expect(norm('DEPOT-Y').clean).toBe('DEPOT-Y')
+  })
+})

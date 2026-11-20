@@ -9,7 +9,7 @@ import type {
 import { TXN_KINDS } from './types'
 import { maskDigits } from './mask'
 import { normalizeDescription } from './normalize'
-import { merchantKey } from './merchant'
+import { merchantKey, withCounterparty } from './merchant'
 import { inferYear, isIsoDate } from './dates'
 import { dedupeKey, occurrences } from './dedupe'
 import { classifyKind } from './kind'
@@ -104,13 +104,14 @@ export async function planImportDetailed(req: ImportRequest, ctx: PlanContext, w
       if (known.has(id)) { duplicates++; continue }
       known.add(id)
 
-      const mk = merchantKey(n.clean)
       const guess = classifyKind(n, row.amountCents, account, accounts, row.kindHint)
+      const counterpartyKnown = n.counterpartyLast4 !== null && accounts.some((a) => a.id !== account.id && a.last4 === n.counterpartyLast4)
+      let mk = merchantKey(n.clean)
+      if (guess.kind === 'transfer_external' && n.counterpartyLast4 && !counterpartyKnown) mk = withCounterparty(mk, n.counterpartyLast4)
       const input: RuleInput = { accountId: st.accountId, merchantKey: mk.key, storeNo: n.storeNo, amountCents: row.amountCents }
       const cat = categorize(input, rules, { kind: guess.kind, kindSource: guess.source, kindConfidence: guess.confidence, categoryId: autoCategory(n.clean) ?? (guess.kind === 'fee' ? 'fees' : null) })
       const split = storeSplitReview(input, cat.rule, rules)
       const confidence = clamp(cat.confidence + split.confidenceDelta)
-      const counterpartyKnown = n.counterpartyLast4 !== null && accounts.some((a) => a.id !== account.id && a.last4 === n.counterpartyLast4)
       const flags = reviewFlags({ ...cat, ...input, confidence, split, aggregator: mk.aggregator, counterpartyLast4: n.counterpartyLast4,
         counterpartyKnown, postedDate: row.postedDate }, { sameDayAmounts: seenKeys })
 

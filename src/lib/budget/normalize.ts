@@ -40,6 +40,12 @@ export function normalizeDescription(raw: string): NormalizedDesc {
   let storeNo: string | null = null
   let location: string | null = null
 
+  // Card-swipe prefix `POINT OF SALE DEBIT|CREDIT L### ...`: the terminal code goes, a credit line becomes a
+  // REFUND lead word (merchantKey drops it; classifyKind reads it), and the rest of the line is the merchant.
+  s = s.replace(/\bPOINT OF SALE\s+CREDIT\b(?:\s+L\d{2,4}\b)?/g, ' REFUND ')
+    .replace(/\bPOINT OF SALE\b(?:\s+DEBIT\b)?(?:\s+L\d{2,4}\b)?/g, ' ')
+    .replace(/\bL\d{3}\b(?=\s+(?:TIME|DATE)\b)/g, ' ')
+
   // Counterparty account: masked (X1234, XXXX1234, ****1234, •1234), "ENDING IN 1234", or spelled out.
   s = take(s, /(?:[^A-Z0-9]|^)(?:X+|[*•]+)(\d{4})(?!\d)/, (m) => { counterpartyLast4 = m[1] })
   if (!counterpartyLast4) s = take(s, /\bENDING(?: IN)?\s*(\d{4})(?!\d)/, (m) => { counterpartyLast4 = m[1] })
@@ -55,7 +61,7 @@ export function normalizeDescription(raw: string): NormalizedDesc {
   s = take(s, /\b(?:CONF(?:IRMATION)?|REF(?:ERENCE)?)\s*(?:NO\.?|NUM(?:BER)?|#)?\s*[:#]?\s*([A-Z0-9]*\d[A-Z0-9]*)\b/, (m) => { confirmation = m[1] })
 
   // Times, embedded dates, ACH trace and id runs.
-  s = s.replace(/\bTIME\s*\d{1,2}[.:]\d{2}(?:[.:]\d{2})?\b/g, ' ')
+  s = s.replace(/\bTIME\s*\d{1,2}[.:]\d{2}(?:[.:]\d{2})?(?:\s*[AP]M\b)?/g, ' ')
     .replace(/\bAT\s*\d{1,2}:\d{2}\b/g, ' ')
     .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
     .replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, ' ')
@@ -75,6 +81,7 @@ export function normalizeDescription(raw: string): NormalizedDesc {
 
   // Phone and domain tails, then any other long digit run (ids).
   s = s.replace(/\(\d{3}\)\s?\d{3}-\d{4}/g, ' ')
+    .replace(/(?<=[A-Z])\d{3}[-. ]\d{3}[-. ]\d{4}\b/g, ' ') // a phone number glued to the last letters of the name
     .replace(/\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/g, ' ')
     .replace(/\b\d{6,}\b/g, ' ')
   s = s.replace(/\s+/g, ' ').trim()
@@ -87,6 +94,12 @@ export function normalizeDescription(raw: string): NormalizedDesc {
     const before = s.slice(0, sm.index).trim()
     const after = s.slice(sm.index + sm[0].length).trim()
     if (before) { s = before; location = after || null } else s = after
+  } else if (s.indexOf('#') > 0) {
+    // A store marker without a number ("NAME # CITY ST"): what follows is the location, not part of the name.
+    const at = s.indexOf('#')
+    const after = s.slice(at + 1).trim()
+    s = s.slice(0, at).trim()
+    location = after || null
   } else {
     // Trailing state code: the word before it is taken as the city when enough words remain.
     const words = s.split(' ')

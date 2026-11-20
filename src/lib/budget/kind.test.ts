@@ -68,3 +68,15 @@ describe('classifyKind: loans and hints', () => {
     expect(SPENDING_KINDS).toContain(k('RETURN OF GOODS', 900, 'card-a').kind)
   })
 })
+
+describe('classifyKind: TRFR wording and swipe credits', () => {
+  it('a TRFR line is a transfer like TRANSFER and TFR', () => {
+    expect(k('BRANCH TRFR TO DDA X0002', -5000, 'chk-a').kind).toBe('transfer')
+    expect(k('BRANCH TRFR TO DDA X9999', -5000, 'chk-a').kind).toBe('transfer_external')
+    expect(k('TRFR FROM X0002', 5000, 'chk-a').kind).toBe('transfer')
+  })
+  it('a point-of-sale credit reads as a refund, also without a purchase date', () => {
+    expect(k('POINT OF SALE CREDIT L123 BRAMBLEWOOD MARKET', 1200, 'chk-a').kind).toBe('refund')
+    expect(k('POINT OF SALE DEBIT L123 BRAMBLEWOOD MARKET', -1200, 'chk-a').kind).toBe('spend')
+  })
+})

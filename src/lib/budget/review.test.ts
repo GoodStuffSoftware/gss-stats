@@ -43,6 +43,13 @@ describe('reviewFlags', () => {
     expect(reviewFlags({ ...everything, rule: null, split: { confidenceDelta: 0, reason: null } }, none).reason).toBe('hidden_merchant')
     expect(reviewFlags({ ...everything, rule: null, split: { confidenceDelta: 0, reason: null }, aggregator: false }, none).reason).toBe('low_confidence')
   })
+  it('a rule that matched answers a hidden merchant (no flag); a rule with review set still flags', () => {
+    const plain = rules.find((x) => !x.review)!
+    expect(reviewFlags(base({ aggregator: true, rule: plain }), none)).toEqual({ needsReview: false, reason: null })
+    expect(reviewFlags(base({ aggregator: true, rule: null }), none).reason).toBe('hidden_merchant')
+    const r = rules.find((x) => x.review)!
+    expect(reviewFlags(base({ aggregator: true, rule: r }), none).needsReview).toBe(true)
+  })
   it('a hidden merchant matters only where it is spending', () => {
     expect(reviewFlags(base({ aggregator: true, kind: 'income' }), none).reason).toBeNull()
   })
