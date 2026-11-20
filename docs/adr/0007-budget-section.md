@@ -47,8 +47,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    - Real data is loaded from a private folder outside any git work tree (the load tool refuses an
      output path inside one) as a SQL file run once with `wrangler d1 execute --file`. That file is
      the backup of the load.
-   - Account numbers are masked at the edge: any run of five or more digits is shortened to a bullet
-     and its last four before storage, `accounts.last4` holds four digits and nothing longer, and
+   - Account numbers are masked at the edge: any run of five or more digits, and any number printed
+     in groups joined by single spaces or dashes with nine or more digits in all (dates, phone numbers
+     and short reference numbers stay), is shortened to a bullet and its last four before storage, `accounts.last4` holds four digits and nothing longer, and
      descriptions are stored masked.
    - `.gitignore` blocks statement files (`*.pdf`, `*.ofx`, `*.qfx`, `*.qbo`, `*.csv`,
      `*.budget.json`, `*.budget.sql`, `budget-data/`, `statements/`), and `.gitleaks.toml` has a rule

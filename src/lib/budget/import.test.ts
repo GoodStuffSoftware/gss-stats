@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { ImportError, extendContext, planImport, planImportDetailed } from './import'
 import { ACCOUNTS, CARD_ROWS, CHECKING_ROWS, SEED, emptyContext, row, seedRules, syntheticRequest } from './__fixtures__/synthetic'
+import { dedupeKey } from './dedupe'
 import { hasLongDigitRun } from './mask'
+import { normalizeDescription } from './normalize'
 import { SPENDING_KINDS, type ImportRequest, type MerchantRule, type TxnInsert } from './types'
 
 const NOW = '2026-12-05T10:00:00.000Z'
@@ -31,6 +33,20 @@ describe('planImport on the synthetic statements', () => {
     const p = await plan()
     for (const t of p.txns) expect(hasLongDigitRun(t.description)).toBe(false)
     expect(find(p.txns, 'chk-a', '2026-11-10', 250_000).description).toBe('PAYROLL EXAMPLE EMPLOYER ID: •3210')
+  })
+
+  it('masks a grouped account number in the stored description and leaves the id and merchant alone', async () => {
+    const one = (desc: string): ImportRequest => ({ importId: 'imp-g', sourceLabel: 's', seed: SEED, statements: [
+      { accountId: 'chk-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [row('2026-11-12', -700, desc)] }] })
+    const grouped = (await plan(one('PAYMENT TO ACCT 1234 5678 9012 3456'))).txns[0]
+    expect(grouped.description).toBe('PAYMENT TO ACCT •3456')
+    expect(grouped.description).not.toMatch(/1234|5678|9012/)
+    // The id and merchant come from the normalized text, not the stored description: masking changes neither.
+    const expected = await dedupeKey({ accountId: 'chk-a', postedDate: '2026-11-12', amountCents: -700,
+      clean: normalizeDescription('PAYMENT TO ACCT 1234 5678 9012 3456').clean, occurrence: 0 })
+    expect(grouped.id).toBe(expected)
+    expect(grouped.merchantKey).not.toMatch(/\d/)
+    expect(grouped.merchantName).not.toMatch(/\d/)
   })
 
   it('numbers same-day repeats so they get distinct ids', async () => {
