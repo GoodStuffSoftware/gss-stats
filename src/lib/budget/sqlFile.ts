@@ -3,6 +3,7 @@
 // row). D1 limits: 100 KB per statement; this renderer throws rather than emit a bigger one. Values are
 // literals, so strings are quoted here and numbers must be safe integers; nothing is spliced unchecked.
 import type { Account, Category, ImportPlan, MerchantRule, Person, StatementFacts, TxnInsert } from './types'
+import { REKIND_ON_PAIR } from './pairing'
 
 /** D1 allows 100 KB per statement; stay a little under. */
 export const MAX_STATEMENT_BYTES = 100_000
@@ -23,8 +24,8 @@ export function sqlInt(v: number | null | undefined): string {
 const sqlBool = (v: boolean): string => (v ? '1' : '0')
 const list = (xs: Array<string>): string => xs.join(', ')
 
-/** Kinds a pair turns into 'transfer' (must match pairing.ts REKIND_ON_PAIR). */
-const REKIND = `('spend','transfer_external')`
+/** Kinds a pair turns into 'transfer': the planner's list (pairing.ts REKIND_ON_PAIR), as SQL. */
+const REKIND = `(${REKIND_ON_PAIR.map((k) => sqlStr(k)).join(',')})`
 const REKIND_REVIEW = `('low_confidence','transfer_to_unknown_account','hidden_merchant')`
 
 function personSql(p: Person, i: number): string {

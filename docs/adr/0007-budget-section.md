@@ -50,8 +50,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    - Account numbers are masked at the edge: any run of five or more digits, and any number printed
      in groups joined by single spaces, dashes or slashes with nine or more digits in all, is
      shortened to a bullet and its last four before storage. Dates (`2026-11-20`, `11-20-26`,
-     `11/20/2026`, `11-28`), a phone number standing alone and short reference numbers stay, even
-     next to a long number (`STORE 0412 2026-11-20` keeps both); a long number is masked even when
+     `11/20/2026`, `11-28`, and two of them joined by a dash as a period), a phone number standing
+     alone and short reference numbers stay, even next to a long number (`STORE 0412 2026-11-20`
+     keeps both). Groups joined by dots stay as written. A long number is masked even when
      its start looks like a date or a phone number. `accounts.last4` holds four digits and nothing
      longer, and descriptions are stored masked.
    - `.gitignore` blocks statement files (`*.pdf`, `*.ofx`, `*.qfx`, `*.qbo`, `*.csv`,

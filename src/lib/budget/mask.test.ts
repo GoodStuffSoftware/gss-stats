@@ -34,6 +34,13 @@ describe('maskDigits', () => {
     expect(maskDigits('STORE 0412 11/20/2026 AT 0033')).toBe('STORE 0412 11/20/2026 AT 0033')
     expect(maskDigits('2026-11-20 2026-11-21 0412')).toBe('2026-11-20 2026-11-21 0412')
   })
+  it('keeps a period written as two dates joined by a dash, but not a date joined to a number', () => {
+    for (const s of ['FEE PERIOD 10/21/2026-11/20/2026', 'FEE PERIOD 10/21/26-11/20/26', 'PERIOD 2026-10-21-2026-11-20', 'PERIOD 11/28-12/05']) {
+      expect(maskDigits(s), s).toBe(s)
+    }
+    expect(maskDigits('PERIOD 2026-10-21-2026-11-20 ACCT 1234 5678 9012')).toBe('PERIOD 2026-10-21-2026-11-20 ACCT •9012')
+    expect(maskDigits('REF 12/25/2026-1234')).toBe('REF •1234')
+  })
   it('masks a long number next to a date and keeps the date', () => {
     expect(maskDigits('ACCT 4000 0000 0000 0002 2026-11-20')).toBe('ACCT •0002 2026-11-20')
     expect(maskDigits('11-28 4000 0000 0000 0002')).toBe('11-28 •0002')

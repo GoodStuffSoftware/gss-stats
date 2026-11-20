@@ -19,22 +19,35 @@ const monthDay = (a: string, b: string): boolean => isMonthDay(a, b) || isMonthD
 const isYear = (g: string): boolean => g.length === 2 || (g.length === 4 && /^(19|20)/.test(g))
 const dateSep = (s: string): boolean => s === '-' || s === '/'
 
-/** How many groups, starting at group `i`, form a date that stands alone (a space or nothing on each
- *  side, never a dash or slash that would make it part of a longer number); 0 when none does.
+/** How many groups, starting at group `i`, read as a date; 0 when none do.
  *  `YYYY-MM-DD`, `MM-DD-YY(YY)` and `MM/DD/YY(YY)` (day and month either way round) and `MM-DD`. */
 function dateLength(g: string[], s: string[], i: number): number {
-  const standsAlone = (len: number): boolean => (i === 0 || s[i - 1] === ' ') && (i + len >= g.length || s[i + len - 1] === ' ')
   if (i + 2 < g.length) {
     const iso = s[i] === '-' && s[i + 1] === '-' && /^(19|20)\d\d$/.test(g[i]) && g[i + 1].length === 2 && g[i + 2].length === 2
     const us = dateSep(s[i]) && s[i] === s[i + 1] && g[i].length <= 2 && g[i + 1].length <= 2 && isYear(g[i + 2])
-    if ((iso && monthDay(g[i + 1], g[i + 2])) || (us && monthDay(g[i], g[i + 1]))) {
-      if (standsAlone(3)) return 3
-    }
+    if ((iso && monthDay(g[i + 1], g[i + 2])) || (us && monthDay(g[i], g[i + 1]))) return 3
   }
-  if (i + 1 < g.length && dateSep(s[i]) && g[i].length <= 2 && g[i + 1].length <= 2 && monthDay(g[i], g[i + 1])) {
-    if (standsAlone(2)) return 2
-  }
+  if (i + 1 < g.length && dateSep(s[i]) && g[i].length <= 2 && g[i + 1].length <= 2 && monthDay(g[i], g[i + 1])) return 2
   return 0
+}
+
+/** The groups that belong to a date standing alone: a space or nothing on each side, or one dash or
+ *  slash to another date (a period `2026-10-21-2026-11-20`, `10/21/26-11/20/26`). A date that a dash or
+ *  slash joins to anything else is part of a longer number and is not kept. */
+function dateGroups(g: string[], s: string[]): boolean[] {
+  const found: Array<{ start: number; end: number }> = [] // [start, end) in groups
+  for (let i = 0; i < g.length; ) {
+    const len = dateLength(g, s, i)
+    if (len) found.push({ start: i, end: i + len })
+    i += len || 1
+  }
+  const keep = g.map(() => false)
+  found.forEach((d, k) => {
+    const before = d.start === 0 || s[d.start - 1] === ' ' || (found[k - 1]?.end === d.start)
+    const after = d.end >= g.length || s[d.end - 1] === ' ' || (found[k + 1]?.start === d.end)
+    if (before && after) for (let j = d.start; j < d.end; j++) keep[j] = true
+  })
+  return keep
 }
 
 /** A lone phone number: groups of 3-3-4, or 1-3-3-4, joined by spaces or dashes. */
@@ -47,12 +60,7 @@ function isPhone(groups: string[], seps: string[]): boolean {
 function maskRun(run: string): string {
   const groups = run.split(/[ /-]/)
   const seps = run.match(/[ /-]/g) ?? []
-  const keep = groups.map(() => false) // part of a date: left as written
-  for (let i = 0; i < groups.length; ) {
-    const len = dateLength(groups, seps, i)
-    for (let k = 0; k < len; k++) keep[i + k] = true
-    i += len || 1
-  }
+  const keep = dateGroups(groups, seps) // part of a date: left as written
   let out = ''
   for (let i = 0; i < groups.length; ) {
     if (keep[i]) {

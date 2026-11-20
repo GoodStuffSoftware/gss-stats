@@ -108,6 +108,11 @@ describe('isBudgetPath', () => {
       '/api/budget/../config',
       '/api/config/../budget/x',
       '/api/budget/..',
+      // One decode step leaves /api/budget while the last step stays in (a later decode adds segments,
+      // so the `..` pops less there).
+      '/api/budget%252fx%2f..%2fconfig',
+      '/api/budget%255cx%5c..%5cconfig',
+      '/api/budget/%2e%2e/config',
       '/api/%E0%A4%A',
       '/api/%25%25%25%25/x',
       '/api/config%ZZ',
@@ -126,6 +131,8 @@ describe('isBudgetPath', () => {
       '/api/budget/..%5cconfig',
       '/api/budget/../config',
       '/api/config/../budget/x',
+      '/api/budget%252fx%2f..%2fconfig',
+      '/api/budget%255cx%5c..%5cconfig',
     ]) {
       expect(isBudgetPath(p), p).toBe(true)
     }
@@ -210,6 +217,8 @@ describe('a listed viewer writes under budget only', () => {
         '/api/budget/%252e%252e/config',
         '/api/config/..%2fbudget/x',
         '/api/budget/..%5cconfig',
+        '/api/budget%252fx%2f..%2fconfig',
+        '/api/budget%255cx%5c..%5cconfig',
       ]) {
         const r = await gate(path, method, 'viewerListed')
         expect(r.res.status, `${method} ${path}`).toBe(403)

@@ -237,8 +237,10 @@ the secret `BUDGET_ALLOWED_EMAILS` (comma-separated, exact and case-insensitive 
   and resolved; a path that will not decode counts as budget. So `/api/Budget`, `//`, `%62udget`,
   `budget%2Fmeta` and the bare `/api/budget` are all gated. The write lift for a listed viewer asks
   for the opposite: `isResolvedBudgetPath` needs the path to decode and BOTH readings (dot segments
-  as written, and resolved) to sit under `/api/budget`, so `/api/budget/..%2fconfig` is gated but
-  gets no write.
+  as written, and resolved) to sit under `/api/budget`, for the fully decoded path and for every
+  earlier decode step that has no `%` left in it, so `/api/budget/..%2fconfig` and
+  `/api/budget%252fx%2f..%2fconfig` are gated but get no write. A spelling that is under budget
+  only once decoded (`%62udget`) still lifts.
 - **Two layers.** The root gate (`functions/_lib/auth.ts`) and a scoped middleware
   (`functions/api/budget/_middleware.ts`, via `functions/_lib/budgetAccess.ts`) each check the list
   from the request; a catch-all `functions/api/budget/[[path]].ts` answers 404 for unknown budget

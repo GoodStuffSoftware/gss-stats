@@ -217,36 +217,64 @@ export function isBudgetPath(pathname: string): boolean {
   return budgetPathReading(pathname) !== 'no'
 }
 
-/** The LIFT side: true only when the path decoded AND every reading (dot segments as written, and
- *  resolved) sits under /api/budget. The one thing that lifts the view-only rule for a listed
- *  viewer. A path that will not decode, or whose readings disagree (`/api/budget/..%2fconfig`
- *  resolves to /api/config), never does, so no spelling gets a viewer's write to a non-budget
- *  Function behind a layer that decodes or resolves differently (fail closed). */
+/** The LIFT side: true only when the path decoded AND every reading sits under /api/budget: the
+ *  fully decoded path with dot segments as written and resolved, and the same two readings of
+ *  every earlier decode step that has no escape left in it (a step that still holds a %XX is not
+ *  a spelling any router has finished reading). The one thing that lifts the view-only rule for
+ *  a listed viewer. A path that will not decode, or whose readings disagree
+ *  (`/api/budget/..%2fconfig` resolves to /api/config; `/api/budget%252fx%2f..%2fconfig` does
+ *  after one decode), never does, so no spelling gets a viewer's write to a non-budget Function
+ *  behind a layer that decodes or resolves differently (fail closed). A spelling that is under
+ *  budget only once decoded (`/api/%62udget/x`) still lifts. */
 export function isResolvedBudgetPath(pathname: string): boolean {
   return budgetPathReading(pathname) === 'all'
 }
 
 type BudgetReading = 'all' | 'some' | 'undecodable' | 'no'
 
+/** WHATWG URL reads `%2e` as a dot in a dot segment. */
+const DOT_SEGMENT = /^(?:\.|%2e)$/
+const DOT_DOT_SEGMENT = /^(?:\.|%2e){2}$/
+
+/** One reading of a path: lower-cased, backslashes as slashes, slashes collapsed. `flat` keeps dot
+ *  segments as written, `resolved` resolves them. */
+function readPath(p: string): { flat: string; resolved: string } {
+  const flat = p.toLowerCase().replace(/[\\]/g, '/').replace(/\/{2,}/g, '/')
+  const out: string[] = []
+  for (const seg of flat.split('/')) {
+    if (seg === '' || DOT_SEGMENT.test(seg)) continue
+    if (DOT_DOT_SEGMENT.test(seg)) out.pop()
+    else out.push(seg)
+  }
+  return { flat, resolved: '/' + out.join('/') }
+}
+
 function budgetPathReading(pathname: string): BudgetReading {
   let p = pathname
+  const earlier: string[] = [] // every decode step before the last
   try {
-    for (let i = 0; i < 3 && /%/.test(p); i++) p = decodeURIComponent(p)
+    for (let i = 0; i < 3 && /%/.test(p); i++) {
+      earlier.push(p)
+      p = decodeURIComponent(p)
+    }
     if (/%/.test(p)) return 'undecodable' // still escaped after three rounds: not a spelling we trust
   } catch {
     return 'undecodable'
   }
-  const flat = p.toLowerCase().replace(/[\\]/g, '/').replace(/\/{2,}/g, '/')
-  const resolved: string[] = []
-  for (const seg of flat.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') resolved.pop()
-    else resolved.push(seg)
+  const last = readPath(p)
+  const asWritten = underBudget(last.flat) // what a router that does not resolve dot segments sees
+  const asResolved = underBudget(last.resolved) // what one that does sees
+  if (!asWritten && !asResolved) return 'no'
+  if (!asWritten || !asResolved) return 'some'
+  // An earlier step can leave /api/budget while the last stays in (a later decode adds segments, so a
+  // `..` pops less there): a reading with no escape left in it that is not under budget.
+  for (const step of earlier) {
+    const r = readPath(step)
+    for (const reading of [r.flat, r.resolved]) {
+      if (!reading.includes('%') && !underBudget(reading)) return 'some'
+    }
   }
-  const asWritten = underBudget(flat) // what a router that does not resolve dot segments sees
-  const asResolved = underBudget('/' + resolved.join('/')) // what one that does sees
-  if (asWritten && asResolved) return 'all'
-  return asWritten || asResolved ? 'some' : 'no'
+  return 'all'
 }
 
 function underBudget(p: string): boolean {
