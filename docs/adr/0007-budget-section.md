@@ -69,8 +69,8 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    payment) is not spending: it shows in the debt view per period, because treating card interest as
    spending but loan interest as not would be inconsistent. Interest earned is income. Bank fees stay
    in the spending pie.
-7. **No import button in v1.** The import API (`POST /api/budget/import`) and the private tool stay;
-   the first load and later ones are the private SQL file. An in-browser statement parser would mean
+7. **No import button and no import route in v1.** The private load tool (`npm run budget:load-sql`)
+   is the only way in; the first load and later ones are the private SQL file. An in-browser statement parser would mean
    a PDF library and an institution-specific layout parser in a public repository. A CSV or OFX
    import can be added later if a bank offers one.
 

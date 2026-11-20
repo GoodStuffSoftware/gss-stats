@@ -136,6 +136,32 @@ describe('the SQL against the real migration (local SQLite)', () => {
     expect((db.prepare('SELECT pair_id AS p FROM transactions WHERE id = ?').get(spend.id) as { p: string }).p).toBe(other.id)
   })
 
+  it('a later load never pairs away a hand-edited category: loaded unpaired, edited, partner arrives later', async () => {
+    const first: ImportRequest = { importId: 'imp-1', sourceLabel: 's', seed: SEED, statements: [
+      { accountId: 'chk-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [row('2026-11-14', -50_000, 'SOME SHOP PURCHASE')] }] }
+    const both: ImportRequest = { importId: 'imp-2', sourceLabel: 's', seed: SEED, statements: [
+      ...first.statements,
+      { accountId: 'sav-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [row('2026-11-14', 50_000, 'TRANSFER FROM CHECKING X0001')] }] }
+    const p1 = await plan(first)
+    const db = freshDb()
+    db.exec(renderPlanSql(p1))
+    const id = p1.txns[0].id
+    // A person sets the category in the table: category_source 'manual', kind_source untouched ('auto').
+    db.prepare("UPDATE transactions SET category_id = 'gifts', category_source = 'manual', note = 'mine' WHERE id = ?").run(id)
+    const before = db.prepare('SELECT kind, kind_source AS ks, category_id AS c, category_source AS cs, pair_id AS p, note FROM transactions WHERE id = ?').get(id)
+    expect(before).toMatchObject({ ks: 'auto', c: 'gifts', cs: 'manual', p: null })
+    // The next load re-plans every file from an empty context, so it now pairs the edited row.
+    const p2 = await plan(both)
+    expect(p2.pairs).toHaveLength(1)
+    db.exec(renderPlanSql(p2))
+    expect(db.prepare('SELECT kind, kind_source AS ks, category_id AS c, category_source AS cs, pair_id AS p, note FROM transactions WHERE id = ?').get(id)).toEqual(before)
+    // The same row with an untouched category still pairs (the guard is the edit, not the row).
+    db.prepare("UPDATE transactions SET category_source = 'auto' WHERE id = ?").run(id)
+    db.exec(renderPlanSql(p2))
+    expect(db.prepare('SELECT kind, category_id AS c, category_source AS cs, pair_id AS p FROM transactions WHERE id = ?').get(id))
+      .toEqual({ kind: 'transfer', c: null, cs: 'none', p: p2.pairs[0].find((x) => x !== id) })
+  })
+
   it('pairs a new row with a row loaded earlier, and the second file leaves the first alone', async () => {
     const first: ImportRequest = { importId: 'imp-1', sourceLabel: 's', seed: SEED, statements: [
       { accountId: 'sav-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [row('2026-11-14', 50_000, 'TRANSFER FROM CHECKING X0001')] }] }

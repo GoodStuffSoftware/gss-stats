@@ -1,7 +1,7 @@
 // One statement package in, one ImportPlan out: normalize, key, classify, categorize, flag, de-duplicate
-// and pair. Pure and I/O-free (callers read the context and write the plan), so the Pages Function, the
-// local tool and the tests all run the same code. Errors name a statement or row index, never a
-// description or an amount.
+// and pair. Pure and I/O-free (callers read the context and write the plan), so the local load tool
+// (scripts/budget) and the tests run the same code; there is no import route in v1. Errors name a
+// statement or row index, never a description or an amount.
 import type {
   Account, Category, ImportPlan, ImportRequest, ImportRow, MerchantRule, PairCandidate, PlanContext, Person, StatementFacts,
   TxnInsert,

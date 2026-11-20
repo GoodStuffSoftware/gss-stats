@@ -1,4 +1,4 @@
-// An ImportPlan as literal SQL for `wrangler d1 execute --file`: the same writes the import API makes.
+// An ImportPlan as literal SQL for `wrangler d1 execute --file`: the only load path in v1 (there is no import route).
 // One statement per row, every one idempotent (a second run inserts nothing and never touches an edited
 // row). D1 limits: 100 KB per statement; this renderer throws rather than emit a bigger one. Values are
 // literals, so strings are quoted here and numbers must be safe integers; nothing is spliced unchecked.
@@ -89,10 +89,11 @@ function txnSql(t: TxnInsert): string {
 }
 
 /**
- * One side of a pair. Never touches a row that is already paired or whose kind_source is 'manual' or
- * 'rule'. A row taken for spending or for an outside payee becomes a plain transfer, leaves its
- * category and drops the review reasons the pairing answered. The server leg's executePlan must run
- * the same statement (planParity test).
+ * One side of a pair. Never touches a row that is already paired, whose kind_source is 'manual' or
+ * 'rule', or whose category was set by hand (category_source 'manual'): a later load starts from an
+ * empty context and re-plans every file, so this guard is what protects an edit made since. A row
+ * taken for spending or for an outside payee becomes a plain transfer, leaves its category and drops
+ * the review reasons the pairing answered.
  */
 export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, updatedBy: string): string {
   const re = `kind IN ${REKIND}`
@@ -104,7 +105,7 @@ export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, 
     `review_reason = CASE WHEN ${re} AND review_reason IN ${REKIND_REVIEW} THEN NULL ELSE review_reason END, ` +
     `kind = CASE WHEN ${re} THEN 'transfer' ELSE kind END, ` +
     `updated_at = ${sqlStr(updatedAt)}, updated_by = ${sqlStr(updatedBy)} ` +
-    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule');`
+    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual';`
 }
 
 /** The statements of a plan, in an order that satisfies the foreign keys. */
