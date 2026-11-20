@@ -46,6 +46,10 @@ export const TABLE_MIN_WIDTH = 600
 // widgets). The parent owns the data: it passes `rows`, listens for `edit(rowKey, field, value)`, and decides what
 // to show (the new value at once, a revert, an error) through `rows` and `rowStatus`.
 //
+// Card labels: with `cardLabels` each value in a card carries its column's label above it (small, muted), and line 1
+// becomes a two-column grid. Without it (the default) a card shows bare values, which suits a few columns whose
+// meaning is plain from the value (a date, a name, a size); a table of figures that look alike needs the labels.
+//
 // Layout: `auto` draws a <table> when the component's own width is at least TABLE_MIN_WIDTH, otherwise a card
 // list (line 1: the line-1 columns; line 2: the editors at full width, 44 px tall touch targets). `table` and
 // `cards` force one. Width comes from a ResizeObserver on the component's root (window width until it is measured).
@@ -77,8 +81,10 @@ const props = withDefaults(
     loading?: boolean
     /** Accessible name of the table. */
     label?: string
+    /** Card layout: show each column's label above its value. */
+    cardLabels?: boolean
   }>(),
-  { editable: false, layout: 'auto', status: '', rowStatus: () => ({}), highlightKey: null, loading: false, label: '' },
+  { editable: false, layout: 'auto', status: '', rowStatus: () => ({}), highlightKey: null, loading: false, label: '', cardLabels: false },
 )
 
 const emit = defineEmits<{
@@ -311,14 +317,16 @@ function rowClass(row: R) {
     <!-- Card layout -->
     <ul v-else class="et-list" :aria-label="label || undefined">
       <li v-for="row in rows" :key="keyOf(row)" class="et-card" :data-row-key="keyOf(row)" :class="rowClass(row)" :aria-busy="disabledOf(row) || undefined">
-        <div class="et-line et-line1">
+        <div class="et-line et-line1" :class="{ 'et-labelled': cardLabels }">
           <span v-for="col in cardColumns(1)" :key="col.key" class="et-part" :class="{ 'et-end': col.align === 'end' }">
+            <span v-if="cardLabels" class="et-lab" data-testid="card-label">{{ col.label }}</span>
             <slot v-if="isEditable(col) && $slots['editor-' + col.key]" :name="'editor-' + col.key" v-bind="scopeOf(row, col)" />
             <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) }}</slot>
           </span>
         </div>
         <div v-if="cardColumns(2).length" class="et-line et-line2">
           <div v-for="col in cardColumns(2)" :key="col.key" class="et-field">
+            <span v-if="cardLabels" class="et-lab" data-testid="card-label">{{ col.label }}</span>
             <slot v-if="isEditable(col) && $slots['editor-' + col.key]" :name="'editor-' + col.key" v-bind="scopeOf(row, col)" />
             <select
               v-else-if="isEditable(col) && col.editor === 'select'"
@@ -521,6 +529,33 @@ function rowClass(row: R) {
 }
 .et-field {
   width: 100%;
+}
+/* Labelled cards: a two-column grid of "LABEL / value" pairs. */
+.et-line1.et-labelled {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  align-items: start;
+}
+.et-labelled .et-part,
+.et-labelled .et-part:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  min-width: 0;
+  text-align: left;
+}
+.et-lab {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--ink-3));
+}
+.et-field > .et-lab {
+  display: block;
+  margin-bottom: 2px;
 }
 .et-cards .et-select,
 .et-cards .et-input,

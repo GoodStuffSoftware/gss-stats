@@ -86,6 +86,14 @@ describe('DebtDetail: what it shows', () => {
     expect(text).toContain('$282.00')
   })
 
+  it('a statement period with nothing known is not a row; the debt tables keep their column labels on a phone', async () => {
+    route({ ...DETAIL, periods: [{ periodEnd: '2026-11-20', aprBp: null, interestCents: null, principalPaidCents: null, advancesCents: null }, ...DETAIL.periods] })
+    const w = await mountDetail()
+    expect(w.text()).not.toContain('Nov 20')
+    expect(w.text().match(/Sep 30|Oct 31/g)).toBeTruthy()
+    for (const t of w.findAllComponents({ name: 'EditableTable' })) expect(t.props('cardLabels')).toBe(true)
+  })
+
   it('back goes to the debts', async () => {
     const w = await mountDetail()
     await w.get('[data-testid="debt-back"]').trigger('click')

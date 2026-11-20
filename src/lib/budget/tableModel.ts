@@ -97,7 +97,7 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
   return [
     { key: 'postedDate', label: 'Date', editor: null, value: (t) => formatDate(t.postedDate) },
     { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
-    { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 0 },
+    { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
   ]

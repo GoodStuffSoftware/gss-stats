@@ -84,6 +84,27 @@ describe('EditableTable layout', () => {
     expect(tableSrc).toMatch(/\.et-cards \.et-select[^}]*min-height: 44px/s)
   })
 
+  it('cardLabels: every value in a card has its column label above it; off by default', async () => {
+    width = 400
+    const plain = await mountTable({ editable: false })
+    expect(plain.findAll('[data-testid="card-label"]')).toHaveLength(0)
+    plain.unmount()
+    const cols: EditableColumn<Row>[] = [
+      { key: 'name', label: 'Name', editor: null },
+      { key: 'size', label: 'Size', editor: null },
+      { key: 'note', label: 'Note', editor: null, cardLine: 2 },
+    ]
+    const w = await mountTable({ columns: cols, editable: false, cardLabels: true })
+    const card = w.get('li.et-card')
+    expect(card.findAll('.et-line1 [data-testid="card-label"]').map((l) => l.text())).toEqual(['Name', 'Size'])
+    expect(card.findAll('.et-line2 [data-testid="card-label"]').map((l) => l.text())).toEqual(['Note'])
+    expect(card.get('.et-line1').classes()).toContain('et-labelled')
+    // the table layout never repeats the labels per row (its header has them)
+    wrapper?.unmount()
+    width = 800
+    expect((await mountTable({ columns: cols, cardLabels: true })).findAll('[data-testid="card-label"]')).toHaveLength(0)
+  })
+
   it('a column can leave the card (cardLine 0) and pick its line', async () => {
     width = 400
     const cols: EditableColumn<Row>[] = [

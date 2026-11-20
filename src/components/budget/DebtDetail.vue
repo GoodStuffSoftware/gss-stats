@@ -86,6 +86,8 @@ const paymentColumns: EditableColumn<PaymentRow>[] = [
 ]
 const periodRows = computed<PeriodRow[]>(() =>
   [...(detail.value?.periods ?? [])]
+    // a period with nothing known (the newest one is often just a balance snapshot's date) is not a row
+    .filter((p) => p.aprBp !== null || p.interestCents !== null || p.principalPaidCents !== null || p.advancesCents !== null)
     .sort((a, b) => b.periodEnd.localeCompare(a.periodEnd))
     .map((p) => ({
       periodEnd: formatDate(p.periodEnd),
@@ -233,12 +235,12 @@ async function submit() {
 
       <section v-if="periodRows.length" class="dd-section" aria-label="Interest by period">
         <h3 class="dd-h3">Interest by statement</h3>
-        <EditableTable :columns="periodColumns" :rows="periodRows" row-key="periodEnd" label="Interest by statement" />
+        <EditableTable :columns="periodColumns" :rows="periodRows" row-key="periodEnd" label="Interest by statement" card-labels />
       </section>
 
       <section class="dd-section" aria-label="Payments">
         <h3 class="dd-h3">Payments</h3>
-        <EditableTable :columns="paymentColumns" :rows="paymentRows" row-key="id" label="Payments">
+        <EditableTable :columns="paymentColumns" :rows="paymentRows" row-key="id" label="Payments" card-labels>
           <template #empty><span data-testid="debt-no-payments">No payments recorded.</span></template>
         </EditableTable>
       </section>
