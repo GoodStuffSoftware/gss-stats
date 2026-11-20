@@ -297,3 +297,43 @@ describe('shapes seen on real statements (made-up names): one key per merchant, 
     expect(ruled.txns[1]).toMatchObject({ kind: 'transfer_external', needsReview: true })
   })
 })
+
+describe('payments to our own loans: a rule per debt, no double count', () => {
+  const loanB = { ...ACCOUNTS.find((a) => a.id === 'loan-a')!, id: 'loan-b', label: 'Loan B', last4: '0008', personId: null }
+  const rl = (merchantKey: string, debtAccountId: string) => ({ merchantKey, storeNo: null, accountId: null, amountMinCents: null, amountMaxCents: null,
+    setCategoryId: 'transport', setKind: 'spend' as const, debtAccountId, displayName: 'Vehicle loan', confidence: 90, review: false, reviewReason: null })
+  const loanPay = (day: string, cents: number, last4: string) => row(day, cents, `FUNDS TRANSFER TO LOAN X${last4}`)
+  const receipt = (day: string, cents: number) => row(day, cents, 'FUNDS TRANSFER PAYMENT 90.00 PRINCIPAL AMOUNT 10.00 INTEREST CHARGE AMOUNT', { kindHint: 'loan_payment' })
+  const run = (rules: ReturnType<typeof rl>[]) => planImport({ importId: 'loans', sourceLabel: 's', seed: { accounts: [loanB], rules }, statements: [
+    { accountId: 'chk-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [loanPay('2026-11-03', -10_000, '0005'), loanPay('2026-11-04', -7_500, '0008'),
+      row('2026-11-05', -3_000, 'TRANSFER TO SAVINGS X0002'), row('2026-11-06', -2_000, 'ONLINE PAYMENT TO CARD X0003')] },
+    { accountId: 'loan-a', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [receipt('2026-11-03', 10_000)] },
+    { accountId: 'loan-b', periodStart: '2026-11-01', periodEnd: '2026-11-30', rows: [receipt('2026-11-04', 7_500)] },
+  ] }, emptyContext(), 'u', NOW)
+
+  it('the key carries the loan last four, so each loan can have its own rule; other own-account moves keep their keys', async () => {
+    const p = await run([])
+    const mine = p.txns.filter((t) => t.accountId === 'chk-a')
+    expect(mine.map((t) => t.merchantKey)).toEqual(['funds-transfer-to-0005', 'funds-transfer-to-0008', 'transfer-to-savings', 'online-payment-to'])
+    expect(mine.map((t) => t.kind)).toEqual(['loan_payment', 'loan_payment', 'transfer', 'card_payment'])
+  })
+
+  it('a rule on one loan makes only its payments spending, tied to that debt; the loan-side receipt stays out and is not paired', async () => {
+    const p = await run([rl('funds-transfer-to-0008', 'loan-b')])
+    const a = find(p.txns, 'chk-a', '2026-11-03', -10_000), b = find(p.txns, 'chk-a', '2026-11-04', -7_500)
+    expect(a).toMatchObject({ kind: 'loan_payment' })
+    expect(a.pairId).not.toBeNull()
+    expect(b).toMatchObject({ kind: 'spend', kindSource: 'rule', categoryId: 'transport', debtAccountId: 'loan-b', pairId: null, needsReview: false })
+    const rb = find(p.txns, 'loan-b', '2026-11-04', 7_500)
+    expect(rb).toMatchObject({ kind: 'loan_payment', pairId: null })
+    expect(SPENDING_KINDS).not.toContain(rb.kind)
+    expect(p.pairs.flat()).not.toContain(b.id)
+    expect(p.pairs.flat()).not.toContain(rb.id)
+  })
+
+  it('rules on both loans: both payments are spending once, both receipts stay out', async () => {
+    const p = await run([rl('funds-transfer-to-0005', 'loan-a'), rl('funds-transfer-to-0008', 'loan-b')])
+    const spending = p.txns.filter((t) => SPENDING_KINDS.includes(t.kind))
+    expect(spending.map((t) => [t.accountId, t.debtAccountId, t.amountCents])).toEqual([['chk-a', 'loan-a', -10_000], ['chk-a', 'loan-b', -7_500]])
+  })
+})

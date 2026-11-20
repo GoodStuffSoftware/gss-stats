@@ -108,6 +108,9 @@ export async function planImportDetailed(req: ImportRequest, ctx: PlanContext, w
       const counterpartyKnown = n.counterpartyLast4 !== null && accounts.some((a) => a.id !== account.id && a.last4 === n.counterpartyLast4)
       let mk = merchantKey(n.clean)
       if (guess.kind === 'transfer_external' && n.counterpartyLast4 && !counterpartyKnown) mk = withCounterparty(mk, n.counterpartyLast4)
+      // A payment out to one of our own loans or lines carries that account's last four too, so a rule can treat one
+      // debt differently from another (they share the same name words). Every other kind keeps its key.
+      else if (guess.kind === 'loan_payment' && row.amountCents < 0 && n.counterpartyLast4 && counterpartyKnown) mk = withCounterparty(mk, n.counterpartyLast4)
       const input: RuleInput = { accountId: st.accountId, merchantKey: mk.key, storeNo: n.storeNo, amountCents: row.amountCents }
       const cat = categorize(input, rules, { kind: guess.kind, kindSource: guess.source, kindConfidence: guess.confidence, categoryId: autoCategory(n.clean) ?? (guess.kind === 'fee' ? 'fees' : null) })
       const split = storeSplitReview(input, cat.rule, rules)
