@@ -58,12 +58,16 @@ export interface AccessResponse { ok: true; email: string }
 export interface MetaResponse { people: Person[]; accounts: Account[]; categories: Category[]
   range: { min: IsoDate | null; max: IsoDate | null } }
 export interface SummaryQuery { from: IsoDate; to: IsoDate; person: PersonFilter; category?: string
-  merchant?: string; groupBy?: 'merchant' | 'account' }
+  merchant?: string; groupBy?: 'merchant' | 'account'
+  /** Account id; second drill level when the pie is grouped by account. */
+  account?: string }
 export interface SummarySlice { key: string; label: string; netCents: Cents; count: number }
 export interface SummaryResponse { level: 'category' | 'merchant' | 'purchase'; slices: SummarySlice[]
   totalCents: Cents; reviewCount: number }
 export interface TxnQuery { from: IsoDate; to: IsoDate; person: PersonFilter; category?: string; merchant?: string
-  review?: boolean; scope: 'spending' | 'all'; cursor?: string; limit?: number }
+  review?: boolean; scope: 'spending' | 'all'; cursor?: string; limit?: number
+  /** Account id; second drill level when the pie is grouped by account. */
+  account?: string }
 export interface TxnPage { rows: Txn[]; nextCursor: string | null }
 export interface TxnPatch { categoryId?: string | null; kind?: TxnKind; note?: string | null; expectedUpdatedAt: string }
 export interface TxnPatchResponse { txn: Txn }
