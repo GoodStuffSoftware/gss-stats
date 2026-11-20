@@ -2708,6 +2708,30 @@ compatibility date and a mock Google): the exact token-request settings, a full 
 on the runtime's own `fetch`, a refused token-endpoint redirect, and Google refusing the
 exchange. No test calls Google.
 
+## Budget section
+
+A private household-budget section, behind a second, separate allowlist. The design, the access model and
+the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this is only how to run it.
+
+- **Access.** `BUDGET_ALLOWED_EMAILS` (a Pages secret, comma-separated; locally in `.dev.vars`) lists who may
+  open `/api/budget/*`. It is checked in `functions/api/budget/_middleware.ts` after the site sign-in, and
+  everyone else gets 403. Every budget route reads the signed-in address from `context.data.budgetEmail`
+  and never re-checks access.
+- **Database.** The D1 binding `BUDGET_DB` (database `gss-budget`, schema in `migrations/gss-budget/`) is
+  used only by `functions/api/budget/**`. Routes: `meta`, `summary`, `transactions` (list, and
+  `PATCH transactions/:id`), `rules` (and `rules/apply`), `debts` (and `debts/:id`, `debts/:id/balance`).
+  Every response is `Cache-Control: private, no-store`; none of them touches the edge cache.
+- **Local setup.** `npm run budget:migrate:local` creates the local database. Turn a private seed plus a
+  folder of import requests into one SQL file with
+  `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run
+  `npx wrangler d1 execute gss-budget --local --file <file.sql>`. The tool refuses an output path inside a
+  git work tree. Remote migrations and loads are run by hand by the owner, never by an agent or by CI.
+- **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
+  are ever committed. The seed and the import requests live in a private folder outside the repo, and the
+  SQL file the tool writes goes there too. Tests use only the made-up data in
+  `src/lib/budget/__fixtures__/synthetic.ts`, run against an in-memory SQLite stand-in for D1
+  (`functions/_lib/testing/budgetDb.ts`, which also enforces D1's 100-parameter and 100 KB statement limits).
+
 ## Security / hardening
 
 - **Sign-in gate.** Google sign-in plus an allowlist, enforced in
