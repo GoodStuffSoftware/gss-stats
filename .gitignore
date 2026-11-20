@@ -9,7 +9,7 @@ npm-debug.log*
 # Budget: private bank data never enters this public repo
 budget-data/
 statements/
-stmt*
+/stmt*
 *.pdf
 *.ofx
 *.qfx

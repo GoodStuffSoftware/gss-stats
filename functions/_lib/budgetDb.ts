@@ -274,10 +274,12 @@ export async function accountIdsFor(db: D1Database, person: string): Promise<str
   return results.map((r) => r.id)
 }
 
-export async function assertCategory(db: D1Database, categoryId: string | null | undefined, field = 'category'): Promise<void> {
+/** `forWrite`: a category to assign (an archived one is refused); reads may still filter by an archived one. */
+export async function assertCategory(db: D1Database, categoryId: string | null | undefined, field = 'category', forWrite = false): Promise<void> {
   if (categoryId === undefined || categoryId === null || categoryId === UNCATEGORIZED) return
-  const hit = await db.prepare('SELECT 1 AS ok FROM categories WHERE id = ?').bind(categoryId).first()
+  const hit = await db.prepare('SELECT archived FROM categories WHERE id = ?').bind(categoryId).first<{ archived: number }>()
   if (!hit) throw badRequest(`${field}: unknown category`)
+  if (forWrite && Number(hit.archived) === 1) throw badRequest(`${field}: category is archived`)
 }
 
 // ---------- query builders -----------------------------------------------------------------------

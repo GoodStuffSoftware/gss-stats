@@ -119,6 +119,12 @@ describe('person -> account ids', () => {
     await expect(assertCategory(db.d1, null)).resolves.toBeUndefined()
     await expectBad(() => assertCategory(db.d1, 'nonesuch'), 'category')
   })
+  it('refuses an archived category for a write but still lets a read filter by it', async () => {
+    db.exec("UPDATE categories SET archived = 1 WHERE id = 'fuel'")
+    await expect(assertCategory(db.d1, 'fuel')).resolves.toBeUndefined()
+    await expectBad(() => assertCategory(db.d1, 'fuel', 'categoryId', true), 'categoryId')
+    await expect(assertCategory(db.d1, 'dining', 'categoryId', true)).resolves.toBeUndefined()
+  })
 })
 
 // ---------- EXPLAIN QUERY PLAN: every summary and list shape uses an index ------------------------

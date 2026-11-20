@@ -44,7 +44,7 @@ export const onRequest = defineRoute({
       note = n === '' ? null : n
     }
     if (!hasCategory && !hasKind && !hasNote) throw badRequest('body: nothing to change (send categoryId, kind or note)')
-    await assertCategory(db, categoryId, 'categoryId')
+    await assertCategory(db, categoryId, 'categoryId', true)
 
     if (!isTxnId(id)) throw notFound()
     const before = await getTxn(db, id)
