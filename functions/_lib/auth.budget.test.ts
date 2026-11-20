@@ -9,6 +9,7 @@ import {
   budgetAllowed,
   createSessionCookie,
   isBudgetPath,
+  isResolvedBudgetPath,
   readAuthConfig,
   VIEWER_KEY_PREFIX,
   type AuthEnv,
@@ -89,6 +90,12 @@ describe('isBudgetPath', () => {
     expect(isBudgetPath('/api/%E0%A4%A')).toBe(true)
     expect(isBudgetPath('/api/%25%25%25%25/x')).toBe(true) // still escaped after three decodes
   })
+  it('isResolvedBudgetPath is true only for a path that decoded and sits under budget', () => {
+    for (const p of PATHS) expect(isResolvedBudgetPath(p), p).toBe(true)
+    for (const p of ['/api/%E0%A4%A', '/api/%25%25%25%25/x', '/api/config%ZZ', '/api/budget/%ZZ', '/api/stats', '/api/budgets']) {
+      expect(isResolvedBudgetPath(p), p).toBe(false)
+    }
+  })
   it('leaves every other path alone', () => {
     for (const p of ['/', '/api/stats', '/api/config', '/api/budgets', '/api/budgetary/x', '/budget', '/assets/budget.js', '/auth/me', '/api']) {
       expect(isBudgetPath(p), p).toBe(false)
@@ -155,6 +162,23 @@ describe('a listed viewer writes under budget only', () => {
         expect(other.next, `${method} ${path}`).not.toHaveBeenCalled()
       }
     }
+  })
+
+  it('a path that will not decode never lifts view-only: a listed viewer cannot write to one', async () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      for (const path of ['/api/config%ZZ', '/api/x/%25252525', '/api/%E0%A4%A', '/api/budget/%ZZ']) {
+        const r = await gate(path, method, 'viewerListed')
+        expect(r.res.status, `${method} ${path}`).toBe(403)
+        expect(((await r.res.json()) as { error?: string }).error, `${method} ${path}`).toBe('view_only')
+        expect(r.next, `${method} ${path}`).not.toHaveBeenCalled()
+      }
+    }
+    // Reads still pass for a listed viewer, a listed owner is not held back, and the list check
+    // (deny side) still treats the path as budget for everyone else.
+    expect((await gate('/api/config%ZZ', 'GET', 'viewerListed')).res.status).toBe(200)
+    expect((await gate('/api/config%ZZ', 'PUT', 'ownerListed')).res.status).toBe(200)
+    const unlisted = await gate('/api/config%ZZ', 'PUT', 'viewerUnlisted')
+    expect(((await unlisted.res.json()) as { error?: string }).error).toBe('budget_denied')
   })
 
   it('an unlisted viewer gets budget_denied on budget (not view_only) and view_only elsewhere', async () => {
