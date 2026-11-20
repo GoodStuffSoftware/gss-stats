@@ -45,7 +45,7 @@ async function mountTable(props: Record<string, unknown> = {}, slots: Record<str
     props: { columns: COLUMNS, rows: ROWS, rowKey: 'id', editable: true, ...props },
     slots: slots as never,
     attachTo: document.body,
-  }) as unknown as VueWrapper
+  } as never) as unknown as VueWrapper
   await wrapper.vm.$nextTick() // the width is measured on mount; the layout follows
   return wrapper
 }
@@ -116,7 +116,7 @@ describe('EditableTable editing', () => {
     const w = await mountTable()
     const select = w.get('tbody tr[data-row-key="r1"] select')
     expect(select.findAll('optgroup')).toHaveLength(1)
-    expect((select.element as HTMLSelectElement).value).toBe('small')
+    expect((select.element as unknown as HTMLSelectElement).value).toBe('small')
     await select.setValue('large')
     expect(w.emitted('edit')).toEqual([['r1', 'size', 'large']])
   })
@@ -126,7 +126,7 @@ describe('EditableTable editing', () => {
     const select = w.get('tbody tr[data-row-key="r1"] select')
     await select.setValue('large')
     await w.vm.$nextTick()
-    expect((select.element as HTMLSelectElement).value).toBe('small')
+    expect((select.element as unknown as HTMLSelectElement).value).toBe('small')
   })
 
   it('text editor by keyboard: Enter opens, Enter saves', async () => {
