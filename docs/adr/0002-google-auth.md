@@ -215,3 +215,36 @@ reach production. Everything above still holds for production.
 - **Its own secrets.** Pages keeps secrets per environment, so the preview is fail-closed
   (503) until the owner sets its sign-in secrets under Preview. README "Deploy" →
   "Preview (dev)" lists them.
+
+## Amendment 2026-11-20: a separate list for the Budget section
+
+`/api/budget/*` (the Budget section, [ADR 0007](0007-budget-section.md)) has its own allowlist,
+the secret `BUDGET_ALLOWED_EMAILS` (comma-separated, exact and case-insensitive like
+`ALLOWED_EMAILS`). Everything above still holds; budget adds a second condition.
+
+- **Both are required.** An account must have a session (owner or viewer, as above) AND be on the
+  budget list. The list narrows access and never grants it: a listed address that is neither an
+  owner nor a view-only account gets 401 like any stranger.
+- **Every method.** GET, HEAD and OPTIONS need the list as well as writes, for owner and viewer
+  alike. An owner who is not listed gets 403 `budget_denied`; a viewer who is not listed gets 403
+  `budget_denied` (not `view_only`).
+- **Fail closed.** An unset, empty or blank list admits nobody, in both layers.
+- **Listed viewers may write, here only.** The view-only rule (every write is 403) is lifted for a
+  listed viewer on paths under `/api/budget/*`, and nowhere else. `VIEWER_READ_POSTS` is untouched.
+  The Origin check for writes still runs first.
+- **Path matching denies by default.** `isBudgetPath` reads the path decoded (up to three rounds),
+  with backslashes as slashes, slashes collapsed, lower-cased, and with dot segments both as written
+  and resolved; a path that will not decode counts as budget. So `/api/Budget`, `//`, `%62udget`,
+  `budget%2Fmeta` and the bare `/api/budget` are all gated.
+- **Two layers.** The root gate (`functions/_lib/auth.ts`) and a scoped middleware
+  (`functions/api/budget/_middleware.ts`, via `functions/_lib/budgetAccess.ts`) each check the list
+  from the request; a catch-all `functions/api/budget/[[path]].ts` answers 404 for unknown budget
+  paths so the middleware runs for every one. The middleware sets `context.data.budgetEmail`, the
+  only identity a budget route reads (missing: 403), answers 503 `budget_db_missing` when
+  `BUDGET_DB` is absent, and stamps every response `Cache-Control: private, no-store` and
+  `Vary: Cookie`. The dev bypass counts only for a listed dev email. Order and `context.data`
+  were checked on a local `wrangler pages dev` (the Pages docs do not state them): the root
+  middleware wraps the scoped one, and `context.data` set there reaches the handler.
+- **Operator note.** Pages secrets are per environment: set `BUDGET_ALLOWED_EMAILS` on Preview first;
+  Production's stays unset (budget locked) until a production go. Removing an address takes effect
+  on the next deployment, as for `ALLOWED_EMAILS`.
