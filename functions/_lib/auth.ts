@@ -207,22 +207,28 @@ export function readAuthConfig(env: AuthEnv): ConfigResult {
 /** The 403 body for an account that is not on the budget list. */
 export const BUDGET_DENIED = { error: 'budget_denied', message: 'This account can’t open Budget.' }
 
-/** Any path that could reach a budget Function. Decoded (repeatedly, so a double-encoded
- *  spelling is caught too), backslashes read as slashes, slashes collapsed, dot segments
- *  resolved, lower-cased; a path that will not decode counts as budget (deny by default).
- *  That "deny" reading is for the list check only: a path that did not decode is never
- *  grounds to lift the view-only rule (see isResolvedBudgetPath). */
+/** Any path that could reach a budget Function: under /api/budget in ANY reading. The path is
+ *  decoded (repeatedly, so a double-encoded spelling is caught too), backslashes read as slashes,
+ *  slashes collapsed, lower-cased, then read twice: with dot segments as written and with them
+ *  resolved. One reading under budget is enough, and a path that will not decode counts too
+ *  (deny by default). This is the DENY side, used for the list check. It never lifts the
+ *  view-only rule: that needs the opposite, every reading under budget (isResolvedBudgetPath). */
 export function isBudgetPath(pathname: string): boolean {
   return budgetPathReading(pathname) !== 'no'
 }
 
-/** True only when the path decoded and resolves under /api/budget. The one thing that lifts the
- *  view-only rule for a listed viewer; a path that will not decode never does (fail closed). */
+/** The LIFT side: true only when the path decoded AND every reading (dot segments as written, and
+ *  resolved) sits under /api/budget. The one thing that lifts the view-only rule for a listed
+ *  viewer. A path that will not decode, or whose readings disagree (`/api/budget/..%2fconfig`
+ *  resolves to /api/config), never does, so no spelling gets a viewer's write to a non-budget
+ *  Function behind a layer that decodes or resolves differently (fail closed). */
 export function isResolvedBudgetPath(pathname: string): boolean {
-  return budgetPathReading(pathname) === 'budget'
+  return budgetPathReading(pathname) === 'all'
 }
 
-function budgetPathReading(pathname: string): 'budget' | 'undecodable' | 'no' {
+type BudgetReading = 'all' | 'some' | 'undecodable' | 'no'
+
+function budgetPathReading(pathname: string): BudgetReading {
   let p = pathname
   try {
     for (let i = 0; i < 3 && /%/.test(p); i++) p = decodeURIComponent(p)
@@ -237,9 +243,10 @@ function budgetPathReading(pathname: string): 'budget' | 'undecodable' | 'no' {
     if (seg === '..') resolved.pop()
     else resolved.push(seg)
   }
-  // Both readings count: with dot segments left as written (what a router that does not resolve
-  // them sees) and resolved (what one that does sees).
-  return underBudget(flat) || underBudget('/' + resolved.join('/')) ? 'budget' : 'no'
+  const asWritten = underBudget(flat) // what a router that does not resolve dot segments sees
+  const asResolved = underBudget('/' + resolved.join('/')) // what one that does sees
+  if (asWritten && asResolved) return 'all'
+  return asWritten || asResolved ? 'some' : 'no'
 }
 
 function underBudget(p: string): boolean {
@@ -817,8 +824,8 @@ export async function authGate(
       // Budget has its own list for EVERY method, owner or viewer alike. A listed viewer may write
       // here and nowhere else; functions/api/budget/_middleware.ts checks again.
       if (!budgetAllowed(session.email, env)) return budgetDenied()
-      // Only a path that decoded and resolves under /api/budget lifts the view-only rule; one
-      // that will not decode falls through to it (fail closed).
+      // Only a path with EVERY reading under /api/budget lifts the view-only rule; one that will
+      // not decode, or whose readings disagree, falls through to it (fail closed).
       if (session.role === 'owner' || isResolvedBudgetPath(path)) return gatedResponse(await next())
     }
     // View-only: every write is refused here, before any Function runs (see ROLES above).

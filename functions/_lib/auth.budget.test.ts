@@ -90,10 +90,44 @@ describe('isBudgetPath', () => {
     expect(isBudgetPath('/api/%E0%A4%A')).toBe(true)
     expect(isBudgetPath('/api/%25%25%25%25/x')).toBe(true) // still escaped after three decodes
   })
-  it('isResolvedBudgetPath is true only for a path that decoded and sits under budget', () => {
-    for (const p of PATHS) expect(isResolvedBudgetPath(p), p).toBe(true)
-    for (const p of ['/api/%E0%A4%A', '/api/%25%25%25%25/x', '/api/config%ZZ', '/api/budget/%ZZ', '/api/stats', '/api/budgets']) {
+  it('isResolvedBudgetPath is true only when EVERY reading is under budget', () => {
+    // Spellings whose readings agree (any encoding, case, slash or backslash form).
+    for (const p of PATHS.filter((x) => !x.includes('.'))) expect(isResolvedBudgetPath(p), p).toBe(true)
+    expect(isResolvedBudgetPath('/api\\budget/meta')).toBe(true)
+    expect(isResolvedBudgetPath('/api/%5cbudget/meta')).toBe(true)
+    expect(isResolvedBudgetPath('/api/budget/./meta')).toBe(true) // dot segment in the middle, same place either way
+    // Dot segments that move the path: the readings differ, so no lift (a real URL has them resolved
+    // before it gets here; the lift is for a viewer who is going to a budget Function in every reading).
+    for (const p of ['/api/./budget/meta', '/api/x/../budget/meta']) expect(isResolvedBudgetPath(p), p).toBe(false)
+    // One reading under budget and another elsewhere, or no decode at all, or not budget: no lift.
+    for (const p of [
+      '/api/budget/..%2fconfig',
+      '/api/budget/%252e%252e/config',
+      '/api/config/..%2fbudget/x',
+      '/api/budget/..%5cconfig',
+      '/api/budget/../config',
+      '/api/config/../budget/x',
+      '/api/budget/..',
+      '/api/%E0%A4%A',
+      '/api/%25%25%25%25/x',
+      '/api/config%ZZ',
+      '/api/budget/%ZZ',
+      '/api/stats',
+      '/api/budgets',
+    ]) {
       expect(isResolvedBudgetPath(p), p).toBe(false)
+    }
+  })
+  it('every one of those still counts as budget on the deny side', () => {
+    for (const p of [
+      '/api/budget/..%2fconfig',
+      '/api/budget/%252e%252e/config',
+      '/api/config/..%2fbudget/x',
+      '/api/budget/..%5cconfig',
+      '/api/budget/../config',
+      '/api/config/../budget/x',
+    ]) {
+      expect(isBudgetPath(p), p).toBe(true)
     }
   })
   it('leaves every other path alone', () => {
@@ -164,9 +198,19 @@ describe('a listed viewer writes under budget only', () => {
     }
   })
 
-  it('a path that will not decode never lifts view-only: a listed viewer cannot write to one', async () => {
+  it('a path that will not decode, or reads two ways, never lifts view-only: a listed viewer cannot write to one', async () => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      for (const path of ['/api/config%ZZ', '/api/x/%25252525', '/api/%E0%A4%A', '/api/budget/%ZZ']) {
+      for (const path of [
+        '/api/config%ZZ',
+        '/api/x/%25252525',
+        '/api/%E0%A4%A',
+        '/api/budget/%ZZ',
+        // Readings that disagree (one under budget, one elsewhere): the Request keeps these as written.
+        '/api/budget/..%2fconfig',
+        '/api/budget/%252e%252e/config',
+        '/api/config/..%2fbudget/x',
+        '/api/budget/..%5cconfig',
+      ]) {
         const r = await gate(path, method, 'viewerListed')
         expect(r.res.status, `${method} ${path}`).toBe(403)
         expect(((await r.res.json()) as { error?: string }).error, `${method} ${path}`).toBe('view_only')
