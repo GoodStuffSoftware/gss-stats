@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed, defineAsyncComponent } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
 import { NEW_WIDGET_CAPTION_DISPLAY } from './lib/captionDisplay'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, factoryWidget, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, pageFilterBar, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
@@ -27,6 +27,8 @@ import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
+import BudgetNavLink from './components/budget/BudgetNavLink.vue'
+import { budgetSectionOpen, searchWithSection } from './lib/budget/sectionLink'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
@@ -196,6 +198,28 @@ function syncPageUrl() {
     // history unavailable or sandboxed: the link just isn't kept up to date
   }
 }
+// Budget section (components/budget, lib/budget/sectionLink.ts): `?section=budget` shows it in place of
+// the page. Opening adds a history entry (Back returns to the page); closing replaces it. Every other
+// query param (`?page=`, utm_*) is kept. It never touches the layout or its save path.
+const BudgetSection = defineAsyncComponent(() => import('./components/budget/BudgetSection.vue'))
+const budgetOpen = ref(budgetSectionOpen(globalThis.location?.search ?? ''))
+function setBudgetOpen(open: boolean) {
+  if (budgetOpen.value === open) return
+  budgetOpen.value = open
+  try {
+    const loc = globalThis.location
+    const url = loc.pathname + searchWithSection(loc.search, open) + loc.hash
+    if (open) globalThis.history.pushState(globalThis.history.state, '', url)
+    else globalThis.history.replaceState(globalThis.history.state, '', url)
+  } catch {
+    // history unavailable or sandboxed: the section still opens, the address bar just isn't updated
+  }
+}
+function onBudgetPopState() {
+  budgetOpen.value = budgetSectionOpen(globalThis.location?.search ?? '')
+}
+onMounted(() => window.addEventListener('popstate', onBudgetPopState))
+onBeforeUnmount(() => window.removeEventListener('popstate', onBudgetPopState))
 watch(activePageId, () => {
   if (loaded.value && !loadFailed.value) {
     rememberActivePage()
@@ -339,6 +363,7 @@ const saveLabel = computed(() =>
 // ── Page operations ───────────────────────────────────────────────────────────
 // Switching pages is per viewer: it never touches the shared config (see activePageId).
 function switchPage(id: string) {
+  if (budgetOpen.value) setBudgetOpen(false)
   if (config.pages.some((p) => p.id === id)) activePageId.value = id
 }
 // Picking a group opens the page this viewer last viewed in it, else its first page.
@@ -1035,6 +1060,7 @@ function toggleDark() {
       </button>
       <!-- Group / Page / Drill: each segment opens its siblings (components/nav/NavBreadcrumb.vue). -->
       <NavBreadcrumb
+        v-if="!budgetOpen"
         class="topbar-crumbs"
         :pages="config.pages"
         :active="activePage"
@@ -1050,7 +1076,9 @@ function toggleDark() {
         @rename-group="renameGroupTo"
         @rename-cancel="renaming = null"
       />
+      <span v-else class="topbar-crumbs" data-testid="budget-label">Budget</span>
       <button
+        v-if="!budgetOpen"
         ref="pageMenuBtn"
         v-edit
         type="button"
@@ -1077,7 +1105,8 @@ function toggleDark() {
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
-        <button v-edit class="btn btn-primary" data-testid="add-chart" @click="addChart">＋ Add chart</button>
+        <button v-if="!budgetOpen" v-edit class="btn btn-primary" data-testid="add-chart" @click="addChart">＋ Add chart</button>
+        <BudgetNavLink :active="budgetOpen" @open="setBudgetOpen(true)" @close="setBudgetOpen(false)" />
         <AccountMenu />
       </div>
     </header>
@@ -1091,7 +1120,9 @@ function toggleDark() {
          breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
          only on the campaign page, whose widgets each cover their own fixed campaign window and
          aren't filter-driven. -->
-    <div v-if="showFilterBar" ref="barSectionEl" class="filterbar-inflow">
+    <BudgetSection v-if="budgetOpen" :dark="dark" />
+
+    <div v-if="showFilterBar && !budgetOpen" ref="barSectionEl" class="filterbar-inflow">
       <FilterBar
         :filters="activePage.filters"
         :sync-range="config.syncRange"
@@ -1111,7 +1142,7 @@ function toggleDark() {
          again, Esc, or a click outside it) or until scrolling back to where the in-flow bar is
          visible again; while the in-flow bar IS visible, activating it just moves focus to the
          bar's first control instead (nothing to pin — see activateToggle). -->
-    <div v-if="showFilterBar" class="fb-anchor">
+    <div v-if="showFilterBar && !budgetOpen" class="fb-anchor">
       <button
         ref="fbToggleBtn"
         type="button"
@@ -1143,11 +1174,11 @@ function toggleDark() {
       </Transition>
     </div>
 
-    <NoteBlock v-if="showPopupActivationNote" note-id="tracking-not-yet-active" class="activation-note" />
-    <NoteBlock v-if="showPopupDeferredNote" note-id="popup-deferred-signin" class="activation-note" />
-    <NoteBlock v-if="showSmallSampleNote" note-id="small-sample" class="activation-note small-sample-note" />
+    <NoteBlock v-if="showPopupActivationNote && !budgetOpen" note-id="tracking-not-yet-active" class="activation-note" />
+    <NoteBlock v-if="showPopupDeferredNote && !budgetOpen" note-id="popup-deferred-signin" class="activation-note" />
+    <NoteBlock v-if="showSmallSampleNote && !budgetOpen" note-id="small-sample" class="activation-note small-sample-note" />
 
-    <main class="grid-area">
+    <main v-if="!budgetOpen" class="grid-area">
       <Dashboard
         v-model:widgets="activePage.widgets"
         :filters="activePage.filters"
