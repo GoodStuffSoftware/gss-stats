@@ -7,8 +7,8 @@ import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_
 import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS, flightDayIndex, type CampaignFlight } from './campaigns'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from './adsRules'
 import { isMobileViewport } from './responsive'
-import { layoutMarkerLabels } from './markerLayout'
-import { overlayItems, layoutFlightBands, markerIndex, type OverlayItem } from './timelineOverlay'
+import { layoutMarkerLabels, markerPaddingExtra, settlePaddingExtra } from './markerLayout'
+import { overlayItems, layoutFlightBands, layoutBandLabels, markerIndex, type OverlayItem } from './timelineOverlay'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -284,11 +284,19 @@ export function widgetHasOverlay(widget: Pick<Widget, 'markers' | 'goLiveMarkers
 
 /** Draws a date-axis chart's overlay: shaded flight bands (labelled, one label row per overlap),
  * dashed labelled lines for major releases and go-live moments (labels placed by
- * layoutMarkerLabels, so close markers stagger instead of colliding, and a label that fits
- * nowhere is dropped, not overprinted), short ticks for minor releases. Hover or tap near a
- * marker line, or on a band's label strip, shows that item's date, name and note. `dates` are
- * the plotted category values (YYYY-MM-DD), in order. */
+ * layoutMarkerLabels: close markers stack into extra rows instead of colliding, none is dropped;
+ * the chart's top padding grows by the rows beyond the base ones), short ticks for minor releases.
+ * A band's name is placed by its measured extent (layoutBandLabels), colliding ones on another row.
+ * Hover or tap near a marker line, or on a band's label strip, shows that item's date, name and
+ * note. `dates` are the plotted category values (YYYY-MM-DD), in order. */
 export const BAND_ROW_PX = 14
+/** The top room the marker labels have by default: the layout padding, the label rows that padding
+ * holds, and where the first row starts above the plot. A chart with more rows than `rows` gets
+ * MARKER_LABEL_ROW_PX more padding per extra row (the plugin does it); one that fits keeps exactly these. */
+export const MARKER_LABEL_ROW_PX = 10
+export function markerLabelRoom(narrow: boolean): { pad: number; rows: number; offset: number } {
+  return narrow ? { pad: 24, rows: 2, offset: 22 } : { pad: 34, rows: 3, offset: 32 }
+}
 export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], narrow = false) {
   const dark = isDark()
   const lineColor = dark ? 'rgba(240,238,233,0.45)' : 'rgba(26,23,21,0.4)'
@@ -304,8 +312,63 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
   // Every item under the pointer: markers that share an x position (a web and a Play release on one day) all show.
   let active: { items: OverlayItem[]; x: number; y: number } | null = null
   const bandFlightIndex = new Map(items.filter((i) => i.kind === 'flight').map((it, n) => [it, n]))
+  const room = markerLabelRoom(narrow)
+  // The marker labels' top padding extra (px) this chart is laid out with, decided after each layout from where the labels
+  // really fall (afterLayout). `growOnly` locks it to growth once a chart size has changed it, so passes converge.
+  const padState = { extra: 0, touched: false, size: '', growOnly: false }
+  type Visible = { p: (typeof points)[number]; x: number }
+  // The marker points inside the plot, with their pixel x (after a layout, so the x scale is final).
+  const visiblePoints = (chart: any): Visible[] => {
+    const { chartArea, scales } = chart
+    const out: Visible[] = []
+    for (const p of points) {
+      const x = scales.x.getPixelForValue(p.index)
+      if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
+      out.push({ p, x })
+    }
+    return out
+  }
+  // Where every labelled marker's text goes: unlimited rows, so none is dropped.
+  const placeMarkerLabels = (chart: any, visible: Visible[]) => {
+    const { ctx, chartArea } = chart
+    ctx.save()
+    ctx.font = '600 9.5px Inter, system-ui, sans-serif'
+    const placed = layoutMarkerLabels(
+      visible.filter((v) => v.p.item.kind !== 'minor-release').map((v) => ({ x: v.x, label: v.p.item.label })),
+      { measureWidth: (t) => ctx.measureText(t).width, areaLeft: chartArea.left, areaRight: chartArea.right, maxRows: Infinity, rowHeight: MARKER_LABEL_ROW_PX },
+    )
+    ctx.restore()
+    return placed
+  }
   return {
     id: 'timelineOverlay',
+    // The padding the config sets holds the base rows (markerLabelRoom); rows beyond them add MARKER_LABEL_ROW_PX each.
+    beforeLayout(chart: any) {
+      if (!padState.touched) return
+      const pad = chart.options?.layout?.padding
+      if (pad && typeof pad === 'object') pad.top = room.pad + padState.extra
+    },
+    // After a layout the x positions are final: if the labels need more (or fewer) rows than the padding holds, set the
+    // padding and lay out once more. That pass is the last one unless the plot width shifted (a wider axis label); then the
+    // padding may only grow, so the passes end and never flip back and forth.
+    afterLayout(chart: any) {
+      const { chartArea, scales } = chart
+      if (!chartArea || !scales?.x || !chart.ctx || !points.length) return
+      const needed = markerPaddingExtra(placeMarkerLabels(chart, visiblePoints(chart)), room.rows, MARKER_LABEL_ROW_PX)
+      const size = `${chart.width}x${chart.height}`
+      if (size !== padState.size) {
+        padState.size = size
+        padState.growOnly = false
+      }
+      const next = settlePaddingExtra(padState.extra, needed, padState.growOnly)
+      if (next === padState.extra) return
+      padState.extra = next
+      padState.touched = true
+      padState.growOnly = true
+      queueMicrotask(() => {
+        if (chart.ctx) chart.update('none')
+      })
+    },
     beforeDatasetsDraw(chart: any) {
       const { ctx, chartArea, scales } = chart
       if (!chartArea || !scales?.x) return
@@ -313,37 +376,43 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
       const half = dates.length > 1 ? Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0)) / 2 : 12
       ctx.save()
       ctx.font = '600 9px Inter, system-ui, sans-serif'
-      for (const b of bands) {
-        const left = Math.max(chartArea.left, scales.x.getPixelForValue(b.startIndex) - half)
-        const right = Math.min(chartArea.right, scales.x.getPixelForValue(b.endIndex) + half)
-        if (right <= left) continue
+      const extents = bands
+        .map((b) => ({
+          b,
+          left: Math.max(chartArea.left, scales.x.getPixelForValue(b.startIndex) - half),
+          right: Math.min(chartArea.right, scales.x.getPixelForValue(b.endIndex) + half),
+        }))
+        .filter((e) => e.right > e.left)
+      // A band's name sits in a strip at its bottom edge; an open-ended band gets an arrow. A name is placed by its measured
+      // extent (layoutBandLabels), BAND_ROW_PX per row: bands that overlap in time, or names that would touch, take successive rows.
+      const labels = layoutBandLabels(
+        extents.map((e) => ({ text: `${e.b.item.label}${e.b.clippedEnd && e.b.item.openEnded ? ' →' : ''}`, left: e.left, row: e.b.row })),
+        { measureWidth: (t) => ctx.measureText(t).width, areaLeft: chartArea.left, areaRight: chartArea.right },
+      )
+      extents.forEach(({ b, left, right }, n) => {
         const color = PALETTE[(bandFlightIndex.get(b.item) ?? 0) % PALETTE.length]
         ctx.fillStyle = color + '22'
         ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top)
-        // A band's name sits in a strip at its bottom edge; an open-ended band gets an arrow. Bands that overlap in
-        // time take successive rows (layoutFlightBands), BAND_ROW_PX apart, so their names never print over each other.
-        const y = chartArea.bottom - 5 - b.row * BAND_ROW_PX
-        const text = `${b.item.label}${b.clippedEnd && b.item.openEnded ? ' →' : ''}`
-        let shown = text
-        const room = right - left - 6
-        while (shown.length > 1 && ctx.measureText(shown).width > room) shown = shown.slice(0, -2) + '…'
-        if (room > 14) {
-          ctx.fillStyle = color
-          ctx.textAlign = 'left'
-          ctx.fillText(shown, left + 3, y)
-        }
-        hits.push({ x0: left, x1: right, y0: y - 10, y1: y + 2, item: b.item })
-      }
+        const l = labels[n]
+        const y = chartArea.bottom - 5 - l.row * BAND_ROW_PX
+        ctx.fillStyle = color
+        ctx.textAlign = 'left'
+        ctx.fillText(l.text, l.x, y)
+        hits.push({ x0: Math.min(left, l.x - 3), x1: Math.max(right, l.x + l.width + 3), y0: y - 10, y1: y + 2, item: b.item })
+      })
       ctx.restore()
     },
     afterDatasetsDraw(chart: any) {
       const { ctx, chartArea, scales } = chart
       if (!chartArea || !scales?.x) return
-      const labelled: { x: number; label: string }[] = []
+      const visible = visiblePoints(chart)
+      const placed = placeMarkerLabels(chart, visible)
+      // The labels sit above the plot, in the layout padding, MARKER_LABEL_ROW_PX per row; rows beyond the base ones
+      // (markerLabelRoom) are the padding extra, so the first row starts that much higher.
+      const extraPx = markerPaddingExtra(placed, room.rows, MARKER_LABEL_ROW_PX)
+      const top = chartArea.top - room.offset - extraPx
       ctx.save()
-      for (const p of points) {
-        const x = scales.x.getPixelForValue(p.index)
-        if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
+      for (const { p, x } of visible) {
         if (p.item.kind === 'minor-release') {
           ctx.strokeStyle = tickColor
           ctx.lineWidth = 2
@@ -360,24 +429,14 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
           ctx.lineTo(x, chartArea.bottom)
           ctx.stroke()
           ctx.setLineDash([])
-          labelled.push({ x, label: p.item.label })
         }
-        hits.push({ x0: x - 6, x1: x + 6, y0: chartArea.top - 34, y1: chartArea.bottom, item: p.item })
+        // The hit column reaches up through the label rows, so a tap on the line's label (any row) finds it.
+        hits.push({ x0: x - 6, x1: x + 6, y0: Math.min(chartArea.top - 34, top - 2), y1: chartArea.bottom, item: p.item })
       }
-      // Labels above the plot, in the layout padding: staggered into rows; at phone width only
-      // two rows, so crowded labels drop out (every item stays in the list under the chart).
       ctx.font = '600 9.5px Inter, system-ui, sans-serif'
-      const placed = layoutMarkerLabels(labelled, {
-        measureWidth: (t) => ctx.measureText(t).width,
-        areaLeft: chartArea.left,
-        areaRight: chartArea.right,
-        maxRows: narrow ? 2 : 3,
-        rowHeight: 10,
-      })
       ctx.fillStyle = labelColor
       ctx.textAlign = 'left'
       ctx.textBaseline = 'top'
-      const top = chartArea.top - (narrow ? 22 : 32)
       for (const l of placed) ctx.fillText(l.label, l.x, top + l.y)
       ctx.restore()
     },
@@ -598,7 +657,7 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      layout: { padding: { top: hasLabels ? (narrow ? 24 : 34) : 4 } },
+      layout: { padding: { top: hasLabels ? markerLabelRoom(narrow).pad : 4 } },
       plugins: {
         legend: { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: narrow ? 10 : 11 }, boxWidth: narrow ? 8 : 10, boxHeight: narrow ? 8 : 10, padding: narrow ? 6 : 10 } },
         // A ratio line reads as a percent in the tooltip (a day with nothing in the denominator shows no value).
@@ -1259,7 +1318,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        ...(overlay.length && overlay.some((i) => i.kind === 'release' || i.kind === 'go-live' || i.kind === 'change') ? { layout: { padding: { top: isMobileViewport() ? 24 : 34 } } } : {}),
+        ...(overlay.length && overlay.some((i) => i.kind === 'release' || i.kind === 'go-live' || i.kind === 'change') ? { layout: { padding: { top: markerLabelRoom(isMobileViewport()).pad } } } : {}),
         plugins: noLegend,
         scales: baseScales(),
       },

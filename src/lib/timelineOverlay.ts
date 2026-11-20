@@ -155,3 +155,50 @@ export function layoutFlightBands(dates: string[], flights: OverlayItem[]): Band
   }
   return out
 }
+
+export interface BandLabelInput {
+  text: string
+  left: number // the band's left edge, px (clipped to the plot)
+  row: number // the row layoutFlightBands gave it (overlapping bands already take successive rows)
+}
+export interface PlacedBandLabel {
+  text: string // the label, cut with an ellipsis only when wider than the plot itself
+  x: number // where it starts, px
+  width: number // its measured width, px
+  row: number // its row, counted up from the band strip at the plot's bottom
+}
+export interface BandLabelOptions {
+  measureWidth: (text: string) => number
+  areaLeft: number
+  areaRight: number
+  gap?: number // minimum clear px between two labels in one row, default 4
+  padX?: number // how far right of the band's left edge the label starts, default 3
+}
+
+/** Places each flight band's name by its measured extent. A label starts just inside its band's left
+ * edge and is shown in full, running past the band's right edge when it is wider than the band; a
+ * label wider than the plot itself is cut with an ellipsis. Starting from the row layoutFlightBands
+ * gave the band, a label whose extent would touch another label in the same row moves up to the next
+ * free row. A label near the plot's right edge is pulled left so it stays inside. `inputs` are in
+ * layoutFlightBands order (by start). A chart whose labels all fit inside their bands comes back with
+ * every row unchanged. */
+export function layoutBandLabels(inputs: BandLabelInput[], opts: BandLabelOptions): PlacedBandLabel[] {
+  const gap = opts.gap ?? 4
+  const padX = opts.padX ?? 3
+  const maxW = opts.areaRight - opts.areaLeft - 6
+  const placed: PlacedBandLabel[] = []
+  for (const b of inputs) {
+    let text = b.text
+    let width = opts.measureWidth(text)
+    if (maxW > 0 && width > maxW) {
+      while (text.length > 1 && opts.measureWidth(text.slice(0, -1) + '…') > maxW) text = text.slice(0, -1)
+      text = text.slice(0, -1) + '…'
+      width = opts.measureWidth(text)
+    }
+    const x = Math.max(opts.areaLeft + 2, Math.min(b.left + padX, opts.areaRight - width - 2))
+    let row = b.row
+    while (placed.some((p) => p.row === row && x < p.x + p.width + gap && p.x < x + width + gap)) row++
+    placed.push({ text, x, width, row })
+  }
+  return placed
+}

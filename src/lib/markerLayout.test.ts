@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutMarkerLabels } from './markerLayout'
+import { layoutMarkerLabels, markerPaddingExtra, markerRowsUsed, settlePaddingExtra } from './markerLayout'
 
 // A simple, deterministic stand-in for ctx.measureText(text).width — 6px per character,
 // close enough to the real '600 10px Inter' font to exercise collision logic without a canvas.
@@ -92,5 +92,74 @@ describe('layoutMarkerLabels (owner-reported regression, 2026-09-26: overlapping
 
   it('empty input yields no placements', () => {
     expect(layoutMarkerLabels([], { measureWidth: measure, areaLeft: 0, areaRight: 500 })).toEqual([])
+  })
+})
+
+describe('stacking instead of dropping (phone width: 2 base rows, 10 px each)', () => {
+  const stack = { measureWidth: measure, areaLeft: 0, areaRight: 300, maxRows: Infinity, rowHeight: 10 }
+
+  it('labels that do not collide keep one row and ask for no extra padding', () => {
+    const out = layoutMarkerLabels([{ x: 10, label: 'v1.0' }, { x: 150, label: 'v2.0' }], stack)
+    expect(out.map((p) => p.y)).toEqual([0, 0])
+    expect(markerRowsUsed(out, 10)).toBe(1)
+    expect(markerPaddingExtra(out, 2, 10)).toBe(0)
+  })
+
+  it('two colliding labels stack into a second row; the base two rows add no padding', () => {
+    const out = layoutMarkerLabels([{ x: 10, label: 'First-50 days end' }, { x: 20, label: 'v1.108.0' }], stack)
+    expect(out.map((p) => p.y)).toEqual([0, 10])
+    expect(markerPaddingExtra(out, 2, 10)).toBe(0)
+  })
+
+  it('three colliding labels open a third row (none dropped) and the padding grows by exactly that row', () => {
+    const out = layoutMarkerLabels([{ x: 10, label: 'aaaaaaaa' }, { x: 20, label: 'bbbbbbbb' }, { x: 30, label: 'cccccccc' }], stack)
+    expect(out.map((p) => p.label)).toEqual(['aaaaaaaa', 'bbbbbbbb', 'cccccccc'])
+    expect(out.map((p) => p.y)).toEqual([0, 10, 20])
+    expect(markerRowsUsed(out, 10)).toBe(3)
+    expect(markerPaddingExtra(out, 2, 10)).toBe(10)
+    expect(markerPaddingExtra(out, 3, 10)).toBe(0) // the desktop base of three rows already holds them
+  })
+
+  it('five labels on one crowded spot all stay: five rows, three rows of extra padding at phone width', () => {
+    const crowd = ['a', 'b', 'c', 'd', 'e'].map((c, i) => ({ x: 10 + i, label: c.repeat(8) }))
+    const out = layoutMarkerLabels(crowd, stack)
+    expect(out).toHaveLength(5)
+    expect(markerPaddingExtra(out, 2, 10)).toBe(30)
+  })
+
+  it('a label near the right edge is pulled left to stay inside, and still stacks when it collides there', () => {
+    const out = layoutMarkerLabels([{ x: 250, label: 'v1.100.0' }, { x: 290, label: 'v1.101.0' }], stack)
+    expect(out[0].x + measure('v1.100.0')).toBeLessThanOrEqual(298)
+    expect(out[1].x + measure('v1.101.0')).toBeLessThanOrEqual(298)
+    expect(out[0].y).toBe(0)
+    expect(out[1].y).toBe(10)
+  })
+
+  it('a desktop-like width gives the layout the three-row cap gave, when it never needed to drop one', () => {
+    const wide = [10, 120, 125, 400, 405, 410].map((x, i) => ({ x, label: `v1.${i}.0` }))
+    const capped = layoutMarkerLabels(wide, { measureWidth: measure, areaLeft: 0, areaRight: 800, maxRows: 3, rowHeight: 10 })
+    const open = layoutMarkerLabels(wide, { measureWidth: measure, areaLeft: 0, areaRight: 800, maxRows: Infinity, rowHeight: 10 })
+    expect(open).toEqual(capped)
+    expect(markerPaddingExtra(open, 3, 10)).toBe(0)
+  })
+
+  it('no labels: no rows, no padding', () => {
+    expect(markerRowsUsed([], 10)).toBe(0)
+    expect(markerPaddingExtra([], 2, 10)).toBe(0)
+  })
+})
+
+describe('settlePaddingExtra (the re-layout converges)', () => {
+  it('keeps the padding when the labels need what it already has', () => {
+    expect(settlePaddingExtra(10, 10, false)).toBe(10)
+    expect(settlePaddingExtra(0, 0, true)).toBe(0)
+  })
+  it('follows the need, up or down, the first time a chart size is laid out', () => {
+    expect(settlePaddingExtra(0, 20, false)).toBe(20)
+    expect(settlePaddingExtra(20, 0, false)).toBe(0)
+  })
+  it('once the size has changed it, it may only grow, so a shifted plot cannot flip it back', () => {
+    expect(settlePaddingExtra(20, 10, true)).toBe(20)
+    expect(settlePaddingExtra(10, 20, true)).toBe(20)
   })
 })
