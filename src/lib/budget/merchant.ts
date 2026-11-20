@@ -54,6 +54,40 @@ function words(s: string, max = 3): string[] {
   return out
 }
 
+/** Bank wording after `ACH` that says how money moved, not who it went to. */
+const BANK_LEAD = new Set(['DEBIT', 'CREDIT', 'DEPOSIT', 'PAYMENT', 'PMT', 'WITHDRAWAL'])
+/** Wording after a processor name that is the processor's own, not a payee. */
+const PROCESSOR_FILLER = new Set([...P2P_FILLER, 'RETRY', 'INST', 'XFER', 'INSTANT'])
+
+/**
+ * The name shown for a merchant, cleaned beyond what the key needs (the key never changes with it): a web
+ * address becomes its brand (`WWW.NAME.COM` is `Name`), bank boilerplate (`ACH DEBIT`) and a processor prefix
+ * written without a star (`SP`) are dropped, a processor followed only by its own wording is the processor,
+ * and a name the fixed-width field cut off and glued to a repeat of itself keeps one copy. Names the code cannot
+ * repair (cut mid-word, a city glued on) stay as printed; the seed can set a display name for those.
+ */
+function displayWords(s: string): string[] {
+  let ws = words(s.replace(/\bWWW\./g, ' ').replace(/\.(?:COM|NET|ORG|CO|CA|IO|US|APP)\b\S*/g, ' '))
+  while (ws.length > 2 && ws[0] === 'ACH' && BANK_LEAD.has(ws[1])) ws = ws.slice(2)
+  if (ws.length > 1 && PROCESSOR_PREFIXES.has(ws[0]) && ws[0] !== 'PAYPAL') ws = ws.slice(1)
+  if (ws.length > 1 && ws[0] === 'PAYPAL' && ws.slice(1).every((w) => PROCESSOR_FILLER.has(w))) ws = ws.slice(0, 1)
+  const out: string[] = []
+  for (const w0 of ws) {
+    let w = w0
+    // A word that carries an earlier word (five letters or more) is a truncated copy of it glued on: cut there.
+    for (const prev of out) {
+      const at = prev.length >= 5 ? w.indexOf(prev) : -1
+      if (at >= 0) w = w.slice(0, at)
+    }
+    // A long word whose own first six letters come back later is the same name run into itself.
+    for (let i = 6; i + 6 <= w.length; i++) {
+      if (w.startsWith(w.slice(i, i + 6))) { w = w.slice(0, i); break }
+    }
+    if (w.length >= 3 || (w === w0 && w.length > 0)) out.push(w)
+  }
+  return out.slice(0, 3)
+}
+
 function title(ws: string[]): string {
   return ws.map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ')
 }
@@ -73,7 +107,7 @@ export function withCounterparty(m: MerchantKey, last4: string): MerchantKey {
 
 /**
  * `clean` is the output of normalizeDescription. Prefixes, marketplace `*token` suffixes, store numbers
- * and locations are dropped; the first one to three words remain. `aggregator` is true when no
+ * and locations are dropped; the first one to three words remain (the name shown is cleaned further, see displayWords). `aggregator` is true when no
  * merchant is visible (a bare processor prefix, a person-to-person rail, or an empty name).
  */
 export function merchantKey(clean: string): MerchantKey {
@@ -108,7 +142,9 @@ export function merchantKey(clean: string): MerchantKey {
     const rail = prefix.split(' ')
     const payee = words(s, 6).find((w) => !P2P_FILLER.has(w))
     const ws = payee ? [...rail, payee] : rail
-    return { key: kebab(ws), name: title(ws), aggregator: true }
+    // The key keeps the payee, so a rule can target one payee; the name is the rail, so one slice is not made per
+    // person (the payee stays in the row's description).
+    return { key: kebab(ws), name: title(rail), aggregator: true }
   }
   const ws = words(s)
   if (ws.length === 0) {
@@ -116,5 +152,6 @@ export function merchantKey(clean: string): MerchantKey {
     if (prefix) { const p = prefix.split(' '); return { key: kebab(p), name: title(p), aggregator: PROCESSOR_PREFIXES.has(prefix) || !bareStar } }
     return { key: 'unknown', name: 'Unknown', aggregator: true }
   }
-  return { key: kebab(ws), name: title(ws), aggregator: false }
+  const shown = displayWords(s)
+  return { key: kebab(ws), name: title(shown.length ? shown : ws), aggregator: false }
 }

@@ -34,7 +34,7 @@ describe('merchantKey', () => {
 
 describe('merchantKey: payees, digits in names, "NAME *"', () => {
   it('keeps the payee of a person-to-person line, still hidden, one key per payee', () => {
-    expect(mk('VENMO *PAT EXAMPLE')).toEqual({ key: 'venmo-pat', name: 'Venmo Pat', aggregator: true })
+    expect(mk('VENMO *PAT EXAMPLE')).toEqual({ key: 'venmo-pat', name: 'Venmo', aggregator: true })
     expect(mk('VENMO *LEE SAMPLE').key).toBe('venmo-lee')
     expect(mk('CASH APP*JORDAN TESTLAKEOAKLAND').key).toBe('cash-app-jordan')
     // Later words are cut off and glued to network boilerplate: the payee is the first name word.
@@ -71,5 +71,51 @@ describe('merchantKey: payees, digits in names, "NAME *"', () => {
   })
   it('withCounterparty adds the last four to the key and keeps the name', () => {
     expect(withCounterparty(mk('INTERNET DEBIT TRANSFER'), '0099')).toEqual({ key: 'internet-debit-transfer-0099', name: 'Internet Debit Transfer', aggregator: false })
+  })
+})
+
+describe('merchantKey: display names (the key never changes with them)', () => {
+  it('a web-style name shows the brand, not a run-together address', () => {
+    expect(mk('WWW.QUILLFEATHER.COM')).toEqual({ key: 'wwwquillfeathercom', name: 'Quillfeather', aggregator: false })
+    expect(mk('QUILLFEATHER.COM').name).toBe('Quillfeather')
+    expect(mk('QUILLFEATHER.COM*AB12CD').name).toBe('Quillfeather')
+    expect(mk('QUILLFEATHER.COM/BILL').name).toBe('Quillfeather')
+    expect(mk('1-800-EXAMPLE.COM')).toMatchObject({ key: '1800examplecom', name: '1800example' })
+    expect(mk('BRAMBLEWOOD MARKET WWW.BRAMBLEWOOD.NET').name).toBe('Bramblewood Market')
+    // A dot that is not a web ending stays part of the word.
+    expect(mk('ST.COLLEGE BOOKS').key).toBe('stcollege-books')
+  })
+  it('bank boilerplate is not the merchant', () => {
+    expect(mk('ACH DEBIT QUILLFEATHER CAFE')).toEqual({ key: 'ach-debit-quillfeather', name: 'Quillfeather', aggregator: false })
+    expect(mk('ACH DEPOSIT BRAMBLEWOOD PAYROLL').name).toBe('Bramblewood')
+    expect(mk('ACH DEBIT').name).toBe('Ach Debit')
+  })
+  it('a processor shows as itself when only its own wording follows', () => {
+    expect(mk('ACH DEBIT PAYPAL')).toMatchObject({ key: 'ach-debit-paypal', name: 'Paypal' })
+    expect(mk('PAYPAL PURCHASE •1234')).toMatchObject({ key: 'paypal-purchase', name: 'Paypal' })
+    expect(mk('PAYPAL RETRY PYMT')).toMatchObject({ key: 'paypal-retry-pymt', name: 'Paypal' })
+    expect(mk('PAYPAL QUILLFEATHER').name).toBe('Paypal Quillfeather')
+  })
+  it('a leading processor prefix written without a star is dropped from the name', () => {
+    expect(mk('SP QUILLFEATHER SHOP')).toEqual({ key: 'sp-quillfeather-shop', name: 'Quillfeather Shop', aggregator: false })
+    expect(mk('SP QUILLFEATHER SPQUILLFEATHERC')).toMatchObject({ key: 'sp-quillfeather-spquillfeatherc', name: 'Quillfeather' })
+  })
+  it('a name glued to a truncated copy of itself keeps one copy', () => {
+    expect(mk('BRAMBLEWOOD CLUBBRAMBLEWOODCL').name).toBe('Bramblewood Club')
+    expect(mk('QUILLFEATHER QUILLFEATHERC').name).toBe('Quillfeather')
+    expect(mk('SAMPLEFORGE WORKSHOPSAMPLEFORGEW').key).toBe('sampleforge-workshopsampleforgew')
+    expect(mk('SAMPLEFORGE WORKSHOPSAMPLEFORGEW').name).toBe('Sampleforge Workshop')
+    expect(mk('QUILLFEATHERGLASSWORKSQUILLFEATHERG').name).toBe('Quillfeatherglassworks')
+  })
+  it('a person-to-person payment shows the rail while the key keeps the payee', () => {
+    expect(mk('VENMO *PAT EXAMPLE')).toEqual({ key: 'venmo-pat', name: 'Venmo', aggregator: true })
+    expect(mk('CASH APP*JORDAN TESTLAKEOAKLAND')).toMatchObject({ key: 'cash-app-jordan', name: 'Cash App' })
+    expect(mk('ZELLE PAYMENT TO LEE SAMPLE')).toMatchObject({ key: 'zelle-lee', name: 'Zelle' })
+    expect(mk('VENMO PAYMENT')).toMatchObject({ key: 'venmo', name: 'Venmo' })
+  })
+  it('an ordinary name is unchanged', () => {
+    expect(mk('BRAMBLEWOOD MARKET #12 SPRINGFIELD').name).toBe('Bramblewood Market')
+    expect(mk('FOOD STORE')).toMatchObject({ key: 'food-store', name: 'Food Store' })
+    expect(mk('SPRINGFIELD SPORTS').name).toBe('Springfield Sports')
   })
 })
