@@ -30,6 +30,13 @@
 // write endpoint added later is closed to viewers without touching this file). A KV miss, a
 // missing binding or a KV error is "not a viewer" (fail closed); the owner never needs KV.
 //
+// BUDGET. /api/budget/* (the Budget section, docs/adr/0007-budget-section.md) has its own list,
+// BUDGET_ALLOWED_EMAILS, for EVERY method (GET, HEAD and OPTIONS included), owner and viewer alike:
+// an email not on it gets 403 budget_denied, and an empty or missing list admits nobody. The list
+// narrows access, it never widens it: the email must also hold a session (owner or viewer). A listed
+// viewer may write under /api/budget/* and nowhere else; the view-only rule above is unchanged for
+// every other path. Defense in depth: functions/api/budget/_middleware.ts checks the list again.
+//
 // FAIL CLOSED: if any required setting is missing or invalid, nobody gets in (503).
 // The only way past the gate without Google is AUTH_DEV_BYPASS set to exactly "1", and
 // even then only when the request host is loopback (wrangler pages dev), never a
@@ -43,6 +50,8 @@ export interface AuthEnv {
   SESSION_TTL_HOURS?: string
   AUTH_DEV_BYPASS?: string
   AUTH_DEV_EMAIL?: string
+  /** Comma-separated emails that may open /api/budget/*. Unset or empty: nobody. */
+  BUDGET_ALLOWED_EMAILS?: string
   /** The dashboard's KV namespace; only its `auth:viewer:*` keys are read here. */
   STATS_CONFIG?: ViewerStore
 }
@@ -191,6 +200,44 @@ export function readAuthConfig(env: AuthEnv): ConfigResult {
       ttlSeconds: Math.floor(ttlHours * 3600),
     },
   }
+}
+
+// ── Budget access (docs/adr/0007-budget-section.md) ──────────────────────────────────
+
+/** The 403 body for an account that is not on the budget list. */
+export const BUDGET_DENIED = { error: 'budget_denied', message: 'This account can’t open Budget.' }
+
+/** Any path that could reach a budget Function. Decoded (repeatedly, so a double-encoded
+ *  spelling is caught too), backslashes read as slashes, slashes collapsed, dot segments
+ *  resolved, lower-cased; a path that will not decode counts as budget (deny by default). */
+export function isBudgetPath(pathname: string): boolean {
+  let p = pathname
+  try {
+    for (let i = 0; i < 3 && /%/.test(p); i++) p = decodeURIComponent(p)
+    if (/%/.test(p)) return true // still escaped after three rounds: not a spelling we trust
+  } catch {
+    return true
+  }
+  const flat = p.toLowerCase().replace(/[\\]/g, '/').replace(/\/{2,}/g, '/')
+  const resolved: string[] = []
+  for (const seg of flat.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') resolved.pop()
+    else resolved.push(seg)
+  }
+  // Both readings count: with dot segments left as written (what a router that does not resolve
+  // them sees) and resolved (what one that does sees).
+  return underBudget(flat) || underBudget('/' + resolved.join('/'))
+}
+
+function underBudget(p: string): boolean {
+  return p === '/api/budget' || p.startsWith('/api/budget/')
+}
+
+/** On the budget list. An empty or missing list admits nobody (fail closed). */
+export function budgetAllowed(email: unknown, env: Pick<AuthEnv, 'BUDGET_ALLOWED_EMAILS'>): boolean {
+  const list = parseAllowedEmails(env.BUDGET_ALLOWED_EMAILS)
+  return list.length > 0 && isAllowedEmail(email, list)
 }
 
 /** The loopback hostnames local dev uses. Must stay in step with ALLOWED_HOSTS in
@@ -712,6 +759,8 @@ export async function authGate(
     // POST only, as in production, so a link or prefetch can't sign out (or clear the cache).
     if (path === LOGOUT_PATH) return method === 'POST' ? signOutRedirect([]) : methodNotAllowed('POST')
     if (path === SIGNED_OUT_PATH) return signedOutPage()
+    // The bypass identity needs the budget list like anyone else.
+    if (isBudgetPath(path) && !budgetAllowed(devEmail, env)) return budgetDenied()
     const out = gatedResponse(await next())
     out.headers.set('X-Auth-Dev-Bypass', '1')
     return out
@@ -752,6 +801,12 @@ export async function authGate(
   }
 
   if (session) {
+    if (isBudgetPath(path)) {
+      // Budget has its own list for EVERY method, owner or viewer alike. A listed viewer may write
+      // here and nowhere else; functions/api/budget/_middleware.ts checks again.
+      if (!budgetAllowed(session.email, env)) return budgetDenied()
+      return gatedResponse(await next())
+    }
     // View-only: every write is refused here, before any Function runs (see ROLES above).
     if (session.role !== 'owner' && !viewerMayRequest(method, path)) {
       return gatedResponse(jsonResponse(403, { error: 'view_only', message: 'View-only access: this account can’t change anything.' }))
@@ -785,6 +840,13 @@ function gatedResponse(res: Response): Response {
   const out = new Response(res.body, res)
   out.headers.set('Cache-Control', 'private, no-store')
   denyFraming(out.headers)
+  return out
+}
+
+/** The 403 for an account off the budget list: uncacheable and keyed on the cookie, like every budget answer. */
+function budgetDenied(): Response {
+  const out = gatedResponse(jsonResponse(403, BUDGET_DENIED))
+  out.headers.set('Vary', 'Cookie')
   return out
 }
 
