@@ -29,6 +29,8 @@ const HARNESS_TESTS = [
   'callbackRefusesATokenEndpointRedirect',
   'callbackTurnsAGoogleRejectionInto502',
   'webSocketUpgradePassesTheGate',
+  'budgetGateDeniesUnlistedOwner',
+  'budgetGateLetsListedViewerWrite',
 ]
 
 // Stands in for every host the harness fetches. The token endpoint replies with the

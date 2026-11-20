@@ -42,6 +42,8 @@ function answer(path: string, init?: RequestInit): Response | undefined {
   // The sites list and the sign-in probes.
   if (path === '/api/sites') return json({ sites: [] })
   if (path === '/auth/me') return json({ email: null }, 401)
+  // The Budget nav link's one access probe (components/budget/BudgetNavLink.vue): not on the list, so no link.
+  if (path === '/api/budget/access') return json({ error: 'budget_denied' }, 403)
   // The world map's land outline: an empty feature list draws just the ocean panel.
   if (path.startsWith('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson/')) return json({ type: 'FeatureCollection', features: [] })
   return undefined

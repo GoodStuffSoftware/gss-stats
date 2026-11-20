@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "lib": ["ES2023", "DOM"],
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts", "../../src/lib/budget/*.ts", "../../src/lib/budget/__fixtures__/*.ts"],
+  "exclude": ["../../src/lib/budget/tableModel.ts", "../../src/lib/budget/tableModel.test.ts", "../../src/lib/budget/pieModel.ts", "../../src/lib/budget/pieModel.test.ts"]
+}

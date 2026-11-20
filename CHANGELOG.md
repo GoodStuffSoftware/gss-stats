@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
+
 ## [0.79.2] — 2026-11-20
 
 ### Fixed

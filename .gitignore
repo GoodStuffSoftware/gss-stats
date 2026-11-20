@@ -5,3 +5,15 @@ dist/
 *.local
 .DS_Store
 npm-debug.log*
+
+# Budget: private bank data never enters this public repo
+budget-data/
+statements/
+/stmt*
+*.pdf
+*.ofx
+*.qfx
+*.qbo
+*.csv
+*.budget.json
+*.budget.sql
