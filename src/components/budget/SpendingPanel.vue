@@ -48,7 +48,7 @@ const emit = defineEmits<{
 
 const TOP_LABEL = 'All spending'
 const crumbItems = computed(() => [{ key: '', label: TOP_LABEL }, ...props.path.map((s) => ({ key: s.key, label: s.label }))])
-const slices = computed(() => spendingSlices(props.summary, props.categories, props.path))
+const slices = computed(() => spendingSlices(props.summary, props.categories, props.path, undefined, props.groupBy))
 const where = computed(() => (props.path.length ? props.path[props.path.length - 1].label : TOP_LABEL))
 const NEXT_LEVEL: Record<string, DrillStep['level'] | undefined> = { category: 'category', merchant: 'merchant' }
 
@@ -103,7 +103,7 @@ const pieLabel = computed(() => `Spending in ${where.value}`)
     </div>
 
     <p class="sp-total" data-testid="spending-total">
-      <span class="sp-total-label">{{ where }}</span>
+      <span class="sp-total-label">Total</span>
       <strong class="sp-total-value">{{ formatAmount(summary.totalCents) }}</strong>
     </p>
 

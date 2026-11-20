@@ -39,8 +39,36 @@ export function lighten(hex: string, t: number): string {
   return `#${part(m[1])}${part(m[2])}${part(m[3])}`
 }
 
-/** Slice `i` of the shades of one base colour (the slices inside one category): steps of lightness, repeating
- * every four so neighbours differ, the biggest slice being the base colour itself. */
+/** `hex` mixed toward white by `t` > 0, toward black by `t` < 0 (-1 = black); 0 leaves it. */
+export function tint(hex: string, t: number): string {
+  if (t >= 0) return lighten(hex, t)
+  const m = HEX_RE.exec(hex)
+  if (!m) return hex
+  const k = Math.min(1, -t)
+  const part = (h: string) =>
+    Math.round(parseInt(h, 16) * (1 - k))
+      .toString(16)
+      .padStart(2, '0')
+  return `#${part(m[1])}${part(m[2])}${part(m[3])}`
+}
+
+const LIGHT_BASE = 150
+/** Perceived brightness 0..255 of a #rrggbb colour (255 for anything else, so it is never darkened by mistake). */
+function luminance(hex: string): number {
+  const m = HEX_RE.exec(hex)
+  if (!m) return 255
+  return 0.2126 * parseInt(m[1], 16) + 0.7152 * parseInt(m[2], 16) + 0.0722 * parseInt(m[3], 16)
+}
+
+/** Mix steps for the slices inside one category, in slice order. They alternate dark and light (no two next to
+ * each other are within 0.45 of one another, the wrap from the last step to the first included), so slices of
+ * one hue still read apart in either theme. */
+const SHADE_STEPS = [0, 0.55, -0.22, 0.33, 0.75] as const
+
+/** Slice `i` of the shades of one base colour (the slices inside one category): the biggest slice is the base
+ * colour itself, then SHADE_STEPS, each round of five a touch lighter than the one before. */
 export function shadeOf(base: string, i: number): string {
-  return lighten(base, (i % 4) * 0.2 + Math.floor(i / 4) * 0.05)
+  const t = SHADE_STEPS[i % SHADE_STEPS.length] + Math.floor(i / SHADE_STEPS.length) * 0.07
+  // A base that is already light has no room to go lighter: its steps run the other way, toward black.
+  return tint(base, luminance(base) > LIGHT_BASE ? -t : t)
 }

@@ -44,16 +44,25 @@ describe('spendingSlices', () => {
     const p = spendingSlices(sum('purchase', [['t1', 300]]), CATS, [...path, { level: 'merchant', key: 'a', label: 'A' }])
     expect(p[0].detail).toBeUndefined()
   })
-  it('more than MAX_SLICES fold into one inert "Other" holding the sum of the rest', () => {
+  it('more than MAX_SLICES fold into one bucket (never called "Other") holding the sum of the rest', () => {
     const rows: Array<[string, number]> = Array.from({ length: 15 }, (_, i) => [`m${String(i).padStart(2, '0')}`, 1000 - i * 10])
     const s = spendingSlices(sum('merchant', rows), CATS, [{ level: 'category', key: 'fuel', label: 'Fuel' }])
     expect(s).toHaveLength(MAX_SLICES)
     const other = s.at(-1)!
-    expect(other).toMatchObject({ key: OTHER_KEY, inert: true, color: OTHER_COLOR })
+    expect(other).toMatchObject({ key: OTHER_KEY, color: OTHER_COLOR })
+    expect(other.inert).toBeUndefined()
+    expect(other.members?.map((m) => m.key)).toEqual(['m11', 'm12', 'm13', 'm14'])
+    expect(other.members?.reduce((n, m) => n + m.value, 0)).toBe(other.value)
     const keptSum = s.slice(0, -1).reduce((n, x) => n + x.value, 0)
     expect(keptSum + other.value).toBe(rows.reduce((n, r) => n + r[1], 0))
-    expect(other.label).toBe('Other (4)')
-    expect(s.slice(0, -1).every((x) => !x.inert)).toBe(true)
+    expect(other.label).toBe('4 smaller stores')
+    expect(s.slice(0, -1).every((x) => !x.inert && !x.members)).toBe(true)
+  })
+  it('the bucket names what it holds: categories, accounts, purchases', () => {
+    const rows: Array<[string, number]> = Array.from({ length: 5 }, (_, i) => [`m${i}`, 100 - i])
+    expect(spendingSlices(sum('category', rows), CATS, [], 3).at(-1)!.label).toBe('3 smaller categories')
+    expect(spendingSlices(sum('merchant', rows), CATS, [{ level: 'category', key: 'fuel', label: 'Fuel' }], 3, 'account').at(-1)!.label).toBe('3 smaller accounts')
+    expect(spendingSlices(sum('purchase', rows), CATS, [], 3).at(-1)!.label).toBe('3 smaller purchases')
   })
 })
 
@@ -64,6 +73,8 @@ describe('foldSlices', () => {
     const f = foldSlices(mk(5), 3)
     expect(f.map((x) => x.key)).toEqual(['k0', 'k1', OTHER_KEY])
     expect(f[2].value).toBe(98 + 97 + 96)
+    expect(f[2].label).toBe('3 smaller slices')
+    expect(f[2].members?.map((m) => m.key)).toEqual(['k2', 'k3', 'k4'])
   })
 })
 

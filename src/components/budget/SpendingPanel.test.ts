@@ -53,15 +53,16 @@ describe('SpendingPanel: pie and totals', () => {
   it('draws the slices of the summary and the total, with one crumb at the top', () => {
     const w = mountPanel()
     expect(w.findComponent(DrillPie).props('slices').map((s: { key: string }) => s.key)).toEqual(['groceries', 'fuel'])
-    expect(w.get('[data-testid="spending-total"]').text()).toContain('All spending')
-    expect(w.get('[data-testid="spending-total"]').text()).toContain('$170.00')
+    // the place is named once, by the crumb; the total line just says "Total"
+    expect(w.get('[data-testid="spending-total"]').text()).toBe('Total$170.00')
+    expect(w.text().match(/All spending/g)).toHaveLength(1)
     expect(w.findComponent(Crumbs).props('items')).toEqual([{ key: '', label: 'All spending' }])
   })
 
-  it('crumbs show the path; the total names where you are', () => {
+  it('crumbs show the path; the total does not repeat it', () => {
     const w = mountPanel({ summary: PURCHASE_LEVEL, path: [FUEL, CHAIN] })
     expect(w.findComponent(Crumbs).props('items').map((i: { label: string }) => i.label)).toEqual(['All spending', 'Fuel', 'Chain X'])
-    expect(w.get('[data-testid="spending-total"]').text()).toContain('Chain X')
+    expect(w.get('[data-testid="spending-total"]').text()).not.toContain('Chain X')
   })
 
   it('refreshing dims the old pie and says it is busy', () => {
@@ -110,7 +111,7 @@ describe('SpendingPanel: drilling', () => {
     expect(w.emitted('crumb')).toEqual([[1], [0]])
   })
 
-  it('the folded "Other" slice does not drill', async () => {
+  it('the folded bucket is not called "Other"; picking it lists what it holds, and a member drills', async () => {
     const many: SummaryResponse = {
       level: 'merchant',
       slices: Array.from({ length: 14 }, (_, i) => ({ key: `m${i}`, label: `M${i}`, netCents: 1000 - i, count: 1 })),
@@ -118,10 +119,15 @@ describe('SpendingPanel: drilling', () => {
       reviewCount: 0,
     }
     const w = mountPanel({ summary: many, path: [FUEL] })
-    const other = w.findComponent(DrillPie).props('slices').find((s: { inert?: boolean }) => s.inert)
-    expect(other).toBeTruthy()
-    await w.get(`[data-testid="pie-row-${other!.key}"]`).trigger('click')
-    expect(w.emitted('drill')).toBeUndefined()
+    const bucket = w.findComponent(DrillPie).props('slices').find((s: { members?: unknown[] }) => s.members)
+    expect(bucket).toMatchObject({ label: '3 smaller stores' })
+    expect(w.text()).not.toMatch(/Other/)
+    await w.get(`[data-testid="pie-row-${bucket!.key}"]`).trigger('click')
+    expect(w.emitted('drill')).toBeUndefined() // the bucket itself never drills
+    const members = w.findAll('[data-testid^="pie-member-"]')
+    expect(members.map((m) => m.get('.dp-label').text())).toEqual(['M11', 'M12', 'M13'])
+    await members[0].trigger('click')
+    expect(w.emitted('drill')).toEqual([[{ level: 'merchant', key: 'm11', label: 'M11' }]])
   })
 })
 

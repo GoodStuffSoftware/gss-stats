@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CATEGORY_PALETTE, categoryColor, lighten, NONE_COLOR, OTHER_COLOR, shadeOf, sortedCategories } from './colors'
+import { CATEGORY_PALETTE, categoryColor, lighten, NONE_COLOR, OTHER_COLOR, shadeOf, sortedCategories, tint } from './colors'
 import { UNCATEGORIZED, type Category } from './types'
 
 const cat = (id: string, sort: number, color: string | null = null, label = id): Category => ({ id, label, color, sort })
@@ -42,5 +42,21 @@ describe('shades', () => {
     const shades = Array.from({ length: 12 }, (_, i) => shadeOf('#2C7DA0', i))
     for (let i = 1; i < shades.length; i++) expect(shades[i]).not.toBe(shades[i - 1])
     expect(new Set(shades).size).toBe(12)
+  })
+  it('tint mixes toward black when negative', () => {
+    expect(tint('#ff8040', -1)).toBe('#000000')
+    expect(tint('#ff8040', -0.5)).toBe('#804020')
+    expect(tint('#ff0000', 0.5)).toBe(lighten('#ff0000', 0.5))
+    expect(tint('rgb(1 2 3)', -0.5)).toBe('rgb(1 2 3)')
+  })
+  it('neighbouring shades are far apart in lightness, wrap-around included, for every palette colour', () => {
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    for (const base of CATEGORY_PALETTE) {
+      const shades = Array.from({ length: 12 }, (_, i) => lum(shadeOf(base, i)))
+      for (let i = 1; i < shades.length; i++) expect(Math.abs(shades[i] - shades[i - 1]), `${base} ${i}`).toBeGreaterThan(40)
+    }
   })
 })

@@ -10,8 +10,11 @@ export interface PieSlice {
   color: string
   /** Small text under the label in the list. */
   detail?: string
-  /** A folded slice such as "Other": drawn, listed, never reported by `select`. */
+  /** A folded slice (a bucket of small ones): drawn, listed, never reported by `select`. */
   inert?: boolean
+  /** The slices a bucket holds. A slice with members is not inert: picking it opens or closes a list of them under
+   * its row (a member picked from that list is reported by `select`), instead of being reported itself. */
+  members?: PieSlice[]
 }
 
 /** The per-chart animation option BaseChart turns into a real animation (see its opt-in). */
@@ -32,7 +35,8 @@ export const ANIMATION_ON = { duration: 450, easing: 'easeOutQuart', animateRota
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
 // Emits
-//   select(key: string)                    a slice or its list row was picked (never for an `inert` slice)
+//   select(key: string)                    a slice or its list row was picked (never for an `inert` slice, nor for a
+//                                          slice with `members`: that one opens its list; its members are reported)
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import BaseChart from './BaseChart.vue'
@@ -113,9 +117,21 @@ watch(signature, () => {
   config.value = buildConfig()
 })
 
+const opened = ref<ReadonlySet<string>>(new Set())
+function toggleMembers(key: string) {
+  const next = new Set(opened.value)
+  if (!next.delete(key)) next.add(key)
+  opened.value = next
+}
+const isOpen = (s: PieSlice) => !!s.members?.length && opened.value.has(s.key)
+function pick(s: PieSlice) {
+  if (s.members?.length) toggleMembers(s.key)
+  else if (!s.inert) emit('select', s.key)
+}
+
 function onPoint(p: { index: number }) {
   const s = drawn.value[p.index]
-  if (s && !s.inert) emit('select', s.key)
+  if (s) pick(s)
 }
 </script>
 
@@ -130,9 +146,9 @@ function onPoint(p: { index: number }) {
           :is="s.inert ? 'div' : 'button'"
           class="dp-row"
           :class="{ 'dp-static': s.inert }"
-          v-bind="s.inert ? {} : { type: 'button' }"
+          v-bind="s.inert ? {} : s.members?.length ? { type: 'button', 'aria-expanded': isOpen(s) } : { type: 'button' }"
           :data-testid="`pie-row-${s.key}`"
-          @click="!s.inert && emit('select', s.key)"
+          @click="pick(s)"
         >
           <span class="dp-dot" :style="{ background: s.color }" aria-hidden="true" />
           <span class="dp-text">
@@ -141,7 +157,21 @@ function onPoint(p: { index: number }) {
           </span>
           <span class="dp-value">{{ format(s.value) }}</span>
           <span class="dp-share">{{ share(s.value) }}%</span>
+          <span v-if="s.members?.length" class="dp-caret" aria-hidden="true">{{ isOpen(s) ? '▴' : '▾' }}</span>
         </component>
+        <ul v-if="isOpen(s)" class="dp-members" :aria-label="`${s.label}: what it holds`" :data-testid="`pie-members-${s.key}`">
+          <li v-for="m in s.members" :key="m.key">
+            <button type="button" class="dp-row dp-member" :data-testid="`pie-member-${m.key}`" @click="emit('select', m.key)">
+              <span class="dp-dot" :style="{ background: m.color }" aria-hidden="true" />
+              <span class="dp-text">
+                <span class="dp-label">{{ m.label }}</span>
+                <span v-if="m.detail" class="dp-detail">{{ m.detail }}</span>
+              </span>
+              <span class="dp-value">{{ format(m.value) }}</span>
+              <span class="dp-share">{{ share(m.value) }}%</span>
+            </button>
+          </li>
+        </ul>
       </li>
     </ul>
   </div>
@@ -200,6 +230,22 @@ button.dp-row:focus-visible {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  /* a pale slice colour (the folded bucket's grey, a light shade) still shows against the page */
+  box-shadow: inset 0 0 0 1px rgb(var(--ink-3) / 0.55);
+}
+.dp-caret {
+  flex: none;
+  width: 1em;
+  text-align: center;
+  color: rgb(var(--ink-3));
+}
+.dp-members {
+  list-style: none;
+  margin: 0 0 4px 22px;
+  padding: 0 0 0 8px;
+  border-left: 2px solid rgb(var(--line-2));
+  display: flex;
+  flex-direction: column;
 }
 .dp-text {
   flex: 1 1 auto;

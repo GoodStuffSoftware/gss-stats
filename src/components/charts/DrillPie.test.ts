@@ -110,6 +110,28 @@ describe('DrillPie picks', () => {
     expect(w.emitted('select')).toBeUndefined()
   })
 
+  it('a slice with members opens a list of them (chart or row), is not reported itself, and a member is', async () => {
+    const members: PieSlice[] = [
+      { key: 'm1', label: 'Mem One', value: 600, color: '#111111' },
+      { key: 'm2', label: 'Mem Two', value: 400, color: '#222222' },
+    ]
+    const w = mountPie({ slices: [SLICES[0], { key: 'bucket', label: '2 smaller things', value: 1000, color: '#C9C3B8', members }] })
+    const row = w.get('[data-testid="pie-row-bucket"]')
+    expect(row.element.tagName).toBe('BUTTON')
+    expect(row.attributes('aria-expanded')).toBe('false')
+    expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(false)
+    await row.trigger('click')
+    expect(row.attributes('aria-expanded')).toBe('true')
+    expect(w.findAll('[data-testid^="pie-member-"]').map((m) => m.get('.dp-label').text())).toEqual(['Mem One', 'Mem Two'])
+    expect(w.emitted('select')).toBeUndefined()
+    await w.get('[data-testid="pie-member-m2"]').trigger('click')
+    expect(w.emitted('select')).toEqual([['m2']])
+    w.findComponent(ChartStub).vm.$emit('point', { index: 1, datasetIndex: 0, x: 0, y: 0 }) // the bucket's own arc closes it
+    await w.vm.$nextTick()
+    expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(false)
+    expect(w.emitted('select')).toEqual([['m2']])
+  })
+
   it('the list repeats every drawn slice as a button with its value and share; clicking one reports it', async () => {
     const w = mountPie({ format: (v: number) => `${v} c` })
     const rows = w.findAll('.dp-row')
