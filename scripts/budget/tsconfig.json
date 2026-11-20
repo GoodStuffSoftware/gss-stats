@@ -12,5 +12,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../../src/lib/budget/*.ts", "../../src/lib/budget/__fixtures__/*.ts"]
+  "include": ["./**/*.ts", "../../src/lib/budget/*.ts", "../../src/lib/budget/__fixtures__/*.ts"],
+  "exclude": ["../../src/lib/budget/tableModel.ts", "../../src/lib/budget/tableModel.test.ts"]
 }
