@@ -9,6 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Added
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
+- **Drill-down pies animate and label themselves.** Opening a slice grows the next level out of it, going back up unfurls the pie around the slice you left, with no blank skeleton in between, and the same short motion plays under a reduced-motion setting. Each slice with room shows its name, and its amount and share when those fit, right on the chart.
 
 ### Fixed
 - **Budget legends read better.** Purchases show a short date ("Aug 11") instead of the full ISO date, a long debt name wraps instead of being cut off, the two panel headers line up on desktop, and every category gets its own colour.

@@ -21,12 +21,12 @@
 //   group-by(g)            the second-level grouping switch.
 //   review-only(on)        the "Needs review (n)" toggle.
 //   select-purchase(id)    a purchase slice was picked: the table scrolls to and highlights that row.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { spendingSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { Category, SummaryResponse } from '../../lib/budget/types'
 import type { DrillStep, GroupBy } from '../../lib/budget/viewState'
-import DrillPie from '../charts/DrillPie.vue'
+import DrillPie, { type PieTransition } from '../charts/DrillPie.vue'
 import Crumbs from '../nav/Crumbs.vue'
 
 const props = defineProps<{
@@ -65,6 +65,23 @@ function onSelect(key: string) {
 }
 
 const pieLabel = computed(() => `Spending in ${where.value}`)
+
+// How the next pie relates to the one on screen, from the path alone: one step deeper means the slice just
+// picked (the last step's key) opened; one step up means the pie grows around the slice just left (the step
+// that was dropped). Set before the pie re-renders (the watcher runs ahead of the render), so the pie reads
+// it together with its new slices. The pie stays mounted across levels: the old one stays until the new one's
+// slices arrive, and there is no skeleton in between.
+const transition = ref<PieTransition | undefined>(undefined)
+watch(
+  () => props.path.map((s) => s.key),
+  (now, before) => {
+    const same = now.length === before.length && now.every((k, i) => k === before[i])
+    if (same) return
+    if (now.length > before.length && before.every((k, i) => k === now[i])) transition.value = { key: now[before.length], dir: 'in' }
+    else if (now.length < before.length && now.every((k, i) => k === before[i])) transition.value = { key: before[now.length], dir: 'out' }
+    else transition.value = undefined
+  },
+)
 </script>
 
 <template>
@@ -107,8 +124,8 @@ const pieLabel = computed(() => `Spending in ${where.value}`)
       <strong class="sp-total-value">{{ formatAmount(summary.totalCents) }}</strong>
     </p>
 
-    <div :key="`${path.map((s) => s.key).join('/')}|${groupBy}`" class="sp-body">
-      <DrillPie :slices="slices" :dark="dark" :format="formatAmount" :label="pieLabel" @select="onSelect" />
+    <div class="sp-body">
+      <DrillPie :slices="slices" :dark="dark" :transition="transition" :format="formatAmount" :label="pieLabel" @select="onSelect" />
       <p v-if="slices.length === 0" class="sp-none" data-testid="spending-none">Nothing above zero here: refunds cover the spending.</p>
     </div>
   </div>
@@ -190,25 +207,13 @@ const pieLabel = computed(() => `Spending in ${where.value}`)
 }
 .sp-body {
   min-width: 0;
-  animation: sp-fade 150ms ease-out;
 }
 .sp-none {
   margin: 8px 0 0;
   font-size: 14px;
   color: rgb(var(--ink-2));
 }
-@keyframes sp-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .sp-body {
-    animation: none;
-  }
   .spending-panel {
     transition: none;
   }

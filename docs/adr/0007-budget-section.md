@@ -80,6 +80,10 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    is the only way in; the first load and later ones are the private SQL file. An in-browser statement parser would mean
    a PDF library and an institution-specific layout parser in a public repository. A CSV or OFX
    import can be added later if a bank offers one.
+8. **The drill pie plays its motion under reduced motion too.** Opening or leaving a level is shown only by the pie
+   growing out of the slice (or around the one you came back from); a fade in its place reads as no
+   motion, and the user who sets the preference still needs to see that the level changed. It is a short
+   one-shot (about half a second, never a loop) in this one pie; every other chart stays still.
 
 ## Consequences
 

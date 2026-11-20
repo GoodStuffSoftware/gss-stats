@@ -126,10 +126,32 @@ function textOn(hex: string): string {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#1A1715' : '#ffffff'
 }
 
+function relLuminance(hex: string): number {
+  const lin = (v: number) => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  const [r, g, b] = hexToRgb(hex)
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+}
+/** WCAG contrast ratio (1..21) of two #rrggbb colours. */
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [relLuminance(a), relLuminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+const LABEL_DARK = '#14110F'
+const LABEL_LIGHT = '#FFFFFF'
+/** The label ink (near-black or white) with the higher WCAG contrast against `fill`: never below about 4.5 on any
+ * fill, in either site theme (the slice colour decides it; the theme only changes the slice border). */
+export function inkOn(fill: string): string {
+  return contrastRatio(fill, LABEL_DARK) >= contrastRatio(fill, LABEL_LIGHT) ? LABEL_DARK : LABEL_LIGHT
+}
+
 // Draws "name + count" on each arc of the given datasets (both rings of a nested
 // doughnut), so every segment is self-labeled — no legend or hover needed. Skips
 // slivers too small to fit a label; those stay on hover.
-type ArcItem = { name: string; sub: string }
+// `sub` may be a list of alternatives (longest first): the first that fits the arc is drawn, none when none fits.
+export type ArcItem = { name: string; sub: string | string[] }
 
 // Draw text curved along a circle of radius r, centered on midAngle. Characters
 // stay tangent to the ring; the bottom half is flipped so text reads upright all
@@ -154,7 +176,21 @@ function drawCurvedText(ctx: any, text: string, cx: number, cy: number, r: numbe
   }
 }
 
-function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
+/** Per-plugin look. The defaults are the nested doughnut's, unchanged. */
+export interface ArcLabelOptions {
+  nameFont?: string
+  subFont?: string
+  /** true: ink by best WCAG contrast (see inkOn), instead of the nested doughnut's brightness cut. */
+  bestContrast?: boolean
+  /** Distance (px) of each of the two text lines from the ring's centre line; default 6 (tight, for 10-11 px text). */
+  lineGap?: number
+}
+
+export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look: ArcLabelOptions = {}) {
+  const nameFont = look.nameFont ?? '600 10px Inter, system-ui, sans-serif'
+  const subFont = look.subFont ?? '700 11px "Space Grotesk", system-ui, sans-serif'
+  const gap = look.lineGap ?? 6 // px from the band centre to each of the two text lines
+  const ink = look.bestContrast ? inkOn : textOn
   return {
     id: 'arcLabels',
     afterDatasetsDraw(chart: any) {
@@ -176,18 +212,21 @@ function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
           const ma = ((mid % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
           const bottom = ma > 0 && ma < Math.PI
           // keep "name" visually above "sub" on either half
-          const nameR = bottom ? bandMid - 6 : bandMid + 6
-          const subR = bottom ? bandMid + 6 : bandMid - 6
+          const nameR = bottom ? bandMid - gap : bandMid + gap
+          const subR = bottom ? bandMid + gap : bandMid - gap
           ctx.save()
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillStyle = textOn(colors[i] ?? '#888888')
-          ctx.font = '600 10px Inter, system-ui, sans-serif'
+          ctx.fillStyle = ink(colors[i] ?? '#888888')
+          ctx.font = nameFont
           const nameFits = ctx.measureText(it.name).width / nameR < span * 0.96
           if (nameFits) drawCurvedText(ctx, it.name, arc.x, arc.y, nameR, mid)
           // only show the number line if the name fit too — no orphan "9 · 13%"
-          ctx.font = '700 11px "Space Grotesk", system-ui, sans-serif'
-          if (nameFits && ctx.measureText(it.sub).width / subR < span * 0.96) drawCurvedText(ctx, it.sub, arc.x, arc.y, subR, mid)
+          ctx.font = subFont
+          if (nameFits) {
+            const sub = (Array.isArray(it.sub) ? it.sub : [it.sub]).find((t) => t && ctx.measureText(t).width / subR < span * 0.96)
+            if (sub) drawCurvedText(ctx, sub, arc.x, arc.y, subR, mid)
+          }
           ctx.restore()
         })
       }

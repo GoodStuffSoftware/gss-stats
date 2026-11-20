@@ -164,3 +164,38 @@ describe('SpendingPanel colours', () => {
     }
   })
 })
+
+describe('SpendingPanel: where the next pie comes from', () => {
+  const transition = (w: VueWrapper) => w.findComponent(DrillPie).props('transition')
+
+  it('one step deeper: the picked slice is the last step; one step up: the slice just left is the dropped step', async () => {
+    const w = mountPanel()
+    expect(transition(w)).toBeUndefined()
+    await w.setProps({ summary: MERCHANT_LEVEL, path: [FUEL] })
+    expect(transition(w)).toEqual({ key: 'fuel', dir: 'in' })
+    await w.setProps({ summary: PURCHASE_LEVEL, path: [FUEL, CHAIN] })
+    expect(transition(w)).toEqual({ key: 'chain-x', dir: 'in' })
+    await w.setProps({ summary: MERCHANT_LEVEL, path: [FUEL] })
+    expect(transition(w)).toEqual({ key: 'chain-x', dir: 'out' })
+    await w.setProps({ summary: CATEGORY_LEVEL, path: [] })
+    expect(transition(w)).toEqual({ key: 'fuel', dir: 'out' })
+  })
+
+  it('the pie is one instance across levels (no remount, so the old pie stays until the new slices arrive)', async () => {
+    const w = mountPanel()
+    const pie = w.findComponent(DrillPie).vm.$.uid
+    await w.setProps({ summary: MERCHANT_LEVEL, path: [FUEL] })
+    expect(w.findComponent(DrillPie).vm.$.uid).toBe(pie)
+  })
+
+  it('the same position again (a range or person refresh) is not a transition; a jump to another branch has none', async () => {
+    const w = mountPanel({ summary: MERCHANT_LEVEL, path: [FUEL] })
+    await w.setProps({ path: [{ ...FUEL }] })
+    expect(transition(w)).toBeUndefined()
+    await w.setProps({ summary: PURCHASE_LEVEL, path: [FUEL, CHAIN] })
+    const t = transition(w)
+    await w.setProps({ summary: MERCHANT_LEVEL, path: [{ ...FUEL, key: 'other' }] })
+    expect(transition(w)).toBeUndefined()
+    expect(t).toEqual({ key: 'chain-x', dir: 'in' })
+  })
+})

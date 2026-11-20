@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { Chart, animator } from 'chart.js'
+import { Chart } from 'chart.js'
 import { defineComponent } from 'vue'
 import BaseChart from './BaseChart.vue'
-import DrillPie, { ANIMATION_ON, type PieSlice } from './DrillPie.vue'
+import DrillPie, { sliceLabelParts, type PieSlice } from './DrillPie.vue'
 import source from './DrillPie.vue?raw'
 
 const SLICES: PieSlice[] = [
@@ -33,6 +33,8 @@ function mountPie(props: Record<string, unknown> = {}, stub = true) {
   return w
 }
 const configOf = (w: VueWrapper) => w.findComponent(ChartStub).props('config') as any
+const pluginOf = (c: any, id: string) => c.plugins.find((p: any) => p.id === id)
+const motionOf = (w: VueWrapper) => pluginOf(configOf(w), 'pieMotion').motion
 
 function setReducedMotion(on: boolean) {
   vi.spyOn(window, 'matchMedia').mockImplementation(
@@ -58,15 +60,105 @@ describe('DrillPie config', () => {
     expect(c.options.plugins.legend.display).toBe(false)
   })
 
-  it('animates in with the per-chart option BaseChart opts in on; animate=false turns it off', () => {
-    expect(configOf(mountPie()).options.animation).toEqual({ duration: 450, easing: 'easeOutQuart', animateRotate: true, animateScale: true })
-    expect(configOf(mountPie()).options.animation).toEqual(ANIMATION_ON)
-    expect(configOf(mountPie({ animate: false })).options.animation).toBe(false)
+  it('a first appearance sweeps in; animate=false plays nothing', () => {
+    expect(motionOf(mountPie())).toEqual({ kind: 'unfurl', mid: 0 })
+    expect(motionOf(mountPie({ animate: false }))).toEqual({ kind: 'none' })
   })
 
-  it('prefers-reduced-motion turns the animation off', () => {
+  it('prefers-reduced-motion plays the same motion (a short one-shot, no fade in its place)', () => {
     setReducedMotion(true)
-    expect(configOf(mountPie()).options.animation).toBe(false)
+    expect(motionOf(mountPie())).toEqual({ kind: 'unfurl', mid: 0 })
+    expect(motionOf(mountPie({ animate: false }))).toEqual({ kind: 'none' })
+  })
+
+  describe('a transition says where the next set of slices comes from', () => {
+    const level1: PieSlice[] = [
+      { key: 'a', label: 'Alpha', value: 2000, color: '#E0722C' },
+      { key: 'b', label: 'Beta', value: 6000, color: '#2C7DA0' },
+      { key: 'c', label: 'Gamma', value: 2000, color: '#9C6644' },
+    ]
+    const level2: PieSlice[] = [
+      { key: 'b1', label: 'B one', value: 5, color: '#111111' },
+      { key: 'b2', label: 'B two', value: 5, color: '#222222' },
+    ]
+
+    it('in: the new slices grow out of the picked slice\'s wedge of the pie that was on screen', async () => {
+      const w = mountPie({ slices: level1 })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+      await w.setProps({ slices: level2, transition: { key: 'b', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'expand', from: 0.2, to: 0.8 })
+    })
+
+    it('out: the pie grows around the slice it came back from, in the new pie', async () => {
+      const w = mountPie({ slices: level2 })
+      await w.setProps({ slices: level1, transition: { key: 'b', dir: 'out' } })
+      const m = motionOf(w)
+      expect(m.kind).toBe('unfurl')
+      expect(m.mid).toBeCloseTo(0.5, 9)
+    })
+
+    it('a slice inside a folded bucket counts as the bucket\'s wedge', async () => {
+      const members: PieSlice[] = [
+        { key: 'm1', label: 'M1', value: 300, color: '#111111' },
+        { key: 'm2', label: 'M2', value: 200, color: '#222222' },
+      ]
+      const folded: PieSlice[] = [{ key: 'a', label: 'Alpha', value: 500, color: '#E0722C' }, { key: 'bucket', label: '2 smaller', value: 500, color: '#C9C3B8', members }]
+      const w = mountPie({ slices: folded })
+      await w.setProps({ slices: level2, transition: { key: 'm2', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'expand', from: 0.5, to: 1 })
+      await w.setProps({ slices: folded, transition: { key: 'm2', dir: 'out' } })
+      expect(motionOf(w)).toMatchObject({ kind: 'unfurl', mid: 0.75 })
+    })
+
+    it('a transition whose slice is not found, or none at all, falls back to the sweep from the top', async () => {
+      const w = mountPie({ slices: level1 })
+      await w.setProps({ slices: level2, transition: { key: 'nope', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+      await w.setProps({ slices: level1, transition: undefined })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+    })
+
+    it('a transition is used once: a later change of the slices does not reuse it', async () => {
+      const w = mountPie({ slices: level1 })
+      const t = { key: 'b', dir: 'in' as const }
+      await w.setProps({ slices: level2, transition: t })
+      expect(motionOf(w).kind).toBe('expand')
+      await w.setProps({ slices: [level2[0]] }) // same transition object still set, a different slice set
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+    })
+
+    it('the old pie stays (the same chart) until the new slices arrive, and a new level starts with its buckets closed', async () => {
+      const members: PieSlice[] = [{ key: 'm1', label: 'M1', value: 500, color: '#111111' }]
+      const folded: PieSlice[] = [{ key: 'a', label: 'Alpha', value: 500, color: '#E0722C' }, { key: 'bucket', label: '1 smaller', value: 500, color: '#C9C3B8', members }]
+      const w = mountPie({ slices: folded })
+      const before = configOf(w)
+      await w.get('[data-testid="pie-row-bucket"]').trigger('click')
+      expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(true)
+      expect(configOf(w)).toBe(before)
+      await w.setProps({ slices: level2 })
+      await w.setProps({ slices: folded })
+      expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(false)
+    })
+  })
+
+  it('the same slices redrawn (a theme switch, new numbers) play no motion; a different set does', async () => {
+    const w = mountPie()
+    expect(motionOf(w).kind).toBe('unfurl')
+    await w.setProps({ dark: true })
+    expect(motionOf(w)).toEqual({ kind: 'none' })
+    await w.setProps({ slices: SLICES.map((s) => ({ ...s, value: s.value * 2 })) })
+    expect(motionOf(w)).toEqual({ kind: 'none' })
+    await w.setProps({ slices: SLICES.slice(0, 2) })
+    expect(motionOf(w).kind).toBe('unfurl')
+  })
+
+  it('labels each drawn slice on the arc: its name, then the amount and share alternatives', () => {
+    const c = configOf(mountPie({ format: (v: number) => `$${v / 100}` }))
+    const labels = pluginOf(c, 'arcLabels')
+    expect(labels).toBeTruthy()
+    // the labels plugin comes before the motion plugin: labels are drawn on the moved arcs, then the arcs go back
+    expect(c.plugins.map((p: any) => p.id)).toEqual(['arcLabels', 'pieMotion'])
+    expect(sliceLabelParts('$60', 60)).toEqual(['$60 · 60%', '$60', '60%'])
   })
 
   it('the slice border follows the theme', () => {
@@ -151,8 +243,9 @@ describe('DrillPie is generic (ADR 0005: no one-off widgets)', () => {
   })
 })
 
-// The point of the opt-in: with the site's global "animation off", the per-chart option must still animate
-// when the real BaseChart builds the real Chart.js chart (and must not when motion is reduced).
+// The motion is the pie's own (a plugin that re-draws itself), so it does not depend on Chart.js's animation,
+// which the site keeps off for every chart: through the real BaseChart the chart still moves its arcs for the
+// first frames and ends on the true pie.
 describe('DrillPie through the real BaseChart', () => {
   let getContext: typeof HTMLCanvasElement.prototype.getContext
   beforeEach(() => {
@@ -169,17 +262,24 @@ describe('DrillPie through the real BaseChart', () => {
     HTMLCanvasElement.prototype.getContext = getContext
   })
 
-  it('the sweep runs by default and not under reduced motion; the global default stays off', () => {
+  it('builds the pie with its labels and motion plugins while the global Chart.js animation stays off', () => {
     setReducedMotion(false)
     const w = mountPie({}, false)
     const chart = Chart.getChart(w.get('canvas').element as HTMLCanvasElement)!
     expect(w.findComponent(BaseChart).exists()).toBe(true)
-    expect(animator.has(chart as never)).toBe(true)
+    expect((chart.config as any)._config.plugins.map((p: any) => p.id)).toEqual(['arcLabels', 'pieMotion'])
     expect(Chart.defaults.animation).toBe(false)
+  })
 
-    setReducedMotion(true)
-    const calm = mountPie({}, false)
-    const calmChart = Chart.getChart(calm.get('canvas').element as HTMLCanvasElement)!
-    expect(animator.has(calmChart as never)).toBe(false)
+  it('moves the arcs during the first frame and leaves them on the true pie, drill level after drill level', () => {
+    setReducedMotion(false)
+    const frames: ((t: number) => void)[] = []
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => (frames.push(cb), frames.length))
+    const w = mountPie({}, false)
+    const chart = Chart.getChart(w.get('canvas').element as HTMLCanvasElement)!
+    const arcs = chart.getDatasetMeta(0).data as unknown as { circumference: number }[]
+    const final = arcs.map((a) => a.circumference)
+    chart.draw()
+    expect(arcs.map((a) => a.circumference)).toEqual(final) // put back after the frame
   })
 })

@@ -14,7 +14,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
 import type { DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
-import { useBudgetViewState } from '../../lib/budget/viewState'
+import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
@@ -64,22 +64,33 @@ const summaryError = ref(false)
 const refreshKey = ref(0)
 const highlightId = ref<string | null>(null)
 let summarySeq = 0
-let summaryShape = ''
+// The drill position the summary on screen was fetched for. Any change (a new level, range, person) keeps the
+// old pie on screen, dimmed, until the new answer lands, then the pie plays into it: no skeleton in between
+// (only before the very first answer). So the panel is given THIS path, not the live one: path and answer
+// arrive together.
+const shown = ref<{ path: DrillStep[]; groupBy: GroupBy } | null>(null)
+const shownPath = computed(() => shown.value?.path ?? [])
+const shownGroupBy = computed(() => shown.value?.groupBy ?? 'merchant')
+const shapeKey = (path: DrillStep[], groupBy: GroupBy) => JSON.stringify([path.map((s) => s.key), groupBy])
+// The pie on screen is for another drill position than the one asked for: its slices must not be drilled into.
+const pieIsStale = computed(() => !!shown.value && shapeKey(shown.value.path, shown.value.groupBy) !== shapeKey(state.path, state.groupBy))
+function onDrill(step: DrillStep) {
+  if (!pieIsStale.value) pushStep(step)
+}
 async function loadSummary() {
   const seq = ++summarySeq
-  // A different drill position starts from a skeleton; a new range or person keeps the old pie, dimmed.
-  const shape = JSON.stringify([state.path.map((s) => s.key), state.groupBy])
-  if (shape !== summaryShape) summary.value = null
-  summaryShape = shape
+  const asked = { path: state.path.map((s) => ({ ...s })), groupBy: state.groupBy }
   summaryLoading.value = true
   summaryError.value = false
   try {
     const r = await fetchSummary(summaryQuery.value)
     if (seq !== summarySeq) return
     summary.value = r
+    shown.value = asked
   } catch {
     if (seq !== summarySeq) return
     summary.value = null
+    shown.value = null
     summaryError.value = true
   } finally {
     if (seq === summarySeq) summaryLoading.value = false
@@ -217,12 +228,12 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
               v-else
               :summary="summary"
               :categories="meta.categories"
-              :path="state.path"
-              :group-by="state.groupBy"
+              :path="shownPath"
+              :group-by="shownGroupBy"
               :review-only="state.reviewOnly"
               :dark="dark"
               :refreshing="summaryLoading"
-              @drill="pushStep"
+              @drill="onDrill"
               @crumb="popTo"
               @group-by="setGroupBy"
               @review-only="setReviewOnly"

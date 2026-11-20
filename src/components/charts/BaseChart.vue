@@ -1,11 +1,3 @@
-<script lang="ts">
-import { Chart as ChartJs } from 'chart.js'
-
-// Module scope (a `<script setup>` body runs once per instance, by which time the first instance has already
-// switched the global off): the real Chart.js animation default, read once before anything turns it off.
-const DEFAULT_ANIMATION = ChartJs.defaults.animation
-</script>
-
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { Chart, registerables, type ChartConfiguration } from 'chart.js'
@@ -23,16 +15,7 @@ const chart = shallowRef<Chart | null>(null)
 function render() {
   if (!canvas.value) return
   chart.value?.destroy()
-  // A chart that sets its own `options.animation` opts in: Chart.js only copies the keys of the GLOBAL
-  // animation default into its per-property settings, so with the global `false` a per-chart object never
-  // animates. Restore the real default for this one construction, then switch it off again.
-  const optIn = !!props.config.options?.animation
-  if (optIn) Chart.defaults.animation = DEFAULT_ANIMATION
-  try {
-    chart.value = new Chart(canvas.value, props.config)
-  } finally {
-    Chart.defaults.animation = false as unknown as typeof Chart.defaults.animation
-  }
+  chart.value = new Chart(canvas.value, props.config)
   if (props.drillOpen) setTooltipEnabled(false) // preserve suppression across a re-render (e.g. a data refresh) while the menu is still open
 }
 
