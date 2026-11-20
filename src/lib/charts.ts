@@ -411,6 +411,17 @@ export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], nar
       // (markerLabelRoom) are the padding extra, so the first row starts that much higher.
       const extraPx = markerPaddingExtra(placed, room.rows, MARKER_LABEL_ROW_PX)
       const top = chartArea.top - room.offset - extraPx
+      // The text measures wider now than at the last layout (a web font arriving after it): the padding holds fewer rows than
+      // these need, so the first row would sit above the canvas. Take the larger extra and lay out once more; `padState.extra`
+      // then matches, so later draws queue nothing, and a layout can only keep or grow it from here (growOnly).
+      if (extraPx > padState.extra) {
+        padState.extra = extraPx
+        padState.touched = true
+        padState.growOnly = true
+        queueMicrotask(() => {
+          if (chart.ctx) chart.update('none')
+        })
+      }
       ctx.save()
       for (const { p, x } of visible) {
         if (p.item.kind === 'minor-release') {

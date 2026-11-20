@@ -293,6 +293,71 @@ describe('marker label padding after a layout', () => {
   })
 })
 
+describe('marker label rows that outgrow the padding at draw time', () => {
+  const dates = days('2026-10-26', 5)
+  const item = (date: string, label: string): OverlayItem => ({ kind: 'go-live', date, label, note: '' })
+  // Label width = chars * px.value, so a later draw can measure wider than the layout did (a web font arriving).
+  const setup = (items: OverlayItem[], px: { value: number }) => {
+    const plugin: any = timelineOverlayPlugin(dates, items, true)
+    const mkCtx = () => new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * px.value }) : () => {}), set: () => true })
+    const chart: any = { ctx: mkCtx(), width: 300, height: 240, chartArea: { left: 10, right: 290, top: 24, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, options: { layout: { padding: { top: 24 } } }, update: vi.fn() }
+    return { plugin, chart }
+  }
+  const crowd = [item('2026-10-26', 'a'.repeat(20)), item('2026-10-27', 'b'.repeat(20)), item('2026-10-28', 'c'.repeat(20))]
+  const draw = (plugin: any, chart: any) => {
+    plugin.beforeDatasetsDraw(chart)
+    plugin.afterDatasetsDraw(chart)
+  }
+
+  it('a draw that needs more rows than the layout gave queues exactly one update, then converges', async () => {
+    const px = { value: 1 } // laid out with narrow text: everything fits one row
+    const { plugin, chart } = setup(crowd, px)
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart)
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+    px.value = 5 // the font arrives: three rows at phone width
+    draw(plugin, chart)
+    draw(plugin, chart) // a second draw before the update runs queues nothing more
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+    plugin.beforeLayout(chart) // the update's layout
+    expect(chart.options.layout.padding.top).toBe(34)
+    plugin.afterLayout(chart)
+    draw(plugin, chart)
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+  })
+  it('a draw that fits the padding queues nothing', async () => {
+    const px = { value: 5 }
+    const { plugin, chart } = setup(crowd, px)
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart) // asks for its one update
+    await Promise.resolve()
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart)
+    draw(plugin, chart)
+    draw(plugin, chart)
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1) // only the layout path's own
+    const fit = setup([item('2026-10-26', 'aaaaaaaaaa'), item('2026-10-29', 'bbbbbbbbbb')], { value: 5 })
+    fit.plugin.afterLayout(fit.chart)
+    draw(fit.plugin, fit.chart)
+    await Promise.resolve()
+    expect(fit.chart.update).not.toHaveBeenCalled()
+  })
+  it('a destroyed chart queues nothing', async () => {
+    const px = { value: 1 }
+    const { plugin, chart } = setup(crowd, px)
+    plugin.afterLayout(chart)
+    px.value = 5
+    draw(plugin, chart) // queues the update ...
+    chart.ctx = null // ... and the chart is destroyed before it runs
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+  })
+})
+
 describe('layoutBandLabels', () => {
   const measure = (t: string) => t.length * 5
   const area = { measureWidth: measure, areaLeft: 10, areaRight: 410 }
