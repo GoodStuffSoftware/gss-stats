@@ -178,7 +178,8 @@ export function summaryQueryOf(state: BudgetViewState): SummaryQuery {
 }
 export function txnQueryOf(state: BudgetViewState): TxnQuery {
   const { category, merchant, account } = levelKeys(state)
-  const q: TxnQuery = { from: state.from, to: state.to, person: state.person, scope: 'spending' }
+  // Review mode lists every flagged row, whatever its kind (the server ignores `scope` for it), like the count.
+  const q: TxnQuery = { from: state.from, to: state.to, person: state.person, scope: state.reviewOnly ? 'all' : 'spending' }
   if (category !== undefined) q.category = category
   if (merchant !== undefined) q.merchant = merchant
   if (account !== undefined) q.account = account

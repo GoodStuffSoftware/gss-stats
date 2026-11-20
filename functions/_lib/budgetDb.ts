@@ -309,10 +309,18 @@ export interface SummaryPlan {
 export function buildSummary(q: SummaryQuery, idsJson: string): SummaryPlan {
   const base = `kind IN (${SPENDING_SQL}) AND posted_date BETWEEN ? AND ? AND ${IN_ACCOUNTS}`
   const baseParams: Array<string | number> = [q.from, q.to, idsJson]
-  const review: Built = {
-    sql: `SELECT COUNT(*) AS n FROM transactions WHERE needs_review = 1 AND posted_date BETWEEN ? AND ? AND ${IN_ACCOUNTS}`,
-    params: [q.from, q.to, idsJson],
+  // The review count is the SAME set the table lists for `review=1` (buildTxnList): flagged rows of ANY kind
+  // in the range and person filter, narrowed by the drill (category, merchant, account) but not by spending kinds.
+  const reviewWhere = ['needs_review = 1', 'posted_date BETWEEN ? AND ?', IN_ACCOUNTS]
+  const reviewParams: Array<string | number> = [q.from, q.to, idsJson]
+  if (q.category !== undefined) {
+    const c = categoryFragment(q.category)
+    reviewWhere.push(c.sql)
+    reviewParams.push(...c.params)
   }
+  if (q.merchant !== undefined) { reviewWhere.push('merchant_key = ?'); reviewParams.push(q.merchant) }
+  if (q.account !== undefined) { reviewWhere.push('account_id = ?'); reviewParams.push(q.account) }
+  const review: Built = { sql: `SELECT COUNT(*) AS n FROM transactions WHERE ${reviewWhere.join(' AND ')}`, params: reviewParams }
   if (q.category === undefined) {
     return {
       level: 'category', shape: 'category', total: null, review,
@@ -350,7 +358,9 @@ export function buildSummary(q: SummaryQuery, idsJson: string): SummaryPlan {
 export function buildTxnList(q: TxnQuery & { limit: number }, idsJson: string): Built {
   const where: string[] = ['posted_date BETWEEN ? AND ?', IN_ACCOUNTS]
   const params: Array<string | number> = [q.from, q.to, idsJson]
-  if (q.scope === 'spending') where.push(`kind IN (${SPENDING_SQL})`)
+  // A flagged row is listed whatever its kind (a transfer to an unknown account is a review reason), so the
+  // review list matches the summary's reviewCount.
+  if (q.scope === 'spending' && !q.review) where.push(`kind IN (${SPENDING_SQL})`)
   if (q.category !== undefined) {
     const c = categoryFragment(q.category)
     where.push(c.sql)

@@ -100,7 +100,7 @@ describe('queries derived from the state', () => {
       reviewOnly: true,
     }
     expect(summaryQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'p1', category: 'fuel', groupBy: 'merchant', merchant: 'chain-x' })
-    expect(txnQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'p1', scope: 'spending', category: 'fuel', merchant: 'chain-x', review: true })
+    expect(txnQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'p1', scope: 'all', category: 'fuel', merchant: 'chain-x', review: true })
   })
   it('grouped by account, the second-level key is an account id: `account` (not `merchant`) in both queries', () => {
     const s: BudgetViewState = {

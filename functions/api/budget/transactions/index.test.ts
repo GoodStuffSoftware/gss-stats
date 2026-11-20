@@ -1,6 +1,7 @@
 // GET /api/budget/transactions on the node:sqlite D1 fake (synthetic data).
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { SummaryResponse, TxnPage } from '../../../../src/lib/budget/types'
+import { defaultViewState, summaryQueryOf, txnQueryOf, type BudgetViewState } from '../../../../src/lib/budget/viewState'
 import { addPersonB, callRoute, createBudgetDb, insertTxn, json, type FakeBudgetDb } from '../../../_lib/testing/budgetDb'
 import { onRequest } from './index'
 import { onRequest as summary } from '../summary'
@@ -71,6 +72,48 @@ describe('GET /api/budget/transactions', () => {
       const rows = (await json<TxnPage>(await get({ ...RANGE, category: 'dining', account: s.key, limit: '200' }))).rows
       expect(-rows.reduce((t, r) => t + r.amountCents, 0)).toBe(s.netCents)
     }
+  })
+
+  it('review list and reviewCount are the same set: a flagged row of any kind is listed, with its kind', async () => {
+    const xfer = insertTxn(db, { kind: 'transfer', amount_cents: -50_000, needs_review: 1, review_reason: 'rule', merchant_key: 'acct-move', merchant_name: 'Acct Move' })
+    const pay = insertTxn(db, { kind: 'card_payment', amount_cents: -9000, needs_review: 1, review_reason: 'rule', merchant_key: 'card-pay', merchant_name: 'Card Pay' })
+    const pieAll = await json<SummaryResponse>(await callRoute(summary, db, '/api/budget/summary', { query: { from: RANGE.from, to: RANGE.to, person: 'all' } }))
+    // both scopes list the same rows once review=1 is on, and the count agrees with them
+    for (const scope of ['spending', 'all']) {
+      const rows = (await json<TxnPage>(await get({ ...RANGE, scope, review: '1', limit: '200' }))).rows
+      expect(rows.length, scope).toBe(pieAll.reviewCount)
+      expect(rows.find((r) => r.id === xfer)).toMatchObject({ kind: 'transfer', needsReview: true })
+      expect(rows.find((r) => r.id === pay)?.kind).toBe('card_payment')
+    }
+    // without review=1 the spending scope still hides non-spending kinds
+    expect((await json<TxnPage>(await get({ ...RANGE, limit: '200' }))).rows.some((r) => r.id === xfer)).toBe(false)
+    // the count follows the drill, like the list does
+    const drilled = { from: RANGE.from, to: RANGE.to, person: 'all', category: 'groceries' }
+    const pie = await json<SummaryResponse>(await callRoute(summary, db, '/api/budget/summary', { query: drilled }))
+    const rows = (await json<TxnPage>(await get({ ...RANGE, category: 'groceries', review: '1', limit: '200' }))).rows
+    expect(pie.reviewCount).toBe(rows.length)
+    expect(pie.reviewCount).toBeLessThan(pieAll.reviewCount)
+  })
+
+  it('an account drill: the view state feeds /summary and /transactions the same account, so slice total = table total', async () => {
+    const state: BudgetViewState = {
+      ...defaultViewState('2026-12-15'), from: RANGE.from, to: RANGE.to, groupBy: 'account',
+      path: [{ level: 'category', key: 'dining', label: 'Dining' }, { level: 'merchant', key: 'chk-a', label: 'Checking A' }],
+    }
+    const sq = summaryQueryOf(state)
+    const tq = txnQueryOf(state)
+    expect(sq.account).toBe('chk-a')
+    expect(tq.account).toBe('chk-a')
+    const toQuery = (q: object) => Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])) as Record<string, string>
+    const pie = await json<SummaryResponse>(await callRoute(summary, db, '/api/budget/summary', { query: toQuery(sq) }))
+    const table = await json<TxnPage>(await get({ ...toQuery(tq), limit: '200' }))
+    expect(table.rows.length).toBeGreaterThan(0)
+    expect(table.rows.every((r) => r.accountId === 'chk-a')).toBe(true)
+    expect(pie.level).toBe('purchase')
+    expect(pie.totalCents).toBe(-table.rows.reduce((t, r) => t + r.amountCents, 0))
+    // one level up, the account slice total is the same number as that table
+    const up = await json<SummaryResponse>(await callRoute(summary, db, '/api/budget/summary', { query: toQuery(summaryQueryOf({ ...state, path: state.path.slice(0, 1) })) }))
+    expect(up.slices.find((x) => x.key === 'chk-a')?.netCents).toBe(pie.totalCents)
   })
 
   it('400 for bad dates, range over 400 days, bad limit, scope, review, cursor, category, person', async () => {
