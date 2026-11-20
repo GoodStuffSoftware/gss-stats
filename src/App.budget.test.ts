@@ -3,7 +3,7 @@
 // The Budget section hooks in App.vue: the nav link (shown only when GET /api/budget/access says 200),
 // `?section=budget` opening the section in place of the page, the page chrome that goes while it is open,
 // `switchPage` / the link / popstate closing it, and every other query param (`?page=`, utm_*) surviving.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
@@ -56,6 +56,14 @@ function stubBudget(access: () => Response | Promise<Response>) {
 }
 const budgetCalls = () => fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/budget'))
 
+// The slow part of a first mount of the section is the cold module graph (BudgetSection, the pie, chart.js,
+// transformed on first import: ~0.7 s alone, several seconds on a loaded machine), not the app. Importing it once
+// here puts that one-time cost outside the tests' own time limits; `sectionShown` also waits longer than
+// vi.waitFor's 1 s default so a busy run does not read as a failure.
+beforeAll(async () => {
+  await import('./components/budget/BudgetSection.vue')
+}, 60_000)
+
 const mounted: VueWrapper[] = []
 beforeEach(() => {
   resetAccessProbe()
@@ -76,7 +84,7 @@ async function mountAt(url: string) {
   return w
 }
 /** The section's chunk is an async component: wait for its first render. */
-const sectionShown = (w: VueWrapper) => vi.waitFor(() => expect(w.find('[data-testid="budget-section"]').exists()).toBe(true))
+const sectionShown = (w: VueWrapper) => vi.waitFor(() => expect(w.find('[data-testid="budget-section"]').exists()).toBe(true), { timeout: 4000 })
 const params = () => new URLSearchParams(location.search)
 const link = (w: VueWrapper) => w.find('[data-testid="budget-nav-link"]')
 
@@ -123,6 +131,7 @@ describe('App: ?section=budget', () => {
     expect(w.find('.filterbar-inflow').exists()).toBe(false)
     expect(w.find('.fb-anchor').exists()).toBe(false)
     expect(w.find('main.grid-area').exists()).toBe(false)
+    expect(w.find('footer.foot').exists()).toBe(false) // the traffic footer ("humans only, bots excluded") is not Budget's
     expect(w.find('.drawer-btn').exists()).toBe(true)
     // one probe, then data
     expect(budgetCalls().filter((u) => u === '/api/budget/access')).toHaveLength(1)
@@ -153,6 +162,7 @@ describe('App: opening and closing', () => {
     await flushPromises()
     expect(w.find('[data-testid="budget-section"]').exists()).toBe(false)
     expect(w.find('main.grid-area').exists()).toBe(true)
+    expect(w.find('footer.foot').exists()).toBe(true)
     expect(w.find('[data-testid="add-chart"]').exists()).toBe(true)
     expect(params().has('section')).toBe(false)
     expect([...params().keys()].some((k) => k.startsWith('b_'))).toBe(false)

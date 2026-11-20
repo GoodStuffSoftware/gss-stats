@@ -1290,7 +1290,7 @@ function toggleDark() {
     />
     <IconPicker :open="!!iconFor" :page="iconPage" :pages="config.pages" :return-to="iconFor?.returnTo ?? null" @close="iconFor = null" @pick="pickIcon" />
 
-    <footer class="foot overline">
+    <footer v-if="!budgetOpen" class="foot overline">
       {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
     </footer>
   </div>
