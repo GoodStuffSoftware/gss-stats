@@ -8,6 +8,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Added
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
+- **Drill-down pies animate and label themselves.** Opening a slice grows the next level out of it, going back up unfurls the pie around the slice you left, and a reduced-motion setting gets a short fade instead of movement. Each slice with room shows its name, and its amount and share when those fit, right on the chart.
 
 ## [0.79.2] — 2026-11-20
 

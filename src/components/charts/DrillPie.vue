@@ -17,21 +17,30 @@ export interface PieSlice {
   members?: PieSlice[]
 }
 
-/** The per-chart animation option BaseChart turns into a real animation (see its opt-in). */
-export const ANIMATION_ON = { duration: 450, easing: 'easeOutQuart', animateRotate: true, animateScale: true } as const
+/** The label alternatives for one slice, longest first: the first that fits the arc is drawn. */
+export function sliceLabelParts(amount: string, share: number): string[] {
+  return [`${amount} · ${share}%`, amount, `${share}%`]
+}
 </script>
 
 <script setup lang="ts">
 // A generic doughnut whose slices can be picked, with a list of the same slices under it (the way in for a
 // keyboard, a screen reader and a phone, where a tap on the canvas only shows the tooltip). It knows nothing
 // about what the slices are: the parent maps its data to PieSlice[] and decides what `select` means (drill
-// down, open a detail). Every new `slices` array draws a fresh chart, which animates in (BaseChart rebuilds
-// per config), so each drill level sweeps in; an identical array does not redraw.
+// down, open a detail). Every new `slices` array draws a fresh chart; an identical array does not redraw.
+//
+// Motion (lib/pieMotion.ts): a pie that appears for different slices plays in. A slice was picked and the next
+// level appears within a few seconds: the new slices grow out of the picked slice's wedge. The slices you
+// went back up to: the pie grows around the slice you came from. Nothing to come from: a clockwise sweep.
+// prefers-reduced-motion: a short fade instead of any movement. A redraw with the same slices (a theme
+// switch, new numbers) plays nothing.
+// Labels (arcLabelsPlugin in lib/charts.ts): a slice with room shows its name on the arc, and its amount and
+// share (or just one of them) when those fit too; a slice with no room shows none, the list below has it.
 //
 // Props
 //   slices:  PieSlice[]
 //   dark:    boolean                       site theme (the slice border)
-//   animate: boolean (true)                false = no animation; prefers-reduced-motion also turns it off
+//   animate: boolean (true)                false = no motion at all
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
 // Emits
@@ -39,6 +48,8 @@ export const ANIMATION_ON = { duration: 450, easing: 'easeOutQuart', animateRota
 //                                          slice with `members`: that one opens its list; its members are reported)
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
+import { arcLabelsPlugin } from '../../lib/charts'
+import { pieMotionPlugin, rememberPick, sliceSignature, takeOrigin, type PieMotion } from '../../lib/pieMotion'
 import BaseChart from './BaseChart.vue'
 
 const props = withDefaults(
@@ -71,11 +82,45 @@ const share = (v: number) => (total.value > 0 ? Math.round((v / total.value) * 1
 
 const BORDER_LIGHT = '#FFFFFF'
 const BORDER_DARK = '#211C18'
+// On-slice text: sized for a ring about 70 px thick; the ink is the better-contrast of near-black and white.
+const LABEL_LOOK = {
+  nameFont: '600 12px Inter, system-ui, sans-serif',
+  subFont: '700 11px "Space Grotesk", system-ui, sans-serif',
+  bestContrast: true,
+  lineGap: 8,
+}
 
-function buildConfig(): ChartConfiguration {
+// The slices' wedges as shares of the circle, in drawn order.
+function wedges(list: PieSlice[]): Map<string, { from: number; to: number }> {
+  const sum = list.reduce((n, s) => n + s.value, 0)
+  const out = new Map<string, { from: number; to: number }>()
+  let run = 0
+  for (const s of list) {
+    const from = sum > 0 ? run / sum : 0
+    run += s.value
+    out.set(s.key, { from, to: sum > 0 ? run / sum : 0 })
+  }
+  return out
+}
+const keysOf = (list: PieSlice[]) => list.map((x) => x.key)
+
+/** How the pie plays in: decided once per set of slices (see the header). */
+function chooseMotion(list: PieSlice[]): PieMotion {
+  if (!props.animate) return { kind: 'none' }
+  const keys = keysOf(list)
+  const wedge = wedges(list)
+  const origin = takeOrigin(keys, (k) => wedge.get(k) ?? null)
+  if (reduced.value) return { kind: 'fade' }
+  return origin ?? { kind: 'unfurl', mid: 0 }
+}
+
+function buildConfig(motion: PieMotion): ChartConfiguration {
   const s = drawn.value
   const formatValue = props.format
-  const animation = props.animate && !reduced.value ? { ...ANIMATION_ON } : false
+  const items = s.map((x) => ({
+    name: x.label,
+    sub: sliceLabelParts(formatValue(x.value), share(x.value)),
+  }))
   return {
     type: 'doughnut',
     data: {
@@ -94,7 +139,6 @@ function buildConfig(): ChartConfiguration {
       responsive: true,
       maintainAspectRatio: false,
       cutout: '58%',
-      animation,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -104,17 +148,26 @@ function buildConfig(): ChartConfiguration {
         },
       },
     },
+    // Order matters: the labels are drawn on the moved arcs, then the motion puts the arcs back.
+    plugins: [arcLabelsPlugin({ 0: items }, LABEL_LOOK), pieMotionPlugin({ motion })],
   } as ChartConfiguration
 }
 
-// Rebuild only when something that shows changed, so a refetch that returns the same numbers does not replay
-// the sweep.
+// Rebuild only when something that shows changed, so a refetch that returns the same numbers does not redraw.
+// The motion plays only when the SET of slices changed (a new level), not for a theme switch or new numbers.
 const signature = computed(() =>
-  JSON.stringify([drawn.value.map((x) => [x.key, x.label, x.value, x.color]), props.dark, props.animate && !reduced.value]),
+  JSON.stringify([drawn.value.map((x) => [x.key, x.label, x.value, x.color]), props.dark, props.animate, reduced.value]),
 )
-const config = shallowRef<ChartConfiguration>(buildConfig())
+const keysSignature = computed(() => sliceSignature(keysOf(drawn.value)))
+let playedFor: string | null = null
+function build(): ChartConfiguration {
+  const replay = keysSignature.value !== playedFor
+  playedFor = keysSignature.value
+  return buildConfig(replay ? chooseMotion(drawn.value) : { kind: 'none' })
+}
+const config = shallowRef<ChartConfiguration>(build())
 watch(signature, () => {
-  config.value = buildConfig()
+  config.value = build()
 })
 
 const opened = ref<ReadonlySet<string>>(new Set())
@@ -124,9 +177,22 @@ function toggleMembers(key: string) {
   opened.value = next
 }
 const isOpen = (s: PieSlice) => !!s.members?.length && opened.value.has(s.key)
+// Remember which wedge was picked, so the pie that appears next knows where to come from (or go back to).
+function remember(s: PieSlice) {
+  const w = wedges(drawn.value).get(s.key)
+  if (w) rememberPick({ sig: keysSignature.value, key: s.key, from: w.from, to: w.to })
+}
 function pick(s: PieSlice) {
   if (s.members?.length) toggleMembers(s.key)
-  else if (!s.inert) emit('select', s.key)
+  else if (!s.inert) {
+    remember(s)
+    emit('select', s.key)
+  }
+}
+// A member of a folded bucket is reported by its own key; the motion starts from the bucket's wedge.
+function pickMember(bucket: PieSlice, m: PieSlice) {
+  remember(bucket)
+  emit('select', m.key)
 }
 
 function onPoint(p: { index: number }) {
@@ -161,7 +227,7 @@ function onPoint(p: { index: number }) {
         </component>
         <ul v-if="isOpen(s)" class="dp-members" :aria-label="`${s.label}: what it holds`" :data-testid="`pie-members-${s.key}`">
           <li v-for="m in s.members" :key="m.key">
-            <button type="button" class="dp-row dp-member" :data-testid="`pie-member-${m.key}`" @click="emit('select', m.key)">
+            <button type="button" class="dp-row dp-member" :data-testid="`pie-member-${m.key}`" @click="pickMember(s, m)">
               <span class="dp-dot" :style="{ background: m.color }" aria-hidden="true" />
               <span class="dp-text">
                 <span class="dp-label">{{ m.label }}</span>
