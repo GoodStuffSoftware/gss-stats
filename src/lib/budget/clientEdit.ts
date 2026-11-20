@@ -29,6 +29,7 @@ export function txnQueryString(q: TxnQuery): string {
   p.set('scope', q.scope)
   if (q.category) p.set('category', q.category)
   if (q.merchant) p.set('merchant', q.merchant)
+  if (q.account) p.set('account', q.account)
   if (q.review) p.set('review', '1')
   if (q.cursor) p.set('cursor', q.cursor)
   if (q.limit) p.set('limit', String(q.limit))

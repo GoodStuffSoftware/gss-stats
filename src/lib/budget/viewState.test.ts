@@ -102,14 +102,30 @@ describe('queries derived from the state', () => {
     expect(summaryQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'p1', category: 'fuel', groupBy: 'merchant', merchant: 'chain-x' })
     expect(txnQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'p1', scope: 'spending', category: 'fuel', merchant: 'chain-x', review: true })
   })
-  it('grouped by account, the second-level key is an account id and is left out of both queries', () => {
+  it('grouped by account, the second-level key is an account id: `account` (not `merchant`) in both queries', () => {
     const s: BudgetViewState = {
       ...base,
       groupBy: 'account',
       path: [{ level: 'category', key: 'fuel', label: 'Fuel' }, { level: 'merchant', key: 'acct-1', label: 'Card' }],
     }
-    expect(summaryQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'all', category: 'fuel', groupBy: 'account' })
+    expect(summaryQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'all', category: 'fuel', groupBy: 'account', account: 'acct-1' })
+    expect(txnQueryOf(s)).toEqual({ from: s.from, to: s.to, person: 'all', scope: 'spending', category: 'fuel', account: 'acct-1' })
     expect(txnQueryOf(s).merchant).toBeUndefined()
+    expect(summaryQueryOf(s).merchant).toBeUndefined()
+  })
+  it('pie and table queries always agree on category / merchant / account, at every depth and grouping', () => {
+    const steps = [
+      { level: 'category', key: 'fuel', label: 'Fuel' },
+      { level: 'merchant', key: 'k2', label: 'K2' },
+    ] as const
+    for (const groupBy of ['merchant', 'account'] as const) {
+      for (let depth = 0; depth <= 2; depth++) {
+        const s: BudgetViewState = { ...base, groupBy, path: steps.slice(0, depth).map((x) => ({ ...x })) }
+        const a = summaryQueryOf(s)
+        const b = txnQueryOf(s)
+        expect([a.category, a.merchant, a.account]).toEqual([b.category, b.merchant, b.account])
+      }
+    }
   })
 })
 

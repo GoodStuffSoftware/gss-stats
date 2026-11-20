@@ -154,29 +154,34 @@ export function searchWithState(search: string, state: BudgetViewState): string 
 }
 
 // ── Queries derived from the state ────────────────────────────────────────────────────────────────────────
-// The second drill level is a merchant only when slices are grouped by merchant; grouped by account its key
-// is an account id, which neither SummaryQuery.merchant nor TxnQuery can carry, so it is left out of both.
-function levelKeys(state: BudgetViewState): { category?: string; merchant?: string } {
+// The second drill step's key is a merchant when slices are grouped by merchant and an account id when they
+// are grouped by account. Each goes in its own field (`merchant` / `account`) of BOTH queries, so the pie
+// and the table always show the same slice.
+function levelKeys(state: BudgetViewState): { category?: string; merchant?: string; account?: string } {
+  const second = state.path[1]?.key
   return {
     category: state.path[0]?.key,
-    merchant: state.groupBy === 'merchant' ? state.path[1]?.key : undefined,
+    merchant: state.groupBy === 'merchant' ? second : undefined,
+    account: state.groupBy === 'account' ? second : undefined,
   }
 }
 export function summaryQueryOf(state: BudgetViewState): SummaryQuery {
-  const { category, merchant } = levelKeys(state)
+  const { category, merchant, account } = levelKeys(state)
   const q: SummaryQuery = { from: state.from, to: state.to, person: state.person }
   if (category !== undefined) {
     q.category = category
     q.groupBy = state.groupBy
   }
   if (merchant !== undefined) q.merchant = merchant
+  if (account !== undefined) q.account = account
   return q
 }
 export function txnQueryOf(state: BudgetViewState): TxnQuery {
-  const { category, merchant } = levelKeys(state)
+  const { category, merchant, account } = levelKeys(state)
   const q: TxnQuery = { from: state.from, to: state.to, person: state.person, scope: 'spending' }
   if (category !== undefined) q.category = category
   if (merchant !== undefined) q.merchant = merchant
+  if (account !== undefined) q.account = account
   if (state.reviewOnly) q.review = true
   return q
 }

@@ -216,6 +216,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             <SpendingPanel
               v-else
               :summary="summary"
+              :categories="meta.categories"
               :path="state.path"
               :group-by="state.groupBy"
               :review-only="state.reviewOnly"
