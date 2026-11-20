@@ -324,6 +324,35 @@ describe('BudgetSection: states', () => {
     expect(w.find('[data-testid="spending-panel"]').exists()).toBe(true)
   })
 
+  it('drilling keeps the old pie (no skeleton) until the next level lands, then shows it with its own path', async () => {
+    let release!: (r: Response) => void
+    route()
+    const base = fetchMock.getMockImplementation() as (input: string) => Promise<Response>
+    fetchMock.mockImplementation((input: string) => {
+      const u = new URL(input, 'http://x')
+      return u.pathname === '/api/budget/summary' && u.searchParams.get('category') === 'groceries' ? new Promise<Response>((res) => (release = res)) : base(input)
+    })
+    const w = await mountSection()
+    const pie = w.findComponent(SpendingPanel).vm.$.uid
+    const groceries = { level: 'category', key: 'groceries', label: 'Groceries' }
+    w.findComponent(SpendingPanel).vm.$emit('drill', groceries)
+    await flushPromises()
+    // loading: still the old pie and its crumbs, dimmed; no skeleton
+    expect(w.find('[aria-label="Loading spending"]').exists()).toBe(false)
+    expect(w.findComponent(SpendingPanel).vm.$.uid).toBe(pie)
+    expect(w.findComponent(SpendingPanel).props('path')).toEqual([])
+    expect(w.findComponent(SpendingPanel).props('refreshing')).toBe(true)
+    // a second drill on the old pie is ignored: its slices are not the ones of the position asked for
+    w.findComponent(SpendingPanel).vm.$emit('drill', { level: 'merchant', key: 'chain-x', label: 'Chain X' })
+    await flushPromises()
+    expect(new URLSearchParams(location.search).get('b_path')).toBe(JSON.stringify([['category', 'groceries', 'Groceries']]))
+    release(json({ level: 'merchant', slices: [{ key: 'chain-x', label: 'Chain X', netCents: 3000, count: 2 }], totalCents: 3000, reviewCount: 0 }))
+    await flushPromises()
+    expect(w.findComponent(SpendingPanel).vm.$.uid).toBe(pie)
+    expect(w.findComponent(SpendingPanel).props('path')).toEqual([groceries])
+    expect(w.findComponent(SpendingPanel).props('refreshing')).toBe(false)
+  })
+
   it('summary error: message with Retry that refetches', async () => {
     let fail = true
     route({ summary: () => (fail ? json({ error: 'bad_request' }, 500) : json(SUMMARY)) })

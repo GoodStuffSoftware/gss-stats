@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { Chart } from 'chart.js'
 import { defineComponent } from 'vue'
-import { FORWARD_WINDOW_MS, forgetPicks } from '../../lib/pieMotion'
 import BaseChart from './BaseChart.vue'
 import DrillPie, { sliceLabelParts, type PieSlice } from './DrillPie.vue'
 import source from './DrillPie.vue?raw'
@@ -47,7 +46,6 @@ function setReducedMotion(on: boolean) {
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
   vi.restoreAllMocks()
-  forgetPicks()
 })
 
 describe('DrillPie config', () => {
@@ -67,42 +65,80 @@ describe('DrillPie config', () => {
     expect(motionOf(mountPie({ animate: false }))).toEqual({ kind: 'none' })
   })
 
-  it('prefers-reduced-motion keeps a short fade instead of any movement', () => {
+  it('prefers-reduced-motion plays the same motion (a short one-shot, no fade in its place)', () => {
     setReducedMotion(true)
-    expect(motionOf(mountPie())).toEqual({ kind: 'fade' })
+    expect(motionOf(mountPie())).toEqual({ kind: 'unfurl', mid: 0 })
     expect(motionOf(mountPie({ animate: false }))).toEqual({ kind: 'none' })
   })
 
-  it('drilling: the next pie grows out of the picked wedge; the pie back up grows around the slice it came from', async () => {
+  describe('a transition says where the next set of slices comes from', () => {
     const level1: PieSlice[] = [
       { key: 'a', label: 'Alpha', value: 2000, color: '#E0722C' },
       { key: 'b', label: 'Beta', value: 6000, color: '#2C7DA0' },
       { key: 'c', label: 'Gamma', value: 2000, color: '#9C6644' },
     ]
-    const first = mountPie({ slices: level1 })
-    expect(motionOf(first)).toEqual({ kind: 'unfurl', mid: 0 })
-    await first.get('[data-testid="pie-row-b"]').trigger('click') // wedge 0.2..0.8
-    first.unmount()
-    mounted.pop()
-    const child = mountPie({ slices: [{ key: 'b1', label: 'B one', value: 5, color: '#111111' }, { key: 'b2', label: 'B two', value: 5, color: '#222222' }] })
-    expect(motionOf(child)).toEqual({ kind: 'expand', from: 0.2, to: 0.8 })
-    child.unmount()
-    mounted.pop()
-    const back = mountPie({ slices: level1 })
-    const m = motionOf(back)
-    expect(m.kind).toBe('unfurl')
-    expect(m.mid).toBeCloseTo(0.5, 9)
-  })
+    const level2: PieSlice[] = [
+      { key: 'b1', label: 'B one', value: 5, color: '#111111' },
+      { key: 'b2', label: 'B two', value: 5, color: '#222222' },
+    ]
 
-  it('a pick whose next pie is slow (beyond the window) is not the cause of it', async () => {
-    const w = mountPie()
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-    await w.get('[data-testid="pie-row-a"]').trigger('click')
-    vi.setSystemTime(new Date(Date.now() + FORWARD_WINDOW_MS + 1000))
-    const next = mountPie({ slices: [{ key: 'zz', label: 'Z', value: 1, color: '#111111' }] })
-    vi.useRealTimers()
-    expect(motionOf(next)).toEqual({ kind: 'unfurl', mid: 0 })
+    it('in: the new slices grow out of the picked slice\'s wedge of the pie that was on screen', async () => {
+      const w = mountPie({ slices: level1 })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+      await w.setProps({ slices: level2, transition: { key: 'b', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'expand', from: 0.2, to: 0.8 })
+    })
+
+    it('out: the pie grows around the slice it came back from, in the new pie', async () => {
+      const w = mountPie({ slices: level2 })
+      await w.setProps({ slices: level1, transition: { key: 'b', dir: 'out' } })
+      const m = motionOf(w)
+      expect(m.kind).toBe('unfurl')
+      expect(m.mid).toBeCloseTo(0.5, 9)
+    })
+
+    it('a slice inside a folded bucket counts as the bucket\'s wedge', async () => {
+      const members: PieSlice[] = [
+        { key: 'm1', label: 'M1', value: 300, color: '#111111' },
+        { key: 'm2', label: 'M2', value: 200, color: '#222222' },
+      ]
+      const folded: PieSlice[] = [{ key: 'a', label: 'Alpha', value: 500, color: '#E0722C' }, { key: 'bucket', label: '2 smaller', value: 500, color: '#C9C3B8', members }]
+      const w = mountPie({ slices: folded })
+      await w.setProps({ slices: level2, transition: { key: 'm2', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'expand', from: 0.5, to: 1 })
+      await w.setProps({ slices: folded, transition: { key: 'm2', dir: 'out' } })
+      expect(motionOf(w)).toMatchObject({ kind: 'unfurl', mid: 0.75 })
+    })
+
+    it('a transition whose slice is not found, or none at all, falls back to the sweep from the top', async () => {
+      const w = mountPie({ slices: level1 })
+      await w.setProps({ slices: level2, transition: { key: 'nope', dir: 'in' } })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+      await w.setProps({ slices: level1, transition: undefined })
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+    })
+
+    it('a transition is used once: a later change of the slices does not reuse it', async () => {
+      const w = mountPie({ slices: level1 })
+      const t = { key: 'b', dir: 'in' as const }
+      await w.setProps({ slices: level2, transition: t })
+      expect(motionOf(w).kind).toBe('expand')
+      await w.setProps({ slices: [level2[0]] }) // same transition object still set, a different slice set
+      expect(motionOf(w)).toEqual({ kind: 'unfurl', mid: 0 })
+    })
+
+    it('the old pie stays (the same chart) until the new slices arrive, and a new level starts with its buckets closed', async () => {
+      const members: PieSlice[] = [{ key: 'm1', label: 'M1', value: 500, color: '#111111' }]
+      const folded: PieSlice[] = [{ key: 'a', label: 'Alpha', value: 500, color: '#E0722C' }, { key: 'bucket', label: '1 smaller', value: 500, color: '#C9C3B8', members }]
+      const w = mountPie({ slices: folded })
+      const before = configOf(w)
+      await w.get('[data-testid="pie-row-bucket"]').trigger('click')
+      expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(true)
+      expect(configOf(w)).toBe(before)
+      await w.setProps({ slices: level2 })
+      await w.setProps({ slices: folded })
+      expect(w.find('[data-testid="pie-members-bucket"]').exists()).toBe(false)
+    })
   })
 
   it('the same slices redrawn (a theme switch, new numbers) play no motion; a different set does', async () => {

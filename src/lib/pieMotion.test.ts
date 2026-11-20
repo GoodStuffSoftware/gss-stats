@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { arcLabelsPlugin } from './charts'
-import { FORWARD_WINDOW_MS, MOTION_MS, forgetPicks, pieFrame, pieMotionPlugin, rememberPick, sliceSignature, takeOrigin } from './pieMotion'
+import { MOTION_MS, pieFrame, pieMotionPlugin } from './pieMotion'
 
 const TAU = Math.PI * 2
 const TOP = -Math.PI / 2
@@ -8,15 +8,14 @@ const near = (a: number, b: number) => expect(a).toBeCloseTo(b, 9)
 
 describe('pieFrame', () => {
   it('none is the final pie at every progress', () => {
-    for (const p of [0, 0.5, 1]) expect(pieFrame({ kind: 'none' }, p)).toEqual({ start: TOP, span: TAU, alpha: 1 })
+    for (const p of [0, 0.5, 1]) expect(pieFrame({ kind: 'none' }, p)).toEqual({ start: TOP, span: TAU })
   })
 
   it('every motion ends on the final pie', () => {
-    for (const m of [{ kind: 'expand', from: 0.2, to: 0.45 }, { kind: 'unfurl', mid: 0.3 }, { kind: 'unfurl', mid: 0 }, { kind: 'fade' }] as const) {
+    for (const m of [{ kind: 'expand', from: 0.2, to: 0.45 }, { kind: 'unfurl', mid: 0.3 }, { kind: 'unfurl', mid: 0 }] as const) {
       const f = pieFrame(m, 1)
       near(f.start, TOP)
       near(f.span, TAU)
-      expect(f.alpha).toBe(1)
     }
   })
 
@@ -50,31 +49,16 @@ describe('pieFrame', () => {
     expect(f.span).toBeLessThan(TAU)
   })
 
-  it('fade changes only the opacity', () => {
-    const f = pieFrame({ kind: 'fade' }, 0.3)
-    near(f.start, TOP)
-    near(f.span, TAU)
-    expect(f.alpha).toBeGreaterThan(0)
-    expect(f.alpha).toBeLessThan(1)
-    expect(pieFrame({ kind: 'fade' }, 0).alpha).toBe(0)
-  })
-
-  it('clamps progress outside 0..1', () => {
-    expect(pieFrame({ kind: 'fade' }, 7).alpha).toBe(1)
-    expect(pieFrame({ kind: 'fade' }, -2).alpha).toBe(0)
-  })
-
-  it('durations sit in the 400-700 ms band for movement and are short for the calm fade', () => {
+  it('durations sit in the 400-700 ms band', () => {
     expect(MOTION_MS.expand).toBeGreaterThanOrEqual(400)
     expect(MOTION_MS.expand).toBeLessThanOrEqual(700)
     expect(MOTION_MS.unfurl).toBeGreaterThanOrEqual(400)
     expect(MOTION_MS.unfurl).toBeLessThanOrEqual(700)
-    expect(MOTION_MS.fade).toBeLessThan(400)
   })
 })
 
 // A stand-in for a Chart.js chart: one dataset of arcs (shares of a circle that starts at the top), a ctx that
-// records its alpha, and a `draw` that runs the plugin hooks the way Chart.js orders them.
+// records where labels are drawn, and a `draw` that runs the plugin hooks the way Chart.js orders them.
 function fakeChart(shares: number[], plugins: any[]) {
   let run = 0
   const arcs = shares.map((s) => {
@@ -82,17 +66,10 @@ function fakeChart(shares: number[], plugins: any[]) {
     run += s
     return { startAngle, endAngle: TOP + run * TAU, circumference: s * TAU, x: 100, y: 100, innerRadius: 60, outerRadius: 100 }
   })
-  const alphas: number[] = []
   const labels: { text: string; at: number }[] = []
   const ctx: any = {
-    globalAlpha: 1,
-    stack: [] as number[],
-    save() {
-      ctx.stack.push(ctx.globalAlpha)
-    },
-    restore() {
-      ctx.globalAlpha = ctx.stack.pop() ?? 1
-    },
+    save() {},
+    restore() {},
     textAlign: '',
     textBaseline: '',
     font: '',
@@ -119,11 +96,10 @@ function fakeChart(shares: number[], plugins: any[]) {
       chart.draws++
       for (const p of plugins) p.beforeDatasetsDraw?.(chart)
       seen.push(arcs.map((a) => ({ start: a.startAngle, end: a.endAngle })))
-      alphas.push(ctx.globalAlpha)
       for (const p of plugins) p.afterDatasetsDraw?.(chart)
     },
   }
-  return { chart, arcs, seen, alphas, labels }
+  return { chart, arcs, seen, labels }
 }
 
 function clock() {
@@ -177,22 +153,6 @@ describe('pieMotionPlugin', () => {
     expect(k.c.queue).toHaveLength(0)
   })
 
-  it('fade draws at a rising opacity and puts the opacity back', () => {
-    const k = clock()
-    const plugin = pieMotionPlugin({ motion: { kind: 'fade' }, now: k.now, schedule: k.schedule })
-    const { chart, alphas } = fakeChart([0.6, 0.4], [plugin])
-    chart.draw()
-    k.c.t += 100
-    k.flush()
-    k.c.t += 400
-    k.flush()
-    expect(alphas[0]).toBe(0)
-    expect(alphas[1]).toBeGreaterThan(0)
-    expect(alphas[1]).toBeLessThan(1)
-    expect(alphas[2]).toBe(1)
-    expect(chart.ctx.globalAlpha).toBe(1)
-  })
-
   it('a destroyed chart is not drawn again', () => {
     const k = clock()
     const plugin = pieMotionPlugin({ motion: { kind: 'unfurl', mid: 0 }, now: k.now, schedule: k.schedule })
@@ -218,55 +178,5 @@ describe('pieMotionPlugin', () => {
     expect(drawn).toHaveLength(4)
     expect((drawn[0].at + drawn[1].at) / 2).toBeCloseTo(Math.PI, 5)
     expect((drawn[2].at + drawn[3].at) / 2).toBeCloseTo(Math.PI / 2, 5)
-  })
-})
-
-describe('where the user came from', () => {
-  beforeEach(() => forgetPicks())
-  const CATS = ['a', 'b', 'c']
-  const share = (k: string) => (k === 'b' ? { from: 0.2, to: 0.6 } : null)
-
-  it('a new level soon after a pick expands from the picked wedge', () => {
-    rememberPick({ sig: sliceSignature(CATS), key: 'b', from: 0.2, to: 0.6 }, 1000)
-    expect(takeOrigin(['b1', 'b2'], share, 1500)).toEqual({ kind: 'expand', from: 0.2, to: 0.6 })
-  })
-
-  it('a pick that is old is not the cause of a new pie', () => {
-    rememberPick({ sig: sliceSignature(CATS), key: 'b', from: 0.2, to: 0.6 }, 1000)
-    expect(takeOrigin(['b1', 'b2'], share, 1000 + FORWARD_WINDOW_MS + 1)).toBeNull()
-  })
-
-  it('nothing picked: nothing to come from', () => {
-    expect(takeOrigin(['x'], share, 1)).toBeNull()
-  })
-
-  it('the slices you picked on, again: the way back up, unfurling around the slice you left, however late', () => {
-    rememberPick({ sig: sliceSignature(CATS), key: 'b', from: 0.2, to: 0.6 }, 1000)
-    expect(takeOrigin(CATS, share, 999999)).toEqual({ kind: 'unfurl', mid: 0.4 })
-    // and the memory of that pick is gone
-    expect(takeOrigin(CATS, share, 999999)).toBeNull()
-  })
-
-  it('back up two levels drops the pick of the level in between too', () => {
-    const L1 = sliceSignature(CATS)
-    const L2 = sliceSignature(['b1', 'b2'])
-    rememberPick({ sig: L1, key: 'b', from: 0.2, to: 0.6 }, 1000)
-    rememberPick({ sig: L2, key: 'b1', from: 0, to: 0.5 }, 2000)
-    expect(takeOrigin(CATS, share, 90000)).toEqual({ kind: 'unfurl', mid: 0.4 })
-    expect(takeOrigin(['b1', 'b2'], () => ({ from: 0, to: 0.5 }), 90001)).toBeNull()
-  })
-
-  it('back up one level keeps the pick that leads to it', () => {
-    const L1 = sliceSignature(CATS)
-    const L2 = sliceSignature(['b1', 'b2'])
-    rememberPick({ sig: L1, key: 'b', from: 0.2, to: 0.6 }, 1000)
-    rememberPick({ sig: L2, key: 'b1', from: 0, to: 0.5 }, 2000)
-    expect(takeOrigin(['b1', 'b2'], () => ({ from: 0, to: 0.5 }), 99999)).toEqual({ kind: 'unfurl', mid: 0.25 })
-    expect(takeOrigin(CATS, share, 99999)).toEqual({ kind: 'unfurl', mid: 0.4 })
-  })
-
-  it('a way back whose slice is gone from the new pie falls back to nothing', () => {
-    rememberPick({ sig: sliceSignature(CATS), key: 'gone', from: 0.2, to: 0.6 }, 1000)
-    expect(takeOrigin(CATS, share, 5000)).toBeNull()
   })
 })

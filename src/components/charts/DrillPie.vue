@@ -17,6 +17,14 @@ export interface PieSlice {
   members?: PieSlice[]
 }
 
+/** How the pie that is about to be drawn relates to the one on screen. `in`: `key` is the slice of the pie on screen
+ * that was picked (the new slices grow out of its wedge). `out`: `key` is the slice, in the new pie, that the user
+ * came back from (the pie grows around it). A slice inside a folded bucket counts as the bucket's wedge. */
+export interface PieTransition {
+  key: string
+  dir: 'in' | 'out'
+}
+
 /** The label alternatives for one slice, longest first: the first that fits the arc is drawn. */
 export function sliceLabelParts(amount: string, share: number): string[] {
   return [`${amount} · ${share}%`, amount, `${share}%`]
@@ -29,11 +37,12 @@ export function sliceLabelParts(amount: string, share: number): string[] {
 // about what the slices are: the parent maps its data to PieSlice[] and decides what `select` means (drill
 // down, open a detail). Every new `slices` array draws a fresh chart; an identical array does not redraw.
 //
-// Motion (lib/pieMotion.ts): a pie that appears for different slices plays in. A slice was picked and the next
-// level appears within a few seconds: the new slices grow out of the picked slice's wedge. The slices you
-// went back up to: the pie grows around the slice you came from. Nothing to come from: a clockwise sweep.
-// prefers-reduced-motion: a short fade instead of any movement. A redraw with the same slices (a theme
-// switch, new numbers) plays nothing.
+// Motion (lib/pieMotion.ts): a pie that appears for different slices plays in, with or without
+// prefers-reduced-motion (a short one-shot, and the only sign a level opened; see ADR 0007). `transition` says
+// where it comes from: a picked slice (`in`: the new slices grow out of that wedge), the slice you came back
+// from (`out`: the pie grows around it), or nothing (a clockwise sweep from the top). A redraw with the same
+// slices (a theme switch, new numbers) plays nothing. The parent keeps this one component instance across
+// levels, so the pie on screen stays until the new slices arrive.
 // Labels (arcLabelsPlugin in lib/charts.ts): a slice with room shows its name on the arc, and its amount and
 // share (or just one of them) when those fit too; a slice with no room shows none, the list below has it.
 //
@@ -41,39 +50,30 @@ export function sliceLabelParts(amount: string, share: number): string[] {
 //   slices:  PieSlice[]
 //   dark:    boolean                       site theme (the slice border)
 //   animate: boolean (true)                false = no motion at all
+//   transition: PieTransition              where the next set of slices comes from (see above)
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
 // Emits
 //   select(key: string)                    a slice or its list row was picked (never for an `inert` slice, nor for a
 //                                          slice with `members`: that one opens its list; its members are reported)
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import { arcLabelsPlugin } from '../../lib/charts'
-import { pieMotionPlugin, rememberPick, sliceSignature, takeOrigin, type PieMotion } from '../../lib/pieMotion'
+import { pieMotionPlugin, type PieMotion } from '../../lib/pieMotion'
 import BaseChart from './BaseChart.vue'
 
 const props = withDefaults(
-  defineProps<{ slices: PieSlice[]; dark: boolean; animate?: boolean; format?: (value: number) => string; label?: string }>(),
+  defineProps<{
+    slices: PieSlice[]
+    dark: boolean
+    animate?: boolean
+    transition?: PieTransition
+    format?: (value: number) => string
+    label?: string
+  }>(),
   { animate: true, format: (v: number) => String(v), label: 'Pie chart' },
 )
 const emit = defineEmits<{ select: [key: string] }>()
-
-// ── Motion preference ────────────────────────────────────────────────────────────────────────────────────
-const REDUCED_QUERY = '(prefers-reduced-motion: reduce)'
-const reduced = ref(false)
-let mql: MediaQueryList | null = null
-function onMotionChange(e: MediaQueryListEvent) {
-  reduced.value = e.matches
-}
-onMounted(() => {
-  mql = typeof window.matchMedia === 'function' ? window.matchMedia(REDUCED_QUERY) : null
-  if (!mql) return
-  reduced.value = mql.matches
-  mql.addEventListener?.('change', onMotionChange)
-})
-onBeforeUnmount(() => mql?.removeEventListener?.('change', onMotionChange))
-// Read once more at setup so the very first chart already knows (onMounted runs after BaseChart's own).
-if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') reduced.value = window.matchMedia(REDUCED_QUERY).matches
 
 // ── Slices and chart config ──────────────────────────────────────────────────────────────────────────────
 const drawn = computed(() => props.slices.filter((s) => s.value > 0))
@@ -104,14 +104,29 @@ function wedges(list: PieSlice[]): Map<string, { from: number; to: number }> {
 }
 const keysOf = (list: PieSlice[]) => list.map((x) => x.key)
 
-/** How the pie plays in: decided once per set of slices (see the header). */
-function chooseMotion(list: PieSlice[]): PieMotion {
+/** A slice's wedge in a list; a member of a folded bucket takes the bucket's wedge. */
+function wedgeOf(list: PieSlice[], key: string): { from: number; to: number } | null {
+  const all = wedges(list)
+  const hit = all.get(key)
+  if (hit) return hit
+  const bucket = list.find((x) => x.members?.some((m) => m.key === key))
+  return bucket ? (all.get(bucket.key) ?? null) : null
+}
+
+/** How the pie plays in: decided once per set of slices (see the header). `before` is the pie that was on screen. */
+function chooseMotion(before: PieSlice[], list: PieSlice[]): PieMotion {
   if (!props.animate) return { kind: 'none' }
-  const keys = keysOf(list)
-  const wedge = wedges(list)
-  const origin = takeOrigin(keys, (k) => wedge.get(k) ?? null)
-  if (reduced.value) return { kind: 'fade' }
-  return origin ?? { kind: 'unfurl', mid: 0 }
+  const t = props.transition
+  if (t && t !== handled) {
+    if (t.dir === 'in') {
+      const w = wedgeOf(before, t.key)
+      if (w) return { kind: 'expand', from: w.from, to: w.to }
+    } else {
+      const w = wedgeOf(list, t.key)
+      if (w) return { kind: 'unfurl', mid: (w.from + w.to) / 2 }
+    }
+  }
+  return { kind: 'unfurl', mid: 0 }
 }
 
 function buildConfig(motion: PieMotion): ChartConfiguration {
@@ -156,43 +171,37 @@ function buildConfig(motion: PieMotion): ChartConfiguration {
 // Rebuild only when something that shows changed, so a refetch that returns the same numbers does not redraw.
 // The motion plays only when the SET of slices changed (a new level), not for a theme switch or new numbers.
 const signature = computed(() =>
-  JSON.stringify([drawn.value.map((x) => [x.key, x.label, x.value, x.color]), props.dark, props.animate, reduced.value]),
+  JSON.stringify([drawn.value.map((x) => [x.key, x.label, x.value, x.color]), props.dark, props.animate]),
 )
-const keysSignature = computed(() => sliceSignature(keysOf(drawn.value)))
+const keysSignature = computed(() => keysOf(drawn.value).join('\u0001'))
 let playedFor: string | null = null
+let onScreen: PieSlice[] = [] // the slices of the pie now drawn
+let handled: PieTransition | undefined // the transition already used (or found not to apply)
+const opened = ref<ReadonlySet<string>>(new Set())
 function build(): ChartConfiguration {
   const replay = keysSignature.value !== playedFor
+  const before = onScreen
   playedFor = keysSignature.value
-  return buildConfig(replay ? chooseMotion(drawn.value) : { kind: 'none' })
+  onScreen = drawn.value
+  const motion: PieMotion = replay ? chooseMotion(before, drawn.value) : { kind: 'none' }
+  handled = props.transition
+  if (replay) opened.value = new Set() // a new level starts with every folded bucket closed
+  return buildConfig(motion)
 }
 const config = shallowRef<ChartConfiguration>(build())
 watch(signature, () => {
   config.value = build()
 })
 
-const opened = ref<ReadonlySet<string>>(new Set())
 function toggleMembers(key: string) {
   const next = new Set(opened.value)
   if (!next.delete(key)) next.add(key)
   opened.value = next
 }
 const isOpen = (s: PieSlice) => !!s.members?.length && opened.value.has(s.key)
-// Remember which wedge was picked, so the pie that appears next knows where to come from (or go back to).
-function remember(s: PieSlice) {
-  const w = wedges(drawn.value).get(s.key)
-  if (w) rememberPick({ sig: keysSignature.value, key: s.key, from: w.from, to: w.to })
-}
 function pick(s: PieSlice) {
   if (s.members?.length) toggleMembers(s.key)
-  else if (!s.inert) {
-    remember(s)
-    emit('select', s.key)
-  }
-}
-// A member of a folded bucket is reported by its own key; the motion starts from the bucket's wedge.
-function pickMember(bucket: PieSlice, m: PieSlice) {
-  remember(bucket)
-  emit('select', m.key)
+  else if (!s.inert) emit('select', s.key)
 }
 
 function onPoint(p: { index: number }) {
@@ -227,7 +236,7 @@ function onPoint(p: { index: number }) {
         </component>
         <ul v-if="isOpen(s)" class="dp-members" :aria-label="`${s.label}: what it holds`" :data-testid="`pie-members-${s.key}`">
           <li v-for="m in s.members" :key="m.key">
-            <button type="button" class="dp-row dp-member" :data-testid="`pie-member-${m.key}`" @click="pickMember(s, m)">
+            <button type="button" class="dp-row dp-member" :data-testid="`pie-member-${m.key}`" @click="emit('select', m.key)">
               <span class="dp-dot" :style="{ background: m.color }" aria-hidden="true" />
               <span class="dp-text">
                 <span class="dp-label">{{ m.label }}</span>

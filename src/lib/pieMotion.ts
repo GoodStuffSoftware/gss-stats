@@ -1,5 +1,5 @@
-// Motion for a drill-down pie: a Chart.js plugin that plays the pie in when it appears, and the small memory
-// that tells a freshly built pie where the user came from. Generic: it knows slices by key and share only.
+// Motion for a drill-down pie: a Chart.js plugin that plays the pie in when it appears. Generic: it knows
+// angles and shares only; the caller says where the pie comes from.
 //
 // Why a plugin and not Chart.js's own animation: the site turns Chart.js animation off for every chart
 // (BaseChart sets `Chart.defaults.animation = false`, and a per-chart option cannot override that), and the
@@ -14,7 +14,6 @@
 //   unfurl   a level reached back up: the whole pie grows around the slice (`mid`) you came from, which
 //            stays where it was. A first appearance with nothing to come from is an unfurl around the top,
 //            a clockwise sweep.
-//   fade     the calm version for prefers-reduced-motion: nothing moves, the pie fades in.
 //   none     no motion.
 import type { Plugin } from 'chart.js'
 
@@ -22,9 +21,9 @@ const TAU = Math.PI * 2
 const TOP = -Math.PI / 2 // where a doughnut starts: 12 o'clock
 
 export type PieOrigin = { kind: 'expand'; from: number; to: number } | { kind: 'unfurl'; mid: number }
-export type PieMotion = { kind: 'none' } | { kind: 'fade' } | PieOrigin
+export type PieMotion = { kind: 'none' } | PieOrigin
 
-export const MOTION_MS = { expand: 560, unfurl: 560, fade: 220 } as const
+export const MOTION_MS = { expand: 560, unfurl: 560 } as const
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
@@ -34,25 +33,22 @@ export interface PieFrame {
   start: number
   /** Angle the whole circle spans this frame. */
   span: number
-  /** Opacity 0..1. */
-  alpha: number
 }
 
 /** The geometry of a frame at progress `p` (0 = first frame, 1 = final pie). Pure; the plugin and the tests use it. */
 export function pieFrame(motion: PieMotion, p: number): PieFrame {
   const t = Math.min(1, Math.max(0, p))
-  if (motion.kind === 'none') return { start: TOP, span: TAU, alpha: 1 }
-  if (motion.kind === 'fade') return { start: TOP, span: TAU, alpha: easeOutCubic(t) }
+  if (motion.kind === 'none') return { start: TOP, span: TAU }
   const e = easeOutCubic(t)
   if (motion.kind === 'expand') {
     const from = Math.min(1, Math.max(0, motion.from))
     const to = Math.min(1, Math.max(from, motion.to))
-    return { start: lerp(TOP + from * TAU, TOP, e), span: lerp((to - from) * TAU, TAU, e), alpha: 1 }
+    return { start: lerp(TOP + from * TAU, TOP, e), span: lerp((to - from) * TAU, TAU, e) }
   }
   // unfurl: keep the point `mid` (a share of the circle) where it ends up, grow the span around it
   const mid = Math.min(1, Math.max(0, motion.mid))
   const span = TAU * e
-  return { start: TOP + mid * TAU - mid * span, span, alpha: 1 }
+  return { start: TOP + mid * TAU - mid * span, span }
 }
 
 export interface PieMotionOptions {
@@ -76,7 +72,6 @@ export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { 
   let queued = false
   let gone = false
   let saved: { arc: ArcLike; s: number; e: number; c: number }[] = []
-  let alphaSet = false
 
   const progress = () => {
     if (t0 === null) t0 = now()
@@ -101,11 +96,6 @@ export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { 
           arc.circumference = arc.circumference * k
         }
       }
-      if (f.alpha < 1) {
-        chart.ctx.save()
-        chart.ctx.globalAlpha = f.alpha
-        alphaSet = true
-      }
     },
     afterDatasetsDraw(chart) {
       for (const { arc, s, e, c } of saved) {
@@ -114,10 +104,6 @@ export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { 
         arc.circumference = c
       }
       saved = []
-      if (alphaSet) {
-        chart.ctx.restore()
-        alphaSet = false
-      }
       if (done) return
       if (p >= 1) {
         done = true
@@ -135,59 +121,4 @@ export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { 
       gone = true
     },
   }
-}
-
-// ── Where did the user come from? ────────────────────────────────────────────────────────────────────────────
-// A pick is remembered when a slice is chosen; the next pie that appears either opens from it (a different
-// level, soon after) or, when its slices are the ones the pick was made on, is the way back up. Module-level
-// on purpose: each level is a new pie component, the old one is gone before the new one exists.
-
-export interface Pick {
-  /** Signature of the slice keys the pick was made on (see sliceSignature). */
-  sig: string
-  /** The picked slice's key in that pie. */
-  key: string
-  /** The picked slice's wedge, as shares of the circle (0..1). */
-  from: number
-  to: number
-  at: number
-}
-
-/** A pick is "the cause" of the next new pie only this soon after it (the answer for the next level is fetched). */
-export const FORWARD_WINDOW_MS = 4000
-const MAX_PICKS = 8
-let picks: Pick[] = []
-
-export function sliceSignature(keys: readonly string[]): string {
-  return keys.join('\u0001')
-}
-
-export function rememberPick(p: Omit<Pick, 'at'>, at = Date.now()): void {
-  picks.push({ ...p, at })
-  if (picks.length > MAX_PICKS) picks = picks.slice(-MAX_PICKS)
-}
-
-/** Clears the memory (tests; also a clean slate if a caller wants one). */
-export function forgetPicks(): void {
-  picks = []
-}
-
-/** The origin for a pie that is appearing with these slices, or null (nothing to come from). Takes the
- * matching pick off the memory when it is the way back up. `shareOf(key)` is that slice's wedge in the NEW pie. */
-export function takeOrigin(
-  keys: readonly string[],
-  shareOf: (key: string) => { from: number; to: number } | null,
-  at = Date.now(),
-): PieOrigin | null {
-  const sig = sliceSignature(keys)
-  const back = picks.map((p) => p.sig).lastIndexOf(sig)
-  if (back >= 0) {
-    const came = picks[back]
-    picks = picks.slice(0, back)
-    const w = shareOf(came.key)
-    return w ? { kind: 'unfurl', mid: (w.from + w.to) / 2 } : null
-  }
-  const last = picks[picks.length - 1]
-  if (last && at - last.at <= FORWARD_WINDOW_MS) return { kind: 'expand', from: last.from, to: last.to }
-  return null
 }
