@@ -27,8 +27,8 @@ import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
-import BudgetNavLink from './components/budget/BudgetNavLink.vue'
-import { budgetSectionOpen, searchWithSection } from './lib/budget/sectionLink'
+import { accessibleSections, type NavSection } from './lib/codeSections'
+import { BUDGET_SECTION, budgetSectionOpen, searchWithSection } from './lib/budget/sectionLink'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
@@ -214,6 +214,16 @@ function setBudgetOpen(open: boolean) {
   } catch {
     // history unavailable or sandboxed: the section still opens, the address bar just isn't updated
   }
+}
+// The ☰ menu's code-defined sections (lib/codeSections.ts): each is listed only once its own access check
+// has passed, so an account without access never gets the item (the check is the one probe per load).
+const navSections = ref<NavSection[]>([])
+onMounted(async () => {
+  navSections.value = await accessibleSections()
+})
+function pickSection(id: string) {
+  drawerOpen.value = false
+  if (id === BUDGET_SECTION) setBudgetOpen(true)
 }
 function onBudgetPopState() {
   budgetOpen.value = budgetSectionOpen(globalThis.location?.search ?? '')
@@ -1106,7 +1116,6 @@ function toggleDark() {
           {{ dark ? '☀' : '☾' }}
         </button>
         <button v-if="!budgetOpen" v-edit class="btn btn-primary" data-testid="add-chart" @click="addChart">＋ Add chart</button>
-        <BudgetNavLink :active="budgetOpen" @open="setBudgetOpen(true)" @close="setBudgetOpen(false)" />
         <AccountMenu />
       </div>
     </header>
@@ -1250,7 +1259,10 @@ function toggleDark() {
       :return-to="drawerBtn"
       :compact="isMobile"
       @close="drawerOpen = false"
+      :sections="navSections"
+      :active-section="budgetOpen ? BUDGET_SECTION : null"
       @switch="pickFromDrawer"
+      @section="pickSection"
       @menu="openPageMenu"
       @delete="deletePage"
       @toggle-group="toggleGroup"

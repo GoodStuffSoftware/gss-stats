@@ -4,8 +4,18 @@
 import { PALETTE } from '../charts'
 import { UNCATEGORIZED, type Category } from './types'
 
-/** The site's categorical palette without its warm grey (PALETTE[7]), which is kept for "no category". */
-export const CATEGORY_PALETTE: readonly string[] = PALETTE.filter((_, i) => i !== 7)
+/** More hues than the chart palette has, so a list of sixteen categories never repeats a colour: each is
+ * far from every colour above it (and from the greys) in hue or lightness. */
+const EXTRA_HUES = [
+  '#264653', // deep petrol
+  '#5AA9E6', // sky
+  '#C0508A', // magenta
+  '#9B8AD6', // lavender
+  '#2F4B7C', // navy
+] as const
+/** The site's categorical palette without its warm grey (PALETTE[7]), which is kept for "no category", plus
+ * EXTRA_HUES: 16 distinct colours, one per seeded category. */
+export const CATEGORY_PALETTE: readonly string[] = [...PALETTE.filter((_, i) => i !== 7), ...EXTRA_HUES]
 /** A row with no category. */
 export const NONE_COLOR = PALETTE[7]
 /** The folded "Other" slice: lighter than NONE_COLOR so the two never read as the same thing. */
@@ -23,7 +33,28 @@ export function categoryColor(categories: readonly Category[], id: string | null
   const sorted = sortedCategories(categories)
   const i = sorted.findIndex((c) => c.id === id)
   const own = i >= 0 ? sorted[i].color : null
-  return own ?? CATEGORY_PALETTE[(i < 0 ? 0 : i) % CATEGORY_PALETTE.length]
+  return own ?? paletteSlot(i < 0 ? 0 : i)
+}
+
+/** An #rrggbb for hue `h` (degrees), saturation `s` and lightness `l` (0..1). */
+function hslHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l)
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))))
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+/** Slot `i` of the category colours: the palette first, then (a long list, such as a private category set)
+ * colours spread round the hue wheel by the golden angle and alternating light and dark, so no two slots
+ * share a colour however many categories there are. */
+export function paletteSlot(i: number): string {
+  if (i < CATEGORY_PALETTE.length) return CATEGORY_PALETTE[i]
+  const n = i - CATEGORY_PALETTE.length
+  return hslHex((n * 137.508 + 20) % 360, 0.5, n % 2 ? 0.58 : 0.4)
 }
 
 const HEX_RE = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i

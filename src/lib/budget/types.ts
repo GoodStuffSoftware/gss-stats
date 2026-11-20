@@ -67,7 +67,8 @@ export interface SummaryQuery { from: IsoDate; to: IsoDate; person: PersonFilter
   merchant?: string; groupBy?: 'merchant' | 'account'
   /** Account id; second drill level when the pie is grouped by account. */
   account?: string }
-export interface SummarySlice { key: string; label: string; netCents: Cents; count: number }
+/** `date` and `merchant` come only with purchase slices (the pie builds a short legend label from them). */
+export interface SummarySlice { key: string; label: string; netCents: Cents; count: number; date?: IsoDate; merchant?: string }
 export interface SummaryResponse { level: 'category' | 'merchant' | 'purchase'; slices: SummarySlice[]
   totalCents: Cents; reviewCount: number }
 export interface TxnQuery { from: IsoDate; to: IsoDate; person: PersonFilter; category?: string; merchant?: string

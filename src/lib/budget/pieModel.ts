@@ -4,7 +4,7 @@
 // the word "Other", which is a real category's name); picking the bucket lists what it holds.
 import type { PieSlice } from '../../components/charts/DrillPie.vue'
 import { CATEGORY_PALETTE, categoryColor, OTHER_COLOR, shadeOf } from './colors'
-import type { Category, DebtSlice, SummaryResponse } from './types'
+import type { Category, DebtSlice, SummaryResponse, SummarySlice } from './types'
 import type { DrillStep } from './viewState'
 
 export const MAX_SLICES = 12
@@ -31,6 +31,23 @@ export function foldSlices(slices: PieSlice[], max = MAX_SLICES, noun = 'slices'
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** "Aug 11" for 2026-08-11 ("Aug 11, 2025" when the year is not `thisYear`); anything not an ISO date comes back as is. */
+export function shortDate(iso: string, thisYear = new Date().getFullYear()): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m || +m[2] < 1 || +m[2] > 12) return iso
+  const day = `${MONTHS[+m[2] - 1]} ${+m[3]}`
+  return +m[1] === thisYear ? day : `${day}, ${m[1]}`
+}
+
+/** A purchase's legend label: its short date, then the store only when the breadcrumb does not already name
+ * it (the pie grouped by account), e.g. "Aug 11" or "Aug 11 · Maple Mart". Falls back to the server's label. */
+export function purchaseLabel(s: SummarySlice, withStore: boolean, thisYear?: number): string {
+  if (!s.date) return s.label
+  const day = shortDate(s.date, thisYear)
+  return withStore && s.merchant ? `${day} · ${s.merchant}` : day
+}
+
 /**
  * The slices of one /summary answer. Only a positive net is drawn (refunds that exceed the spend are left to
  * the table). At the category level each slice has its category's colour; deeper down every slice is a shade
@@ -48,7 +65,7 @@ export function spendingSlices(
   const parent = categoryColor(categories, path[0]?.key)
   const slices: PieSlice[] = positive.map((s, i) => ({
     key: s.key,
-    label: s.label,
+    label: summary.level === 'purchase' ? purchaseLabel(s, groupBy === 'account') : s.label,
     value: s.netCents,
     color: summary.level === 'category' ? categoryColor(categories, s.key) : shadeOf(parent, i),
     detail: summary.level === 'purchase' ? undefined : plural(s.count, 'purchase', 'purchases'),

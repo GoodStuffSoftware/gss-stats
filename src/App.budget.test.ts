@@ -86,15 +86,39 @@ async function mountAt(url: string) {
 /** The section's chunk is an async component: wait for its first render. */
 const sectionShown = (w: VueWrapper) => vi.waitFor(() => expect(w.find('[data-testid="budget-section"]').exists()).toBe(true), { timeout: 4000 })
 const params = () => new URLSearchParams(location.search)
-const link = (w: VueWrapper) => w.find('[data-testid="budget-nav-link"]')
+/** The Budget row of the ☰ menu (the drawer is teleported to body); the top bar has no Budget button. */
+const link = (_w?: VueWrapper) => document.querySelector<HTMLElement>('#nav-drawer [data-testid="nav-section-budget"]')
+async function openMenu(w: VueWrapper) {
+  await w.find('.drawer-btn').trigger('click')
+  await flushPromises()
+}
+async function closeMenu() {
+  document.querySelector<HTMLElement>('#nav-drawer .dr-close')?.click()
+  await flushPromises()
+}
+const clickLink = async () => {
+  link()!.click()
+  await flushPromises()
+}
 
-describe('App: Budget nav link', () => {
+describe('App: Budget menu item', () => {
+  it('has no top-bar button', async () => {
+    stubBudget(() => json({ ok: true, email: 'a@example.com' }))
+    const w = await mountAt('/')
+    expect(w.find('[data-testid="budget-nav-link"]').exists()).toBe(false)
+    expect(w.find('.top-actions').text()).not.toContain('Budget')
+  })
+
   it('is absent when the probe says 403, 401 or fails, and a normal page shows', async () => {
     for (const answer of [() => json({ error: 'budget_denied' }, 403), () => json({}, 401), () => Promise.reject(new TypeError('Failed to fetch'))]) {
       resetAccessProbe()
       stubBudget(answer)
       const w = await mountAt('/')
-      expect(link(w).exists()).toBe(false)
+      await openMenu(w)
+      expect(document.querySelector('#nav-drawer')).not.toBeNull()
+      expect(link()).toBeNull()
+      expect(document.querySelector('#nav-drawer .dr-sections')).toBeNull()
+      await closeMenu()
       expect(w.find('main.grid-area').exists()).toBe(true)
       expect(budgetCalls()).toEqual(['/api/budget/access'])
       w.unmount()
@@ -106,7 +130,9 @@ describe('App: Budget nav link', () => {
   it('is shown on 200, probed exactly once, with no other budget request while the section is closed', async () => {
     stubBudget(() => json({ ok: true, email: 'a@example.com' }))
     const w = await mountAt('/')
-    expect(link(w).exists()).toBe(true)
+    await openMenu(w)
+    expect(link()!.textContent).toContain('Budget')
+    expect(link()!.getAttribute('aria-current')).toBeNull()
     expect(w.findComponent(NavBreadcrumb).exists()).toBe(true)
     expect(budgetCalls()).toEqual(['/api/budget/access'])
   })
@@ -147,18 +173,23 @@ describe('App: ?section=budget', () => {
 describe('App: opening and closing', () => {
   beforeEach(() => stubBudget(() => json({ ok: true, email: 'a@example.com' })))
 
-  it('the link opens the section (new history entry) and the link again closes it; other params survive both ways', async () => {
+  it('the menu item opens the section (new history entry), shows as current, and picking a page closes it; other params survive both ways', async () => {
     const w = await mountAt('/?utm_source=x&page=bsk-features')
     const len = history.length
-    await link(w).trigger('click')
+    await openMenu(w)
+    await clickLink()
     await sectionShown(w)
+    expect(document.querySelector('#nav-drawer')).toBeNull() // picking the item closes the menu
     expect(history.length).toBe(len + 1)
     expect(params().get('section')).toBe('budget')
     expect(params().get('page')).toBe('bsk-features')
     expect(params().get('utm_source')).toBe('x')
-    expect(link(w).attributes('aria-current')).toBe('page')
 
-    await link(w).trigger('click')
+    await openMenu(w)
+    expect(link()!.getAttribute('aria-current')).toBe('page')
+    expect(document.querySelectorAll('#nav-drawer .dr-page[aria-current="page"]')).toHaveLength(1) // no page is current while the section is
+    const row = Array.from(document.querySelectorAll<HTMLElement>('#nav-drawer .dr-page')).find((r) => r.querySelector('.nm')!.textContent!.trim() === 'Campaigns')!
+    row.click()
     await flushPromises()
     expect(w.find('[data-testid="budget-section"]').exists()).toBe(false)
     expect(w.find('main.grid-area').exists()).toBe(true)
@@ -166,7 +197,7 @@ describe('App: opening and closing', () => {
     expect(w.find('[data-testid="add-chart"]').exists()).toBe(true)
     expect(params().has('section')).toBe(false)
     expect([...params().keys()].some((k) => k.startsWith('b_'))).toBe(false)
-    expect(params().get('page')).toBe('bsk-features')
+    expect(params().get('page')).toBe('bsk-campaigns')
     expect(params().get('utm_source')).toBe('x')
     expect(history.length).toBe(len + 1) // closing replaced, did not add
     expect(budgetCalls().filter((u) => u === '/api/budget/access')).toHaveLength(1)

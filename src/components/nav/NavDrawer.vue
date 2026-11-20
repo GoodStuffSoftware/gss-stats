@@ -12,7 +12,8 @@ import type { DashboardPage, GroupMeta } from '../../types'
 import { GROUP_NAME_MAX, PAGE_NAME_MAX, cleanGroupName, cleanPageName } from '../../lib/defaults'
 import { ancestorsOf, groupNameError, navTree, orderedGroups, rootOf, rootsInGroup, type NavNode, type RenameTarget } from '../../lib/nav'
 import type { GroupDraft, PageDraft } from '../../lib/wizards'
-import { ChevronDownIcon, CloseIcon, EllipsisIcon, StarIcon } from '../../lib/icons'
+import { ChevronDownIcon, CloseIcon, EllipsisIcon, ICONS, StarIcon } from '../../lib/icons'
+import type { NavSection } from '../../lib/codeSections'
 import PageIcon from './PageIcon.vue'
 import GroupBadge from './GroupBadge.vue'
 import GroupMenu from './GroupMenu.vue'
@@ -36,10 +37,15 @@ const props = defineProps<{
   returnTo?: HTMLElement | null
   /** Phone layout: menus open as bottom sheets. */
   compact?: boolean
+  /** Code-defined sections this account may open (lib/codeSections.ts), listed under ★ Overview. */
+  sections?: NavSection[]
+  /** The section on screen, if any; then no page is the current one. */
+  activeSection?: string | null
 }>()
 const emit = defineEmits<{
   close: []
   switch: [id: string]
+  section: [id: string]
   menu: [id: string, anchor: HTMLElement]
   delete: [id: string]
   'toggle-group': [name: string]
@@ -226,7 +232,7 @@ async function onCreateGroup(d: GroupDraft) {
                   @cancel="cancelPageRename(r.page.id)"
                 />
               </div>
-              <button v-else type="button" class="nav-row dr-page" :class="{ kid: r.depth > 0 }" :aria-current="r.page.id === active.id ? 'page' : undefined" @click="emit('switch', r.page.id)">
+              <button v-else type="button" class="nav-row dr-page" :class="{ kid: r.depth > 0 }" :aria-current="r.page.id === active.id && !activeSection ? 'page' : undefined" @click="emit('switch', r.page.id)">
                 <PageIcon :page="r.page" :pages="pages" />
                 <span class="nm">{{ r.page.name }}</span>
                 <template v-if="r.depth === 0">
@@ -250,7 +256,21 @@ async function onCreateGroup(d: GroupDraft) {
               </button>
             </li>
           </ul>
-          <section v-for="({ group: g, rows }, gi) in groupRows" :key="g.name" class="dr-group" :class="{ flash: flash === g.name }" :data-group="g.name">
+          <ul v-if="sections?.length" class="dr-list dr-sections" aria-label="Sections">
+            <li v-for="sec in sections" :key="sec.id" class="dr-item" :data-section="sec.id">
+              <button
+                type="button"
+                class="nav-row dr-page"
+                :aria-current="activeSection === sec.id ? 'page' : undefined"
+                :data-testid="`nav-section-${sec.id}`"
+                @click="emit('section', sec.id)"
+              >
+                <span class="sec-icon" aria-hidden="true"><component :is="ICONS[sec.icon]" :size="16" :stroke-width="2" /></span>
+                <span class="nm">{{ sec.label }}</span>
+              </button>
+            </li>
+          </ul>
+          <section v-for="({ group: g, rows }, gi) in groupRows":key="g.name" class="dr-group" :class="{ flash: flash === g.name }" :data-group="g.name">
             <div class="dr-gh" :class="{ cur: g.name === activeGroup, pressed: groupMenu?.name === g.name }">
               <h3 class="dr-gh-h">
                 <div v-if="renamingGroup(g.name)" class="dr-gbtn dr-editing">
@@ -309,7 +329,7 @@ async function onCreateGroup(d: GroupDraft) {
                     @cancel="cancelPageRename(r.page.id)"
                   />
                 </div>
-                <button v-else type="button" class="nav-row dr-page" :class="{ kid: r.depth > 1 }" :aria-current="r.page.id === active.id ? 'page' : undefined" @click="emit('switch', r.page.id)">
+                <button v-else type="button" class="nav-row dr-page" :class="{ kid: r.depth > 1 }" :aria-current="r.page.id === active.id && !activeSection ? 'page' : undefined" @click="emit('switch', r.page.id)">
                   <PageIcon :page="r.page" :pages="pages" />
                   <span class="nm">{{ r.page.name }}</span>
                 </button>
@@ -468,6 +488,15 @@ async function onCreateGroup(d: GroupDraft) {
 /* A drill page with drill pages of its own: its fold chevron takes the connector's place. */
 .dr-item:has(.dr-fold) .nav-row.dr-page.kid::before {
   display: none;
+}
+.dr-sections {
+  margin-top: 2px;
+}
+.sec-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: rgb(var(--ink-2));
 }
 .dr-editing {
   cursor: default;

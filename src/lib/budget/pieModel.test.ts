@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CATEGORY_PALETTE, NONE_COLOR, OTHER_COLOR, shadeOf } from './colors'
-import { debtSlices, foldSlices, formatApr, MAX_SLICES, OTHER_KEY, spendingSlices } from './pieModel'
+import { debtSlices, foldSlices, formatApr, MAX_SLICES, OTHER_KEY, purchaseLabel, shortDate, spendingSlices } from './pieModel'
 import { rowDotColor } from './tableModel'
 import { UNCATEGORIZED, type Category, type DebtSlice, type SummaryResponse, type Txn } from './types'
 
@@ -97,5 +97,32 @@ describe('debtSlices', () => {
   it('formats a rate from basis points', () => {
     expect(formatApr(1999)).toBe('19.99%')
     expect(formatApr(0)).toBe('0.00%')
+  })
+})
+
+describe('purchase legend labels', () => {
+  const slice = { key: 't1', label: '2026-08-11 Maple Mart', netCents: 300, count: 1, date: '2026-08-11', merchant: 'Maple Mart' }
+  it('shortDate: a short month and day, the year only when it is not this year, bad input untouched', () => {
+    expect(shortDate('2026-08-11', 2026)).toBe('Aug 11')
+    expect(shortDate('2026-01-05', 2026)).toBe('Jan 5')
+    expect(shortDate('2025-12-31', 2026)).toBe('Dec 31, 2025')
+    expect(shortDate('2026-13-01', 2026)).toBe('2026-13-01')
+    expect(shortDate('soon', 2026)).toBe('soon')
+  })
+  it('purchaseLabel: the date alone under a store; the store too when the pie is grouped by account', () => {
+    expect(purchaseLabel(slice, false, 2026)).toBe('Aug 11')
+    expect(purchaseLabel(slice, true, 2026)).toBe('Aug 11 · Maple Mart')
+    expect(purchaseLabel({ ...slice, merchant: undefined }, true, 2026)).toBe('Aug 11')
+  })
+  it('purchaseLabel falls back to the server label when the slice has no date', () => {
+    const { date: _d, merchant: _m, ...bare } = slice
+    expect(purchaseLabel(bare, false)).toBe('2026-08-11 Maple Mart')
+  })
+  it('spendingSlices uses it at the purchase level only', () => {
+    const res: SummaryResponse = { level: 'purchase', slices: [slice], totalCents: 300, reviewCount: 0 }
+    const path = [{ level: 'category' as const, key: 'groceries', label: 'Groceries' }]
+    expect(spendingSlices(res, CATS, path, undefined, 'merchant')[0].label).toBe(purchaseLabel(slice, false))
+    expect(spendingSlices(res, CATS, path, undefined, 'account')[0].label).toBe(purchaseLabel(slice, true))
+    expect(spendingSlices({ ...res, level: 'merchant' }, CATS, path)[0].label).toBe('2026-08-11 Maple Mart')
   })
 })

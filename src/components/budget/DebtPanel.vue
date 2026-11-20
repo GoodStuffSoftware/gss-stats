@@ -73,11 +73,18 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   gap: 12px;
   min-width: 0;
 }
+/* A debt's name wraps in the legend instead of being cut (a long one, such as a line of credit, stays readable). */
+.debt-panel :deep(.dp-label) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* The same 44 px row the spending panel's breadcrumb has, so the two headers sit on one line on desktop. */
 .dp-total {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 44px;
   margin: 0;
 }
 .dp-total-label {

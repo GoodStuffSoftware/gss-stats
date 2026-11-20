@@ -24,9 +24,18 @@ describe('categoryColor', () => {
     expect(CATEGORY_PALETTE).not.toContain(OTHER_COLOR)
     for (const c of [...CATEGORY_PALETTE, NONE_COLOR, OTHER_COLOR]) expect(c).toMatch(/^#[0-9a-fA-F]{6}$/)
   })
-  it('wraps around when there are more categories than palette slots', () => {
-    const many = Array.from({ length: CATEGORY_PALETTE.length + 2 }, (_, i) => cat(`c${String(i).padStart(2, '0')}`, i))
-    expect(categoryColor(many, many[CATEGORY_PALETTE.length].id)).toBe(CATEGORY_PALETTE[0])
+  it('gives every category its own colour, however long the list (the palette first, then spread hues)', () => {
+    const many = Array.from({ length: 40 }, (_, i) => cat(`c${String(i).padStart(2, '0')}`, i))
+    const colors = many.map((c) => categoryColor(many, c.id))
+    expect(new Set(colors).size).toBe(40)
+    expect(colors.slice(0, CATEGORY_PALETTE.length)).toEqual([...CATEGORY_PALETTE])
+    for (const c of colors) expect(c).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(colors).not.toContain(NONE_COLOR)
+    expect(colors).not.toContain(OTHER_COLOR)
+  })
+  it('the palette has the 11 site colours plus 5 more, no two the same', () => {
+    expect(CATEGORY_PALETTE).toHaveLength(16)
+    expect(new Set(CATEGORY_PALETTE.map((c) => c.toLowerCase())).size).toBe(16)
   })
 })
 

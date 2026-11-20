@@ -8,6 +8,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Added
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
+- **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
+
+### Fixed
+- **Budget legends read better.** Purchases show a short date ("Aug 11") instead of the full ISO date, a long debt name wraps instead of being cut off, the two panel headers line up on desktop, and every category gets its own colour.
 
 ## [0.79.2] — 2026-11-20
 

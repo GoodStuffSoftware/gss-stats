@@ -420,7 +420,7 @@ export async function runSummary(db: D1Database, q: SummaryQuery): Promise<Summa
   } else if (plan.shape === 'account') {
     slices = main.results.map((r) => ({ key: str(r.key), label: labelOf.get(str(r.key)) ?? str(r.key), netCents: Number(r.net), count: Number(r.n) }))
   } else {
-    slices = main.results.map((r) => ({ key: str(r.key), label: `${str(r.posted_date)} ${str(r.merchant_name)}`.trim(), netCents: Number(r.net), count: 1 }))
+    slices = main.results.map((r) => ({ key: str(r.key), label: `${str(r.posted_date)} ${str(r.merchant_name)}`.trim(), netCents: Number(r.net), count: 1, date: str(r.posted_date), merchant: str(r.merchant_name) }))
   }
   if (plan.shape !== 'purchase') slices.sort((a, b) => b.netCents - a.netCents || (a.key < b.key ? -1 : 1))
   const totalCents = total ? Number((total.results[0] as Row).net) : slices.reduce((s, x) => s + x.netCents, 0)

@@ -44,6 +44,8 @@ describe('GET /api/budget/summary', () => {
     expect(p.slices.map((s) => s.netCents)).toEqual([7800, 450, 450])
     expect(p.slices.every((s) => s.count === 1 && /^[0-9a-f]{32}$/.test(s.key))).toBe(true)
     expect(p.totalCents).toBe(8700)
+    // each purchase also carries its date and store (the pie builds a short legend label from them)
+    expect(p.slices.every((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date ?? '') && s.merchant === 'Quillfeather Cafe')).toBe(true)
     const byAcc = await json<SummaryResponse>(await get({ ...RANGE, category: 'dining', groupBy: 'account', account: 'chk-a' }))
     expect(byAcc.level).toBe('purchase')
     expect(byAcc.slices.map((s) => s.netCents)).toEqual([450, 450])
