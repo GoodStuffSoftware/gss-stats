@@ -46,7 +46,7 @@ export function normalizeDescription(raw: string): NormalizedDesc {
     .replace(/\bPOINT OF SALE\b(?:\s+DEBIT\b)?(?:\s+L\d{2,4}\b)?/g, ' ')
     .replace(/\bL\d{3}\b(?=\s+(?:TIME|DATE)\b)/g, ' ')
 
-  // Counterparty account: masked (X1234, XXXX1234, ****1234, •1234), "ENDING IN 1234", or spelled out.
+  // Counterparty account: masked (X1234, XXXX0001, ****1234, •1234), "ENDING IN 1234", or spelled out.
   s = take(s, /(?:[^A-Z0-9]|^)(?:X+|[*•]+)(\d{4})(?!\d)/, (m) => { counterpartyLast4 = m[1] })
   if (!counterpartyLast4) s = take(s, /\bENDING(?: IN)?\s*(\d{4})(?!\d)/, (m) => { counterpartyLast4 = m[1] })
   if (!counterpartyLast4) {

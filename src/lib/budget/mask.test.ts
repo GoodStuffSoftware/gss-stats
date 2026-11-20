@@ -16,7 +16,7 @@ describe('maskDigits', () => {
 
 describe('last4', () => {
   it('keeps digits only', () => {
-    expect(last4('XXXX-1234')).toBe('1234')
+    expect(last4('XXXX-0001')).toBe('0001')
     expect(last4('acct 12 34 56')).toBe('3456')
   })
   it('is null under four digits', () => {
