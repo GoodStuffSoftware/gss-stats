@@ -26,6 +26,18 @@ database_name = "gss-stats-ads"
 database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
 migrations_dir = "migrations/gss-stats-ads"
 
+# The Budget section's OWN database (docs/adr/0007-budget-section.md): household bank data, kept apart
+# from every other store so one mistake can't reach it and it can be restored on its own. Read and
+# written only by functions/api/budget/** behind the BUDGET_ALLOWED_EMAILS list. Schema:
+# migrations/gss-budget/, applied by hand once per environment:
+#   npx wrangler d1 migrations apply gss-budget --remote
+# migrations_dir is scoped to this database only. The id comes from `wrangler d1 create gss-budget`.
+[[d1_databases]]
+binding = "BUDGET_DB"
+database_name = "gss-budget"
+database_id = "1194bb36-100d-480e-baed-61d545e7873c"
+migrations_dir = "migrations/gss-budget"
+
 # The gss-stats-sync Worker (workers/sync/), reachable ONLY through this Service Binding: it has
 # no workers.dev URL and no route. /api/ads/refresh asks it to run the shared Ads sync when the
 # data is stale (docs/adr/0001-ads-read-store.md, "The sync Worker").
@@ -41,7 +53,9 @@ service = "gss-stats-sync"
 binding = "LIVE"
 service = "gss-live"
 
-# Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
+# Secrets (NOT here): BUDGET_ALLOWED_EMAILS (comma-separated; who may open /api/budget/*, set
+# per environment with `npx wrangler pages secret put BUDGET_ALLOWED_EMAILS`, locally in .dev.vars;
+# unset or empty locks everyone out) and CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).
 
@@ -71,6 +85,14 @@ binding = "gss_stats_ads"
 database_name = "gss-stats-ads"
 database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
 migrations_dir = "migrations/gss-stats-ads"
+
+# The Budget database, as above (preview and production share it; the preview's own
+# BUDGET_ALLOWED_EMAILS secret decides who may open it).
+[[env.preview.d1_databases]]
+binding = "BUDGET_DB"
+database_name = "gss-budget"
+database_id = "1194bb36-100d-480e-baed-61d545e7873c"
+migrations_dir = "migrations/gss-budget"
 
 # The real sync Worker: an ads refresh on preview runs a real Google Ads sync.
 [[env.preview.services]]

@@ -185,3 +185,71 @@ export const webSocketUpgradePassesTheGate = {
     check(calls === before, 'no session: next() was called')
   },
 }
+
+// ── Budget list (docs/adr/0007-budget-section.md) ───────────────────────────────────
+
+const BUDGET_ENV: AuthEnv = {
+  ...ENV,
+  ALLOWED_EMAILS: 'owner@example.com,owner2@example.com',
+  BUDGET_ALLOWED_EMAILS: 'owner2@example.com,viewer@example.com',
+  STATS_CONFIG: { get: async (key: string) => (key === 'auth:viewer:viewer@example.com' ? 'viewer' : null) },
+}
+
+async function budgetRequest(email: string, method: string, path: string, env: AuthEnv, next: () => Promise<Response>) {
+  const resolved = readAuthConfig(env)
+  check(resolved.ok, 'harness budget env is not a valid auth config')
+  const url = new URL(`${ORIGIN}${path}`)
+  const cookie = (await createSessionCookie(url, resolved.config, { email, sub: '42' }, Date.now())).split(';')[0]
+  const headers: Record<string, string> = { Cookie: cookie }
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') headers.Origin = ORIGIN
+  return authGate(new Request(url, { method, headers }), env, next)
+}
+
+/** An owner who is NOT on the budget list is refused on every budget method (a percent-encoded
+ *  spelling included), and the Function never runs; the same owner still reads a non-budget route. */
+export const budgetGateDeniesUnlistedOwner = {
+  async test() {
+    let calls = 0
+    const reached = async () => {
+      calls++
+      return new Response('protected')
+    }
+    for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      const res = await budgetRequest('owner@example.com', method, '/api/%62udget/transactions/x', BUDGET_ENV, reached)
+      check(res.status === 403, `${method}: expected 403, got ${res.status}`)
+      if (method !== 'HEAD') {
+        const body = (await res.json()) as { error?: string }
+        check(body.error === 'budget_denied', `${method}: expected budget_denied, got ${JSON.stringify(body)}`)
+      }
+    }
+    check(calls === 0, `the Function ran ${calls} time(s) for an unlisted owner`)
+    const other = await budgetRequest('owner@example.com', 'GET', '/api/config', BUDGET_ENV, reached)
+    check(other.status === 200, `non-budget route: expected 200, got ${other.status}`)
+    const empty = await budgetRequest('owner2@example.com', 'GET', '/api/budget/access', { ...BUDGET_ENV, BUDGET_ALLOWED_EMAILS: '' }, reached)
+    check(empty.status === 403, `an empty list: expected 403, got ${empty.status}`)
+  },
+}
+
+/** A listed VIEWER may write under /api/budget/* (the Function runs) and is still view-only on every
+ *  other path (403 view_only, the Function never runs). */
+export const budgetGateLetsListedViewerWrite = {
+  async test() {
+    let calls = 0
+    const reached = async () => {
+      calls++
+      return new Response('protected')
+    }
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const before = calls
+      const res = await budgetRequest('viewer@example.com', method, '/api/budget/transactions/x', BUDGET_ENV, reached)
+      check(res.status === 200 && calls === before + 1, `${method} budget: expected the Function to run (200), got ${res.status}`)
+      const elsewhere = await budgetRequest('viewer@example.com', method, '/api/config', BUDGET_ENV, reached)
+      const body = (await elsewhere.json()) as { error?: string }
+      check(
+        elsewhere.status === 403 && body.error === 'view_only',
+        `${method} /api/config: expected 403 view_only, got ${elsewhere.status} ${JSON.stringify(body)}`,
+      )
+    }
+    check(calls === 4, `expected 4 Function runs, got ${calls}`)
+  },
+}

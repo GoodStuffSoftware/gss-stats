@@ -333,6 +333,7 @@ version is first saved. Two builds with the same version always pass, last write
 | Retired-panel text | A fallback for a layout the v10/v11 migrations could not map. Removing it would leave such a widget blank. |
 | Stat tile and bar table **data path** | Decision (a), default. `fetchStats` carries RUM (Cloudflare GraphQL) and the drill and dimension filters for every dataset. Moving them onto `/api/metrics` would add GraphQL facts and filter params to the registry, which widens the security boundary ADR 0003 fixes. Only their markup becomes shared. |
 | Chart.js charts and the map | Already one generic, config-driven component each. Turning the timeline into a series card (ADR 0003's "then the timeline") is not part of this work. |
+| Budget section | A code-defined section outside the layout (2026-11-20): its own page, API and database, built from reusable pieces. See [ADR 0007](0007-budget-section.md). |
 
 ## Slices
 

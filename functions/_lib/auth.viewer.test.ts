@@ -92,6 +92,8 @@ const ROUTES: Route[] = handlerFiles(API_DIR)
     return { path, file, methods }
   })
   .filter((r) => r.methods.length > 0)
+  // /api/budget/* answers to its own list, not the viewer rule: auth.budget.test.ts covers it.
+  .filter((r) => !r.path.startsWith('/api/budget/'))
 
 const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
 

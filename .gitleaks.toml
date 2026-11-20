@@ -68,6 +68,26 @@ regexes = [
   '''^fedcba9876543210fedcba9876543210$''',
 ]
 
+# Budget (docs/adr/0007-budget-section.md): bank data never enters this repo. Statements print
+# account numbers masked (a run of X's then the last four) and ACH trace numbers as 15 digits.
+# Synthetic fixtures use last four 0001 to 0009 only.
+[[rules]]
+id = "bank-masked-account"
+description = "A bank-masked account token (a run of X then four digits): real statement text; fixtures use last four 0001-0009"
+regex = '''\b[Xx]{4,}[-\s]?\d{4}\b'''
+keywords = ["xxxx"]
+[[rules.allowlists]]
+regexes = ['''(?i)[x]{4,}[-\s]?000[1-9]$''']
+
+[[rules]]
+id = "bank-ach-trace"
+description = "A 15-digit run (an ACH trace number from a bank statement); made-up fixtures use only 0s and 1s"
+regex = '''\b\d{15}\b'''
+[[rules.allowlists]]
+regexes = ['''^[01]{15}$''']
+[[rules.allowlists]]
+paths = ['''(?:^|/)package-lock\.json$''']
+
 [[rules]]
 id = "google-oauth-client-id"
 description = "A Google OAuth client id (env data: GOOGLE_CLIENT_ID secret, or bws)"
