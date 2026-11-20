@@ -497,7 +497,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   markers (tracking activation, the game-complete/auth beacons, the install fix, the raw-install
   de-dupe) and shaded campaign-flight bands (an active flight's band runs to the axis end), each
   a checkbox in the chart editor ([`src/lib/timelineOverlay.ts`](src/lib/timelineOverlay.ts)).
-  Close labels stagger into rows and drop out rather than overprint (fewer rows at phone width);
+  Close marker labels stack into extra rows above the chart (it grows only as much as needed, so no label is dropped, at phone width too), and flight band names show in full and move to another row when they would touch;
   hovering or tapping a marker line or a band's name shows its date and note (every marker on that same day, when a web and a Play release share one), and a collapsed
   "Markers and bands" list under the chart holds every item in range for keyboard and touch.
   **Product changes** (`changeMarkers`: dashed lines for changes that are not releases, listed in
