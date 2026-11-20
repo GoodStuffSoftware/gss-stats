@@ -87,7 +87,7 @@ const LABEL_LOOK = {
   nameFont: '600 12px Inter, system-ui, sans-serif',
   subFont: '700 11px "Space Grotesk", system-ui, sans-serif',
   bestContrast: true,
-  lineGap: 8,
+  fit: true,
 }
 
 // The slices' wedges as shares of the circle, in drawn order.

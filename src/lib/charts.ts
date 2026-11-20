@@ -176,6 +176,178 @@ function drawCurvedText(ctx: any, text: string, cx: number, cy: number, r: numbe
   }
 }
 
+// ── Strict label fit (opt-in: ArcLabelOptions.fit) ──────────────────────────────────────────────────────
+// A label is drawn only when the full box of every glyph, at its drawn position and rotation, lies inside the
+// slice: between the inner and outer radius and between the start and end angle, with a margin. Shorter forms are
+// tried before giving up, fullest first: the name with the best amount/share text, the same with the name wrapped
+// on two lines, then the name alone (wrapped or not). Each form is tried along the arc and across it (the order
+// follows whichever is closer to horizontal at the slice's angle). The text is never upside down.
+export interface ArcGeom {
+  cx: number
+  cy: number
+  innerRadius: number
+  outerRadius: number
+  startAngle: number
+  endAngle: number
+}
+/** One drawn piece of text: `text` centred at (x, y) on the canvas, turned `rot` radians, `w` x `h` px. */
+export interface ArcPlacement {
+  text: string
+  x: number
+  y: number
+  rot: number
+  w: number
+  h: number
+  font: string
+}
+export interface ArcLine {
+  text: string
+  font: string
+}
+export type ArcLabelMeasure = (font: string, text: string) => number
+
+const TAU = 2 * Math.PI
+const FIT_MARGIN = 4 // px kept clear inside every edge of the slice (the 2 px border and the hover nudge)
+const LINE_GAP = 2 // px between the boxes of two lines
+const normAngle = (a: number) => ((a % TAU) + TAU) % TAU
+const fontPx = (font: string): number => Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 12)
+
+/** True when the point (px, py) (canvas coordinates) lies inside the slice, `margin` px clear of every edge. */
+export function pointInSlice(g: ArcGeom, px: number, py: number, margin: number): boolean {
+  const dx = px - g.cx
+  const dy = py - g.cy
+  const rho = Math.hypot(dx, dy)
+  if (rho < g.innerRadius + margin || rho > g.outerRadius - margin) return false
+  const span = g.endAngle - g.startAngle
+  if (span >= TAU - 1e-6) return true // the whole ring: no radial edge
+  const d = normAngle(Math.atan2(dy, dx) - g.startAngle) // angle past the start edge, 0..2pi
+  if (d > span) return false
+  // distance to a radial edge (a point more than a quarter turn from an edge is far from it)
+  const dist = (gap: number) => (gap >= Math.PI / 2 ? rho : rho * Math.sin(gap))
+  return dist(d) >= margin && dist(span - d) >= margin
+}
+
+/** True when the whole rotated box of a placement lies inside the slice: its four corners are inside (the radial
+ * bounds are extreme at the corners, and a slice up to a half turn is convex between its two edges). */
+export function placementInSlice(g: ArcGeom, p: ArcPlacement, margin: number): boolean {
+  const c = Math.cos(p.rot)
+  const s = Math.sin(p.rot)
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const lx = (sx * p.w) / 2
+    const ly = (sy * p.h) / 2
+    if (!pointInSlice(g, p.x + lx * c - ly * s, p.y + lx * s + ly * c, margin)) return false
+  }
+  return true
+}
+
+/** Splits a name into two lines at the space that makes the wider one narrowest; null for a one-word name. */
+export function wrapName(name: string, measure: (t: string) => number): [string, string] | null {
+  const words = name.split(/\s+/).filter(Boolean)
+  if (words.length < 2) return null
+  let best: [string, string] | null = null
+  let bestW = Infinity
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ')
+    const b = words.slice(i).join(' ')
+    const w = Math.max(measure(a), measure(b))
+    if (w < bestW) {
+      bestW = w
+      best = [a, b]
+    }
+  }
+  return best
+}
+
+/** Lays the lines out along the arc (each line on its own circle, characters tangent to it, upright on both halves). */
+function layoutAlongArc(g: ArcGeom, lines: ArcLine[], measure: ArcLabelMeasure): ArcPlacement[] {
+  const mid = (g.startAngle + g.endAngle) / 2
+  const ma = normAngle(mid)
+  const bottom = ma > 0 && ma < Math.PI // bottom half (canvas y is down): the text runs the other way
+  const hs = lines.map((l) => fontPx(l.font))
+  const total = hs.reduce((a, b) => a + b, 0) + LINE_GAP * (lines.length - 1)
+  const bandMid = (g.innerRadius + g.outerRadius) / 2
+  const out: ArcPlacement[] = []
+  let broken = false // a line would sit on a circle of no radius: no label
+  let top = -total / 2 // the line's top, measured from the band centre towards the visual top
+  lines.forEach((l, i) => {
+    const centre = top + hs[i] / 2
+    top += hs[i] + LINE_GAP
+    const r = bottom ? bandMid + centre : bandMid - centre
+    if (r <= 0) {
+      broken = true
+      return
+    }
+    const chars = [...l.text]
+    const widths = chars.map((ch) => measure(l.font, ch))
+    const totalAngle = widths.reduce((a, b) => a + b, 0) / r
+    let a = bottom ? mid + totalAngle / 2 : mid - totalAngle / 2
+    chars.forEach((ch, k) => {
+      const ca = widths[k] / r
+      a += bottom ? -ca / 2 : ca / 2
+      out.push({
+        text: ch,
+        x: g.cx + Math.cos(a) * r,
+        y: g.cy + Math.sin(a) * r,
+        rot: bottom ? a - Math.PI / 2 : a + Math.PI / 2,
+        w: widths[k],
+        h: hs[i],
+        font: l.font,
+      })
+      a += bottom ? -ca / 2 : ca / 2
+    })
+  })
+  return broken ? [] : out
+}
+
+/** Lays the lines out across the arc: straight text along the radius through the slice's middle, stacked at right
+ * angles to it, turned to read left to right (never upside down). */
+function layoutAcrossArc(g: ArcGeom, lines: ArcLine[], measure: ArcLabelMeasure): ArcPlacement[] {
+  const mid = (g.startAngle + g.endAngle) / 2
+  const bandMid = (g.innerRadius + g.outerRadius) / 2
+  const rot = Math.cos(mid) < 0 ? mid + Math.PI : mid
+  const hs = lines.map((l) => fontPx(l.font))
+  const total = hs.reduce((a, b) => a + b, 0) + LINE_GAP * (lines.length - 1)
+  const ux = Math.cos(rot) // the text direction; its down direction is (-uy, ux)
+  const uy = Math.sin(rot)
+  const bx = g.cx + Math.cos(mid) * bandMid
+  const by = g.cy + Math.sin(mid) * bandMid
+  let top = -total / 2
+  return lines.map((l, i) => {
+    const centre = top + hs[i] / 2
+    top += hs[i] + LINE_GAP
+    return { text: l.text, x: bx - uy * centre, y: by + ux * centre, rot, w: measure(l.font, l.text), h: hs[i], font: l.font }
+  })
+}
+
+/** The forms of one label, fullest first. */
+function labelForms(name: string, subs: string[], nameFont: string, subFont: string, measure: ArcLabelMeasure): ArcLine[][] {
+  const wrapped = wrapName(name, (t) => measure(nameFont, t))
+  const forms: ArcLine[][] = []
+  for (const sub of [...subs, '']) {
+    const tail: ArcLine[] = sub ? [{ text: sub, font: subFont }] : []
+    forms.push([{ text: name, font: nameFont }, ...tail])
+    if (wrapped) forms.push([{ text: wrapped[0], font: nameFont }, { text: wrapped[1], font: nameFont }, ...tail])
+  }
+  return forms
+}
+
+/** The first label form and orientation that fits entirely inside the slice, or null. Pure geometry (no canvas). */
+export function fitArcLabel(g: ArcGeom, item: ArcItem, fonts: { name: string; sub: string }, measure: ArcLabelMeasure): ArcPlacement[] | null {
+  if (!(g.endAngle > g.startAngle) || g.outerRadius <= g.innerRadius) return null
+  const subs = (Array.isArray(item.sub) ? item.sub : [item.sub]).filter(Boolean)
+  const mid = (g.startAngle + g.endAngle) / 2
+  // closer to horizontal: along the arc near 12 and 6 o'clock, across it near 3 and 9
+  const alongFirst = Math.abs(Math.sin(mid)) >= Math.abs(Math.cos(mid))
+  const layouts = alongFirst ? [layoutAlongArc, layoutAcrossArc] : [layoutAcrossArc, layoutAlongArc]
+  for (const form of labelForms(item.name, subs, fonts.name, fonts.sub, measure)) {
+    for (const layout of layouts) {
+      const placed = layout(g, form, measure)
+      if (placed.length && placed.every((p) => placementInSlice(g, p, FIT_MARGIN))) return placed
+    }
+  }
+  return null
+}
+
 /** Per-plugin look. The defaults are the nested doughnut's, unchanged. */
 export interface ArcLabelOptions {
   nameFont?: string
@@ -184,6 +356,9 @@ export interface ArcLabelOptions {
   bestContrast?: boolean
   /** Distance (px) of each of the two text lines from the ring's centre line; default 6 (tight, for 10-11 px text). */
   lineGap?: number
+  /** true: a label is drawn only where its full text box lies inside the slice, trying shorter forms and the other
+   * orientation first (see fitArcLabel); lineGap is not used. Default false: the nested doughnut's own rule. */
+  fit?: boolean
 }
 
 export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look: ArcLabelOptions = {}) {
@@ -191,6 +366,38 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
   const subFont = look.subFont ?? '700 11px "Space Grotesk", system-ui, sans-serif'
   const gap = look.lineGap ?? 6 // px from the band centre to each of the two text lines
   const ink = look.bestContrast ? inkOn : textOn
+  const drawFitted = (ctx: any, arc: any, item: ArcItem, fill: string) => {
+    const measure: ArcLabelMeasure = (font, text) => {
+      ctx.font = font
+      return ctx.measureText(text).width
+    }
+    const geom: ArcGeom = {
+      cx: arc.x,
+      cy: arc.y,
+      innerRadius: arc.innerRadius,
+      outerRadius: arc.outerRadius,
+      startAngle: arc.startAngle,
+      endAngle: arc.endAngle,
+    }
+    ctx.save() // the measuring below changes ctx.font
+    const placed = fitArcLabel(geom, item, { name: nameFont, sub: subFont }, measure)
+    if (!placed) {
+      ctx.restore()
+      return
+    }
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = ink(fill)
+    for (const p of placed) {
+      ctx.font = p.font
+      ctx.save()
+      ctx.translate(p.x, p.y)
+      ctx.rotate(p.rot)
+      ctx.fillText(p.text, 0, 0)
+      ctx.restore()
+    }
+    ctx.restore()
+  }
   return {
     id: 'arcLabels',
     afterDatasetsDraw(chart: any) {
@@ -205,6 +412,10 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
         meta.data.forEach((arc: any, i: number) => {
           const it = items[i]
           if (!it) return
+          if (look.fit) {
+            drawFitted(ctx, arc, it, colors[i] ?? '#888888')
+            return
+          }
           const span = arc.endAngle - arc.startAngle
           if (span < 0.2) return // ~11°, too small to label
           const mid = (arc.startAngle + arc.endAngle) / 2

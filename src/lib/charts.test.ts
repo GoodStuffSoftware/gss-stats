@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PALETTE, activationMarkerIndex, arcLabelsPlugin, contrastRatio, inkOn, playActivationMarkerPlugin } from './charts'
+import { PALETTE, activationMarkerIndex, arcLabelsPlugin, contrastRatio, fitArcLabel, inkOn, playActivationMarkerPlugin, pointInSlice } from './charts'
 import { PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
 
 // Part A: the pop-up trend chart's "tracking starts" boundary — see lib/popupEvents.ts
@@ -137,6 +137,128 @@ describe('arcLabelsPlugin', () => {
   it('the default ink is the nested doughnut brightness cut; bestContrast picks by WCAG contrast', () => {
     expect(draw(1.2, [{ name: 'Ab', sub: [] }], '#8A8278').inks[0]).toBe('#ffffff')
     expect(draw(1.2, [{ name: 'Ab', sub: [] }], '#E9C46A', { bestContrast: true }).inks[0]).toBe(inkOn('#E9C46A'))
+  })
+})
+
+// The strict fit (look.fit): every glyph box must lie inside its slice. Made-up slices on a ring 80..140 px around
+// (200,200); every character is 6 px wide whatever the font. Angles: 0 = 3 o'clock, clockwise, 12 o'clock = -pi/2.
+describe('fitArcLabel', () => {
+  const FONTS = { name: '600 12px Inter', sub: '700 11px Grotesk' }
+  const measure = (_font: string, t: string) => t.length * 6
+  const geom = (mid: number, span: number) => ({ cx: 200, cy: 200, innerRadius: 80, outerRadius: 140, startAngle: mid - span / 2, endAngle: mid + span / 2 })
+  const SUBS = ['$1,200.00 · 25%', '$1,200.00', '25%']
+  const TOP = -Math.PI / 2
+  const BOTTOM = Math.PI / 2
+  const LEFT = Math.PI
+
+  // An independent check of the geometry, by polar coordinates of every corner of every glyph box.
+  function insideBy(g: ReturnType<typeof geom>, placed: NonNullable<ReturnType<typeof fitArcLabel>>, margin: number) {
+    const mid = (g.startAngle + g.endAngle) / 2
+    const half = (g.endAngle - g.startAngle) / 2
+    for (const p of placed) {
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const lx = (sx * p.w) / 2
+        const ly = (sy * p.h) / 2
+        const x = p.x + lx * Math.cos(p.rot) - ly * Math.sin(p.rot) - g.cx
+        const y = p.y + lx * Math.sin(p.rot) + ly * Math.cos(p.rot) - g.cy
+        const rho = Math.hypot(x, y)
+        let off = Math.atan2(y, x) - mid
+        off = Math.atan2(Math.sin(off), Math.cos(off)) // -pi..pi
+        if (rho < g.innerRadius + margin - 1e-9 || rho > g.outerRadius - margin + 1e-9) return false
+        if (rho * Math.sin(half - Math.abs(off)) < margin - 1e-9 || Math.abs(off) > half) return false
+      }
+    }
+    return true
+  }
+  const upright = (placed: NonNullable<ReturnType<typeof fitArcLabel>>) =>
+    placed.every((p) => Math.cos(p.rot) > -1e-9) // the text direction points right (or straight up/down), never leftwards
+  const textOf = (placed: NonNullable<ReturnType<typeof fitArcLabel>>) => placed.map((p) => p.text).join('')
+
+  it('a thick slice shows the name and the full amount line, inside the slice', () => {
+    const g = geom(BOTTOM, 1.6)
+    const placed = fitArcLabel(g, { name: 'Rent', sub: SUBS }, FONTS, measure)!
+    expect(placed).not.toBeNull()
+    expect(textOf(placed)).toBe('Rent$1,200.00 · 25%')
+    expect(insideBy(g, placed, 4)).toBe(true)
+    expect(upright(placed)).toBe(true)
+  })
+
+  it('a thin slice gets no label, and none that pokes out', () => {
+    expect(fitArcLabel(geom(TOP, 0.1), { name: 'Rent', sub: SUBS }, FONTS, measure)).toBeNull()
+    // a thin slice that fits only a short name: the name alone, inside
+    const g = geom(BOTTOM, 0.5)
+    const placed = fitArcLabel(g, { name: 'Gas', sub: SUBS }, FONTS, measure)
+    if (placed) expect(insideBy(g, placed, 4)).toBe(true)
+  })
+
+  it('a 6% slice at 9 o clock drops the amount that would run past the slice and keeps what fits, across the arc', () => {
+    const g = geom(LEFT, 0.377)
+    const item = { name: 'Fees', sub: ['$7,400.58 · 6%', '$7,400.58', '6%'] }
+    const placed = fitArcLabel(g, item, FONTS, measure)!
+    expect(placed).not.toBeNull()
+    expect(textOf(placed)).not.toContain('$7,400.58') // 54 px of amount in a 60 px ring with 4 px margins: no
+    expect(textOf(placed)).toContain('Fees')
+    expect(insideBy(g, placed, 4)).toBe(true)
+    expect(upright(placed)).toBe(true)
+    // across the arc at 9 o'clock is horizontal text: one rotation for the whole label, and it is level
+    expect(new Set(placed.map((p) => p.rot.toFixed(6))).size).toBe(1)
+    expect(Math.abs(Math.sin(placed[0].rot))).toBeLessThan(1e-6)
+  })
+
+  it('a long name is wrapped on two lines when that is what fits', () => {
+    const g = geom(BOTTOM, 0.63)
+    const placed = fitArcLabel(g, { name: 'Home and garden', sub: ['10%'] }, FONTS, measure)!
+    expect(placed).not.toBeNull()
+    expect(textOf(placed)).toContain('Home and')
+    expect(textOf(placed)).toContain('garden')
+    expect(textOf(placed)).not.toContain('Home and garden')
+    expect(insideBy(g, placed, 4)).toBe(true)
+  })
+
+  it('a name that fits nowhere gets no label at all, not a clipped one', () => {
+    expect(fitArcLabel(geom(LEFT, 0.377), { name: 'Entertainment', sub: SUBS }, FONTS, measure)).toBeNull()
+  })
+
+  it('a slice that crosses 12 o clock fits the same as one at 6 o clock, with the angles taken either way round', () => {
+    const base = fitArcLabel(geom(BOTTOM, 1.6), { name: 'Rent', sub: SUBS }, FONTS, measure)!
+    const g1 = geom(TOP, 1.6) // -pi/2 -/+ 0.8
+    const g2 = { ...g1, startAngle: g1.startAngle + 2 * Math.PI, endAngle: g1.endAngle + 2 * Math.PI } // 3pi/2 -/+ 0.8
+    for (const g of [g1, g2]) {
+      const placed = fitArcLabel(g, { name: 'Rent', sub: SUBS }, FONTS, measure)!
+      expect(placed).not.toBeNull()
+      expect(textOf(placed)).toBe(textOf(base))
+      expect(insideBy(g, placed, 4)).toBe(true)
+      expect(upright(placed)).toBe(true)
+    }
+  })
+
+  it('pointInSlice: inside, past each edge, and past each radius', () => {
+    const g = geom(TOP, 1)
+    const at = (r: number, a: number) => pointInSlice(g, 200 + r * Math.cos(a), 200 + r * Math.sin(a), 2)
+    expect(at(110, TOP)).toBe(true)
+    expect(at(110, TOP + 0.5)).toBe(false) // on the end edge: within the margin
+    expect(at(110, TOP - 0.7)).toBe(false) // beyond the start edge
+    expect(at(81, TOP)).toBe(false) // inside the inner margin
+    expect(at(139, TOP)).toBe(false) // inside the outer margin
+  })
+
+  it('the plugin with fit draws only what fits (the 9 o clock case) and keeps the fitted ink', () => {
+    const calls: { text: string; ink: string }[] = []
+    const ctx: any = {
+      save() {},
+      restore() {},
+      translate() {},
+      rotate() {},
+      measureText: (t: string) => ({ width: t.length * 6 }),
+      fillText: (t: string) => calls.push({ text: t, ink: ctx.fillStyle }),
+    }
+    const arc = { ...geom(LEFT, 0.377), x: 200, y: 200 }
+    const chart: any = { ctx, data: { datasets: [{ backgroundColor: ['#E9C46A'] }] }, getDatasetMeta: () => ({ data: [arc] }) }
+    arcLabelsPlugin({ 0: [{ name: 'Fees', sub: ['$7,400.58 · 6%', '$7,400.58', '6%'] }] }, { fit: true, bestContrast: true, nameFont: FONTS.name, subFont: FONTS.sub }).afterDatasetsDraw(chart)
+    const text = calls.map((c) => c.text).join('')
+    expect(text).toContain('Fees')
+    expect(text).not.toContain('$7,400.58')
+    expect(new Set(calls.map((c) => c.ink))).toEqual(new Set([inkOn('#E9C46A')]))
   })
 })
 
