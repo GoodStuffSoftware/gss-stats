@@ -14,7 +14,7 @@ describe('BudgetFilters', () => {
     const w = mountFilters()
     const sel = w.get('[data-testid="budget-range"]')
     expect(sel.findAll('option').map((o) => o.text())).toEqual(['This month', 'Last month', 'Last 3 months', 'Year to date', 'Custom'])
-    expect((sel.element as HTMLSelectElement).value).toBe('this-month')
+    expect((sel.element as unknown as HTMLSelectElement).value).toBe('this-month')
   })
 
   it('picking a preset emits its range', async () => {
@@ -27,8 +27,8 @@ describe('BudgetFilters', () => {
 
   it('a range that matches no preset shows Custom with date inputs', () => {
     const w = mountFilters({ from: '2026-10-05', to: '2026-10-09' })
-    expect((w.get('[data-testid="budget-range"]').element as HTMLSelectElement).value).toBe('custom')
-    expect((w.get('[data-testid="budget-from"]').element as HTMLInputElement).value).toBe('2026-10-05')
+    expect((w.get('[data-testid="budget-range"]').element as unknown as HTMLSelectElement).value).toBe('custom')
+    expect((w.get('[data-testid="budget-from"]').element as unknown as HTMLInputElement).value).toBe('2026-10-05')
   })
 
   it('choosing Custom opens the inputs without changing the range; a valid custom range emits', async () => {

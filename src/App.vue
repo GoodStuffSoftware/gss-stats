@@ -1174,9 +1174,9 @@ function toggleDark() {
       </Transition>
     </div>
 
-    <NoteBlock v-if="showPopupActivationNote && !budgetOpen"note-id="tracking-not-yet-active" class="activation-note" />
-    <NoteBlock v-if="showPopupDeferredNote && !budgetOpen"note-id="popup-deferred-signin" class="activation-note" />
-    <NoteBlock v-if="showSmallSampleNote && !budgetOpen"note-id="small-sample" class="activation-note small-sample-note" />
+    <NoteBlock v-if="showPopupActivationNote && !budgetOpen" note-id="tracking-not-yet-active" class="activation-note" />
+    <NoteBlock v-if="showPopupDeferredNote && !budgetOpen" note-id="popup-deferred-signin" class="activation-note" />
+    <NoteBlock v-if="showSmallSampleNote && !budgetOpen" note-id="small-sample" class="activation-note small-sample-note" />
 
     <main v-if="!budgetOpen" class="grid-area">
       <Dashboard

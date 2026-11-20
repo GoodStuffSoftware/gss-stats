@@ -245,7 +245,7 @@ describe('BudgetSection: states', () => {
   it('loading: a skeleton shows until the summary lands', async () => {
     let release!: (r: Response) => void
     route()
-    const base = fetchMock.getMockImplementation()!
+    const base = fetchMock.getMockImplementation() as (input: string) => Promise<Response>
     fetchMock.mockImplementation((input: string) =>
       new URL(input, 'http://x').pathname === '/api/budget/summary' ? new Promise<Response>((res) => (release = res)) : base(input))
     const w = await mountSection()
