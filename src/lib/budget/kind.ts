@@ -5,7 +5,7 @@ import type { NormalizedDesc } from './normalize'
 
 export interface KindGuess { kind: TxnKind; confidence: number; source: 'hint' | 'auto' }
 
-const RE_TRANSFER = /\b(?:TRANSFER|XFER|TFR|E-?TRANSFER)\b/
+const RE_TRANSFER = /\b(?:TRANSFER|XFER|TFR|TRFR|E-?TRANSFER)\b/
 const RE_PAYMENT = /\b(?:PAYMENT|PMT|PYMT)\b/
 const RE_OVERDRAFT = /\bOVERDRAFT\b|\bOD\s+PROT/
 const RE_FEE = /\b(?:FEES?|NSF|CHARGE\s+FOR)\b/
