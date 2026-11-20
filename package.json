@@ -13,7 +13,7 @@
     "deploy": "npm run build && wrangler pages deploy",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit",
-    "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit && tsc -p scripts/metrics/tsconfig.json --noEmit",
+    "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit && tsc -p scripts/metrics/tsconfig.json --noEmit && tsc -p scripts/budget/tsconfig.json --noEmit",
     "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
     "ads:cloud-check": "tsx scripts/ads-reads/cloud-check.ts",
@@ -32,7 +32,9 @@
     "live:check": "wrangler deploy --dry-run -c workers/live/wrangler.toml --outdir .wrangler/live-check",
     "limits:check": "tsx scripts/check-range-limits.ts",
     "metrics:capture": "tsx scripts/metrics/capture-facts.ts",
-    "metrics:profile": "tsx scripts/metrics/profile-metrics.ts"
+    "metrics:profile": "tsx scripts/metrics/profile-metrics.ts",
+    "budget:load-sql": "tsx scripts/budget/build-load-sql.ts",
+    "budget:migrate:local": "wrangler d1 migrations apply gss-budget --local"
   },
   "dependencies": {
     "@lucide/vue": "^1.51.0",

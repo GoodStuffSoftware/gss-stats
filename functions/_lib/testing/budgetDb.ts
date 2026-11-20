@@ -69,22 +69,37 @@ export interface FakeBudgetDb {
 const conn = (db: DatabaseSync): Conn => db as unknown as Conn
 const num = (n: number | bigint): number => Number(n)
 
+/** D1's per-statement limits: 100 bound parameters and 100 KB of SQL. The fake enforces them so a route that breaks one fails its test. */
+export const D1_MAX_PARAMS = 100
+export const D1_MAX_SQL_BYTES = 100_000
+
+function checkLimits(sql: string, values: readonly unknown[]): void {
+  if (values.length > D1_MAX_PARAMS) throw new Error(`D1_ERROR: too many SQL variables (${values.length} > ${D1_MAX_PARAMS})`)
+  if (sql.length > D1_MAX_SQL_BYTES) throw new Error(`D1_ERROR: statement too long (${sql.length} > ${D1_MAX_SQL_BYTES})`)
+}
+
 function wrap(c: Conn, sql: string, values: SqlValue[], log: string[], d1: { failBatch: boolean }): FakePrepared {
   const prepared: FakePrepared = {
     sql,
     values,
-    bind: (...v: unknown[]) => wrap(c, sql, v as SqlValue[], log, d1),
+    bind: (...v: unknown[]) => {
+      checkLimits(sql, v)
+      return wrap(c, sql, v as SqlValue[], log, d1)
+    },
     async all() {
+      checkLimits(sql, values)
       log.push(sql)
       const stmt = c.prepare(sql)
       const results = stmt.all(...values)
       return { results, success: true, meta: { changes: 0, rows_read: results.length } }
     },
     async first() {
+      checkLimits(sql, values)
       log.push(sql)
       return c.prepare(sql).get(...values) ?? null
     },
     async run() {
+      checkLimits(sql, values)
       log.push(sql)
       const r = c.prepare(sql).run(...values)
       return { results: [], success: true, meta: { changes: num(r.changes), rows_read: 0 } }
@@ -144,6 +159,7 @@ export async function createBudgetDb(opts: CreateOptions = {}): Promise<FakeBudg
       c.exec('BEGIN')
       try {
         for (const s of stmts) {
+          checkLimits(s.sql, s.values)
           statements.push(s.sql)
           const stmt = c.prepare(s.sql)
           if (stmt.columns().length > 0) {
