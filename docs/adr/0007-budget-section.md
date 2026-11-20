@@ -48,9 +48,12 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
      output path inside one) as a SQL file run once with `wrangler d1 execute --file`. That file is
      the backup of the load.
    - Account numbers are masked at the edge: any run of five or more digits, and any number printed
-     in groups joined by single spaces or dashes with nine or more digits in all (dates, phone numbers
-     and short reference numbers stay), is shortened to a bullet and its last four before storage, `accounts.last4` holds four digits and nothing longer, and
-     descriptions are stored masked.
+     in groups joined by single spaces, dashes or slashes with nine or more digits in all, is
+     shortened to a bullet and its last four before storage. Dates (`2026-11-20`, `11-20-26`,
+     `11/20/2026`, `11-28`), a phone number standing alone and short reference numbers stay, even
+     next to a long number (`STORE 0412 2026-11-20` keeps both); a long number is masked even when
+     its start looks like a date or a phone number. `accounts.last4` holds four digits and nothing
+     longer, and descriptions are stored masked.
    - `.gitignore` blocks statement files (`*.pdf`, `*.ofx`, `*.qfx`, `*.qbo`, `*.csv`,
      `*.budget.json`, `*.budget.sql`, `budget-data/`, `statements/`), and `.gitleaks.toml` has a rule
      for bank-masked account tokens (a run of `X`s then four digits) and 15-digit bank trace
@@ -65,7 +68,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    they are (the credit card; draws from a line of credit that land in checking). That is done with
    seed rules (`set_kind: 'spend'` plus a category, and `debt_account_id` to tie the payment to its
    debt), not with code, so the answer for any one debt is a data change. A row whose kind was set
-   by hand or by a rule is never changed by pairing or by a re-run.
+   by hand or by a rule is never changed by pairing or by a re-run. A pair lands on both rows or on
+   neither: when one side cannot take it (a hand-set kind or category, or already paired), the
+   other keeps its own classification and no pair.
 6. **Interest and fees.** Interest charged (card interest lines; the interest part of a loan
    payment) is not spending: it shows in the debt view per period, because treating card interest as
    spending but loan interest as not would be inconsistent. Interest earned is income. Bank fees stay

@@ -72,6 +72,16 @@ describe('POST /api/budget/rules', () => {
     expect(again.rule).toMatchObject({ id: rule.id, setCategoryId: 'gifts', active: true })
   })
 
+  it('refuses to teach a category that was archived after the edit', async () => {
+    const taught = manualRow()
+    const a = autoRow()
+    db.exec("UPDATE categories SET archived = 1 WHERE id = 'shopping'")
+    const res = await post({ txnId: taught, scope: 'merchant' })
+    expect(res.status).toBe(400)
+    expect(db.get<{ n: number }>("SELECT COUNT(*) n FROM merchant_rules WHERE merchant_key = 'gadget-hut'")!.n).toBe(0)
+    expect(row(a)).toMatchObject({ category_id: null, category_source: 'none' })
+  })
+
   it('a kind-only manual edit teaches a kind rule', async () => {
     const taught = insertTxn(db, { ...shop, kind: 'transfer', kind_source: 'manual' })
     const a = autoRow({ account_id: 'card-a' })

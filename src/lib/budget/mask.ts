@@ -1,31 +1,82 @@
 // Account and card numbers never reach the database or the browser: every run of 5 or more digits in
 // free text is cut to a bullet plus its last four, and so is a number printed in groups (digit groups
-// joined by single spaces or dashes). Pure; used by the load tool (scripts/budget) through import.ts.
+// joined by single spaces, dashes or slashes). Pure; used by the load tool (scripts/budget) through import.ts.
 
 const LONG_RUN = /\d{5,}/g
 
-// Digit groups (2+ digits each) joined by single spaces or dashes: `1234 5678 9012 3456`, `1234-5678-90`.
-// The replacer masks one only when it holds 9+ digits in all, so amounts, times and short reference
-// numbers (under 9 digits) are never touched. Alternatives are tried in order at each position: a date
-// (`2026-11-20`, `11-20-2026`) and a phone number (`555-123-4567`, `(555) 123-4567`, `1-555-123-4567`)
-// are matched first and left as written.
-const DATE = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})(?!\d)`
-const PHONE = String.raw`(?:\(\d{3}\)\s?|(?:1[-. ])?\d{3}[-. ])\d{3}[-. ]\d{4}(?!\d)`
-const GROUPED = String.raw`\d{2,}(?:[ -]\d{2,})+(?!\d)`
-const GROUPED_NUMBER = new RegExp(String.raw`(?<![\d])(?:(${DATE})|(${PHONE})|(${GROUPED}))`, 'g')
+// A run of digit groups joined by single spaces, dashes or slashes: `1234 5678 9012 3456`, `1234-5678-90`,
+// `STORE 0412 2026-11-20`. Each run is split into groups; dates inside it are set aside first, what is
+// left between them is a number of its own and is masked when it holds 9+ digits in all. Amounts, times,
+// short reference numbers (under 9 digits) and a lone phone number are never touched.
+const GROUP_RUN = /(?<!\d)\d+(?:[ /-]\d+)+(?!\d)/g
 
-/** A number printed in digit groups (9+ digits in all) becomes `•` + its last 4 digits. */
-function maskGrouped(s: string): string {
-  return s.replace(GROUPED_NUMBER, (match, date: string | undefined, phone: string | undefined) => {
-    if (date || phone) return match
-    const digits = match.replace(/\D/g, '')
-    return digits.length >= 9 ? '•' + digits.slice(-4) : match
-  })
+const isMonthDay = (a: string, b: string): boolean => {
+  const m = Number(a)
+  const d = Number(b)
+  return m >= 1 && m <= 12 && d >= 1 && d <= 31
+}
+const monthDay = (a: string, b: string): boolean => isMonthDay(a, b) || isMonthDay(b, a)
+const isYear = (g: string): boolean => g.length === 2 || (g.length === 4 && /^(19|20)/.test(g))
+const dateSep = (s: string): boolean => s === '-' || s === '/'
+
+/** How many groups, starting at group `i`, form a date that stands alone (a space or nothing on each
+ *  side, never a dash or slash that would make it part of a longer number); 0 when none does.
+ *  `YYYY-MM-DD`, `MM-DD-YY(YY)` and `MM/DD/YY(YY)` (day and month either way round) and `MM-DD`. */
+function dateLength(g: string[], s: string[], i: number): number {
+  const standsAlone = (len: number): boolean => (i === 0 || s[i - 1] === ' ') && (i + len >= g.length || s[i + len - 1] === ' ')
+  if (i + 2 < g.length) {
+    const iso = s[i] === '-' && s[i + 1] === '-' && /^(19|20)\d\d$/.test(g[i]) && g[i + 1].length === 2 && g[i + 2].length === 2
+    const us = dateSep(s[i]) && s[i] === s[i + 1] && g[i].length <= 2 && g[i + 1].length <= 2 && isYear(g[i + 2])
+    if ((iso && monthDay(g[i + 1], g[i + 2])) || (us && monthDay(g[i], g[i + 1]))) {
+      if (standsAlone(3)) return 3
+    }
+  }
+  if (i + 1 < g.length && dateSep(s[i]) && g[i].length <= 2 && g[i + 1].length <= 2 && monthDay(g[i], g[i + 1])) {
+    if (standsAlone(2)) return 2
+  }
+  return 0
+}
+
+/** A lone phone number: groups of 3-3-4, or 1-3-3-4, joined by spaces or dashes. */
+function isPhone(groups: string[], seps: string[]): boolean {
+  if (seps.some((x) => x === '/')) return false
+  const shape = groups.map((x) => x.length).join('-')
+  return shape === '3-3-4' || shape === '1-3-3-4'
+}
+
+function maskRun(run: string): string {
+  const groups = run.split(/[ /-]/)
+  const seps = run.match(/[ /-]/g) ?? []
+  const keep = groups.map(() => false) // part of a date: left as written
+  for (let i = 0; i < groups.length; ) {
+    const len = dateLength(groups, seps, i)
+    for (let k = 0; k < len; k++) keep[i + k] = true
+    i += len || 1
+  }
+  let out = ''
+  for (let i = 0; i < groups.length; ) {
+    if (keep[i]) {
+      out += groups[i]
+      if (i < seps.length) out += seps[i]
+      i++
+      continue
+    }
+    let j = i // the stretch of groups [i, j] that are not part of a date
+    while (j + 1 < groups.length && !keep[j + 1]) j++
+    const part = groups.slice(i, j + 1)
+    const inner = seps.slice(i, j)
+    const digits = part.join('')
+    if (digits.length >= 9 && !isPhone(part, inner)) out += '•' + digits.slice(-4)
+    else part.forEach((x, k) => (out += x + (k < inner.length ? inner[k] : '')))
+    if (j < seps.length) out += seps[j]
+    i = j + 1
+  }
+  return out
 }
 
 /** Grouped numbers and runs of 5+ digits become `•` + their last 4 digits, so the result has no 5-digit run. */
 export function maskDigits(s: string): string {
-  return maskGrouped(s).replace(LONG_RUN, (run) => '•' + run.slice(-4))
+  return s.replace(GROUP_RUN, maskRun).replace(LONG_RUN, (run) => '•' + run.slice(-4))
 }
 
 /** The last four digits of `s` (digits only), or null when it holds fewer than four digits. */

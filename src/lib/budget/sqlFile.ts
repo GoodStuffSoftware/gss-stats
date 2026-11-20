@@ -77,7 +77,10 @@ function statementSql(s: StatementFacts, importId: string): string {
     `min_due_cents = excluded.min_due_cents, due_date = excluded.due_date;`
 }
 
-function txnSql(t: TxnInsert): string {
+function txnSql(row: TxnInsert): string {
+  // A row the planner paired goes in as it was before pairing (no pair, its own classification): the
+  // pair UPDATEs below then set both sides or neither, so a skipped pair never leaves one side half done.
+  const t: TxnInsert = row.unpaired && row.pairId !== null ? { ...row, ...row.unpaired, pairId: null } : row
   return `INSERT INTO transactions (id, account_id, statement_end, import_id, posted_date, txn_date, amount_cents, description, merchant_key, ` +
     `merchant_name, store_no, counterparty_last4, bank_ref, kind, kind_source, category_id, category_source, rule_id, confidence, needs_review, ` +
     `review_reason, pair_id, debt_account_id, principal_cents, interest_cents, note, updated_at, updated_by) VALUES (` +
@@ -93,7 +96,8 @@ function txnSql(t: TxnInsert): string {
  * 'rule', or whose category was set by hand (category_source 'manual'): a later load starts from an
  * empty context and re-plans every file, so this guard is what protects an edit made since. A row
  * taken for spending or for an outside payee becomes a plain transfer, leaves its category and drops
- * the review reasons the pairing answered.
+ * the review reasons the pairing answered. The partner has to be free to pair too, so a pair lands on
+ * both rows or on neither (a new row of a skipped pair stays unpaired, with its own classification).
  */
 export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, updatedBy: string): string {
   const re = `kind IN ${REKIND}`
@@ -105,7 +109,10 @@ export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, 
     `review_reason = CASE WHEN ${re} AND review_reason IN ${REKIND_REVIEW} THEN NULL ELSE review_reason END, ` +
     `kind = CASE WHEN ${re} THEN 'transfer' ELSE kind END, ` +
     `updated_at = ${sqlStr(updatedAt)}, updated_by = ${sqlStr(updatedBy)} ` +
-    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual';`
+    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual' ` +
+    // The partner must be free to pair as well (or already point here), so either both sides pair or neither.
+    `AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${sqlStr(partnerId)} AND (p.pair_id IS NULL OR p.pair_id = ${sqlStr(id)}) ` +
+    `AND p.kind_source NOT IN ('manual','rule') AND p.category_source <> 'manual');`
 }
 
 /** The statements of a plan, in an order that satisfies the foreign keys. */

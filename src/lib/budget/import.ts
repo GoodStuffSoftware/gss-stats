@@ -147,6 +147,8 @@ export async function planImportDetailed(req: ImportRequest, ctx: PlanContext, w
     for (const [mine, other] of [[a, b], [b, a]] as const) {
       const t = newById.get(mine)
       if (!t) continue
+      t.unpaired = { kind: t.kind, categoryId: t.categoryId, categorySource: t.categorySource, confidence: t.confidence,
+        needsReview: t.needsReview, reviewReason: t.reviewReason }
       t.pairId = other
       if (REKIND_ON_PAIR.includes(t.kind)) {
         t.kind = 'transfer'

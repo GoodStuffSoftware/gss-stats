@@ -10,7 +10,7 @@
 import type { RuleResponse } from '../../../../src/lib/budget/types'
 import { budgetJson } from '../../../_lib/budgetAccess'
 import {
-  MAX_BODY, RULE_COLUMNS, applyRules, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject, ruleFromTxn,
+  MAX_BODY, RULE_COLUMNS, applyRules, assertCategory, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject, ruleFromTxn,
 } from '../../../_lib/budgetDb'
 
 export const onRequest = defineRoute({
@@ -25,6 +25,8 @@ export const onRequest = defineRoute({
     if (txn.merchantKey === '') throw badRequest('txnId: this row has no merchant to make a rule for')
     if (body.scope === 'merchant_store' && !txn.storeNo) throw badRequest('scope: this row has no store number')
 
+    // A category archived after the edit must not become a rule's category (same refusal as the PATCH).
+    if (txn.categorySource === 'manual') await assertCategory(db, txn.categoryId, 'txnId', true)
     const learned = await ruleFromTxn({ ...txn, categoryId: txn.categorySource === 'manual' ? txn.categoryId : null }, body.scope)
     if (!learned.setCategoryId && !learned.setKind) throw badRequest('txnId: this row has no manual category or kind to learn from')
 

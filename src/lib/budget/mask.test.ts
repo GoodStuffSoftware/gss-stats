@@ -27,6 +27,44 @@ describe('maskDigits', () => {
       expect(maskDigits(s).replace(/\D/g, '').length, s).toBeLessThanOrEqual(4)
     }
   })
+  it('never swallows a date that sits next to a number', () => {
+    expect(maskDigits('STORE 0412 2026-11-20')).toBe('STORE 0412 2026-11-20')
+    expect(maskDigits('PURCHASE 1120 11-20-26')).toBe('PURCHASE 1120 11-20-26')
+    expect(maskDigits('POS 11-28 1234 5678')).toBe('POS 11-28 1234 5678')
+    expect(maskDigits('STORE 0412 11/20/2026 AT 0033')).toBe('STORE 0412 11/20/2026 AT 0033')
+    expect(maskDigits('2026-11-20 2026-11-21 0412')).toBe('2026-11-20 2026-11-21 0412')
+  })
+  it('masks a long number next to a date and keeps the date', () => {
+    expect(maskDigits('ACCT 4000 0000 0000 0002 2026-11-20')).toBe('ACCT •0002 2026-11-20')
+    expect(maskDigits('11-28 4000 0000 0000 0002')).toBe('11-28 •0002')
+    expect(maskDigits('2026-11-20 123 456 789')).toBe('2026-11-20 •6789')
+    expect(maskDigits('PAID 11/20/2026 TO 1234 5678 9012')).toBe('PAID 11/20/2026 TO •9012')
+  })
+  it('masks a long grouped number even when its start looks like a phone number or a date', () => {
+    expect(maskDigits('123 456 7890 1234')).toBe('•1234')
+    expect(maskDigits('555-123-4567 8901')).toBe('•8901')
+    expect(maskDigits('12-34-5678 9012')).toBe('•9012')
+    expect(maskDigits('12/34/5678 9012 3456')).toBe('•3456')
+    expect(maskDigits('10-12-3456 7890 1234')).toBe('•1234')
+    expect(maskDigits('1-555-123-4567 8901')).toBe('•8901')
+    expect(maskDigits('2026-11-20-1234 5678')).toBe('•5678')
+  })
+  it('keeps a lone phone number but not one that is part of a longer number', () => {
+    expect(maskDigits('CALL 555-123-4567 ON 2026-11-20')).toBe('CALL 555-123-4567 ON 2026-11-20')
+    expect(maskDigits('CALL 555-123-4567 2026-11-20')).toBe('CALL 555-123-4567 2026-11-20')
+    expect(maskDigits('CALL 555 123 4567 8901')).toBe('CALL •8901')
+  })
+  it('never leaves a 5-digit run, in any mix of numbers, dates and phone numbers', () => {
+    const parts = ['2026-11-20', '11-28', '11/20/2026', '0412', '1234', '5678', '555-123-4567', '123', '4567', '12-34-5678', '9012', 'AT']
+    for (const a of parts) {
+      for (const b of parts) {
+        for (const c of parts) {
+          const out = maskDigits(`${a} ${b} ${c}`)
+          expect(hasLongDigitRun(out), out).toBe(false)
+        }
+      }
+    }
+  })
   it('keeps short numbers, dates and store numbers', () => {
     expect(maskDigits('STORE #0412 ON 2026-11-20 X0003')).toBe('STORE #0412 ON 2026-11-20 X0003')
   })

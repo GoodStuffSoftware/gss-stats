@@ -43,8 +43,13 @@ export interface Txn { id: string; accountId: string; postedDate: IsoDate; txnDa
   confidence: number; needsReview: boolean; reviewReason: ReviewReason | null; pairId: string | null
   debtAccountId: string | null; principalCents: Cents | null; interestCents: Cents | null; note: string | null
   updatedAt: string; updatedBy: string }
+/** What pairing changes on a row: it is the row's classification as it stood before it was paired. */
+export type UnpairedFields = Pick<Txn, 'kind' | 'categoryId' | 'categorySource' | 'confidence' | 'needsReview' | 'reviewReason'>
 export interface TxnInsert extends Txn { importId: string; statementEnd: IsoDate | null
-  counterpartyLast4: string | null; bankRef: string | null }
+  counterpartyLast4: string | null; bankRef: string | null
+  /** Set on a row the planner paired: its classification and no pair, before pairing. The SQL load inserts
+   *  this and then pairs both sides together, so a pair either lands on both rows or on neither. */
+  unpaired?: UnpairedFields }
 export interface PairCandidate { id: string; accountId: string; postedDate: IsoDate; amountCents: Cents
   kind: TxnKind; counterpartyLast4: string | null; pairId: string | null }
 export interface PlanContext { accounts: Account[]; rules: MerchantRule[]; pairCandidates: PairCandidate[]

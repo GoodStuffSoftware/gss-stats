@@ -84,6 +84,12 @@ describe('the SQL against the real migration (local SQLite)', () => {
     const broken = db.prepare('SELECT COUNT(*) AS n FROM transactions a JOIN transactions b ON a.pair_id = b.id WHERE b.pair_id IS NOT a.id').get() as { n: number }
     expect(broken.n).toBe(0)
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    // A paired row ends up in the DB exactly as the plan has it (insert unpaired, then pair in SQL).
+    expect(full.txns.some((t) => t.unpaired)).toBe(true)
+    const get = db.prepare('SELECT kind, category_id AS c, category_source AS cs, confidence AS conf, needs_review AS nr, review_reason AS rr, pair_id AS p FROM transactions WHERE id = ?')
+    for (const t of full.txns) {
+      expect(get.get(t.id), t.id).toEqual({ kind: t.kind, c: t.categoryId, cs: t.categorySource, conf: t.confidence, nr: t.needsReview ? 1 : 0, rr: t.reviewReason, p: t.pairId })
+    }
   })
 
   it('running the same SQL again inserts no new rows', () => {
@@ -155,9 +161,22 @@ describe('the SQL against the real migration (local SQLite)', () => {
     expect(p2.pairs).toHaveLength(1)
     db.exec(renderPlanSql(p2))
     expect(db.prepare('SELECT kind, kind_source AS ks, category_id AS c, category_source AS cs, pair_id AS p, note FROM transactions WHERE id = ?').get(id)).toEqual(before)
-    // The same row with an untouched category still pairs (the guard is the edit, not the row).
+    // The partner row is new, and the pair was skipped, so it is unpaired too: no pair_id pointing at the
+    // edited row, and the classification it would have had without pairing (not 'transfer' by a pair that is not there).
+    const partnerId = p2.pairs[0].find((x) => x !== id)!
+    const partnerPlan = p2.txns.find((t) => t.id === partnerId)!
+    expect(partnerPlan.pairId).toBe(id) // the plan pairs them; the load did not
+    expect(partnerPlan.unpaired).toBeDefined()
+    expect(db.prepare('SELECT kind, category_id AS c, category_source AS cs, confidence AS conf, needs_review AS nr, review_reason AS rr, pair_id AS p FROM transactions WHERE id = ?').get(partnerId))
+      .toEqual({ kind: partnerPlan.unpaired!.kind, c: partnerPlan.unpaired!.categoryId, cs: partnerPlan.unpaired!.categorySource,
+        conf: partnerPlan.unpaired!.confidence, nr: partnerPlan.unpaired!.needsReview ? 1 : 0, rr: partnerPlan.unpaired!.reviewReason, p: null })
+    expect((db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE pair_id IS NOT NULL').get() as { n: number }).n).toBe(0)
+    // The same row with an untouched category still pairs (the guard is the edit, not the row), and
+    // now the partner pairs with it, with the pair pointing both ways.
     db.prepare("UPDATE transactions SET category_source = 'auto' WHERE id = ?").run(id)
     db.exec(renderPlanSql(p2))
+    expect(db.prepare('SELECT kind, category_id AS c FROM transactions WHERE id = ?').get(partnerId)).toEqual({ kind: 'transfer', c: null })
+    expect((db.prepare('SELECT pair_id AS p FROM transactions WHERE id = ?').get(partnerId) as { p: string }).p).toBe(id)
     expect(db.prepare('SELECT kind, category_id AS c, category_source AS cs, pair_id AS p FROM transactions WHERE id = ?').get(id))
       .toEqual({ kind: 'transfer', c: null, cs: 'none', p: p2.pairs[0].find((x) => x !== id) })
   })
