@@ -26,16 +26,20 @@ describe('GET /api/budget/summary', () => {
   it('level merchant: category drills to merchants; `__none__` is uncategorized; groupBy=account swaps the key', async () => {
     const m = await json<SummaryResponse>(await get({ ...RANGE, category: 'groceries' }))
     expect(m.level).toBe('merchant')
-    expect(m.slices).toEqual([{ key: 'chain-x', label: 'Chain X', netCents: 10_550, count: 3 }])
+    // the slice key is the display name (several merchant keys can share one); one name, one slice
+    expect(m.slices).toEqual([
+      { key: 'Chain X Grocery', label: 'Chain X Grocery', netCents: 8400, count: 1 },
+      { key: 'Chain X', label: 'Chain X', netCents: 2150, count: 2 },
+    ])
     const none = await json<SummaryResponse>(await get({ ...RANGE, category: '__none__' }))
-    expect(none.slices.map((s) => s.key).sort()).toEqual(['bramblewood-market', 'paypal'])
+    expect(none.slices.map((s) => s.key).sort()).toEqual(['Bramblewood Market', 'Paypal'])
     const acc = await json<SummaryResponse>(await get({ ...RANGE, category: 'dining', groupBy: 'account' }))
     expect(acc.level).toBe('merchant')
     expect(acc.slices.map((s) => [s.key, s.label])).toEqual([['card-a', 'Card A'], ['chk-a', 'Checking A']])
   })
 
   it('level purchase: by merchant, or by account when the pie is grouped by account', async () => {
-    const p = await json<SummaryResponse>(await get({ ...RANGE, category: 'dining', merchant: 'quillfeather-cafe' }))
+    const p = await json<SummaryResponse>(await get({ ...RANGE, category: 'dining', merchant: 'Quillfeather Cafe' }))
     expect(p.level).toBe('purchase')
     expect(p.slices.map((s) => s.netCents)).toEqual([7800, 450, 450])
     expect(p.slices.every((s) => s.count === 1 && /^[0-9a-f]{32}$/.test(s.key))).toBe(true)
@@ -45,15 +49,30 @@ describe('GET /api/budget/summary', () => {
     expect(byAcc.slices.map((s) => s.netCents)).toEqual([450, 450])
     // a purchase list is capped at 200 rows but the total is the whole slice
     for (let i = 0; i < 230; i++) insertTxn(db, { amount_cents: -100, merchant_key: 'bulk-shop', merchant_name: 'Bulk Shop', category_id: 'other', category_source: 'manual', posted_date: '2026-11-11' })
-    const big = await json<SummaryResponse>(await get({ ...RANGE, category: 'other', merchant: 'bulk-shop' }))
+    const big = await json<SummaryResponse>(await get({ ...RANGE, category: 'other', merchant: 'Bulk Shop' }))
     expect(big.slices.length).toBe(200)
     expect(big.totalCents).toBe(23_000)
+  })
+
+  it('one store is one slice even when several merchant keys share its display name; drilling lists every purchase', async () => {
+    for (const [key, cents] of [['maple-mart', -1000], ['maple-mart-online', -2500], ['maple-mart-www', -400]] as const) {
+      insertTxn(db, { amount_cents: cents, merchant_key: key, merchant_name: 'Maple Mart', category_id: 'shopping', category_source: 'manual', posted_date: '2026-11-12' })
+    }
+    insertTxn(db, { amount_cents: -700, merchant_key: 'oak-outlet', merchant_name: 'Oak Outlet', category_id: 'shopping', category_source: 'manual', posted_date: '2026-11-12' })
+    const m = await json<SummaryResponse>(await get({ ...RANGE, category: 'shopping' }))
+    expect(m.slices.filter((s) => s.label === 'Maple Mart')).toEqual([{ key: 'Maple Mart', label: 'Maple Mart', netCents: 3900, count: 3 }])
+    expect(new Set(m.slices.map((s) => s.label)).size).toBe(m.slices.length)
+    const p = await json<SummaryResponse>(await get({ ...RANGE, category: 'shopping', merchant: 'Maple Mart' }))
+    expect(p.level).toBe('purchase')
+    expect(p.totalCents).toBe(3900)
+    expect(p.slices.map((s) => s.netCents)).toEqual([2500, 1000, 400])
+    expect(m.slices.find((s) => s.key === 'Maple Mart')!.netCents).toBe(p.totalCents)
   })
 
   it('refunds net against spend', async () => {
     insertTxn(db, { kind: 'refund', amount_cents: 2000, category_id: 'fuel', category_source: 'manual', merchant_key: 'chain-x', merchant_name: 'Chain X' })
     const body = await json<SummaryResponse>(await get({ ...RANGE, category: 'fuel' }))
-    expect(body.slices[0]).toMatchObject({ key: 'chain-x', netCents: 15_200 - 2000, count: 3 })
+    expect(body.slices[0]).toMatchObject({ key: 'Chain X', netCents: 9000 - 2000, count: 2 })
   })
 
   it('person filter', async () => {

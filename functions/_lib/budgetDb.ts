@@ -290,6 +290,15 @@ export interface Built {
 const SPENDING_SQL = SPENDING_KINDS.map((k) => `'${k}'`).join(',')
 const IN_ACCOUNTS = 'account_id IN (SELECT value FROM json_each(?))'
 
+/**
+ * A store as the pie and the table's merchant filter see it: its display name (the first 80 characters, the
+ * `merchant` parameter's cap), falling back to the key. Several merchant keys can carry one display name (a
+ * marketplace and a retail line of one chain), and the person looking at the pie sees one store, so the pie
+ * groups and the drill filters on this expression, never on `merchant_key`. It is evaluated only on the rows the
+ * date range, person and category already narrowed to (idx_txn_cat / idx_txn_date), never as an index probe.
+ */
+export const STORE_SQL = `substr(COALESCE(NULLIF(merchant_name, ''), merchant_key), 1, 80)`
+
 function categoryFragment(category: string): { sql: string; params: string[] } {
   return category === UNCATEGORIZED ? { sql: 'category_id IS NULL', params: [] } : { sql: 'category_id = ?', params: [category] }
 }
@@ -318,7 +327,7 @@ export function buildSummary(q: SummaryQuery, idsJson: string): SummaryPlan {
     reviewWhere.push(c.sql)
     reviewParams.push(...c.params)
   }
-  if (q.merchant !== undefined) { reviewWhere.push('merchant_key = ?'); reviewParams.push(q.merchant) }
+  if (q.merchant !== undefined) { reviewWhere.push(`${STORE_SQL} = ?`); reviewParams.push(q.merchant) }
   if (q.account !== undefined) { reviewWhere.push('account_id = ?'); reviewParams.push(q.account) }
   const review: Built = { sql: `SELECT COUNT(*) AS n FROM transactions WHERE ${reviewWhere.join(' AND ')}`, params: reviewParams }
   if (q.category === undefined) {
@@ -335,14 +344,14 @@ export function buildSummary(q: SummaryQuery, idsJson: string): SummaryPlan {
       main: {
         sql: byAccount
           ? `SELECT account_id AS key, -SUM(amount_cents) AS net, COUNT(*) AS n FROM transactions WHERE ${cat.sql} AND ${base} GROUP BY account_id`
-          : `SELECT merchant_key AS key, MIN(merchant_name) AS label, -SUM(amount_cents) AS net, COUNT(*) AS n FROM transactions WHERE ${cat.sql} AND ${base} GROUP BY merchant_key`,
+          : `SELECT ${STORE_SQL} AS key, -SUM(amount_cents) AS net, COUNT(*) AS n FROM transactions WHERE ${cat.sql} AND ${base} GROUP BY ${STORE_SQL}`,
         params: [...cat.params, ...baseParams],
       },
     }
   }
   let where = `${cat.sql} AND ${base}`
   const params: Array<string | number> = [...cat.params, ...baseParams]
-  if (q.merchant !== undefined) { where += ' AND merchant_key = ?'; params.push(q.merchant) }
+  if (q.merchant !== undefined) { where += ` AND ${STORE_SQL} = ?`; params.push(q.merchant) }
   if (q.account !== undefined) { where += ' AND account_id = ?'; params.push(q.account) }
   return {
     level: 'purchase', shape: 'purchase', review,
@@ -366,7 +375,7 @@ export function buildTxnList(q: TxnQuery & { limit: number }, idsJson: string): 
     where.push(c.sql)
     params.push(...c.params)
   }
-  if (q.merchant !== undefined) { where.push('merchant_key = ?'); params.push(q.merchant) }
+  if (q.merchant !== undefined) { where.push(`${STORE_SQL} = ?`); params.push(q.merchant) }
   if (q.account !== undefined) { where.push('account_id = ?'); params.push(q.account) }
   if (q.review) where.push('needs_review = 1')
   if (q.cursor) {
@@ -405,7 +414,7 @@ export async function runSummary(db: D1Database, q: SummaryQuery): Promise<Summa
       return { key, label: key === UNCATEGORIZED ? 'Uncategorized' : (labelOf.get(key) ?? key), netCents: Number(r.net), count: Number(r.n) }
     })
   } else if (plan.shape === 'merchant') {
-    slices = main.results.map((r) => ({ key: str(r.key), label: str(r.label) || str(r.key), netCents: Number(r.net), count: Number(r.n) }))
+    slices = main.results.map((r) => ({ key: str(r.key), label: str(r.key), netCents: Number(r.net), count: Number(r.n) }))
   } else if (plan.shape === 'account') {
     slices = main.results.map((r) => ({ key: str(r.key), label: labelOf.get(str(r.key)) ?? str(r.key), netCents: Number(r.net), count: Number(r.n) }))
   } else {

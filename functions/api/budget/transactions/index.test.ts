@@ -55,7 +55,7 @@ describe('GET /api/budget/transactions', () => {
     const ids = async (q: Record<string, string>) => (await json<TxnPage>(await get({ ...RANGE, limit: '200', ...q }))).rows
     expect((await ids({ category: 'fuel' })).length).toBe(2)
     expect((await ids({ category: '__none__' })).every((r) => r.categoryId === null)).toBe(true)
-    expect((await ids({ category: 'groceries', merchant: 'chain-x' })).length).toBe(3)
+    expect((await ids({ category: 'groceries', merchant: 'Chain X' })).length).toBe(2)
     expect((await ids({ category: 'dining', account: 'card-a' })).map((r) => r.amountCents)).toEqual([-7800])
     expect((await ids({ review: '1' })).length).toBe(6)
     expect((await ids({ review: '1', category: 'groceries' })).length).toBe(2)

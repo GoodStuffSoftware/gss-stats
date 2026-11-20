@@ -129,8 +129,8 @@ const SUMMARY_SHAPES: Array<[string, SummaryQuery]> = [
   ['merchant level', { ...RANGE, person: 'pa', category: 'fuel' }],
   ['merchant level, uncategorized', { ...RANGE, person: 'all', category: '__none__' }],
   ['account level', { ...RANGE, person: 'all', category: 'fuel', groupBy: 'account' }],
-  ['purchase level by merchant', { ...RANGE, person: 'all', category: 'fuel', merchant: 'chain-x' }],
-  ['purchase level by merchant, uncategorized', { ...RANGE, person: 'all', category: '__none__', merchant: 'paypal' }],
+  ['purchase level by merchant', { ...RANGE, person: 'all', category: 'fuel', merchant: 'Chain X' }],
+  ['purchase level by merchant, uncategorized', { ...RANGE, person: 'all', category: '__none__', merchant: 'Paypal' }],
   ['purchase level by account', { ...RANGE, person: 'all', category: 'dining', groupBy: 'account', account: 'chk-a' }],
 ]
 const TXN_BASE: TxnQuery & { limit: number } = { ...RANGE, person: 'all', scope: 'spending', limit: 100 }
@@ -140,14 +140,14 @@ const TXN_SHAPES: Array<[string, TxnQuery & { limit: number }]> = [
   ['scope all', { ...TXN_BASE, scope: 'all' }],
   ['category', { ...TXN_BASE, category: 'fuel' }],
   ['uncategorized', { ...TXN_BASE, category: '__none__' }],
-  ['category + merchant', { ...TXN_BASE, category: 'fuel', merchant: 'chain-x' }],
+  ['category + merchant', { ...TXN_BASE, category: 'fuel', merchant: 'Chain X' }],
   ['category + account', { ...TXN_BASE, category: 'dining', account: 'chk-a' }],
-  ['merchant only', { ...TXN_BASE, merchant: 'chain-x' }],
+  ['merchant only', { ...TXN_BASE, merchant: 'Chain X' }],
   ['review', { ...TXN_BASE, review: true }],
   ['review, scope all', { ...TXN_BASE, scope: 'all', review: true }],
   ['category + review', { ...TXN_BASE, category: 'groceries', review: true }],
   ['cursor', { ...TXN_BASE, cursor: CURSOR }],
-  ['cursor + category + merchant', { ...TXN_BASE, category: 'fuel', merchant: 'chain-x', cursor: CURSOR }],
+  ['cursor + category + merchant', { ...TXN_BASE, category: 'fuel', merchant: 'Chain X', cursor: CURSOR }],
 ]
 
 function assertIndexed(plan: string[]): void {
@@ -248,7 +248,7 @@ describe('summary runner', () => {
   it('account level names accounts; purchases are sorted by size and labelled by date and merchant', async () => {
     const acc = await runSummary(db.d1, { ...RANGE, person: 'all', category: 'dining', groupBy: 'account' })
     expect(acc.slices.map((s) => [s.key, s.label, s.netCents])).toEqual([['card-a', 'Card A', 7800], ['chk-a', 'Checking A', 900]])
-    const purchases = await runSummary(db.d1, { ...RANGE, person: 'all', category: 'dining', merchant: 'quillfeather-cafe' })
+    const purchases = await runSummary(db.d1, { ...RANGE, person: 'all', category: 'dining', merchant: 'Quillfeather Cafe' })
     expect(purchases.slices.map((s) => s.netCents)).toEqual([7800, 450, 450])
     expect(purchases.slices[0].label).toBe('2026-11-20 Quillfeather Cafe')
   })
@@ -328,7 +328,7 @@ describe('transactions runner: keyset paging', () => {
     expect((await ids({ review: true })).every((r) => r.needsReview)).toBe(true)
     expect((await ids({ category: 'fuel' })).map((r) => r.amountCents).sort((a, b) => a - b)).toEqual([-9000, -6200])
     expect((await ids({ category: '__none__' })).every((r) => r.categoryId === null)).toBe(true)
-    expect((await ids({ merchant: 'chain-x' })).length).toBe(5)
+    expect((await ids({ merchant: 'Chain X' })).length).toBe(3)
     expect((await ids({ account: 'card-a' })).every((r) => r.accountId === 'card-a')).toBe(true)
     addPersonB(db)
     expect(await ids({ person: 'pb' })).toEqual([])

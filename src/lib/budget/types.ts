@@ -58,6 +58,7 @@ export interface AccessResponse { ok: true; email: string }
 export interface MetaResponse { people: Person[]; accounts: Account[]; categories: Category[]
   range: { min: IsoDate | null; max: IsoDate | null } }
 export interface SummaryQuery { from: IsoDate; to: IsoDate; person: PersonFilter; category?: string
+  /** A store's display name (the store-level slice key), not a merchant key: several keys can share one name. */
   merchant?: string; groupBy?: 'merchant' | 'account'
   /** Account id; second drill level when the pie is grouped by account. */
   account?: string }

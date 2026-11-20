@@ -2,8 +2,9 @@
 //
 // GET /api/budget/summary: the spending pie, one level per call (docs/adr/0007-budget-section.md).
 // `from`, `to` (<= 400 days apart), `person`, then by which params are present: none -> categories;
-// `category` -> merchants (or accounts with `groupBy=account`); `category` + `merchant` or `account` ->
-// the purchases. Spending = kinds spend, refund, fee (refunds net against spend). `reviewCount` is the rows
+// `category` -> stores (or accounts with `groupBy=account`); `category` + `merchant` or `account` ->
+// the purchases. A store is one display name (several merchant keys can share it), so `merchant` is that
+// name, the slice `key` of the store level (the same filter the transactions list takes). Spending = kinds spend, refund, fee (refunds net against spend). `reviewCount` is the rows
 // flagged for review (any kind) in the range, person filter and drill: exactly what `review=1` lists.
 
 import { budgetJson } from '../../_lib/budgetAccess'
