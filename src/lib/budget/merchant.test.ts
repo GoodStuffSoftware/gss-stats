@@ -56,8 +56,13 @@ describe('merchantKey: payees, digits in names, "NAME *"', () => {
     expect(mk('QUILLFEATHER4U CAFE').key).toBe('quillfeather4u-cafe')
     expect(mk('BRAMBLEWOOD MARKET 1234').key).toBe('bramblewood-market')
     expect(mk('SHEETZ B9FQ').key).toBe('sheetz')
-    expect(mk('SHOP•7530FUQUAY').key).toBe('unknown')
+    expect(mk('SHOP•7530SAMPLEVILLE').key).toBe('unknown')
     expect(mk('EXAMPLECLOUD4029355550100').key).toBe('unknown')
+    // A name cut off against an area code, a random id and a city that starts with a digit are not names.
+    expect(mk('SAMPLETOWN HELPDESK877').key).toBe('sampletown')
+    expect(mk('GADGET *RKK8VW').key).toBe('gadget')
+    expect(mk('SQ *GADGET SHOP QX9ZB').key).toBe('gadget-shop')
+    expect(mk('BRAMBLEWOOD MARKET 1SPRINGFIELD').key).toBe('bramblewood-market')
   })
   it('"NAME *" with nothing after the star is the named merchant, not a hidden one', () => {
     expect(mk('ACME *')).toEqual({ key: 'acme', name: 'Acme', aggregator: false })

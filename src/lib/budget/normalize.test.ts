@@ -56,7 +56,7 @@ describe('normalizeDescription', () => {
   })
 })
 
-describe('normalizeDescription: card-swipe boilerplate, glued phones, bare store marker', () => {
+describe('normalizeDescription: card-swipe boilerplate and a bare store marker', () => {
   it('strips the point-of-sale prefix, terminal code and a 12-hour time, keeping the purchase date', () => {
     const a = norm('POINT OF SALE DEBIT L123 DATE 06-03 BRAMBLEWOOD MARKET #12 SPRINGFIELD')
     expect(a.clean).toBe('BRAMBLEWOOD MARKET')
@@ -73,10 +73,6 @@ describe('normalizeDescription: card-swipe boilerplate, glued phones, bare store
   it('drops a terminal code that follows another label, but not a store code elsewhere', () => {
     expect(norm('ONLINE TRANSFER CREDIT L123 TIME 09.15 AM').clean).toBe('ONLINE TRANSFER CREDIT')
     expect(norm('PLANT L123 SUPPLY').clean).toBe('PLANT L123 SUPPLY')
-  })
-  it('drops a phone number glued to the last letters of the name', () => {
-    expect(norm('PAYPAL *EXAMPLECLOUD402-555-0100').clean).toBe('PAYPAL *EXAMPLECLOUD')
-    expect(norm('QUILLFEATHER CAFE555-123-4567').clean).toBe('QUILLFEATHER CAFE')
   })
   it('a "#" with no number starts the location, so the name is the same with and without it', () => {
     const a = norm('DEPOT-Y # SPRINGFIELD NC')

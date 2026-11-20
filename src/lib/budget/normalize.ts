@@ -81,7 +81,6 @@ export function normalizeDescription(raw: string): NormalizedDesc {
 
   // Phone and domain tails, then any other long digit run (ids).
   s = s.replace(/\(\d{3}\)\s?\d{3}-\d{4}/g, ' ')
-    .replace(/(?<=[A-Z])\d{3}[-. ]\d{3}[-. ]\d{4}\b/g, ' ') // a phone number glued to the last letters of the name
     .replace(/\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/g, ' ')
     .replace(/\b\d{6,}\b/g, ' ')
   s = s.replace(/\s+/g, ' ').trim()
