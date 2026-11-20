@@ -38,7 +38,7 @@ beforeEach(() => {
   getContext = HTMLCanvasElement.prototype.getContext
   HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
     return fakeCtx(this) as unknown as CanvasRenderingContext2D
-  } as typeof getContext
+  } as unknown as typeof getContext
 })
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
@@ -50,24 +50,24 @@ describe('BaseChart animation opt-in', () => {
   it('a chart with no animation option does not animate (as before)', () => {
     const { chart } = mountChart(config())
     expect(chart).toBeTruthy()
-    expect(animator.has(chart!)).toBe(false)
+    expect(animator.has(chart as never)).toBe(false)
     expect(Chart.defaults.animation).toBe(false)
   })
 
   it('animation: false stays off', () => {
     const { chart } = mountChart(config(false))
-    expect(animator.has(chart!)).toBe(false)
+    expect(animator.has(chart as never)).toBe(false)
     expect((chart as unknown as { _animationsDisabled: boolean })._animationsDisabled).toBe(true)
     expect(Chart.defaults.animation).toBe(false)
   })
 
   it('a per-chart animation object animates, and the global default is off again afterwards', () => {
     const { chart } = mountChart(config({ duration: 450, easing: 'easeOutQuart', animateRotate: true, animateScale: true }))
-    expect(animator.has(chart!)).toBe(true)
+    expect(animator.has(chart as never)).toBe(true)
     expect(Chart.defaults.animation).toBe(false)
     // another chart built afterwards, without the option, is still off
     const other = mountChart(config())
-    expect(animator.has(other.chart!)).toBe(false)
+    expect(animator.has(other.chart as never)).toBe(false)
   })
 
   it('the global default is off again even when the constructor throws', () => {

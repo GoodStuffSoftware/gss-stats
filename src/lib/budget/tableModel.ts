@@ -4,6 +4,7 @@
 import { reactive, ref } from 'vue'
 import type { EditableColumn, RowStatus, SelectOption } from '../../components/table/EditableTable.vue'
 import { BudgetApiError } from './clientEdit'
+import { categoryColor, NONE_COLOR } from './colors'
 import {
   SPENDING_KINDS, UNCATEGORIZED,
   type Account, type BudgetEditedEvent, type Category, type RuleFromEdit, type RuleResponse, type Txn, type TxnKind,
@@ -77,18 +78,11 @@ export function parseSelection(value: string): { categoryId?: string | null; kin
   return { categoryId: value === UNCATEGORIZED_VALUE ? null : value }
 }
 
-// The colour dot of a category: its own colour, else a slot of the site's seven-colour badge palette by position.
-export function categoryColor(categories: Category[], id: string | null): string {
-  if (!id) return 'rgb(var(--ink-3))'
-  const sorted = [...categories].sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label))
-  const i = sorted.findIndex((c) => c.id === id)
-  const own = i >= 0 ? sorted[i].color : null
-  return own ?? `rgb(var(--g${(i < 0 ? 0 : i) % 7}))`
-}
+// The colour dot of a category is the SAME colour as its pie slice: lib/budget/colors.ts is the one place.
 
 /** Row colour for the dot: category colour while it counts as spending, grey otherwise. */
 export function rowDotColor(categories: Category[], t: Txn): string {
-  return SPENDING_KINDS.includes(t.kind) ? categoryColor(categories, t.categoryId) : 'rgb(var(--ink-3))'
+  return SPENDING_KINDS.includes(t.kind) ? categoryColor(categories, t.categoryId) : NONE_COLOR
 }
 
 export function categoryLabel(categories: Category[], t: Txn): string {

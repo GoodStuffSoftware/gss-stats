@@ -86,7 +86,7 @@ export function fetchMeta(): Promise<MetaResponse> {
 
 export function fetchSummary(q: SummaryQuery): Promise<SummaryResponse> {
   return request<SummaryResponse>(
-    `/api/budget/summary${qs({ from: q.from, to: q.to, person: q.person, category: q.category, merchant: q.merchant, groupBy: q.groupBy })}`,
+    `/api/budget/summary${qs({ from: q.from, to: q.to, person: q.person, category: q.category, merchant: q.merchant, account: q.account, groupBy: q.groupBy })}`,
   )
 }
 

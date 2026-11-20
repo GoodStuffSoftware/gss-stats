@@ -26,6 +26,7 @@ const SUMMARY: SummaryResponse = {
   totalCents: 17000,
   reviewCount: 2,
 }
+const EMPTY_PAGE = { rows: [], nextCursor: null }
 const DEBTS: DebtSlice[] = [
   { accountId: 'acct-1', label: 'Card A', kind: 'card', last4: '0001', personId: 'p1', balanceCents: 90000, asOf: '2026-10-31', source: 'statement', aprBp: 1999, creditLimitCents: 500000 },
 ]
@@ -35,6 +36,7 @@ interface Routes {
   meta?: () => Response
   summary?: (u: URL) => Response
   debts?: (u: URL) => Response
+  transactions?: (u: URL) => Response
 }
 let fetchMock: ReturnType<typeof vi.fn>
 function route(r: Routes = {}) {
@@ -45,6 +47,7 @@ function route(r: Routes = {}) {
       case '/api/budget/meta': return r.meta ? r.meta() : json(META)
       case '/api/budget/summary': return r.summary ? r.summary(u) : json(SUMMARY)
       case '/api/budget/debts': return r.debts ? r.debts(u) : json({ debts: DEBTS })
+      case '/api/budget/transactions': return r.transactions ? r.transactions(u) : json(EMPTY_PAGE)
       default: throw new Error(`unmocked ${input}`)
     }
   })
@@ -81,9 +84,12 @@ describe('BudgetSection: access first', () => {
   it('never fetches data before the probe has answered', async () => {
     let release!: (r: Response) => void
     route({ access: () => { throw new Error('replaced') } })
+    // Every other route answers with its own shape (the real table reads `rows` from /transactions).
     fetchMock.mockImplementation((input: string) => {
       if (input === '/api/budget/access') return new Promise<Response>((res) => (release = res))
-      return Promise.resolve(json(input.startsWith('/api/budget/meta') ? META : input.startsWith('/api/budget/debts') ? { debts: DEBTS } : SUMMARY))
+      const path = new URL(input, 'http://x').pathname
+      const body = path === '/api/budget/meta' ? META : path === '/api/budget/debts' ? { debts: DEBTS } : path === '/api/budget/transactions' ? EMPTY_PAGE : SUMMARY
+      return Promise.resolve(json(body))
     })
     vi.stubGlobal('fetch', fetchMock)
     const w = mount(BudgetSection, { props: { dark: false, today: TODAY }, attachTo: document.body })
@@ -168,6 +174,67 @@ describe('BudgetSection: data', () => {
     await flushPromises()
     expect(new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams.has('category')).toBe(false)
     expect(new URLSearchParams(location.search).has('b_path')).toBe(false)
+  })
+
+  it('drilling to purchases and back: the pie and the table always ask for the same slice', async () => {
+    route()
+    const w = await mountSection()
+    const lastSummary = () => new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams
+    const spending = () => w.findComponent(SpendingPanel)
+    const sameSlice = () => {
+      const s = lastSummary()
+      const t = w.findComponent(BudgetTable).props("query") as unknown as Record<string, unknown>
+      for (const k of ['category', 'merchant', 'account']) expect(t[k] ?? null).toBe(s.get(k))
+      expect([t.from, t.to, t.person]).toEqual([s.get('from'), s.get('to'), s.get('person')])
+    }
+    sameSlice()
+    spending().vm.$emit('drill', { level: 'category', key: 'groceries', label: 'Groceries' })
+    await flushPromises()
+    sameSlice()
+    spending().vm.$emit('drill', { level: 'merchant', key: 'chain-x', label: 'Chain X' })
+    await flushPromises()
+    expect(lastSummary().get('merchant')).toBe('chain-x')
+    sameSlice()
+    spending().vm.$emit('select-purchase', 'txn-1')
+    await flushPromises()
+    expect(w.findComponent(BudgetTable).props('highlightId')).toBe('txn-1')
+    // one step back: the highlight clears, the slice widens to the category
+    spending().vm.$emit('crumb', 1)
+    await flushPromises()
+    expect(w.findComponent(BudgetTable).props('highlightId')).toBeNull()
+    expect(lastSummary().has('merchant')).toBe(false)
+    sameSlice()
+    spending().vm.$emit('crumb', 0)
+    await flushPromises()
+    expect(lastSummary().has('category')).toBe(false)
+    sameSlice()
+  })
+
+  it('by account: the account id goes to the summary and the table, and survives the URL round trip', async () => {
+    route()
+    const w = await mountSection()
+    const spending = () => w.findComponent(SpendingPanel)
+    spending().vm.$emit('drill', { level: 'category', key: 'groceries', label: 'Groceries' })
+    await flushPromises()
+    spending().vm.$emit('group-by', 'account')
+    await flushPromises()
+    expect(new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams.get('groupBy')).toBe('account')
+    spending().vm.$emit('drill', { level: 'merchant', key: 'acct-1', label: 'Card A' })
+    await flushPromises()
+    const q = new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams
+    expect(q.get('account')).toBe('acct-1')
+    expect(q.has('merchant')).toBe(false)
+    expect(w.findComponent(BudgetTable).props('query')).toMatchObject({ category: 'groceries', account: 'acct-1' })
+    expect(w.findComponent(BudgetTable).props('query')).not.toHaveProperty('merchant', expect.anything())
+    // the table's own requests carry it too
+    const tx = callsTo('/api/budget/transactions').map((c) => new URL(c[0], 'http://x').searchParams)
+    expect(tx.at(-1)!.get('account')).toBe('acct-1')
+    // reload from the address bar: same slice on both sides
+    const url = location.pathname + location.search
+    const again = await mountSection(url)
+    const q2 = new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams
+    expect([q2.get('category'), q2.get('account'), q2.get('groupBy')]).toEqual(['groceries', 'acct-1', 'account'])
+    expect(again.findComponent(BudgetTable).props('query')).toMatchObject({ category: 'groceries', account: 'acct-1' })
   })
 
   it('review-only goes to the table query without refetching the summary', async () => {
