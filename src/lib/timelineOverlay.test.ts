@@ -1,7 +1,7 @@
 // The date-axis overlay (lib/timelineOverlay.ts) and the series line chart (lib/charts.ts
 // buildSeriesLineConfig) that together replace the Overview's bespoke timeline panel.
-import { describe, expect, it } from 'vitest'
-import { flightItems, goLiveItems, itemsInRange, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
+import { describe, expect, it, vi } from 'vitest'
+import { flightItems, goLiveItems, itemsInRange, layoutBandLabels, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
 import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, seriesDayModel, truncatedFrom, seriesRows, timelineOverlayPlugin, BAND_ROW_PX } from './charts'
 import { compareReadoutText, compareTarget, compareTargets, compareWindows } from './beforeAfter'
 import { featureStepSeriesOf } from './featureHealth'
@@ -225,6 +225,172 @@ describe('band labels', () => {
     expect(ys[0]).toBeGreaterThan(40)
     const q = draw([flight('2026-10-20', '2026-11-03', 'early'), flight('2026-11-05', '2026-11-12', 'late')])
     expect(new Set(q.map((t) => t.y)).size).toBe(1)
+  })
+  it('a name wider than its one-day band prints in full, and the next band whose name would touch it moves to another row', () => {
+    // Bands 11-03 (x 65..95) and 11-05 (x 125..155) never overlap in time, so both start on row 0; the first name runs ~100 px.
+    const p = draw([flight('2026-11-03', '2026-11-03', 'Flight 3 — long name'), flight('2026-11-05', '2026-11-05', 'Flight 5 — Microsoft')])
+    const a = p.find((t) => t.text === 'Flight 3 — long name')!
+    const b = p.find((t) => t.text === 'Flight 5 — Microsoft')!
+    expect(a).toBeTruthy() // in full, not cut to the band
+    expect(b).toBeTruthy()
+    expect(a.y).not.toBe(b.y)
+  })
+  it('names that fit their bands keep today\'s rows: non-overlapping bands share row 0', () => {
+    const p = draw([flight('2026-11-01', '2026-11-05', 'early'), flight('2026-11-07', '2026-11-12', 'late')])
+    expect(new Set(p.map((t) => t.y)).size).toBe(1)
+  })
+})
+
+describe('marker label padding after a layout', () => {
+  // A fake phone-width chart: x = 20 + 30 * index, three markers whose labels (100 px each) all collide.
+  const dates = days('2026-10-26', 5)
+  const item = (date: string, label: string): OverlayItem => ({ kind: 'go-live', date, label, note: '' })
+  const setup = (items: OverlayItem[], narrow = true) => {
+    const plugin: any = timelineOverlayPlugin(dates, items, narrow)
+    const ctx: any = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * 5 }) : () => {}), set: () => true })
+    const chart: any = { ctx, width: 300, height: 240, chartArea: { left: 10, right: 290, top: 24, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, options: { layout: { padding: { top: 24 } } }, update: vi.fn() }
+    return { plugin, chart }
+  }
+  const crowd = [item('2026-10-26', 'a'.repeat(20)), item('2026-10-27', 'b'.repeat(20)), item('2026-10-28', 'c'.repeat(20))]
+
+  it('labels that need more rows than the base ask for one more layout, with the top padding grown by the extra rows', async () => {
+    const { plugin, chart } = setup(crowd)
+    plugin.beforeLayout(chart)
+    expect(chart.options.layout.padding.top).toBe(24) // nothing decided yet: the config's padding stands
+    plugin.afterLayout(chart)
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+    plugin.beforeLayout(chart) // the re-layout
+    expect(chart.options.layout.padding.top).toBe(34) // three rows at phone width: 24 + one 10 px row
+    plugin.afterLayout(chart) // same need, same chart size: settled
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+  })
+  it('a chart whose labels fit the base rows never re-lays out and keeps the configured padding', async () => {
+    const { plugin, chart } = setup([item('2026-10-26', 'aaaaaaaaaa'), item('2026-10-29', 'bbbbbbbbbb')])
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart)
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+    expect(chart.options.layout.padding.top).toBe(24)
+  })
+  it('the same crowd at desktop width fits the three base rows: no extra padding', async () => {
+    const { plugin, chart } = setup(crowd, false)
+    plugin.afterLayout(chart)
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+  })
+  it('every label is drawn, the first row one extra row higher, and its hit column reaches that high', () => {
+    const { plugin, chart } = setup(crowd)
+    plugin.afterLayout(chart)
+    plugin.beforeLayout(chart)
+    const printed: { text: string; y: number }[] = []
+    chart.ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * 5 }) : k === 'fillText' ? (text: string, _x: number, y: number) => printed.push({ text, y }) : () => {}), set: () => true })
+    plugin.beforeDatasetsDraw(chart)
+    plugin.afterDatasetsDraw(chart)
+    expect(printed.map((p) => p.text)).toEqual(['a'.repeat(20), 'b'.repeat(20), 'c'.repeat(20)])
+    expect(printed.map((p) => p.y)).toEqual([24 - 22 - 10, 24 - 22, 24 - 22 + 10]) // top = chartArea.top - offset - extra
+  })
+})
+
+describe('marker label rows that outgrow the padding at draw time', () => {
+  const dates = days('2026-10-26', 5)
+  const item = (date: string, label: string): OverlayItem => ({ kind: 'go-live', date, label, note: '' })
+  // Label width = chars * px.value, so a later draw can measure wider than the layout did (a web font arriving).
+  const setup = (items: OverlayItem[], px: { value: number }) => {
+    const plugin: any = timelineOverlayPlugin(dates, items, true)
+    const mkCtx = () => new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (t: string) => ({ width: t.length * px.value }) : () => {}), set: () => true })
+    const chart: any = { ctx: mkCtx(), width: 300, height: 240, chartArea: { left: 10, right: 290, top: 24, bottom: 200 }, scales: { x: { getPixelForValue: (i: number) => 20 + 30 * i } }, options: { layout: { padding: { top: 24 } } }, update: vi.fn() }
+    return { plugin, chart }
+  }
+  const crowd = [item('2026-10-26', 'a'.repeat(20)), item('2026-10-27', 'b'.repeat(20)), item('2026-10-28', 'c'.repeat(20))]
+  const draw = (plugin: any, chart: any) => {
+    plugin.beforeDatasetsDraw(chart)
+    plugin.afterDatasetsDraw(chart)
+  }
+
+  it('a draw that needs more rows than the layout gave queues exactly one update, then converges', async () => {
+    const px = { value: 1 } // laid out with narrow text: everything fits one row
+    const { plugin, chart } = setup(crowd, px)
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart)
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+    px.value = 5 // the font arrives: three rows at phone width
+    draw(plugin, chart)
+    draw(plugin, chart) // a second draw before the update runs queues nothing more
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+    plugin.beforeLayout(chart) // the update's layout
+    expect(chart.options.layout.padding.top).toBe(34)
+    plugin.afterLayout(chart)
+    draw(plugin, chart)
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1)
+  })
+  it('a draw that fits the padding queues nothing', async () => {
+    const px = { value: 5 }
+    const { plugin, chart } = setup(crowd, px)
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart) // asks for its one update
+    await Promise.resolve()
+    plugin.beforeLayout(chart)
+    plugin.afterLayout(chart)
+    draw(plugin, chart)
+    draw(plugin, chart)
+    await Promise.resolve()
+    expect(chart.update).toHaveBeenCalledTimes(1) // only the layout path's own
+    const fit = setup([item('2026-10-26', 'aaaaaaaaaa'), item('2026-10-29', 'bbbbbbbbbb')], { value: 5 })
+    fit.plugin.afterLayout(fit.chart)
+    draw(fit.plugin, fit.chart)
+    await Promise.resolve()
+    expect(fit.chart.update).not.toHaveBeenCalled()
+  })
+  it('a destroyed chart queues nothing', async () => {
+    const px = { value: 1 }
+    const { plugin, chart } = setup(crowd, px)
+    plugin.afterLayout(chart)
+    px.value = 5
+    draw(plugin, chart) // queues the update ...
+    chart.ctx = null // ... and the chart is destroyed before it runs
+    await Promise.resolve()
+    expect(chart.update).not.toHaveBeenCalled()
+  })
+})
+
+describe('layoutBandLabels', () => {
+  const measure = (t: string) => t.length * 5
+  const area = { measureWidth: measure, areaLeft: 10, areaRight: 410 }
+
+  it('names that sit inside their bands keep the rows they came with', () => {
+    const out = layoutBandLabels([{ text: 'one', left: 10, row: 0 }, { text: 'two', left: 200, row: 0 }, { text: 'three', left: 100, row: 1 }], area)
+    expect(out.map((p) => p.row)).toEqual([0, 0, 1])
+    expect(out[0].x).toBe(13)
+  })
+  it('a name wider than its band is shown in full, not cut', () => {
+    const out = layoutBandLabels([{ text: 'Flight 3 — Microsoft search', left: 100, row: 0 }], area)
+    expect(out[0].text).toBe('Flight 3 — Microsoft search')
+  })
+  it('two names whose extents touch go to different rows; one clear of the gap stays', () => {
+    const out = layoutBandLabels([{ text: 'aaaaaaaaaa', left: 100, row: 0 }, { text: 'bbbbbbbbbb', left: 140, row: 0 }, { text: 'cccccccccc', left: 300, row: 0 }], area)
+    expect(out.map((p) => p.row)).toEqual([0, 1, 0])
+  })
+  it('three mutually touching names take three rows', () => {
+    const out = layoutBandLabels([{ text: 'aaaaaaaaaa', left: 100, row: 0 }, { text: 'bbbbbbbbbb', left: 110, row: 0 }, { text: 'cccccccccc', left: 120, row: 0 }], area)
+    expect(out.map((p) => p.row)).toEqual([0, 1, 2])
+  })
+  it('a bumped name starts from the row it was given, never below it', () => {
+    const out = layoutBandLabels([{ text: 'aaaaaaaaaa', left: 100, row: 1 }, { text: 'bbbbbbbbbb', left: 110, row: 1 }], area)
+    expect(out.map((p) => p.row)).toEqual([1, 2])
+  })
+  it('a name near the right edge is pulled left to stay inside the plot', () => {
+    const out = layoutBandLabels([{ text: 'Flight 5 — Microsoft search', left: 380, row: 0 }], area)
+    expect(out[0].x + out[0].width).toBeLessThanOrEqual(408)
+  })
+  it('a name wider than the plot itself is cut with an ellipsis to fit', () => {
+    const out = layoutBandLabels([{ text: 'x'.repeat(100), left: 10, row: 0 }], area)
+    expect(out[0].text.endsWith('…')).toBe(true)
+    expect(out[0].width).toBeLessThanOrEqual(400 - 6)
   })
 })
 

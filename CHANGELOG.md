@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.79.2] — 2026-11-20
+
+### Fixed
+- **Chart labels stack instead of vanishing on a phone.** Change, release and go-live labels that crowd each other now take extra rows above the chart (it grows only as much as needed), and flight band names show in full and move to another row when they would touch.
+
 ## [0.79.1] — 2026-11-14
 
 ### Fixed
