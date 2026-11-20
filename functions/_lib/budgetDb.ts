@@ -486,6 +486,18 @@ export async function loadActiveRules(db: D1Database, merchantKeys: string[] | n
   return (await stmt.all<Row>()).results.map(mapRule)
 }
 
+const APPLY_COLUMNS = 'id, account_id, merchant_key, store_no, amount_cents, kind, kind_source, category_id, category_source, rule_id, debt_account_id, confidence, needs_review, review_reason, updated_at'
+
+/**
+ * The rows a rule re-apply reads: a merchant's whole history, on purpose. A rule says what a merchant IS,
+ * so it must reach every past row of that merchant, and a date window would silently skip some (ADR 0007,
+ * Consequences). The read is key-limited and index-backed: idx_txn_merchant (merchant_key, posted_date), at
+ * most MAX_MERCHANT_KEYS keys per statement, manual rows excluded. Only "apply all" (no keys) reaches
+ * every merchant that has an active rule, and that is an explicit action.
+ */
+export const APPLY_CANDIDATES_SQL =
+  `SELECT ${APPLY_COLUMNS} FROM transactions WHERE merchant_key IN (SELECT value FROM json_each(?)) AND category_source <> 'manual' AND kind_source <> 'manual'`
+
 /**
  * Re-applies the active rules to stored rows in the precedence manual > rule > auto
  * (src/lib/budget/rules.ts `categorize`): a row whose category_source OR kind_source is 'manual' is never
@@ -499,13 +511,10 @@ export async function applyRules(db: D1Database, merchantKeys: string[] | null, 
   const rules = await loadActiveRules(db, merchantKeys)
   if (rules.length === 0) return 0
   const keys = merchantKeys ?? [...new Set(rules.map((r) => r.merchantKey))]
-  const cols = 'id, account_id, merchant_key, store_no, amount_cents, kind, kind_source, category_id, category_source, rule_id, debt_account_id, confidence, needs_review, review_reason, updated_at'
   const rows: ApplyRow[] = []
   // Candidate rows come in slices of merchant keys so one json_each parameter stays small.
   for (let i = 0; i < keys.length; i += MAX_MERCHANT_KEYS) {
-    const { results } = await db.prepare(
-      `SELECT ${cols} FROM transactions WHERE merchant_key IN (SELECT value FROM json_each(?)) AND category_source <> 'manual' AND kind_source <> 'manual'`,
-    ).bind(JSON.stringify(keys.slice(i, i + MAX_MERCHANT_KEYS))).all<ApplyRow>()
+    const { results } = await db.prepare(APPLY_CANDIDATES_SQL).bind(JSON.stringify(keys.slice(i, i + MAX_MERCHANT_KEYS))).all<ApplyRow>()
     rows.push(...results)
   }
 
@@ -624,13 +633,21 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
   })
 }
 
+/**
+ * The debt detail's payment list, newest 60. Each reads only the newest 60 index entries: idx_txn_debt
+ * (debt_account_id, posted_date, id) and the partial idx_txn_pay (account_id, posted_date, id) walk in the
+ * order asked for, so there is no sort and no read of the account's older rows. The test asserts the plan.
+ */
+export const DEBT_PAYMENTS_SQL = {
+  external: `SELECT id, posted_date, amount_cents, principal_cents, interest_cents FROM transactions WHERE debt_account_id = ? ORDER BY posted_date DESC, id DESC LIMIT 60`,
+  account: `SELECT id, posted_date, amount_cents, principal_cents, interest_cents FROM transactions WHERE account_id = ? AND kind IN ('card_payment','loan_payment') ORDER BY posted_date DESC, id DESC LIMIT 60`,
+} as const
+
 export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDetail | null> {
   const acct = await db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE id = ? AND is_debt = 1`).bind(id).first<Row>()
   if (!acct) return null
   const account = mapAccount(acct)
-  const paymentSql = account.kind === 'external_debt'
-    ? `SELECT id, posted_date, amount_cents, principal_cents, interest_cents FROM transactions WHERE debt_account_id = ? ORDER BY posted_date DESC, id DESC LIMIT 60`
-    : `SELECT id, posted_date, amount_cents, principal_cents, interest_cents FROM transactions WHERE account_id = ? AND kind IN ('card_payment','loan_payment') ORDER BY posted_date DESC, id DESC LIMIT 60`
+  const paymentSql = account.kind === 'external_debt' ? DEBT_PAYMENTS_SQL.external : DEBT_PAYMENTS_SQL.account
   const [statements, manual, payments] = await db.batch<Row>([
     db.prepare(
       `SELECT period_end, closing_balance_cents, apr_bp, interest_cents, principal_paid_cents, advances_cents FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 24`,

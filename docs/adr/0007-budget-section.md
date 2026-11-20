@@ -86,8 +86,14 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
   needs a pass over the review list.
 - A statement re-sent in another format gives different dedupe keys; it is flagged
   (`possible_duplicate`) rather than prevented.
-- The database is real money data on Cloudflare's free-tier-sized store: reads are index range scans
-  bounded by the date range, never a full-table scan, and a test asserts the plan for every query
-  shape.
-- Production is unchanged until a production go: no list, so the section answers 403 everywhere,
-  and the database exists but holds nothing there.
+- The database is real money data on Cloudflare's free-tier-sized store: the summary and list reads
+  are index range scans bounded by the date range (400 days at most), and a test asserts the plan for
+  every query shape. Two reads are bounded differently, on purpose. A rule re-apply reads a merchant's
+  whole history, because a rule says what the merchant is and a date window would skip rows; it is
+  key-limited and index-backed (`idx_txn_merchant`), and only "apply all" reaches every merchant with
+  an active rule. The debt detail reads each debt's newest 60 payments by an index walk in order
+  (`idx_txn_debt`, `idx_txn_pay`: no sort, no scan of the account's older rows).
+- Preview and Production bind the same database (one `database_id`, the same pattern as the ads
+  database); only each environment's `BUDGET_ALLOWED_EMAILS` decides who can open it. Data loaded for
+  Preview is therefore in Production's database too. Production's list stays unset until a production
+  go, so the section answers 403 there; setting it opens the data at once.

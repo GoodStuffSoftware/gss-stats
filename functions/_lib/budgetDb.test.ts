@@ -3,7 +3,7 @@
 // uses an index), the rule engine's write path, and the route wrapper.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  BudgetHttpError, CHUNK_BYTES, RANGE_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
+  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, RANGE_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
   encodeCursor, getTxn, isIsoDate, loadDebts, mapAccount, mapRule, mapTxn, nextStamp, parseManualBalance, parseRange, parseSummaryQuery,
   parseTxnQuery, readJsonObject, runSummary, runTxnList,
 } from './budgetDb'
@@ -169,10 +169,20 @@ describe('every query shape is index-backed (EXPLAIN QUERY PLAN)', () => {
   })
   it('meta and detail reads are index-backed too', () => {
     assertIndexed(db.explain(RANGE_SQL))
-    assertIndexed(db.explain("SELECT id FROM transactions WHERE debt_account_id = ? ORDER BY posted_date DESC, id DESC LIMIT 60", ['mtg']))
-    assertIndexed(db.explain("SELECT id FROM transactions WHERE account_id = ? AND kind IN ('card_payment','loan_payment') ORDER BY posted_date DESC, id DESC LIMIT 60", ['card-a']))
-    assertIndexed(db.explain('SELECT id FROM transactions WHERE merchant_key IN (SELECT value FROM json_each(?))', ['["chain-x"]']))
-    assertIndexed(db.explain('SELECT id FROM transactions WHERE merchant_key IN (SELECT merchant_key FROM merchant_rules WHERE active = 1)'))
+    assertIndexed(db.explain(APPLY_CANDIDATES_SQL, ['["chain-x"]'])) // the statement applyRules runs, per slice of keys
+  })
+  it('the debt payment lists read the newest rows only: an index walk in order, no sort, no scan of the account', () => {
+    for (const [sql, id, index] of [[DEBT_PAYMENTS_SQL.external, 'mtg', 'idx_txn_debt'], [DEBT_PAYMENTS_SQL.account, 'card-a', 'idx_txn_pay']] as const) {
+      const plan = db.explain(sql, [id])
+      assertIndexed(plan)
+      expect(plan.join('\n'), plan.join('\n')).toContain(index)
+      expect(plan.join('\n'), plan.join('\n')).not.toMatch(/TEMP B-TREE/)
+    }
+  })
+  it('a rule re-apply reads only the keyed merchants rows, through idx_txn_merchant', () => {
+    const plan = db.explain(APPLY_CANDIDATES_SQL, ['["chain-x"]']).join('\n')
+    expect(plan).toContain('idx_txn_merchant')
+    expect(plan).not.toMatch(/SCAN transactions/)
   })
   it('binds every value: a hostile merchant or category never reaches the SQL text', () => {
     const evil = "x'; DROP TABLE transactions; --"

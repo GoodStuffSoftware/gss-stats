@@ -113,9 +113,10 @@ CREATE INDEX idx_txn_date     ON transactions (posted_date, id);                
 CREATE INDEX idx_txn_kind     ON transactions (kind, posted_date);               -- pie level 0, pairing candidates
 CREATE INDEX idx_txn_cat      ON transactions (category_id, posted_date);        -- pie level 1, table category filter
 CREATE INDEX idx_txn_merchant ON transactions (merchant_key, posted_date);       -- pie level 2, rule re-apply
-CREATE INDEX idx_txn_account  ON transactions (account_id, posted_date);         -- debt payments, duplicate check
+CREATE INDEX idx_txn_account  ON transactions (account_id, posted_date);         -- duplicate check, account filter
 CREATE INDEX idx_txn_review   ON transactions (posted_date) WHERE needs_review = 1;
-CREATE INDEX idx_txn_debt     ON transactions (debt_account_id, posted_date) WHERE debt_account_id IS NOT NULL;
+CREATE INDEX idx_txn_debt     ON transactions (debt_account_id, posted_date, id) WHERE debt_account_id IS NOT NULL;  -- debt detail payments, newest first, no sort
+CREATE INDEX idx_txn_pay      ON transactions (account_id, posted_date, id) WHERE kind IN ('card_payment','loan_payment');  -- debt detail payments, newest first, no sort
 CREATE INDEX idx_txn_import   ON transactions (import_id);
 -- category_edits: who changed what (undo, trust between two editors).
 CREATE TABLE category_edits (
