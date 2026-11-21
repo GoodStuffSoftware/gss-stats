@@ -13,6 +13,7 @@
 // Props: `dark` (site theme), `today` (YYYY-MM-DD, tests only).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
+import { readHiddenPanels, togglePanel, writeHiddenPanels, type PanelId } from '../../lib/budget/panelVisibility'
 import type { DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import BudgetFilters from './BudgetFilters.vue'
@@ -29,6 +30,17 @@ const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, p
 // ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
 const access = ref<'checking' | 'ok' | 'denied' | 'expired' | 'error'>('checking')
 const canEdit = computed(() => access.value === 'ok')
+const accountEmail = ref('') // from the access probe: the key of this viewer's saved view choices (hashed there)
+
+// ── Hidden charts (desktop) ───────────────────────────────────────────────────────────────────────────────
+// Which of the two charts this viewer hid, remembered per account in localStorage (lib/budget/panelVisibility.ts).
+// Read once the account is known; at most one chart can be hidden. Below 1024 px the tabs pick the panel and
+// this is ignored.
+const hiddenPanels = ref<PanelId[]>([])
+function onTogglePanel(id: PanelId) {
+  hiddenPanels.value = togglePanel(hiddenPanels.value, id)
+  writeHiddenPanels(accountEmail.value, hiddenPanels.value)
+}
 
 // ── Meta ──────────────────────────────────────────────────────────────────────────────────────────────────
 const meta = ref<MetaResponse | null>(null)
@@ -49,8 +61,13 @@ async function loadMeta() {
 }
 async function init() {
   access.value = 'checking'
-  access.value = (await probeAccess()).state
-  if (access.value === 'ok') await loadMeta()
+  const probed = await probeAccess()
+  access.value = probed.state
+  if (probed.state === 'ok') {
+    accountEmail.value = probed.email
+    hiddenPanels.value = readHiddenPanels(probed.email)
+    await loadMeta()
+  }
 }
 function retryAccess() {
   resetAccessProbe() // user-initiated: the only retry there is
@@ -141,6 +158,12 @@ watch(
   },
   { immediate: true },
 )
+// A pane that holds its chart panel joins the shared grid rows (so the two donuts and lists line up); a pane that
+// shows a note, a skeleton or a debt's detail does not.
+const spendingPanelUp = computed(
+  () => !summaryError.value && !!summary.value && !(summary.value.level === 'category' && summary.value.slices.length === 0),
+)
+const debtPanelUp = computed(() => !selectedDebtId.value && !debtsError.value && !!debts.value && debts.value.length > 0)
 function onDebtSaved() {
   debtsRefresh.value++
 }
@@ -186,8 +209,10 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
           :person="state.person"
           :people="meta.people"
           :today="today"
+          :hidden="hiddenPanels"
           @range="(r) => setRange(r.from, r.to)"
           @person="setPerson"
+          @toggle-panel="onTogglePanel"
         />
 
         <div class="b-tabs" role="tablist" aria-label="Budget view">
@@ -211,8 +236,12 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
           >Debts</button>
         </div>
 
-        <div class="b-grid">
-          <div class="b-pane" :class="{ active: state.tab === 'spending' }" data-pane="spending">
+        <div class="b-grid" :class="{ solo: hiddenPanels.length > 0 }">
+          <div
+            class="b-pane"
+            :class="{ active: state.tab === 'spending', 'is-hidden': hiddenPanels.includes('spending'), 'has-panel': spendingPanelUp }"
+            data-pane="spending"
+          >
             <div v-if="summaryError" class="b-note" role="alert">
               <span>Couldn't load spending.</span>
               <button type="button" class="btn" data-testid="budget-retry-summary" @click="loadSummary">Retry</button>
@@ -241,7 +270,11 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             />
           </div>
 
-          <div class="b-pane" :class="{ active: state.tab === 'debts' }" data-pane="debts">
+          <div
+            class="b-pane"
+            :class="{ active: state.tab === 'debts', 'is-hidden': hiddenPanels.includes('debts'), 'has-panel': debtPanelUp }"
+            data-pane="debts"
+          >
             <DebtDetail
               v-if="selectedDebtId"
               :account-id="selectedDebtId"
@@ -343,9 +376,79 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
   .b-tabs {
     display: none;
   }
+  /* Side by side. The grid has shared rows and each panel takes them as a subgrid, so the same part of each panel
+   * sits in the same row whatever height the other has: 1 header (the spending crumbs / review / total stack, the
+   * debt total), 2 the donut, 3 the hint line, 4 the list, 5 whatever follows the list (the debts without a
+   * balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the spacing is
+   * margins on the items, so a row with nothing in it (no hint) costs nothing. */
   .b-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 16px;
+    row-gap: 0;
     align-items: start;
+  }
+  .b-pane {
+    grid-row: 1 / -1;
+  }
+  .b-pane.has-panel {
+    display: grid;
+    grid-template-rows: subgrid;
+    align-self: stretch;
+  }
+  /* A hidden chart takes its whole panel away (the table stays); the one left is centred at a readable width. */
+  .b-pane.is-hidden {
+    display: none;
+  }
+  .b-grid.solo {
+    grid-template-columns: minmax(0, 720px);
+    justify-content: center;
+  }
+
+  /* The panels' own parts, placed in those rows (the DrillPie wrapper dissolves so its donut, hint and list are
+   * placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
+  .b-pane.has-panel :deep(.spending-panel),
+  .b-pane.has-panel :deep(.debt-panel) {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: 1 / -1;
+    row-gap: 0;
+    align-items: start;
+  }
+  .b-pane.has-panel :deep(.sp-body),
+  .b-pane.has-panel :deep(.drill-pie) {
+    display: contents;
+  }
+  .b-pane.has-panel :deep(.sp-top),
+  .b-pane.has-panel :deep(.dp-total) {
+    grid-row: 1;
+    align-self: end; /* the two totals share a line at the bottom of the header row */
+  }
+  .b-pane.has-panel :deep(.dp-canvas) {
+    grid-row: 2;
+    justify-self: center;
+    align-self: start;
+    margin-top: 8px;
+  }
+  .b-pane.has-panel :deep(.dp-hint) {
+    grid-row: 3;
+    margin: 12px 0 0;
+  }
+  .b-pane.has-panel :deep(.dp-list) {
+    grid-row: 4 / 6; /* spans the row after it, so a longer list than the other panel's does not stretch row 4 */
+    margin-top: 12px;
+  }
+  .b-pane.has-panel :deep(.debt-panel .dp-list) {
+    grid-row: 4;
+  }
+  .b-pane.has-panel :deep(.sp-none),
+  .b-pane.has-panel :deep(.dp-none) {
+    grid-row: 4;
+    margin-top: 12px;
+  }
+  .b-pane.has-panel :deep(.dp-others) {
+    grid-row: 5;
+    margin-top: 12px;
   }
 }
 .b-skeleton {

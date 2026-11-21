@@ -2726,6 +2726,11 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run
   `npx wrangler d1 execute gss-budget --local --file <file.sql>`. The tool refuses an output path inside a
   git work tree. Remote migrations and loads are run by hand by the owner, never by an agent or by CI.
+- **Layout.** From 1024 px the spending and debt panels sit side by side on shared grid rows (header, donut,
+  hint, list), so the donuts and lists align whatever height each header has; below that the Spending / Debts
+  tabs show one panel. A "Show: Spending | Debts" control beside the filters hides either chart on desktop (never
+  both), remembered per signed-in account in `localStorage` (`lib/budget/panelVisibility.ts`; the key holds a
+  hash of the address, not the address).
 - **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
   are ever committed. The seed and the import requests live in a private folder outside the repo, and the
   SQL file the tool writes goes there too. Tests use only the made-up data in
