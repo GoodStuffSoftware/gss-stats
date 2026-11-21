@@ -4,8 +4,8 @@
 // Body (CategoryCreateRequest): `name`. The name is trimmed, 1-40 characters, no control characters, and not one
 // of the picker's own choices (Uncategorized, Transfer, Income, Exclude, Not spending); else 400.
 // A name that matches a visible category, ignoring case, is NOT an error: the answer is 200 with that category and
-// `created: false` (two people adding the same name at once both end up with the one category, and the caller
-// applies it the same way). A new category answers 201 with `created: true`.
+// `created: false` (the caller applies it the same way; two adds of one name at the very same moment can still make
+// two categories with the same label, which is harmless). A new category answers 201 with `created: true`.
 // The id is 'u-' + a slug of the name, made unique ('-2', '-3'...); the 'u-' prefix is reserved, so the seed tool
 // (sqlFile.ts categorySql) can never overwrite, rename or recolour it. It sorts after every existing category
 // (MAX(sort) + 10, set in the same statement), so no existing category changes position or palette colour, and it

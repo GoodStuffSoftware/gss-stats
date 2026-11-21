@@ -89,6 +89,9 @@ export interface DrillHistoryOptions<Step> {
   parseSteps: (raw: unknown) => Step[] | null
   /** Run `fn` after the other popstate listeners and the reactive flush (a macrotask in the browser). */
   later?: (fn: () => void) => void
+  /** The landing of a go() this module issued (a breadcrumb jump): the entry landed on keeps the address it had when
+   * it was pushed, so the section writes its current state onto it. */
+  landed?: () => void
   session?: string
 }
 
@@ -197,6 +200,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
             forward = []
             mark(landed.rebase)
           }
+          opts.landed?.()
           return
         }
         if (m.d === depth) return

@@ -58,7 +58,11 @@ function parseSteps(raw: unknown): Step[] | null {
 function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
   const path: Step[] = startPath.slice()
   const later: (() => void)[] = []
+  let landings = 0
   const dh = createDrillHistory<Step>({
+    landed: () => {
+      landings++
+    },
     history: h,
     drill: (s) => {
       path.push(s)
@@ -91,6 +95,7 @@ function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
       while (later.length) later.shift()!()
     },
     keys: () => path.map((s) => s.key),
+    landings: () => landings,
   }
 }
 
@@ -264,6 +269,20 @@ describe('a breadcrumb jump', () => {
     h.back() // the top: leaves the section
     expect(h.state).toBe('previous page')
     expect(s.keys()).toEqual([])
+  })
+
+  it('tells the section when the jump lands (to write its state onto the entry landed on), not on a plain Back', () => {
+    const h = new FakeHistory()
+    const s = section(h)
+    s.drill(FUEL)
+    s.drill(SHOP)
+    s.crumb(0)
+    expect(s.landings()).toBe(0) // the traversal has not landed yet
+    h.flush()
+    expect(s.landings()).toBe(1)
+    s.drill(FUEL)
+    h.back()
+    expect(s.landings()).toBe(1)
   })
 
   it('a jump up one level uses one entry', () => {

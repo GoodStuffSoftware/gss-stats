@@ -233,7 +233,7 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   let drill: DrillHistory<DrillStep> | null = null
   if (getCurrentInstance() && globalThis.history && globalThis.window) {
     const copy = () => state.path.map((x) => ({ ...x }))
-    const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy, parseSteps: parseDrillSteps })
+    const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy, parseSteps: parseDrillSteps, landed: writeUrl })
     drill = d
     // sync: the entry is pushed before writeUrl (later in the flush) stamps the new level on the address bar
     watch(() => state.path.length, () => d.pathChanged(copy()), { flush: 'sync' })
