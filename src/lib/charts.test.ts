@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PALETTE, activationMarkerIndex, arcLabelsPlugin, contrastRatio, fitArcLabel, inkOn, playActivationMarkerPlugin, pointInSlice } from './charts'
+import { PALETTE, activationMarkerIndex, arcLabelsPlugin, contrastRatio, ellipsize, fitArcLabel, inkOn, placeOutsideLabels, playActivationMarkerPlugin, pointInSlice, spreadRows } from './charts'
 import { PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
 
 // Part A: the pop-up trend chart's "tracking starts" boundary — see lib/popupEvents.ts
@@ -272,5 +272,150 @@ describe('inkOn', () => {
   it('is dark on light fills and white on dark ones', () => {
     expect(inkOn('#E9C46A')).not.toBe('#FFFFFF')
     expect(inkOn('#211C18')).toBe('#FFFFFF')
+  })
+})
+
+// Outside labels (look.outside): a ring 80..140 px around (260, 200) in a 520 x 400 chart; every character is 6 px
+// wide whatever the font. Made-up names. Angles: 0 = 3 o'clock, clockwise.
+describe('outside labels', () => {
+  const FONTS = { name: '500 11px Inter', tail: '700 11px Grotesk' }
+  const measure = (_f: string, t: string) => t.length * 6
+  const SIZE = { w: 520, h: 400 }
+  const slice = (mid: number, span: number, index = 0, name = 'Insurance', tail = '4%') => ({
+    index,
+    name,
+    tail,
+    geom: { cx: 260, cy: 200, innerRadius: 80, outerRadius: 140, startAngle: mid - span / 2, endAngle: mid + span / 2 },
+  })
+  const rectOf = (l: ReturnType<typeof placeOutsideLabels>[number]) => {
+    const w = l.nameW + 4 + l.tailW
+    const x0 = l.side === 1 ? l.x : l.x - w
+    return { x0, x1: x0 + w, y0: l.y - 6.5, y1: l.y + 6.5 }
+  }
+  // An independent check: no two boxes overlap, every box is inside the chart and clear of the ring.
+  function expectClean(labels: ReturnType<typeof placeOutsideLabels>) {
+    const rects = labels.map(rectOf)
+    rects.forEach((r, i) => {
+      expect(r.x0).toBeGreaterThanOrEqual(0)
+      expect(r.x1).toBeLessThanOrEqual(SIZE.w)
+      expect(r.y0).toBeGreaterThanOrEqual(0)
+      expect(r.y1).toBeLessThanOrEqual(SIZE.h)
+      // the point of the box nearest the ring's centre is clear of the ring
+      const nx = Math.min(Math.max(260, r.x0), r.x1)
+      const ny = Math.min(Math.max(200, r.y0), r.y1)
+      expect(Math.hypot(nx - 260, ny - 200)).toBeGreaterThanOrEqual(140)
+      rects.slice(i + 1).forEach((o) => {
+        const apart = r.x1 <= o.x0 || o.x1 <= r.x0 || r.y1 <= o.y0 || o.y1 <= r.y0
+        expect(apart).toBe(true)
+      })
+    })
+  }
+
+  it('ellipsize: whole when it fits, cut with an ellipsis, null when not even two letters fit', () => {
+    const m = (t: string) => t.length * 6
+    expect(ellipsize('Dining', 36, m)).toBe('Dining')
+    expect(ellipsize('Home & garden', 60, m)).toBe('Home & ga…')
+    expect(ellipsize('Home & garden', 17, m)).toBeNull()
+  })
+
+  it('spreadRows: rows keep their ideal place when apart, pool around the mean when colliding, and stay in bounds', () => {
+    expect(spreadRows([20, 60, 100], 15, 10, 200)).toEqual([20, 60, 100])
+    const pooled = spreadRows([50, 52, 54], 15, 10, 200)!
+    expect(pooled.map((y, i) => (i ? y - pooled[i - 1] : 15))).toEqual([15, 15, 15])
+    expect(pooled[1]).toBeCloseTo(52, 6) // centred on the mean of the ideals
+    expect(spreadRows([2, 3], 15, 10, 200)).toEqual([10, 25]) // pushed in from the top edge
+    expect(spreadRows([198, 199], 15, 10, 200)).toEqual([185, 200]) // and from the bottom
+    expect(spreadRows([1, 2, 3, 4], 15, 10, 50)).toBeNull() // 4 rows need 45 px, 40 are there
+    expect(spreadRows([], 15, 10, 50)).toEqual([])
+  })
+
+  it('a small slice on each side gets its name and share on a leader that starts on its edge', () => {
+    const labels = placeOutsideLabels([slice(-0.5, 0.1, 0, 'Insurance', '4%'), slice(Math.PI + 0.5, 0.1, 1, 'Fuel', '3%')], SIZE, FONTS, measure)
+    expect(labels.map((l) => [l.index, l.side, l.name, l.tail])).toEqual([[0, 1, 'Insurance', '4%'], [1, -1, 'Fuel', '3%']])
+    for (const l of labels) {
+      const [start] = l.line
+      expect(Math.hypot(start[0] - 260, start[1] - 200)).toBeCloseTo(141, 6) // starts at the ring's outer edge
+      expect(l.line[l.line.length - 1][1]).toBe(l.y) // ends level with its text
+    }
+    expectClean(labels)
+  })
+
+  it('many tiny slices on one side: none overlaps, and the smallest are dropped when there is no room', () => {
+    const cands = Array.from({ length: 40 }, (_, i) => slice(-0.45 + i * 0.022, 0.01 + i * 0.0001, i, `Store ${i}`, '1%'))
+    const labels = placeOutsideLabels(cands, SIZE, FONTS, measure)
+    expect(labels.length).toBeGreaterThan(5)
+    expect(labels.length).toBeLessThan(40)
+    expectClean(labels)
+    // what was dropped is the smaller part: the kept slices are on average the bigger
+    const kept = new Set(labels.map((l) => l.index))
+    const span = (i: number) => cands[i].geom.endAngle - cands[i].geom.startAngle
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
+    const dropped = cands.map((_, i) => i).filter((i) => !kept.has(i))
+    expect(mean([...kept].map(span))).toBeGreaterThan(mean(dropped.map(span)))
+  })
+
+  it('a name too long for the room is cut with an ellipsis; no room even for that drops the label', () => {
+    const narrow = { w: 470, h: 400 } // 70 px beyond the ring at 3 o'clock
+    const [l] = placeOutsideLabels([slice(0, 0.1, 0, 'Home & garden', '4%')], narrow, FONTS, measure)
+    expect(l.name.endsWith('…')).toBe(true)
+    expect(l.name.length).toBeLessThan('Home & garden'.length)
+    expect(l.x + l.nameW + 4 + l.tailW).toBeLessThanOrEqual(narrow.w)
+    expect(placeOutsideLabels([slice(0, 0.1, 0, 'Home & garden', '4%')], { w: 430, h: 400 }, FONTS, measure)).toEqual([])
+  })
+
+  it('a full pie of small slices stays clean', () => {
+    const n = 18
+    const cands = Array.from({ length: n }, (_, i) => slice(-Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / n, (2 * Math.PI) / n, i, `Name ${i}`, '5%'))
+    expectClean(placeOutsideLabels(cands, SIZE, FONTS, measure))
+  })
+
+  describe('the plugin', () => {
+    function draw(items: { name: string; sub: string[]; tail?: string }[], arcs: object[], outside: object | undefined) {
+      const texts: string[] = []
+      let strokes = 0
+      const ctx: any = {
+        save() {},
+        restore() {},
+        translate() {},
+        rotate() {},
+        beginPath() {},
+        moveTo() {},
+        lineTo() {},
+        stroke: () => strokes++,
+        measureText: (t: string) => ({ width: t.length * 6 }),
+        fillText: (t: string) => texts.push(t),
+      }
+      const chart: any = { ctx, width: SIZE.w, height: SIZE.h, data: { datasets: [{ backgroundColor: arcs.map(() => '#E9C46A') }] }, getDatasetMeta: () => ({ data: arcs }) }
+      arcLabelsPlugin({ 0: items }, { fit: true, nameFont: FONTS.name, subFont: FONTS.tail, ...(outside ? { outside } : {}) } as never).afterDatasetsDraw(chart)
+      return { texts: texts.join('|'), strokes }
+    }
+    const arc = (mid: number, span: number) => ({ x: 260, y: 200, innerRadius: 80, outerRadius: 140, startAngle: mid - span / 2, endAngle: mid + span / 2 })
+    const OUT = { ink: '#111111', line: '#555555' }
+    const items = [
+      { name: 'Rent', sub: ['$1,200.00 · 50%', '$1,200.00', '50%'], tail: '50%' },
+      { name: 'Insurance', sub: ['$80.00 · 3%', '$80.00', '3%'], tail: '3%' },
+    ]
+    const arcs = [arc(-Math.PI / 2 + 1.5, 3), arc(-0.1, 0.1)]
+
+    it('draws an outside label (name, share, a leader) for the slice with none inside, and only for it', () => {
+      const r = draw(items, arcs, OUT)
+      expect(r.texts).toContain('R|e|n|t') // inside, as before (drawn letter by letter)
+      expect(r.texts).toContain('Insurance|3%') // outside: name, then the tail
+      expect(r.strokes).toBe(1)
+    })
+
+    it('without the option nothing is drawn outside, and while not ready nothing is', () => {
+      expect(draw(items, arcs, undefined).strokes).toBe(0)
+      expect(draw(items, arcs, undefined).texts).not.toContain('Insurance')
+      const waiting = draw(items, arcs, { ...OUT, ready: () => false })
+      expect(waiting.strokes).toBe(0)
+      expect(waiting.texts).not.toContain('Insurance')
+      expect(draw(items, arcs, { ...OUT, ready: () => true }).strokes).toBe(1)
+    })
+
+    it('the tail defaults to the last alternative of the sub text', () => {
+      const r = draw([{ name: 'Insurance', sub: ['$80.00 · 3%', '$80.00', '3%'] }], [arc(-0.1, 0.1)], OUT)
+      expect(r.texts).toContain('Insurance|3%')
+    })
   })
 })

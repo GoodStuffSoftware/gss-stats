@@ -151,7 +151,8 @@ export function inkOn(fill: string): string {
 // doughnut), so every segment is self-labeled — no legend or hover needed. Skips
 // slivers too small to fit a label; those stay on hover.
 // `sub` may be a list of alternatives (longest first): the first that fits the arc is drawn, none when none fits.
-export type ArcItem = { name: string; sub: string | string[] }
+// `tail` is the short text an OUTSIDE label shows after the name (the share); default: the last `sub` alternative.
+export type ArcItem = { name: string; sub: string | string[]; tail?: string }
 
 // Draw text curved along a circle of radius r, centered on midAngle. Characters
 // stay tangent to the ring; the bottom half is flipped so text reads upright all
@@ -348,6 +349,161 @@ export function fitArcLabel(g: ArcGeom, item: ArcItem, fonts: { name: string; su
   return null
 }
 
+// ── Outside labels (opt-in: ArcLabelOptions.outside, with `fit`) ───────────────────────────────────────
+// A slice that got no label inside gets one outside the ring, at the end of a short leader line: its name (cut
+// with an ellipsis to the room there is) and its share. Labels sit in a column on each side of the ring, one row
+// per label, as near their slice's own height as the rows allow (spreadRows). A label is never drawn over another,
+// over the ring or past the chart's edge: when there is no room for all of them, the smallest slices' labels go
+// (placeOutsideLabels).
+export interface OutsideCandidate {
+  index: number
+  name: string
+  tail: string
+  geom: ArcGeom
+}
+export interface OutsideLabel {
+  index: number
+  /** 1 = right of the ring (the text starts at x and runs right), -1 = left (the text ends at x and runs left). */
+  side: 1 | -1
+  /** The leader line, from the slice's edge to the text. */
+  line: [number, number][]
+  x: number
+  y: number
+  /** The name as drawn (maybe cut with an ellipsis) and the tail after it. */
+  name: string
+  tail: string
+  nameW: number
+  tailW: number
+}
+const OUT_LEAD = 8 // px a leader runs radially out of the ring when it has to bend around
+const OUT_CLEAR = 3 // px kept between the ring and any label
+const OUT_TICK = 6 // px of the leader's horizontal end
+const OUT_PAD = 2 // px between the leader's end and the text
+const OUT_EDGE = 2 // px kept clear of the chart's edge
+const OUT_ROW_GAP = 2 // px between two rows
+const OUT_SPACE = 4 // px between the name and the tail
+
+/** `text` cut with an ellipsis to at most `maxW` wide; whole when it fits; null when not even `minChars` letters and
+ * the ellipsis do. */
+export function ellipsize(text: string, maxW: number, measure: (t: string) => number, minChars = 2): string | null {
+  if (measure(text) <= maxW) return text
+  const chars = [...text]
+  for (let n = chars.length - 1; n >= minChars; n--) {
+    const cut = `${chars.slice(0, n).join('').trimEnd()}…`
+    if (measure(cut) <= maxW) return cut
+  }
+  return null
+}
+
+/** Rows `pitch` apart, in the order of `ideal` (ascending), each as near its ideal centre as the others allow
+ * (colliding rows are pooled around the mean of their ideals), all within lo..hi; null when they cannot fit. */
+export function spreadRows(ideal: number[], pitch: number, lo: number, hi: number): number[] | null {
+  const n = ideal.length
+  if (n === 0) return []
+  if (lo + (n - 1) * pitch > hi + 1e-9) return null
+  const blocks: { i: number; n: number; y: number }[] = ideal.map((y, i) => ({ i, n: 1, y })) // y: centre of the first row
+  for (;;) {
+    for (const b of blocks) b.y = Math.min(Math.max(b.y, lo), hi - (b.n - 1) * pitch)
+    let merged = false
+    for (let k = 1; k < blocks.length; k++) {
+      const a = blocks[k - 1]
+      const b = blocks[k]
+      if (a.y + a.n * pitch > b.y + 1e-9) {
+        const count = a.n + b.n
+        let sum = 0
+        for (let j = a.i; j < a.i + count; j++) sum += ideal[j] - (j - a.i) * pitch
+        blocks.splice(k - 1, 2, { i: a.i, n: count, y: sum / count })
+        merged = true
+        break
+      }
+    }
+    if (!merged) break
+  }
+  const out: number[] = []
+  for (const b of blocks) for (let j = 0; j < b.n; j++) out.push(b.y + j * pitch)
+  return out
+}
+
+/** Where the outside labels go, and which slices go without one. Pure geometry (no canvas). `size` is the chart's
+ * width and height; every label stays inside it, clear of the ring and of the other labels. */
+export function placeOutsideLabels(
+  cands: OutsideCandidate[],
+  size: { w: number; h: number },
+  fonts: { name: string; tail: string },
+  measure: ArcLabelMeasure,
+): OutsideLabel[] {
+  const h = Math.max(fontPx(fonts.name), fontPx(fonts.tail)) + 2
+  const pitch = h + OUT_ROW_GAP
+  const lo = OUT_EDGE + h / 2
+  const hi = size.h - OUT_EDGE - h / 2
+  const result: OutsideLabel[] = []
+  type Row = { c: OutsideCandidate; mid: number; span: number; ideal: number }
+  for (const side of [1, -1] as const) {
+    let group: Row[] = cands
+      .filter((c) => c.geom.endAngle > c.geom.startAngle && (Math.cos((c.geom.startAngle + c.geom.endAngle) / 2) >= 0 ? 1 : -1) === side)
+      .map((c) => {
+        const mid = (c.geom.startAngle + c.geom.endAngle) / 2
+        return { c, mid, span: c.geom.endAngle - c.geom.startAngle, ideal: c.geom.cy + (c.geom.outerRadius + OUT_LEAD) * Math.sin(mid) }
+      })
+      .sort((a, b) => a.ideal - b.ideal)
+    while (group.length) {
+      const ys = spreadRows(group.map((g) => g.ideal), pitch, lo, hi)
+      if (!ys) {
+        const smallest = group.reduce((m, g) => (g.span < m.span ? g : m))
+        group = group.filter((g) => g !== smallest)
+        continue
+      }
+      const labels: OutsideLabel[] = []
+      let failed: Row | null = null
+      for (let k = 0; k < group.length && !failed; k++) {
+        const label = fitOutsideLabel(group[k].c, group[k].mid, ys[k], side, h, size.w, fonts, measure)
+        if (label) labels.push(label)
+        else failed = group[k]
+      }
+      if (!failed) {
+        result.push(...labels)
+        break
+      }
+      const dropped: Row = failed
+      group = group.filter((g) => g !== dropped)
+    }
+  }
+  return result.sort((a, b) => a.index - b.index)
+}
+
+/** One label at height `y` on `side`: its leader and its text, or null when the room is too small for the name. */
+function fitOutsideLabel(
+  c: OutsideCandidate,
+  mid: number,
+  y: number,
+  side: 1 | -1,
+  h: number,
+  width: number,
+  fonts: { name: string; tail: string },
+  measure: ArcLabelMeasure,
+): OutsideLabel | null {
+  const g = c.geom
+  const cos = Math.cos(mid)
+  const sin = Math.sin(mid)
+  const p0: [number, number] = [g.cx + (g.outerRadius + 1) * cos, g.cy + (g.outerRadius + 1) * sin]
+  // the label's box must clear the ring: judged at its edge nearest the ring's centre line
+  const dyMin = Math.max(0, Math.abs(y - g.cy) - h / 2)
+  const clear = Math.sqrt(Math.max(0, (g.outerRadius + OUT_CLEAR) ** 2 - dyMin ** 2))
+  const qx = g.cx + side * Math.max(clear, Math.abs(p0[0] - g.cx) + 3)
+  const q: [number, number] = [qx, y]
+  const t: [number, number] = [qx + side * OUT_TICK, y]
+  // a leader that would double back into the ring bends around it first
+  const outward = (q[0] - p0[0]) * cos + (q[1] - p0[1]) * sin >= 0
+  const bend: [number, number] = [g.cx + (g.outerRadius + OUT_LEAD) * cos, g.cy + (g.outerRadius + OUT_LEAD) * sin]
+  const line: [number, number][] = outward ? [p0, q, t] : [p0, bend, q, t]
+  const start = t[0] + side * OUT_PAD
+  const room = side === 1 ? width - OUT_EDGE - start : start - OUT_EDGE
+  const tailW = measure(fonts.tail, c.tail)
+  const name = ellipsize(c.name, room - tailW - OUT_SPACE, (s) => measure(fonts.name, s))
+  if (name === null) return null
+  return { index: c.index, side, line, x: start, y, name, tail: c.tail, nameW: measure(fonts.name, name), tailW }
+}
+
 /** Per-plugin look. The defaults are the nested doughnut's, unchanged. */
 export interface ArcLabelOptions {
   nameFont?: string
@@ -359,6 +515,11 @@ export interface ArcLabelOptions {
   /** true: a label is drawn only where its full text box lies inside the slice, trying shorter forms and the other
    * orientation first (see fitArcLabel); lineGap is not used. Default false: the nested doughnut's own rule. */
   fit?: boolean
+  /** With `fit`: a slice that got no label inside gets one outside the ring on a leader line (see
+   * placeOutsideLabels). `ink` and `line` are the text and leader colours, `font` the name's font (the tail uses the
+   * sub font), `ready` is asked on every draw: the labels wait while it says false (a motion is playing).
+   * Default: none. The chart needs layout padding for them to sit in. */
+  outside?: { ink: string; line: string; font?: string; ready?: () => boolean }
 }
 
 export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look: ArcLabelOptions = {}) {
@@ -366,7 +527,9 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
   const subFont = look.subFont ?? '700 11px "Space Grotesk", system-ui, sans-serif'
   const gap = look.lineGap ?? 6 // px from the band centre to each of the two text lines
   const ink = look.bestContrast ? inkOn : textOn
-  const drawFitted = (ctx: any, arc: any, item: ArcItem, fill: string) => {
+  const outsideFont = look.outside?.font ?? '500 11px Inter, system-ui, sans-serif'
+  /** Draws the label inside the slice when it fits; false when it did not (the slice may get one outside). */
+  const drawFitted = (ctx: any, arc: any, item: ArcItem, fill: string): boolean => {
     const measure: ArcLabelMeasure = (font, text) => {
       ctx.font = font
       return ctx.measureText(text).width
@@ -383,7 +546,7 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
     const placed = fitArcLabel(geom, item, { name: nameFont, sub: subFont }, measure)
     if (!placed) {
       ctx.restore()
-      return
+      return false
     }
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -395,6 +558,34 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
       ctx.rotate(p.rot)
       ctx.fillText(p.text, 0, 0)
       ctx.restore()
+    }
+    ctx.restore()
+    return true
+  }
+  /** The outside labels of the slices that got none inside: placed together (so they never collide), then drawn. */
+  const drawOutside = (chart: any, ctx: any, cands: OutsideCandidate[]) => {
+    const out = look.outside
+    if (!out || !cands.length || out.ready?.() === false) return
+    ctx.save()
+    const measure: ArcLabelMeasure = (font, text) => {
+      ctx.font = font
+      return ctx.measureText(text).width
+    }
+    const labels = placeOutsideLabels(cands, { w: chart.width, h: chart.height }, { name: outsideFont, tail: subFont }, measure)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = out.line
+    ctx.fillStyle = out.ink
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    for (const l of labels) {
+      ctx.beginPath()
+      l.line.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
+      ctx.stroke()
+      const x0 = l.side === 1 ? l.x : l.x - (l.nameW + OUT_SPACE + l.tailW)
+      ctx.font = outsideFont
+      ctx.fillText(l.name, x0, l.y)
+      ctx.font = subFont
+      ctx.fillText(l.tail, x0 + l.nameW + OUT_SPACE, l.y)
     }
     ctx.restore()
   }
@@ -409,11 +600,17 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
         const meta = chart.getDatasetMeta(di)
         const colors = (ds.backgroundColor as string[]) ?? []
         const items = itemsByDataset[di] ?? []
+        const outside: OutsideCandidate[] = []
         meta.data.forEach((arc: any, i: number) => {
           const it = items[i]
           if (!it) return
           if (look.fit) {
-            drawFitted(ctx, arc, it, colors[i] ?? '#888888')
+            if (!drawFitted(ctx, arc, it, colors[i] ?? '#888888') && look.outside) {
+              const subs = (Array.isArray(it.sub) ? it.sub : [it.sub]).filter(Boolean)
+              const tail = it.tail ?? subs[subs.length - 1] ?? ''
+              const geom: ArcGeom = { cx: arc.x, cy: arc.y, innerRadius: arc.innerRadius, outerRadius: arc.outerRadius, startAngle: arc.startAngle, endAngle: arc.endAngle }
+              outside.push({ index: i, name: it.name, tail, geom })
+            }
             return
           }
           const span = arc.endAngle - arc.startAngle
@@ -440,6 +637,7 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
           }
           ctx.restore()
         })
+        drawOutside(chart, ctx, outside)
       }
     },
   }

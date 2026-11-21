@@ -10,6 +10,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
 - **Drill-down pies animate and label themselves.** Opening a slice grows the next level out of it, going back up unfurls the pie around the slice you left, with no blank skeleton in between, and the same short motion plays under a reduced-motion setting. Each slice with room shows its name, and its amount and share when those fit, right on the chart.
+- **Budget pies label small slices outside the ring.** A slice with no room for text inside gets its name and share at the end of a short leader line, cut with an ellipsis to the room there is; labels never overlap each other, the ring or the chart edge, and the smallest are dropped when there is no room. The chart has more room at the sides, and the labels appear once the drill motion ends.
+
+### Changed
+- **Opening a spending slice takes a deliberate gesture.** A single click or tap on the pie now only highlights the slice and shows its tooltip; a double-click, a double-tap or pressing and holding for half a second opens it, and a hint under the pie says so. The list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
 
 ### Fixed
 - **Budget pie labels stay inside their slice.** A label is drawn only when all of its text fits within the slice, and more slices get one: a long name wraps on two lines, a narrow slice can carry its text across the ring instead of along it, and the amount or share is dropped before the name.

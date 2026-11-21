@@ -62,7 +62,7 @@ type ArcLike = { startAngle: number; endAngle: number; circumference: number }
 
 /** The plugin. List it AFTER any labels plugin in the chart's `plugins`: it puts the arcs back in
  * `afterDatasetsDraw`, which has to come after the labels have been drawn on the moved arcs. */
-export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { motion: PieMotion } {
+export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { motion: PieMotion; settled: () => boolean } {
   const { motion } = opts
   const now = opts.now ?? (() => performance.now())
   const schedule = opts.schedule ?? ((cb: () => void) => void requestAnimationFrame(cb))
@@ -82,6 +82,9 @@ export function pieMotionPlugin(opts: PieMotionOptions): Plugin<'doughnut'> & { 
   return {
     id: 'pieMotion',
     motion, // readable by callers and tests; Chart.js ignores it
+    /** True when the frame being drawn is the final pie (or no motion plays): things that must not follow a moving
+     * arc, such as labels outside the ring, wait for it. Valid from `beforeDatasetsDraw` on. */
+    settled: () => done || p >= 1,
     beforeDatasetsDraw(chart) {
       if (done) return
       p = progress()

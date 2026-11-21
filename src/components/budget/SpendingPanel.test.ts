@@ -98,10 +98,22 @@ describe('SpendingPanel: drilling', () => {
     expect(w.emitted('drill')).toBeUndefined()
   })
 
-  it('a click on the chart itself drills the same way as the list', () => {
+  it('a single click on the chart does not drill (it only shows the tooltip); a hint says how to open a slice', () => {
     const w = mountPanel()
+    expect(w.findComponent(DrillPie).props('deliberate')).toBe(true)
+    expect(w.get('[data-testid="pie-hint"]').text()).toContain('Double-click or press and hold')
     w.findComponent(ChartStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
-    expect(w.emitted('drill')).toEqual([[{ level: 'category', key: 'groceries', label: 'Groceries' }]])
+    expect(w.emitted('drill')).toBeUndefined()
+  })
+
+  it('the merchant level is deliberate too; the purchase level (nothing to open) has no hint and a click selects the row', () => {
+    const merchants = mountPanel({ summary: MERCHANT_LEVEL, path: [FUEL] })
+    expect(merchants.findComponent(DrillPie).props('deliberate')).toBe(true)
+    const w = mountPanel({ summary: PURCHASE_LEVEL, path: [FUEL, CHAIN] })
+    expect(w.findComponent(DrillPie).props('deliberate')).toBe(false)
+    expect(w.find('[data-testid="pie-hint"]').exists()).toBe(false)
+    w.findComponent(ChartStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
+    expect(w.emitted('select-purchase')).toEqual([['txn-1']])
   })
 
   it('crumbs go back: the top is depth 0, the first step depth 1', async () => {

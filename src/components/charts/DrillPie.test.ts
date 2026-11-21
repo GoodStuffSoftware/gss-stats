@@ -237,6 +237,115 @@ describe('DrillPie picks', () => {
   })
 })
 
+// deliberate: a click or tap on the chart only shows the tooltip; a double-click, a double-tap or a hold picks.
+describe('DrillPie deliberate picking', () => {
+  // The chart stand-in has a canvas, and Chart.getChart finds a hit test for it: x < 100 is slice 0, else slice 1.
+  const CanvasStub = defineComponent({
+    name: 'BaseChart',
+    props: { config: { type: Object, required: true }, drillOpen: Boolean },
+    emits: ['point'],
+    template: '<canvas />',
+  })
+  const mountDeliberate = (props: Record<string, unknown> = {}) => {
+    const w = mount(DrillPie, { props: { slices: SLICES, dark: false, deliberate: true, ...props }, global: { stubs: { BaseChart: CanvasStub } }, attachTo: document.body })
+    mounted.push(w)
+    return w
+  }
+  const fire = (w: VueWrapper, type: string, x = 50, y = 50, extra: Record<string, unknown> = {}) => {
+    const e = Object.assign(new Event(type, { bubbles: true, cancelable: true }), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: x, clientY: y }, extra)
+    w.get('canvas').element.dispatchEvent(e)
+    return e
+  }
+  beforeEach(() => {
+    setReducedMotion(false)
+    vi.useFakeTimers()
+    vi.spyOn(Chart, 'getChart').mockReturnValue({
+      getElementsAtEventForMode: (e: { clientX: number }) => [{ index: e.clientX < 100 ? 0 : 1, datasetIndex: 0 }],
+    } as never)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('shows a hint under the pie; without deliberate there is none', () => {
+    expect(mountDeliberate().get('[data-testid="pie-hint"]').text()).toBe('Double-click or press and hold a slice to open it')
+    expect(mountPie().find('[data-testid="pie-hint"]').exists()).toBe(false)
+  })
+
+  it('a click on the chart, or the chart\'s own long-press, does not pick', () => {
+    const w = mountDeliberate()
+    w.findComponent(CanvasStub).vm.$emit('point', { index: 1, datasetIndex: 0, x: 0, y: 0 })
+    fire(w, 'pointerdown')
+    vi.advanceTimersByTime(100)
+    fire(w, 'pointerup')
+    fire(w, 'click')
+    expect(w.emitted('select')).toBeUndefined()
+  })
+
+  it('a double-click picks the slice under the pointer', () => {
+    const w = mountDeliberate()
+    fire(w, 'dblclick', 150)
+    expect(w.emitted('select')).toEqual([['b']])
+  })
+
+  it('a hold picks it, and the release after it does not pick again or click through', () => {
+    const w = mountDeliberate()
+    fire(w, 'pointerdown', 50)
+    vi.advanceTimersByTime(500)
+    expect(w.emitted('select')).toEqual([['a']])
+    fire(w, 'pointerup', 50)
+    const click = fire(w, 'click', 50)
+    expect(click.defaultPrevented).toBe(true)
+    expect(w.emitted('select')).toEqual([['a']])
+  })
+
+  it('a hold that moves away picks nothing', () => {
+    const w = mountDeliberate()
+    fire(w, 'pointerdown', 50)
+    fire(w, 'pointermove', 70)
+    vi.advanceTimersByTime(1000)
+    expect(w.emitted('select')).toBeUndefined()
+  })
+
+  it('a double-tap picks (touch)', () => {
+    const w = mountDeliberate()
+    for (let i = 0; i < 2; i++) {
+      fire(w, 'pointerdown', 50, 50, { pointerType: 'touch' })
+      vi.advanceTimersByTime(50)
+      fire(w, 'pointerup', 50, 50, { pointerType: 'touch' })
+      vi.advanceTimersByTime(100)
+    }
+    expect(w.emitted('select')).toEqual([['a']])
+  })
+
+  it('the folded bucket opens its list by the gesture, and is not reported', async () => {
+    const members = [{ key: 'm1', label: 'M1', value: 500, color: '#111111' }, { key: 'm2', label: 'M2', value: 500, color: '#222222' }]
+    const w = mountDeliberate({ slices: [SLICES[0], { key: '__b__', label: '2 smaller', value: 1000, color: '#C9C3B8', members }] })
+    fire(w, 'dblclick', 150)
+    await w.vm.$nextTick()
+    expect(w.emitted('select')).toBeUndefined()
+    expect(w.find('[data-testid="pie-members-__b__"]').exists()).toBe(true)
+  })
+
+  it('the list rows still pick with one click, and turning deliberate off brings back the one-click chart', async () => {
+    const w = mountDeliberate()
+    await w.get('[data-testid="pie-row-b"]').trigger('click')
+    expect(w.emitted('select')).toEqual([['b']])
+    await w.setProps({ deliberate: false })
+    expect(w.find('[data-testid="pie-hint"]').exists()).toBe(false)
+    w.findComponent(CanvasStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
+    fire(w, 'dblclick', 150) // the gesture is off
+    expect(w.emitted('select')).toEqual([['b'], ['a']])
+  })
+
+  it('leaves room for the outside labels: padding that grows with the chart, within limits', () => {
+    const c = mountDeliberate().findComponent(CanvasStub).props('config') as any
+    expect(c.options.layout.padding({ chart: { width: 340 } })).toEqual({ left: 58, right: 58, top: 18, bottom: 18 })
+    expect(c.options.layout.padding({ chart: { width: 520 } }).left).toBe(88)
+    expect(c.options.layout.padding({ chart: { width: 200 } }).left).toBe(52) // never under 52 px
+    expect(c.options.layout.padding({ chart: { width: 900 } }).left).toBe(92) // nor over 92 px
+    expect(pluginOf(c, 'arcLabels')).toBeTruthy()
+  })
+})
+
 describe('DrillPie is generic (ADR 0005: no one-off widgets)', () => {
   it('its source has no knowledge of what the slices are', () => {
     expect(source).not.toMatch(/budget|categor|merchant|transaction|cents|account|debt|spend/i)

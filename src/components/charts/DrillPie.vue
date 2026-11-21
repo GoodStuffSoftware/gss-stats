@@ -44,21 +44,28 @@ export function sliceLabelParts(amount: string, share: number): string[] {
 // slices (a theme switch, new numbers) plays nothing. The parent keeps this one component instance across
 // levels, so the pie on screen stays until the new slices arrive.
 // Labels (arcLabelsPlugin in lib/charts.ts): a slice with room shows its name on the arc, and its amount and
-// share (or just one of them) when those fit too; a slice with no room shows none, the list below has it.
+// share (or just one of them) when those fit too; a slice with no room gets its name and share outside the ring
+// on a leader line (cut with an ellipsis to the room there is; dropped, smallest first, when there is none), once
+// the motion has settled. The chart's layout padding is the room for them, wider as the chart is.
+// Picking: by default a click on a slice picks it. With `deliberate`, a click or tap only shows the tooltip, and a
+// double-click, a double-tap or a press held for half a second picks it (lib/pieGesture.ts); a hint says so. The
+// list rows pick with one click either way.
 //
 // Props
 //   slices:  PieSlice[]
 //   dark:    boolean                       site theme (the slice border)
 //   animate: boolean (true)                false = no motion at all
 //   transition: PieTransition              where the next set of slices comes from (see above)
+//   deliberate: boolean (false)            picking a slice on the chart takes a double-click, double-tap or hold
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
 // Emits
 //   select(key: string)                    a slice or its list row was picked (never for an `inert` slice, nor for a
 //                                          slice with `members`: that one opens its list; its members are reported)
-import { computed, ref, shallowRef, watch } from 'vue'
-import type { ChartConfiguration } from 'chart.js'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { Chart, type ChartConfiguration } from 'chart.js'
 import { arcLabelsPlugin } from '../../lib/charts'
+import { createPieGesture, type PieGesture } from '../../lib/pieGesture'
 import { pieMotionPlugin, type PieMotion } from '../../lib/pieMotion'
 import BaseChart from './BaseChart.vue'
 
@@ -68,10 +75,11 @@ const props = withDefaults(
     dark: boolean
     animate?: boolean
     transition?: PieTransition
+    deliberate?: boolean
     format?: (value: number) => string
     label?: string
   }>(),
-  { animate: true, format: (v: number) => String(v), label: 'Pie chart' },
+  { animate: true, deliberate: false, format: (v: number) => String(v), label: 'Pie chart' },
 )
 const emit = defineEmits<{ select: [key: string] }>()
 
@@ -88,6 +96,20 @@ const LABEL_LOOK = {
   subFont: '700 11px "Space Grotesk", system-ui, sans-serif',
   bestContrast: true,
   fit: true,
+}
+// Outside labels: the name in a lighter weight than the on-slice one; ink and leader line by theme (a canvas cannot
+// read CSS variables).
+const OUTSIDE_LOOK = {
+  font: '500 11px Inter, system-ui, sans-serif',
+  light: { ink: '#1A1715', line: 'rgba(26, 23, 21, 0.45)' },
+  dark: { ink: '#F4F1EA', line: 'rgba(244, 241, 234, 0.5)' },
+}
+// Room around the ring for the outside labels: a share of the chart's width, within limits (a phone keeps a ring of
+// a sensible size; a wide chart has the room), and a little above and below.
+const PAD_V = 18
+function layoutPadding(ctx: { chart: { width: number } }) {
+  const h = Math.min(92, Math.max(52, Math.round(ctx.chart.width * 0.17)))
+  return { left: h, right: h, top: PAD_V, bottom: PAD_V }
 }
 
 // The slices' wedges as shares of the circle, in drawn order.
@@ -135,7 +157,13 @@ function buildConfig(motion: PieMotion): ChartConfiguration {
   const items = s.map((x) => ({
     name: x.label,
     sub: sliceLabelParts(formatValue(x.value), share(x.value)),
+    tail: `${share(x.value)}%`,
   }))
+  const motionPlugin = pieMotionPlugin({ motion })
+  const look = {
+    ...LABEL_LOOK,
+    outside: { ...(props.dark ? OUTSIDE_LOOK.dark : OUTSIDE_LOOK.light), font: OUTSIDE_LOOK.font, ready: () => motionPlugin.settled() },
+  }
   return {
     type: 'doughnut',
     data: {
@@ -154,6 +182,7 @@ function buildConfig(motion: PieMotion): ChartConfiguration {
       responsive: true,
       maintainAspectRatio: false,
       cutout: '58%',
+      layout: { padding: layoutPadding },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -164,7 +193,7 @@ function buildConfig(motion: PieMotion): ChartConfiguration {
       },
     },
     // Order matters: the labels are drawn on the moved arcs, then the motion puts the arcs back.
-    plugins: [arcLabelsPlugin({ 0: items }, LABEL_LOOK), pieMotionPlugin({ motion })],
+    plugins: [arcLabelsPlugin({ 0: items }, look), motionPlugin],
   } as ChartConfiguration
 }
 
@@ -205,16 +234,62 @@ function pick(s: PieSlice) {
 }
 
 function onPoint(p: { index: number }) {
+  if (props.deliberate) return // the chart's own click and long-press are not enough: see the gesture below
   const s = drawn.value[p.index]
   if (s) pick(s)
 }
+
+// The deliberate gesture (props.deliberate): listens on the canvas's wrapper, ahead of the chart's own handlers.
+const canvasBox = ref<HTMLElement | null>(null)
+let gesture: PieGesture | null = null
+let detach: (() => void) | null = null
+function sliceAt(e: { clientX: number; clientY: number }): number | null {
+  const canvas = canvasBox.value?.querySelector('canvas')
+  const chart = canvas ? Chart.getChart(canvas) : undefined
+  const hit = chart?.getElementsAtEventForMode(e as unknown as Event, 'nearest', { intersect: true }, false)[0]
+  return hit ? hit.index : null
+}
+onMounted(() => {
+  const box = canvasBox.value
+  if (!box) return
+  const g = createPieGesture({
+    hit: sliceAt,
+    open: (i) => {
+      const s = drawn.value[i]
+      if (s) pick(s)
+    },
+  })
+  gesture = g
+  const on = (type: string, fn: (e: never) => void) => {
+    const handler = (e: Event) => {
+      if (props.deliberate) fn(e as never)
+    }
+    box.addEventListener(type, handler, true)
+    return () => box.removeEventListener(type, handler, true)
+  }
+  const offs = [
+    on('pointerdown', (e) => g.pointerdown(e)),
+    on('pointermove', (e) => g.pointermove(e)),
+    on('pointerup', (e) => g.pointerup(e)),
+    on('pointercancel', (e) => g.pointercancel(e)),
+    on('pointerleave', (e) => g.pointerleave(e)),
+    on('click', (e) => g.click(e)),
+    on('dblclick', (e) => g.dblclick(e)),
+  ]
+  detach = () => offs.forEach((off) => off())
+})
+onBeforeUnmount(() => {
+  detach?.()
+  gesture?.destroy()
+})
 </script>
 
 <template>
   <div class="drill-pie" data-testid="drill-pie">
-    <div class="dp-canvas" role="img" :aria-label="label">
+    <div ref="canvasBox" class="dp-canvas" role="img" :aria-label="label">
       <BaseChart :config="config" :drill-open="false" @point="onPoint" />
     </div>
+    <p v-if="deliberate" class="dp-hint" data-testid="pie-hint">Double-click or press and hold a slice to open it</p>
     <ul class="dp-list" :aria-label="`${label}: slices`">
       <li v-for="s in drawn" :key="s.key" class="dp-item">
         <component
@@ -259,11 +334,25 @@ function onPoint(p: { index: number }) {
   gap: 12px;
   min-width: 0;
 }
+/* Wider than tall on a wide screen, so the outside labels have room at the sides without shrinking the ring. */
 .dp-canvas {
   position: relative;
-  width: min(100%, 340px);
+  width: 100%;
+  max-width: 520px;
+  max-height: 372px;
   aspect-ratio: 1;
   align-self: center;
+  /* a hold or a double-tap on the pie must not select text, pop a callout or zoom the page */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+}
+.dp-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgb(var(--ink-3));
 }
 .dp-list {
   list-style: none;

@@ -179,4 +179,25 @@ describe('pieMotionPlugin', () => {
     expect((drawn[0].at + drawn[1].at) / 2).toBeCloseTo(Math.PI, 5)
     expect((drawn[2].at + drawn[3].at) / 2).toBeCloseTo(Math.PI / 2, 5)
   })
+
+  it('settled() is false for every frame of a motion but the last, so labels outside the ring wait for the final pie', () => {
+    const k = clock()
+    const plugin = pieMotionPlugin({ motion: { kind: 'unfurl', mid: 0 }, now: k.now, schedule: k.schedule })
+    const asked: boolean[] = []
+    const probe = { afterDatasetsDraw: () => asked.push(plugin.settled()) } // runs before the motion plugin's own
+    const { chart } = fakeChart([0.6, 0.4], [plugin])
+    const hooks = [plugin, probe]
+    const draw = () => {
+      for (const p of hooks) (p as any).beforeDatasetsDraw?.(chart)
+      for (const p of [probe, plugin]) (p as any).afterDatasetsDraw?.(chart)
+    }
+    draw()
+    k.c.t += 200
+    k.flush()
+    draw()
+    k.c.t += 400
+    draw()
+    expect(asked).toEqual([false, false, true])
+    expect(pieMotionPlugin({ motion: { kind: 'none' } }).settled()).toBe(true)
+  })
 })

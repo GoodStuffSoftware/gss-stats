@@ -2,7 +2,9 @@
 // The spending pie: DrillPie of the current /summary answer, the crumbs back up, the total, the "Needs review
 // (n)" toggle and, once inside a category, a switch for what the next level groups by. BudgetSection owns the
 // state and the fetching (and the loading / error / empty-range screens); this panel only draws and reports
-// clicks.
+// clicks. A slice on the pie opens with a double-click, a double-tap or a press held for half a second (a single
+// click only shows its tooltip; a hint under the pie says so); at the purchase level a click picks, as there is
+// nothing to open. The list rows under the pie and the crumbs open with one click.
 //
 // Props
 //   summary:    SummaryResponse   the answer for the CURRENT state; never null, never empty at the top level.
@@ -125,7 +127,15 @@ watch(
     </p>
 
     <div class="sp-body">
-      <DrillPie :slices="slices" :dark="dark" :transition="transition" :format="formatAmount" :label="pieLabel" @select="onSelect" />
+      <DrillPie
+        :slices="slices"
+        :dark="dark"
+        :transition="transition"
+        :deliberate="summary.level !== 'purchase'"
+        :format="formatAmount"
+        :label="pieLabel"
+        @select="onSelect"
+      />
       <p v-if="slices.length === 0" class="sp-none" data-testid="spending-none">Nothing above zero here: refunds cover the spending.</p>
     </div>
   </div>
