@@ -152,7 +152,7 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: rgb(var(--ink-3));
+  color: rgb(var(--ink-2));
 }
 .bt-badge {
   margin-left: 6px;
