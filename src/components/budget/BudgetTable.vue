@@ -13,7 +13,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
 import { createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
-import { budgetColumns, categoryOptions, createTxnTable, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
+import { budgetColumns, categoryOptions, createTxnTable, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
 import type { BudgetEditedEvent, BudgetTableProps, Txn } from '../../lib/budget/types'
 
 const props = defineProps<BudgetTableProps>()
@@ -100,8 +100,24 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
     >
       <template #cell-merchant="{ row }">
         <span class="bt-merchant" :title="row.description">{{ row.merchantName || row.description }}</span>
-        <span v-if="row.needsReview" class="bt-badge" title="Needs a look">Review</span>
+        <span v-if="row.needsReview" class="bt-badge" :title="reviewReasonText(row.reviewReason) ?? 'Needs a look'">Review</span>
+        <button
+          v-if="row.needsReview && canEdit"
+          type="button"
+          class="bt-confirm"
+          title="Looks right"
+          :aria-label="'Looks right: ' + rowLabel(row)"
+          :disabled="!!rowState[row.id]?.pending"
+          data-testid="review-confirm"
+          @click="model.confirmReview(row.id)"
+        >✓</button>
         <span v-if="row.note" class="bt-note" :title="row.note">{{ row.note }}</span>
+        <span
+          v-if="row.needsReview && reviewReasonText(row.reviewReason)"
+          class="bt-reason"
+          :title="reviewReasonText(row.reviewReason) ?? ''"
+          data-testid="review-reason"
+        >{{ reviewReasonText(row.reviewReason) }}</span>
       </template>
       <template #cell-category="{ row }">
         <span class="bt-cat">
@@ -153,6 +169,40 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
   white-space: nowrap;
   font-size: 11px;
   color: rgb(var(--ink-2));
+}
+.bt-reason {
+  display: block;
+  max-width: 36ch;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-style: italic;
+  color: rgb(var(--ink-2));
+}
+.bt-confirm {
+  margin-left: 6px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  vertical-align: middle;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  cursor: pointer;
+}
+.bt-confirm:hover:not(:disabled) {
+  border-color: rgb(var(--amber));
+  background: rgb(var(--amber-tint));
+}
+.bt-confirm:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .bt-badge {
   margin-left: 6px;

@@ -288,7 +288,7 @@ describe('outside labels', () => {
     geom: { cx: 260, cy: 200, innerRadius: 80, outerRadius: 140, startAngle: mid - span / 2, endAngle: mid + span / 2 },
   })
   const rectOf = (l: ReturnType<typeof placeOutsideLabels>[number]) => {
-    const w = l.nameW + 4 + l.tailW
+    const w = l.nameW + (l.tail ? 4 + l.tailW : 0)
     const x0 = l.side === 1 ? l.x : l.x - w
     return { x0, x1: x0 + w, y0: l.y - 6.5, y1: l.y + 6.5 }
   }
@@ -363,6 +363,23 @@ describe('outside labels', () => {
     expect(placeOutsideLabels([slice(0, 0.1, 0, 'Home & garden', '4%')], { w: 430, h: 400 }, FONTS, measure)).toEqual([])
   })
 
+  it('the share goes first: the whole name is shown when it fits without the share, and is cut only when even it does not', () => {
+    const name = 'Home & garden' // 78 px; the share adds 16 more
+    const wide = { w: 495, h: 400 } // 82 px of room: the name fits, the name and the share do not
+    const [bare] = placeOutsideLabels([slice(0, 0.1, 0, name, '4%')], wide, FONTS, measure)
+    expect(bare.name).toBe(name)
+    expect(bare.tail).toBe('')
+    expect(bare.tailW).toBe(0)
+    expect(bare.x + bare.nameW).toBeLessThanOrEqual(wide.w)
+    const roomy = { w: 520, h: 400 } // room for both: nothing is dropped
+    const [both] = placeOutsideLabels([slice(0, 0.1, 0, name, '4%')], roomy, FONTS, measure)
+    expect([both.name, both.tail]).toEqual([name, '4%'])
+    const tight = { w: 485, h: 400 } // 72 px: not even the bare name fits, so it is cut and keeps its share
+    const [cut] = placeOutsideLabels([slice(0, 0.1, 0, name, '4%')], tight, FONTS, measure)
+    expect(cut.name.endsWith('…')).toBe(true)
+    expect(cut.tail).toBe('4%')
+  })
+
   it('a full pie of small slices stays clean', () => {
     const n = 18
     const cands = Array.from({ length: n }, (_, i) => slice(-Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / n, (2 * Math.PI) / n, i, `Name ${i}`, '5%'))
@@ -370,7 +387,7 @@ describe('outside labels', () => {
   })
 
   describe('the plugin', () => {
-    function draw(items: { name: string; sub: string[]; tail?: string }[], arcs: object[], outside: object | undefined) {
+    function draw(items: { name: string; sub: string[]; tail?: string }[], arcs: object[], outside: object | undefined, width = SIZE.w) {
       const texts: string[] = []
       let strokes = 0
       const ctx: any = {
@@ -385,7 +402,7 @@ describe('outside labels', () => {
         measureText: (t: string) => ({ width: t.length * 6 }),
         fillText: (t: string) => texts.push(t),
       }
-      const chart: any = { ctx, width: SIZE.w, height: SIZE.h, data: { datasets: [{ backgroundColor: arcs.map(() => '#E9C46A') }] }, getDatasetMeta: () => ({ data: arcs }) }
+      const chart: any = { ctx, width, height: SIZE.h, data: { datasets: [{ backgroundColor: arcs.map(() => '#E9C46A') }] }, getDatasetMeta: () => ({ data: arcs }) }
       arcLabelsPlugin({ 0: items }, { fit: true, nameFont: FONTS.name, subFont: FONTS.tail, ...(outside ? { outside } : {}) } as never).afterDatasetsDraw(chart)
       return { texts: texts.join('|'), strokes }
     }
@@ -402,6 +419,13 @@ describe('outside labels', () => {
       expect(r.texts).toContain('R|e|n|t') // inside, as before (drawn letter by letter)
       expect(r.texts).toContain('Insurance|3%') // outside: name, then the tail
       expect(r.strokes).toBe(1)
+    })
+
+    it('draws the whole name alone when only the share would not fit with it', () => {
+      const long = [{ name: 'Home & garden', sub: ['$80.00 · 3%', '$80.00', '3%'], tail: '3%' }]
+      expect(draw(long, [arc(-0.1, 0.1)], OUT, 495).texts).toContain('Home & garden')
+      expect(draw(long, [arc(-0.1, 0.1)], OUT, 495).texts).not.toContain('3%')
+      expect(draw(long, [arc(-0.1, 0.1)], OUT, 520).texts).toContain('Home & garden|3%')
     })
 
     it('without the option nothing is drawn outside, and while not ready nothing is', () => {

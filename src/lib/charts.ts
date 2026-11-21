@@ -350,8 +350,8 @@ export function fitArcLabel(g: ArcGeom, item: ArcItem, fonts: { name: string; su
 }
 
 // ── Outside labels (opt-in: ArcLabelOptions.outside, with `fit`) ───────────────────────────────────────
-// A slice that got no label inside gets one outside the ring, at the end of a short leader line: its name (cut
-// with an ellipsis to the room there is) and its share. Labels sit in a column on each side of the ring, one row
+// A slice that got no label inside gets one outside the ring, at the end of a short leader line: its name and its share (when
+// the room is short the share goes first, and the name is cut with an ellipsis only when even it does not fit). Labels sit in a column on each side of the ring, one row
 // per label, as near their slice's own height as the rows allow (spreadRows). A label is never drawn over another,
 // over the ring or past the chart's edge: when there is no room for all of them, the smallest slices' labels go
 // (placeOutsideLabels).
@@ -369,7 +369,8 @@ export interface OutsideLabel {
   line: [number, number][]
   x: number
   y: number
-  /** The name as drawn (maybe cut with an ellipsis) and the tail after it. */
+  /** The name as drawn (maybe cut with an ellipsis) and the tail after it ('' and 0 wide when the share was dropped so
+   * the whole name fits). */
   name: string
   tail: string
   nameW: number
@@ -498,10 +499,17 @@ function fitOutsideLabel(
   const line: [number, number][] = outward ? [p0, q, t] : [p0, bend, q, t]
   const start = t[0] + side * OUT_PAD
   const room = side === 1 ? width - OUT_EDGE - start : start - OUT_EDGE
+  const nameOf = (s: string) => measure(fonts.name, s)
+  // The whole name beats the share: when the name would be cut to leave room for the share, the share goes first,
+  // and the name is cut only when even the bare name does not fit.
   const tailW = measure(fonts.tail, c.tail)
-  const name = ellipsize(c.name, room - tailW - OUT_SPACE, (s) => measure(fonts.name, s))
+  const fullW = nameOf(c.name)
+  if (fullW > room - tailW - OUT_SPACE && fullW <= room) {
+    return { index: c.index, side, line, x: start, y, name: c.name, tail: '', nameW: fullW, tailW: 0 }
+  }
+  const name = ellipsize(c.name, room - tailW - OUT_SPACE, nameOf)
   if (name === null) return null
-  return { index: c.index, side, line, x: start, y, name, tail: c.tail, nameW: measure(fonts.name, name), tailW }
+  return { index: c.index, side, line, x: start, y, name, tail: c.tail, nameW: nameOf(name), tailW }
 }
 
 /** Per-plugin look. The defaults are the nested doughnut's, unchanged. */
@@ -581,11 +589,13 @@ export function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>, look:
       ctx.beginPath()
       l.line.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)))
       ctx.stroke()
-      const x0 = l.side === 1 ? l.x : l.x - (l.nameW + OUT_SPACE + l.tailW)
+      const x0 = l.side === 1 ? l.x : l.x - (l.nameW + (l.tail ? OUT_SPACE + l.tailW : 0))
       ctx.font = outsideFont
       ctx.fillText(l.name, x0, l.y)
-      ctx.font = subFont
-      ctx.fillText(l.tail, x0 + l.nameW + OUT_SPACE, l.y)
+      if (l.tail) {
+        ctx.font = subFont
+        ctx.fillText(l.tail, x0 + l.nameW + OUT_SPACE, l.y)
+      }
     }
     ctx.restore()
   }

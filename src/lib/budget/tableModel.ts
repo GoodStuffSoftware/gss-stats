@@ -90,6 +90,21 @@ export function categoryLabel(categories: Category[], t: Txn): string {
   return categoryOptions(categories, t).find((o) => o.value === v)?.label ?? v
 }
 
+/** Why a row is flagged, as words: the engine's codes read plainly, and free text (a rule's own reason) shows as it is. */
+const REVIEW_WORDS: Record<string, string> = {
+  rule: 'A rule asks for a check',
+  ambiguous_store: 'The store could fit more than one category',
+  amount_out_of_band: 'The amount is unusual for this store',
+  hidden_merchant: 'The real merchant is hidden behind a payment service',
+  low_confidence: 'Not sure about this one',
+  transfer_to_unknown_account: 'Transfer to an account that is not tracked',
+}
+export function reviewReasonText(reason: string | null | undefined): string | null {
+  const r = reason?.trim()
+  if (!r) return null
+  return REVIEW_WORDS[r] ?? (/^[a-z]+(_[a-z]+)*$/.test(r) ? kindWords(r) : r)
+}
+
 // ---- columns ---------------------------------------------------------------------------------------------
 
 export function budgetColumns(categories: Category[], accounts: Account[]): EditableColumn<Txn>[] {
@@ -192,16 +207,17 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
   }
 
   /** The row changed from the category select: update it now, save, and revert if the save fails. */
-  async function setSelection(id: string, value: string) {
+  async function setSelection(id: string, value: string, confirm = false) {
     const i = indexOf(id)
     if (i < 0 || rowState[id]?.pending) return
     const before = rows.value[i]
-    const sel = parseSelection(value)
+    // Confirming a row that is not spending in a way the select can name (a card payment) saves its own kind.
+    const sel = confirm && value.startsWith('kind:') && !NOT_SPENDING.some((n) => n.value === value) ? { kind: before.kind } : parseSelection(value)
     if (sel.categoryId === undefined && sel.kind === undefined) return
     const patch: TxnPatch = { expectedUpdatedAt: before.updatedAt }
     const optimistic: Txn = { ...before, needsReview: false, reviewReason: null }
     if (sel.categoryId !== undefined) {
-      if (selectValueFor(before) === value) return
+      if (!confirm && selectValueFor(before) === value) return
       patch.categoryId = sel.categoryId
       optimistic.categoryId = sel.categoryId
       optimistic.categorySource = 'manual'
@@ -212,7 +228,7 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
         optimistic.kindSource = 'manual'
       }
     } else if (sel.kind !== undefined) {
-      if (before.kind === sel.kind) return
+      if (!confirm && before.kind === sel.kind) return
       patch.kind = sel.kind
       optimistic.kind = sel.kind
       optimistic.kindSource = 'manual'
@@ -248,6 +264,13 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
     }
   }
 
+  /** "Looks right": save the row as it stands (its current category, or its kind when it is not spending) as a manual edit,
+   *  which takes it off the review list. Picking the same option in the select again sends no change, hence this. */
+  async function confirmReview(id: string) {
+    const row = rows.value[indexOf(id)]
+    if (row?.needsReview) await setSelection(id, selectValueFor(row), true)
+  }
+
   /** "Use for all <merchant>": make the edit a rule, then show how many rows it changed. */
   async function useForAll(id: string) {
     const i = indexOf(id)
@@ -280,5 +303,5 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, useForAll }
+  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, confirmReview, useForAll }
 }

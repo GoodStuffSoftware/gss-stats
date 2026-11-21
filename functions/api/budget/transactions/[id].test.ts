@@ -28,6 +28,17 @@ describe('PATCH /api/budget/transactions/:id', () => {
       .toEqual([{ txn_id: id, old_category_id: 'groceries', new_category_id: 'fuel', old_kind: 'spend', new_kind: 'spend', edited_at: txn.updatedAt, edited_by: 'user-a@example.com' }])
   })
 
+  it('the same category as it stands is accepted: it becomes a manual edit and the review flag clears ("Looks right")', async () => {
+    const id = idOf("store_no = '9999'")
+    expect(row(id)).toMatchObject({ needs_review: 1, review_reason: 'ambiguous_store', category_id: 'groceries', category_source: 'rule' })
+    const res = await patch(id, { categoryId: 'groceries', expectedUpdatedAt: SEED_STAMP })
+    expect(res.status).toBe(200)
+    const { txn } = await json<TxnPatchResponse>(res)
+    expect(txn).toMatchObject({ id, categoryId: 'groceries', categorySource: 'manual', needsReview: false, reviewReason: null })
+    expect(row(id)).toMatchObject({ category_id: 'groceries', category_source: 'manual', needs_review: 0, review_reason: null, confidence: 100 })
+    expect(db.all('SELECT txn_id, old_category_id, new_category_id FROM category_edits')).toEqual([{ txn_id: id, old_category_id: 'groceries', new_category_id: 'groceries' }])
+  })
+
   it('a kind edit makes kind_source manual; a null category means uncategorized and stays manual', async () => {
     const id = idOf("merchant_key = 'paypal'")
     const { txn } = await json<TxnPatchResponse>(await patch(id, { kind: 'transfer', expectedUpdatedAt: SEED_STAMP }))

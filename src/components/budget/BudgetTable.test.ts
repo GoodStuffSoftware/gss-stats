@@ -317,6 +317,94 @@ describe('BudgetTable purpose note', () => {
   })
 })
 
+describe('BudgetTable review reason and "Looks right"', () => {
+  const REASON = 'Business? Tech purchase since June, please confirm (made-up)'
+  const flagged = (over: Partial<Txn> = {}) => txn('t1', { needsReview: true, reviewReason: REASON as never, categoryId: 'dining', ...over })
+  const reviewed = (id: string, over: Partial<Txn> = {}) => txn(id, { categoryId: 'dining', categorySource: 'manual', updatedAt: 'N', ...over })
+
+  it('shows the reason as visible text under the merchant and in the badge tooltip, with the note too', async () => {
+    mockFetch(() => json({ rows: [flagged({ note: 'Laptop bag (made-up)' }), txn('t2', { merchantName: 'Shop Y' })], nextCursor: null }))
+    const w = await mountTable()
+    const r = rowEl(w, 't1')
+    expect(r.get('.bt-reason').text()).toBe(REASON)
+    expect(r.get('.bt-note').text()).toBe('Laptop bag (made-up)')
+    expect(r.get('.bt-badge').attributes('title')).toBe(REASON)
+    expect(rowEl(w, 't2').find('.bt-reason').exists()).toBe(false)
+    expect(rowEl(w, 't2').find('.bt-confirm').exists()).toBe(false)
+  })
+
+  it('a flagged row without a reason shows the badge with the old tooltip and no reason line; engine codes read as words', async () => {
+    mockFetch(() => json({ rows: [flagged({ reviewReason: null }), { ...flagged({ reviewReason: 'ambiguous_store' }), id: 't2' }], nextCursor: null }))
+    const w = await mountTable()
+    expect(rowEl(w, 't1').find('.bt-reason').exists()).toBe(false)
+    expect(rowEl(w, 't1').get('.bt-badge').attributes('title')).toBe('Needs a look')
+    expect(rowEl(w, 't2').get('.bt-reason').text()).toBe('The store could fit more than one category')
+  })
+
+  it('shows the reason in the card layout too', async () => {
+    width = 400
+    mockFetch(() => json({ rows: [flagged()], nextCursor: null }))
+    const w = await mountTable()
+    expect(w.get('li[data-row-key="t1"] .bt-reason').text()).toBe(REASON)
+    expect(w.get('li[data-row-key="t1"] .bt-confirm').attributes('aria-label')).toBe('Looks right: Chain X')
+  })
+
+  it('confirm saves the CURRENT category, then the badge, reason and control are gone and edited is emitted', async () => {
+    mockFetch((url, init) => (init?.method === 'PATCH' ? json({ txn: reviewed('t1') }) : json({ rows: [flagged()], nextCursor: null })))
+    const w = await mountTable()
+    const btn = rowEl(w, 't1').get('.bt-confirm')
+    expect(btn.attributes('aria-label')).toBe('Looks right: Chain X')
+    await btn.trigger('click')
+    await flushPromises()
+    const patches = calls.filter((c) => c.method === 'PATCH')
+    expect(patches).toHaveLength(1)
+    expect(patches[0].url.pathname).toBe('/api/budget/transactions/t1')
+    expect(patches[0].body).toEqual({ categoryId: 'dining', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    const r = rowEl(w, 't1')
+    expect(r.find('.bt-badge').exists()).toBe(false)
+    expect(r.find('.bt-reason').exists()).toBe(false)
+    expect(r.find('.bt-confirm').exists()).toBe(false)
+    expect(selectOf(w, 't1').value).toBe('dining')
+    expect(w.emitted('edited')).toEqual([[{ txnId: 't1', ruleApplied: false, reapplied: 0 }]])
+  })
+
+  it('confirm on a row that is not spending saves its kind', async () => {
+    mockFetch((url, init) => (init?.method === 'PATCH' ? json({ txn: reviewed('t1', { kind: 'transfer' }) }) : json({ rows: [flagged({ kind: 'transfer' })], nextCursor: null })))
+    const w = await mountTable()
+    await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+    await flushPromises()
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ kind: 'transfer', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+  })
+
+  it('a failed confirm puts the row back (badge, reason, control) and shows the error a failed category change shows', async () => {
+    mockFetch((url, init) => (init?.method === 'PATCH' ? json({ error: 'server_error' }, 500) : json({ rows: [flagged()], nextCursor: null })))
+    const w = await mountTable()
+    await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+    await flushPromises()
+    expect(w.get('[role="alert"]').text()).toBe('Couldn’t save (500). The row is back as it was.')
+    expect(rowEl(w, 't1').find('.bt-badge').exists()).toBe(true)
+    expect(rowEl(w, 't1').find('.bt-reason').text()).toBe(REASON)
+    expect(rowEl(w, 't1').get('.bt-confirm').attributes('disabled')).toBeUndefined()
+    expect(w.emitted('edited')).toBeUndefined()
+  })
+
+  it('in the review list the confirmed row stays, dimmed, until the list reloads', async () => {
+    mockFetch((url, init) => (init?.method === 'PATCH' ? json({ txn: reviewed('t1') }) : json({ rows: [flagged()], nextCursor: null })))
+    const w = await mountTable({ query: { ...QUERY, review: true } })
+    await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+    await flushPromises()
+    expect(rowEl(w, 't1').classes()).toContain('et-dimmed')
+    expect(w.text()).toContain('Reviewed, so it leaves the review list')
+  })
+
+  it('read-only: the reason shows but there is no confirm control', async () => {
+    mockFetch(() => json({ rows: [flagged()], nextCursor: null }))
+    const w = await mountTable({ canEdit: false })
+    expect(rowEl(w, 't1').get('.bt-reason').text()).toBe(REASON)
+    expect(w.find('.bt-confirm').exists()).toBe(false)
+  })
+})
+
 describe('BudgetTable layouts and highlight', () => {
   it('under 600 px it is a card list: line 1 date, merchant, amount; line 2 the category select; a dot per row', async () => {
     width = 400
