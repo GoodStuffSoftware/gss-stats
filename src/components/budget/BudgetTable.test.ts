@@ -297,6 +297,26 @@ describe('BudgetTable and its parent', () => {
   })
 })
 
+describe('BudgetTable purpose note', () => {
+  const rows = () => [txn('t1', { note: 'Birthday gift for a friend (made-up)' }), txn('t2', { merchantName: 'Shop Y' }), txn('t3', { merchantName: 'Shop Z', note: '' })]
+  it('shows a non-empty note under the merchant with the full text in the title, and nothing for rows without one', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    const note = rowEl(w, 't1').get('.bt-note')
+    expect(note.text()).toBe('Birthday gift for a friend (made-up)')
+    expect(note.attributes('title')).toBe('Birthday gift for a friend (made-up)')
+    expect(rowEl(w, 't2').find('.bt-note').exists()).toBe(false)
+    expect(rowEl(w, 't3').find('.bt-note').exists()).toBe(false)
+  })
+  it('shows it in the card layout too', async () => {
+    width = 400
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    expect(w.get('li[data-row-key="t1"] .bt-note').text()).toBe('Birthday gift for a friend (made-up)')
+    expect(w.find('li[data-row-key="t2"] .bt-note').exists()).toBe(false)
+  })
+})
+
 describe('BudgetTable layouts and highlight', () => {
   it('under 600 px it is a card list: line 1 date, merchant, amount; line 2 the category select; a dot per row', async () => {
     width = 400
