@@ -100,17 +100,19 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
     >
       <template #cell-merchant="{ row }">
         <span class="bt-merchant" :title="row.description">{{ row.merchantName || row.description }}</span>
-        <span v-if="row.needsReview" class="bt-badge" :title="reviewReasonText(row.reviewReason) ?? 'Needs a look'">Review</span>
-        <button
-          v-if="row.needsReview && canEdit"
-          type="button"
-          class="bt-confirm"
-          title="Looks right"
-          :aria-label="'Looks right: ' + rowLabel(row)"
-          :disabled="!!rowState[row.id]?.pending"
-          data-testid="review-confirm"
-          @click="model.confirmReview(row.id)"
-        >✓</button>
+        <span v-if="row.needsReview" class="bt-flags">
+          <span class="bt-badge" :title="reviewReasonText(row.reviewReason) ?? 'Needs a look'">Review</span>
+          <button
+            v-if="canEdit"
+            type="button"
+            class="bt-confirm"
+            title="Looks right"
+            :aria-label="'Looks right: ' + rowLabel(row)"
+            :disabled="!!rowState[row.id]?.pending"
+            data-testid="review-confirm"
+            @click="model.confirmReview(row.id)"
+          >✓</button>
+        </span>
         <span v-if="row.note" class="bt-note" :title="row.note">{{ row.note }}</span>
         <span
           v-if="row.needsReview && reviewReasonText(row.reviewReason)"
@@ -172,14 +174,17 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
 }
 .bt-reason {
   display: block;
-  max-width: 36ch;
+  max-width: 48ch;
   margin-top: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
+  line-height: 1.3;
   font-style: italic;
   color: rgb(var(--ink-2));
+}
+.bt-flags {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 .bt-confirm {
   margin-left: 6px;
