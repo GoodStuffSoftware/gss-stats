@@ -1,10 +1,10 @@
 // Browser calls behind the Budget table (docs/adr/0007-budget-section.md): a page of transactions, the
-// PATCH of one row, and the rule made from an edit. Every route answers JSON; an error body is
+// PATCH of one row, a new category, and the rule made from an edit. Every route answers JSON; an error body is
 // { error, message?, current? }. A failure is thrown as BudgetApiError, whose message reads "budget <status>: ..."
 // so the app's 401 handling (session.ts isAuthError) recognises it. A 401 or a network failure runs the
 // confirming session probe (the same one src/api.ts runs) before the error is rethrown.
 import { checkSessionExpired, isAuthError, isNetworkError } from '../../session'
-import type { ApiError, BudgetErrorCode, RuleFromEdit, RuleResponse, Txn, TxnPage, TxnPatch, TxnPatchResponse, TxnQuery } from './types'
+import type { ApiError, BudgetErrorCode, CategoryCreateRequest, CategoryCreateResponse, RuleFromEdit, RuleResponse, Txn, TxnPage, TxnPatch, TxnPatchResponse, TxnQuery } from './types'
 
 export class BudgetApiError extends Error {
   readonly status: number
@@ -60,6 +60,11 @@ export function fetchTxnPage(q: TxnQuery): Promise<TxnPage> {
 
 export function patchTxn(id: string, patch: TxnPatch): Promise<TxnPatchResponse> {
   return call<TxnPatchResponse>(`/transactions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+/** POST /categories: make a category (or get the one of that name, any letter case: `created` is false). */
+export function createCategory(name: string): Promise<CategoryCreateResponse> {
+  return call<CategoryCreateResponse>('/categories', { method: 'POST', body: JSON.stringify({ name } satisfies CategoryCreateRequest) })
 }
 
 export function createRule(req: RuleFromEdit): Promise<RuleResponse> {

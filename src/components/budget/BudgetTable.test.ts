@@ -62,7 +62,19 @@ async function mountTable(over: Partial<BudgetTableProps> = {}) {
   return wrapper
 }
 const rowEl = (w: VueWrapper, id: string) => w.get(`[data-row-key="${id}"]`)
-const selectOf = (w: VueWrapper, id: string) => rowEl(w, id).get('select').element as HTMLSelectElement
+const comboOf = (w: VueWrapper, id: string) => rowEl(w, id).get('input[role="combobox"]')
+/** What the category field shows: the label of the current category. */
+const comboValue = (w: VueWrapper, id: string) => (comboOf(w, id).element as HTMLInputElement).value
+const optionsShown = (w: VueWrapper) => w.findAll('[role="option"]')
+/** Opens the row's category list and clicks the option with this label. */
+async function pick(w: VueWrapper, id: string, label: string) {
+  await comboOf(w, id).trigger('click')
+  await flushPromises()
+  const opt = optionsShown(w).find((o) => o.text() === label)
+  if (!opt) throw new Error('no option "' + label + '"')
+  await opt.trigger('click')
+  await flushPromises()
+}
 
 describe('BudgetTable loading and paging', () => {
   it('loads the first page for the query and shows date, merchant, account, category and amount', async () => {
@@ -76,7 +88,7 @@ describe('BudgetTable loading and paging', () => {
     expect(first).toContain('Chain X')
     expect(first).toContain('Checking A')
     expect(first).toContain('-$12.34')
-    expect(selectOf(w, 't1').value).toBe('groceries')
+    expect(comboValue(w, 't1')).toBe('Groceries')
     expect(w.text()).not.toContain('Load more')
   })
 
@@ -155,11 +167,8 @@ describe('BudgetTable editing', () => {
       return json({ rows: [txn('t1')], nextCursor: null })
     })
     const w = await mountTable()
-    const sel = selectOf(w, 't1')
-    sel.value = 'fuel'
-    await w.get('[data-row-key="t1"] select').trigger('change')
-    await w.vm.$nextTick()
-    expect(selectOf(w, 't1').value).toBe('fuel') // before the server answered
+    await pick(w, 't1', 'Fuel')
+    expect(comboValue(w, 't1')).toBe('Fuel') // before the server answered
     const patch = calls.find((c) => c.method === 'PATCH')!
     expect(patch.url.pathname).toBe('/api/budget/transactions/t1')
     expect(patch.body).toEqual({ categoryId: 'fuel', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
@@ -175,9 +184,9 @@ describe('BudgetTable editing', () => {
       ? json({ error: 'conflict', current: txn('t1', { categoryId: 'dining', updatedAt: 'SERVER' }) }, 409)
       : json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable()
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
-    expect(selectOf(w, 't1').value).toBe('dining')
+    expect(comboValue(w, 't1')).toBe('Dining')
     expect(w.get('[role="alert"]').text()).toBe('Changed by someone else. It is now Dining.')
     expect(w.emitted('edited')).toBeUndefined()
   })
@@ -186,9 +195,9 @@ describe('BudgetTable editing', () => {
     mockFetch((url, init) => (init?.method === 'PATCH' ? new TypeError('Failed to fetch') : json({ rows: [txn('t1')], nextCursor: null })))
     // the session probe after a network failure is a fetch too; let it answer
     const w = await mountTable()
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
-    expect(selectOf(w, 't1').value).toBe('groceries')
+    expect(comboValue(w, 't1')).toBe('Groceries')
     expect(w.get('[role="alert"]').text()).toMatch(/Couldn’t save/)
     expect(w.emitted('edited')).toBeUndefined()
   })
@@ -198,9 +207,11 @@ describe('BudgetTable editing', () => {
       ? json({ txn: txn('t1', { kind: 'transfer', updatedAt: 'N' }) })
       : json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable()
-    const options = Array.from(selectOf(w, 't1').querySelectorAll('optgroup[label="Not spending"] option')).map((o) => o.textContent)
+    await comboOf(w, 't1').trigger('click')
+    const options = optionsShown(w).filter((o) => o.element.closest('[role="group"][aria-label="Not spending"]')).map((o) => o.text())
     expect(options).toEqual(['Transfer', 'Income', 'Exclude'])
-    await w.get('[data-row-key="t1"] select').setValue('kind:transfer')
+    await comboOf(w, 't1').trigger('keydown', { key: 'Escape' })
+    await pick(w, 't1', 'Transfer')
     await flushPromises()
     expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ kind: 'transfer', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
     expect(w.emitted('edited')).toHaveLength(1)
@@ -211,16 +222,16 @@ describe('BudgetTable editing', () => {
       ? json({ txn: txn('t1', { categoryId: 'fuel', updatedAt: 'N' }) })
       : json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable({ query: { ...QUERY, category: 'groceries' } })
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
     expect(rowEl(w, 't1').classes()).toContain('et-dimmed')
     expect(w.text()).toContain('Moved to Fuel')
   })
 
-  it('read-only when canEdit is false: no select, no buttons, the category as text', async () => {
+  it('read-only when canEdit is false: no category field, no buttons, the category as text', async () => {
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable({ canEdit: false })
-    expect(w.find('select').exists()).toBe(false)
+    expect(w.find('input').exists()).toBe(false)
     expect(w.find('tbody button').exists()).toBe(false)
     expect(rowEl(w, 't1').text()).toContain('Groceries')
   })
@@ -238,7 +249,7 @@ describe('BudgetTable "Use for all"', () => {
   it('offers the rule after a category change, shows how many rows changed and emits edited', async () => {
     mockFetch(rulesFetch(3))
     const w = await mountTable()
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
     const offer = w.get('button.et-action')
     expect(offer.text()).toBe('Use for all Chain X')
@@ -253,7 +264,7 @@ describe('BudgetTable "Use for all"', () => {
       [{ txnId: 't1', ruleApplied: false, reapplied: 0 }],
       [{ txnId: 't1', ruleApplied: true, reapplied: 3 }],
     ])
-    expect(selectOf(w, 't2').value).toBe('fuel') // the other row of that merchant on the page followed
+    expect(comboValue(w, 't2')).toBe('Fuel') // the other row of that merchant on the page followed
   })
 
   it('shows no "Use for all" when the row\'s key is shared (ruleSafe false), and a confirm does not offer it either', async () => {
@@ -261,7 +272,7 @@ describe('BudgetTable "Use for all"', () => {
       ? json({ txn: txn('t1', { categoryId: 'fuel', categorySource: 'manual', updatedAt: 'N', ruleSafe: false }) })
       : json({ rows: [txn('t1', { ruleSafe: false })], nextCursor: null })))
     const w = await mountTable()
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
     expect(w.find('button.et-action').exists()).toBe(false)
     expect(calls.some((c) => c.url.pathname === '/api/budget/rules')).toBe(false)
@@ -270,7 +281,7 @@ describe('BudgetTable "Use for all"', () => {
   it('says so when no other row changed', async () => {
     mockFetch(rulesFetch(0))
     const w = await mountTable()
-    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(w, 't1', 'Fuel')
     await flushPromises()
     await w.get('button.et-action').trigger('click')
     await flushPromises()
@@ -295,7 +306,7 @@ describe('BudgetTable and its parent', () => {
     const { Parent, refreshKey, edits } = parent()
     wrapper = mount(Parent, { attachTo: document.body }) as unknown as VueWrapper
     await flushPromises()
-    await wrapper.get('[data-row-key="t1"] select').setValue('fuel')
+    await pick(wrapper, 't1', 'Fuel')
     await flushPromises()
     expect(edits).toHaveLength(1)
     expect(refreshKey.value).toBe(1)
@@ -375,7 +386,7 @@ describe('BudgetTable review reason and "Looks right"', () => {
     expect(r.find('.bt-badge').exists()).toBe(false)
     expect(r.find('.bt-reason').exists()).toBe(false)
     expect(r.find('.bt-confirm').exists()).toBe(false)
-    expect(selectOf(w, 't1').value).toBe('dining')
+    expect(comboValue(w, 't1')).toBe('Dining')
     expect(w.emitted('edited')).toEqual([[{ txnId: 't1', ruleApplied: false, reapplied: 0 }]])
   })
 
@@ -429,7 +440,7 @@ describe('BudgetTable layouts and highlight', () => {
     expect(line1).toContain('Review')
     expect(line1).toContain('-$12.34')
     expect(line1).not.toContain('Checking A')
-    expect(card.get('.et-line2 select').attributes('aria-label')).toBe('Category, Chain X')
+    expect(card.get('.et-line2 input[role="combobox"]').attributes('aria-label')).toBe('Category, Chain X')
     expect(card.find('.et-line2 .cs-dot').exists()).toBe(true)
   })
 
@@ -439,7 +450,7 @@ describe('BudgetTable layouts and highlight', () => {
       ? json({ txn: txn('t1', { categoryId: 'dining', updatedAt: 'N' }) })
       : json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable()
-    await w.get('li[data-row-key="t1"] select').setValue('dining')
+    await pick(w, 't1', 'Dining')
     await flushPromises()
     expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ categoryId: 'dining' })
   })
@@ -471,5 +482,100 @@ describe('BudgetTable layouts and highlight', () => {
 
   it('the generic table has no budget code in it', () => {
     expect(tableSrc).not.toMatch(/budget|categor|merchant|transaction/i)
+  })
+})
+
+describe('BudgetTable search and "Add category"', () => {
+  /** A parent that owns the category list, as BudgetSection does (meta.categories). */
+  function withCategories() {
+    const categories = ref<Category[]>([...CATS])
+    const added: Category[] = []
+    const Parent = defineComponent({
+      setup: () => () => h(BudgetTable, {
+        ...baseProps({ categories: categories.value }),
+        onCategoryAdded: (c: Category) => { added.push(c); categories.value = [...categories.value, c] },
+      }),
+    })
+    return { Parent, categories, added }
+  }
+  const addFetch = (over: (url: URL, init?: RequestInit) => Response | undefined = () => undefined) => (url: URL, init?: RequestInit) => {
+    const special = over(url, init)
+    if (special) return special
+    if (url.pathname === '/api/budget/categories') return json({ category: { id: 'u-boat-fees', label: 'Boat fees', color: null, sort: 1000 }, created: true }, 201)
+    if (init?.method === 'PATCH') return json({ txn: txn('t1', { categoryId: 'u-boat-fees', categorySource: 'manual', updatedAt: '2026-10-07T00:00:00Z' }) })
+    return json({ rows: [txn('t1'), txn('t2')], nextCursor: null })
+  }
+  async function typeAndEnter(w: VueWrapper, id: string, text: string) {
+    const input = comboOf(w, id)
+    await input.trigger('click')
+    ;(input.element as HTMLInputElement).value = text
+    await input.trigger('input')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+  }
+
+  it('typing filters the row\'s list', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    await comboOf(w, 't1').trigger('click')
+    ;(comboOf(w, 't1').element as HTMLInputElement).value = 'IN'
+    await comboOf(w, 't1').trigger('input')
+    expect(optionsShown(w).map((o) => o.text()).filter((l) => !l.startsWith('Add'))).toEqual(['Dining', 'Income'])
+  })
+
+  it('Add category: creates it, then saves the row with it as any category edit, and it is in every list at once', async () => {
+    mockFetch(addFetch())
+    const { Parent, added } = withCategories()
+    wrapper = mount(Parent, { attachTo: document.body }) as unknown as VueWrapper
+    await flushPromises()
+    await typeAndEnter(wrapper, 't1', '  Boat fees ')
+    const writes = calls.filter((c) => c.method !== 'GET')
+    expect(writes.map((c) => `${c.method} ${c.url.pathname}`)).toEqual(['POST /api/budget/categories', 'PATCH /api/budget/transactions/t1'])
+    expect(writes[0].body).toEqual({ name: 'Boat fees' })
+    expect(writes[1].body).toEqual({ categoryId: 'u-boat-fees', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    expect(added).toEqual([{ id: 'u-boat-fees', label: 'Boat fees', color: null, sort: 1000 }])
+    expect(comboValue(wrapper, 't1')).toBe('Boat fees')
+    // the other row's list has it with no reload
+    await comboOf(wrapper, 't2').trigger('click')
+    expect(optionsShown(wrapper).map((o) => o.text())).toContain('Boat fees')
+    expect(calls.filter((c) => c.method === 'GET' && c.url.pathname === '/api/budget/transactions')).toHaveLength(1) // no reload
+  })
+
+  it('when the server already has that name it returns that category and the row takes it (no duplicate)', async () => {
+    mockFetch(addFetch((url) => (url.pathname === '/api/budget/categories'
+      ? json({ category: { id: 'fuel', label: 'Fuel', color: null, sort: 20 }, created: false })
+      : undefined)))
+    const { Parent } = withCategories()
+    wrapper = mount(Parent, { attachTo: document.body }) as unknown as VueWrapper
+    await flushPromises()
+    await typeAndEnter(wrapper, 't1', 'Fue')
+    const patch = calls.find((c) => c.method === 'PATCH')!
+    expect(patch.body).toMatchObject({ categoryId: 'fuel' })
+  })
+
+  it('a failed create leaves the row as it was, says so, and sends no PATCH', async () => {
+    mockFetch(addFetch((url) => (url.pathname === '/api/budget/categories' ? json({ error: 'bad_request', message: 'name: required' }, 400) : undefined)))
+    const { Parent, added } = withCategories()
+    wrapper = mount(Parent, { attachTo: document.body }) as unknown as VueWrapper
+    await flushPromises()
+    await typeAndEnter(wrapper, 't1', 'Boat fees')
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    expect(added).toEqual([])
+    expect(comboValue(wrapper, 't1')).toBe('Groceries')
+    expect(wrapper.get('[role="alert"]').text()).toBe('Couldn’t add the category (400).')
+    expect(rowEl(wrapper, 't1').find('input[role="combobox"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('a create that works but a save that fails (409) keeps the new category in the lists and shows the server row', async () => {
+    mockFetch(addFetch((url, init) => (init?.method === 'PATCH'
+      ? json({ error: 'conflict', current: txn('t1', { categoryId: 'dining', updatedAt: 'SERVER' }) }, 409)
+      : undefined)))
+    const { Parent, added } = withCategories()
+    wrapper = mount(Parent, { attachTo: document.body }) as unknown as VueWrapper
+    await flushPromises()
+    await typeAndEnter(wrapper, 't1', 'Boat fees')
+    expect(added).toHaveLength(1)
+    expect(comboValue(wrapper, 't1')).toBe('Dining')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Changed by someone else')
   })
 })

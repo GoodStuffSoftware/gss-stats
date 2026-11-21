@@ -2719,8 +2719,17 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   and never re-checks access.
 - **Database.** The D1 binding `BUDGET_DB` (database `gss-budget`, schema in `migrations/gss-budget/`) is
   used only by `functions/api/budget/**`. Routes: `meta`, `summary`, `transactions` (list, and
-  `PATCH transactions/:id`), `rules` (and `rules/apply`), `debts` (and `debts/:id`, `debts/:id/balance`).
-  Every response is `Cache-Control: private, no-store`; none of them touches the edge cache.
+  `PATCH transactions/:id`), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
+  `debts/:id`, `debts/:id/balance`). Every response is `Cache-Control: private, no-store`; none of them
+  touches the edge cache.
+- **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
+  Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
+  `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no
+  control or invisible characters. A name that already exists (any case) is not duplicated: the server
+  answers 200 with that category (`created: false`); a new one is 201 with the category. The id is
+  `u-<slug>` (a numbered suffix on a clash), it sorts after the spending categories, and the next palette
+  colour is its colour. The `u-` prefix is reserved: a seed or re-import never deletes, renames or recolours
+  such a category, and a manual edit to it is never re-pointed. No schema change; the creator is not recorded.
 - **Local setup.** `npm run budget:migrate:local` creates the local database. Turn a private seed plus a
   folder of import requests into one SQL file with
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run

@@ -1,13 +1,13 @@
 // The Budget table's logic, apart from the screen: columns, the category choices (incl. "Not spending"), the
 // optimistic edit with revert, the rule offer and cursor paging. BudgetTable.vue draws it; the tests drive it with
 // fake calls. State is Vue refs so the component can read them directly.
-import { reactive, ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import type { EditableColumn, RowStatus, SelectOption } from '../../components/table/EditableTable.vue'
 import { BudgetApiError } from './clientEdit'
 import { categoryColor, NONE_COLOR } from './colors'
 import {
   SPENDING_KINDS, UNCATEGORIZED,
-  type Account, type BudgetEditedEvent, type Category, type RuleFromEdit, type RuleResponse, type Txn, type TxnKind,
+  type Account, type BudgetEditedEvent, type Category, type CategoryCreateResponse, type RuleFromEdit, type RuleResponse, type Txn, type TxnKind,
   type TxnPage, type TxnPatch, type TxnPatchResponse, type TxnQuery,
 } from './types'
 
@@ -124,6 +124,8 @@ export interface TableDeps {
   fetchPage(q: TxnQuery): Promise<TxnPage>
   patch(id: string, p: TxnPatch): Promise<TxnPatchResponse>
   createRule(r: RuleFromEdit): Promise<RuleResponse>
+  /** Makes a category (the server answers with the existing one when the name is taken). Absent = the table cannot add. */
+  createCategory?(name: string): Promise<CategoryCreateResponse>
 }
 
 /** Why a row no longer belongs to the query, or null while it still does. Used to dim it ("moved to X"). */
@@ -136,7 +138,13 @@ export function leavesSlice(q: TxnQuery, t: Txn, categories: Category[]): string
 
 const NETWORK_MESSAGE = 'Couldn’t save. Check your connection and try again.'
 
-export function createTxnTable(deps: TableDeps, getCategories: () => Category[], onEdited: (e: BudgetEditedEvent) => void) {
+/** `onCategoryAdded` hears of every category the table made (or found by name), so the owner can put it in the lists. */
+export function createTxnTable(
+  deps: TableDeps,
+  getCategories: () => Category[],
+  onEdited: (e: BudgetEditedEvent) => void,
+  onCategoryAdded: (c: Category) => void = () => {},
+) {
   const rows = ref<Txn[]>([])
   const nextCursor = ref<string | null>(null)
   const loading = ref(false)
@@ -265,6 +273,27 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
     }
   }
 
+  /** `Add category "<name>"` on a row: make the category, show it in every list, then give it to the row as any other
+   *  category edit (same PATCH, manual source, audit row). If making it fails the row is left as it was, with the reason. */
+  async function addCategoryTo(id: string, name: string) {
+    if (!deps.createCategory || indexOf(id) < 0 || rowState[id]?.pending) return
+    setState(id, { pending: true })
+    let made: CategoryCreateResponse
+    try {
+      made = await deps.createCategory(name)
+    } catch (e) {
+      const msg = e instanceof BudgetApiError ? `Couldn’t add the category (${e.status}).` : NETWORK_MESSAGE
+      setState(id, { error: msg })
+      status.value = msg
+      return
+    }
+    onCategoryAdded(made.category)
+    // The owner's list is updated on the next tick; the edit below reads it for its confirmation text.
+    await nextTick()
+    setState(id, null)
+    await setSelection(id, made.category.id)
+  }
+
   /** "Looks right": save the row as it stands (its current category, or its kind when it is not spending) as a manual edit,
    *  which takes it off the review list. Picking the same option in the select again sends no change, hence this. */
   async function confirmReview(id: string) {
@@ -304,5 +333,5 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, confirmReview, useForAll }
+  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, addCategoryTo, confirmReview, useForAll }
 }

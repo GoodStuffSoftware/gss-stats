@@ -112,6 +112,32 @@ describe('the SQL against the real migration (local SQLite)', () => {
     expect(r).toEqual({ c: 'gifts', s: 'manual', note: 'mine' })
   })
 
+  it('a re-import never deletes, renames or recolours a category made in the app, and never re-points a row edited to it', () => {
+    const db = freshDb()
+    const sql = renderPlanSql(full)
+    db.exec(sql)
+    // What POST /api/budget/categories writes, then a manual edit of one row to it.
+    db.exec("INSERT INTO categories (id, label, color, sort, archived) VALUES ('u-hobbies', 'Hobbies', '#123456', 1000, 0), ('u-pet-food', 'Pet food', NULL, 1010, 0)")
+    const target = full.txns.find((t) => t.kind === 'spend' && t.pairId === null)!
+    db.prepare("UPDATE transactions SET category_id = 'u-hobbies', category_source = 'manual', rule_id = NULL, confidence = 100 WHERE id = ?").run(target.id)
+    const snapshot = () => db.prepare("SELECT id, label, color, sort, archived FROM categories WHERE id LIKE 'u-%' ORDER BY id").all()
+    const before = snapshot()
+    // Re-applying the same seed, and a changed one (a seed category renamed and recoloured), touches only seed ids.
+    db.exec(sql)
+    const changed = renderPlanSql({ ...full, categories: full.categories.map((c) => ({ ...c, label: c.label + ' v2', color: '#abcdef' })) })
+    db.exec(changed)
+    expect(snapshot()).toEqual(before)
+    expect(before).toHaveLength(2)
+    expect(db.prepare('SELECT label FROM categories WHERE id = ?').get(full.categories[0].id)).toEqual({ label: full.categories[0].label + ' v2' })
+    expect(db.prepare('SELECT category_id AS c, category_source AS s FROM transactions WHERE id = ?').get(target.id)).toEqual({ c: 'u-hobbies', s: 'manual' })
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+
+  it('refuses a seed category whose id is in the range reserved for categories made in the app', () => {
+    const bad = { ...full, categories: [...full.categories, { id: 'u-hobbies', label: 'Hobbies', color: null, sort: 5 }] }
+    expect(() => renderPlanSql(bad)).toThrow(/reserved/)
+  })
+
   it('a seed re-run refreshes seed rules but never overwrites a rule made from an edit', () => {
     const db = freshDb()
     const sql = renderPlanSql(full)
