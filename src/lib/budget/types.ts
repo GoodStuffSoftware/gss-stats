@@ -81,6 +81,9 @@ export interface TxnQuery { from: IsoDate; to: IsoDate; person: PersonFilter; ca
 export interface TxnPage { rows: Txn[]; nextCursor: string | null }
 export interface TxnPatch { categoryId?: string | null; kind?: TxnKind; note?: string | null; expectedUpdatedAt: string }
 export interface TxnPatchResponse { txn: Txn }
+/** POST /api/budget/categories. `created` is false when a category of that name (any letter case) already existed: it comes back as is. */
+export interface CategoryCreateRequest { name: string }
+export interface CategoryCreateResponse { category: Category; created: boolean }
 export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_store' }
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null

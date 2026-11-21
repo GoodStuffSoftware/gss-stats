@@ -6,21 +6,23 @@
 // - A new `query` starts over at the first page. So does a `refreshKey` change, except the one the parent makes in
 //   answer to our own `edited` (that would wipe the "moved to X" notes and the rule offer).
 // - An edit shows at once and is saved with PATCH (expectedUpdatedAt); a 409 or a failure puts the row back and says so.
+// - The category list is searchable and offers `Add category "<text>"` (POST /categories, then the same edit); the new
+//   category is reported up (`category-added`) so every list and the pie know it without a reload.
 // - After a category change the row offers "Use for all <merchant>" (POST /rules).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
-import { createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
+import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { budgetColumns, categoryOptions, createTxnTable, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
-import type { BudgetEditedEvent, BudgetTableProps, Txn } from '../../lib/budget/types'
+import type { BudgetEditedEvent, BudgetTableProps, Category, Txn } from '../../lib/budget/types'
 
 const props = defineProps<BudgetTableProps>()
-const emit = defineEmits<{ edited: [e: BudgetEditedEvent] }>()
+const emit = defineEmits<{ edited: [e: BudgetEditedEvent]; 'category-added': [c: Category] }>()
 
 const MAX_HIGHLIGHT_PAGES = 5
-const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule }
+const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule, createCategory }
 
 let ownEdit = false
 function onEdited(e: BudgetEditedEvent) {
@@ -32,7 +34,7 @@ function onEdited(e: BudgetEditedEvent) {
   })
 }
 
-const model = createTxnTable(deps, () => props.categories, onEdited)
+const model = createTxnTable(deps, () => props.categories, onEdited, (c) => emit('category-added', c))
 const { rows, rowState, status, loading, loadingMore, loadError, nextCursor } = model
 
 const columns = computed(() => budgetColumns(props.categories, props.accounts))
@@ -134,7 +136,9 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
           :color="rowDotColor(categories, row)"
           :label="label"
           :disabled="disabled"
+          allow-add
           @change="commit"
+          @add="(name: string) => model.addCategoryTo(row.id, name)"
         />
       </template>
       <template #empty>No transactions in this view.</template>

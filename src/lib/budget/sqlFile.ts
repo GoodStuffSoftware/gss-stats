@@ -4,6 +4,7 @@
 // literals, so strings are quoted here and numbers must be safe integers; nothing is spliced unchecked.
 import type { Account, Category, ImportPlan, MerchantRule, Person, StatementFacts, TxnInsert } from './types'
 import { REKIND_ON_PAIR } from './pairing'
+import { USER_CATEGORY_PREFIX } from './categoryName'
 
 /** D1 allows 100 KB per statement; stay a little under. */
 export const MAX_STATEMENT_BYTES = 100_000
@@ -42,6 +43,9 @@ function accountSql(a: Account, i: number): string {
 }
 
 function categorySql(c: Category): string {
+  // Ids that start with 'u-' belong to categories made in the app (POST /api/budget/categories); a seed that named
+  // one would overwrite that category's label, colour and place, so it is refused.
+  if (c.id.startsWith(USER_CATEGORY_PREFIX)) throw new RangeError(`category id "${c.id}" starts with "${USER_CATEGORY_PREFIX}", which is reserved for categories added in the app`)
   return `INSERT INTO categories (id, label, color, sort) VALUES (${list([sqlStr(c.id), sqlStr(c.label), sqlStr(c.color), sqlInt(c.sort)])}) ` +
     `ON CONFLICT(id) DO UPDATE SET label = excluded.label, color = excluded.color, sort = excluded.sort;`
 }

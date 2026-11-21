@@ -13,7 +13,7 @@
 // Props: `dark` (site theme), `today` (YYYY-MM-DD, tests only).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
-import type { DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import type { Category, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
@@ -149,6 +149,11 @@ function onDebtSaved() {
 function onEdited() {
   refreshKey.value++
 }
+/** A category made in the table: every list, dot and pie slice reads `meta.categories`, so it goes in there. */
+function onCategoryAdded(c: Category) {
+  const m = meta.value
+  if (m && !m.categories.some((x) => x.id === c.id)) meta.value = { ...m, categories: [...m.categories, c] }
+}
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────────────────────────────────
 onMounted(() => {
@@ -273,6 +278,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             :refresh-key="refreshKey"
             :highlight-id="highlightId"
             @edited="onEdited"
+            @category-added="onCategoryAdded"
           />
         </div>
       </template>

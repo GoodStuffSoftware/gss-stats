@@ -13,6 +13,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget pies label small slices outside the ring.** A slice with no room for text inside gets its name and share at the end of a short leader line, cut with an ellipsis to the room there is; labels never overlap each other, the ring or the chart edge, and the smallest are dropped when there is no room. The chart has more room at the sides, and the labels appear once the drill motion ends.
 - **Budget table shows a purchase's purpose.** A transaction with a note shows it as a small grey line under the merchant (one line, cut with an ellipsis when long, the full text on hover).
 
+- **Budget categories are searchable, and you can add your own.** The category list on a transaction filters as you type (any case, anywhere in the name) with arrow keys, Enter and Esc, and text that matches nothing offers "Add category", which creates it and applies it to that row in one step, with its own colour in every list and the pie.
+
 ### Changed
 - **Opening a spending slice takes a deliberate gesture.** A single click or tap on the pie now only highlights the slice and shows its tooltip; a double-click, a double-tap or pressing and holding for half a second opens it, and a hint under the pie says so. The list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
 
