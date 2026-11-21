@@ -341,6 +341,20 @@ describe('1.108.0 review-request rows change (errorRowsOnly entry)', () => {
   })
 })
 
+describe('1.108.1 landing visit rows change (errorRowsOnly entry)', () => {
+  const V1108_1 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.1')!
+  it('is dated 2026-11-21, names the path, and is in no auth, coach or report-line consumer, with no timeline marker of its own', () => {
+    expect(V1108_1.dateEt).toBe('2026-11-21')
+    expect(V1108_1.errorRowsOnly).toBe(true)
+    expect(V1108_1.note).toContain('/landing/sudoku-no-ads')
+    expect(markedChanges().some((c) => c.id === 'v1.108.1')).toBe(true)
+    expect(authMarkedChanges().some((c) => c.id === 'v1.108.1')).toBe(false)
+    expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.108.1')
+    expect(coachMeasurementNote('2099-03-01') ?? '').not.toContain('v1.108.1')
+    expect(RELEASES.some((r) => r.version === 'v1.108.1')).toBe(false)
+  })
+})
+
 describe('1.105.0 sw-update error-row change (errorRowsOnly entry)', () => {
   it('is flagged errorRowsOnly, dated 2026-10-28, and names the transient failure, the beacon path and the second-failure rule in plain words', () => {
     expect(V1105_DATE).toBe('2026-10-28')

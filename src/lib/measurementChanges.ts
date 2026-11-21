@@ -34,6 +34,9 @@
 // v1.108.0 (errorRowsOnly, no marker of its own): the store-review request rows /review-prompt/requested start. App only (Play and App
 // Store installs), never the web, once per device ever. The plain v1.108.0 web and Play markers (lib/releases.ts) mark the release.
 //
+// v1.108.1 (errorRowsOnly, no marker of its own): the no-ads landing page's visit rows (/landing/sudoku-no-ads) start, web only. The plain
+// v1.108.1 web marker (lib/releases.ts) marks the release, so a chart shows one line for it, not two.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -103,6 +106,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     id: 'v1.108.0',
     dateEt: '2026-11-11', // web live 2026-11-11T17:28:26Z; Play production promotion 17:52:16Z (1108000), Play review pending then. Same day as the plain v1.108.0 markers in lib/releases.ts
     note: 'review-request rows start: /review-prompt/requested, from the app only (Play and App Store installs, never the web), one row per device ever, from the 1.108.0 Play promotion 2026-11-11 17:52Z as devices update once Play review clears, so a chart of them is blank before and fills in slowly as the app updates',
+    errorRowsOnly: true,
+  },
+  {
+    id: 'v1.108.1',
+    dateEt: '2026-11-21', // web live 2026-11-21T23:32:57Z = 18:32:57 ET. Same day as the plain v1.108.1 web marker in lib/releases.ts
+    note: 'no-ads landing visit rows start: /landing/sudoku-no-ads on bestsudoku-web, from 23:32:57Z on 11-21, counts only, on the production host only, never for opted-out or consent-pending visitors, so a chart of them is blank before this',
     errorRowsOnly: true,
   },
 ]

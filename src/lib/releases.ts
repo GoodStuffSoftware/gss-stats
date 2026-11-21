@@ -335,6 +335,17 @@ export const RELEASES: ReleaseMarker[] = [
     note: 'Play production promotion 17:52:16Z 11-11 (1108000); Play review was still pending, so devices get it later and old and new Android builds mix until updates spread. The store-review request row (/review-prompt/requested) starts as devices update.',
     major: true, // a go-live moment (the app starts sending the review request rows): a labelled line, not a tick.
   },
+  // v1.108.1 (web only): the no-ads landing page starts sending the counts-only beacon (site bestsudoku-web, path
+  // /landing/sudoku-no-ads, plus the utm source/medium/campaign when present; production host only, honours opt-out and EU consent).
+  // Rows under /landing/ start at this instant and none exist before it. A labelled line, the one marker for it: the matching
+  // measurement entry (v1.108.1 in lib/measurementChanges.ts, errorRowsOnly) mints none.
+  {
+    version: 'v1.108.1 web',
+    dateEt: '2026-11-21', // web live 2026-11-21T23:32:57Z = 18:32:57 ET
+    note: 'Web live 23:32:57Z 11-21. The no-ads landing page starts sending the counts-only visit row (/landing/sudoku-no-ads), so its chart is blank before this and fills in from here.',
+    label: 'v1.108.1 landing visits',
+    major: true, // a go-live moment (the landing rows start): a labelled line, not a tick.
+  },
 ]
 
 /** The first WHOLE ET day the once-per-device first-finish rows (FIRST_FINISH_PATH, lib/popupEvents.ts) exist: the day after the
