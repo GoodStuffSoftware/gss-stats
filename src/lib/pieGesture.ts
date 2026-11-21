@@ -1,23 +1,30 @@
-// The deliberate "open this slice" gesture for a pie: a double-click (mouse), a double-tap (touch or pen) or a press
-// held for HOLD_MS (mouse, touch or pen). A single click or tap opens nothing (the chart's own hover and tooltip
-// are all it does), so a tooltip can be read without drilling by accident.
+// The "open this slice" gesture for a pie, by input kind (the event's `pointerType`):
+//   - mouse: a single click opens the slice (the hover tooltip stays). A habitual double-click opens only ONE
+//     level: a click is ignored while `blocked()` says the level is still opening (the caller knows the fetch and
+//     the motion) and for GUARD_MS after an open.
+//   - touch and pen: a single tap only shows the tooltip; two quick taps (a double-tap) or a press held for
+//     HOLD_MS open it. Pen is treated like touch: a pen tap has no hover step before it, so a lone tap must stay
+//     harmless, and it keeps what a pen did before.
 //
 // Pure of the DOM and of Chart.js: the caller says which slice lies under a point (`hit`) and what opening means
 // (`open`); the handlers take the fields they need of mouse and pointer events, so tests can feed plain objects.
 //
 // Rules
 //   - A hold cancels once the pointer has moved more than SLOP_PX, when a second finger comes down, when the
-//     pointer is cancelled (the browser took the touch for a scroll) or when it leaves the pie.
+//     pointer is cancelled (the browser took the touch for a scroll) or when it leaves the pie. A mouse has no
+//     hold: it clicks.
 //   - A hold that fired is over: the release must not count as a click, so the `click` that follows it is
-//     swallowed, and neither it nor the hold can start or finish a double-click or double-tap.
-//   - A double-click is the browser's own `dblclick` (it knows the system's double-click time). A double-tap is
-//     two quick taps on the same slice; a `dblclick` that a browser adds after it is ignored, as is one that
-//     follows an open within DEDUPE_MS, so one gesture opens once.
+//     swallowed, and neither it nor the hold can start or finish a double-tap.
+//   - A double-tap is two quick taps on the same slice. The browser's own `dblclick` after it (or after a hold)
+//     is ignored, as is one that follows an open within DEDUPE_MS, so one gesture opens once. A mouse `dblclick`
+//     never opens: its first click already did.
 export const HOLD_MS = 500
 export const SLOP_PX = 10
 export const DOUBLE_TAP_MS = 350
 export const TAP_SLOP_PX = 30
 const DEDUPE_MS = 600
+/** After an open, a mouse click is ignored for this long (the second click of a double-click). */
+export const GUARD_MS = 700
 
 export interface GesturePointer {
   pointerId: number
@@ -29,6 +36,8 @@ export interface GesturePointer {
 export interface GestureMouse {
   clientX: number
   clientY: number
+  /** Set on the browser's click events (they are PointerEvents); else the last pointerdown's type is used. */
+  pointerType?: string
   preventDefault?: () => void
   stopPropagation?: () => void
 }
@@ -37,6 +46,8 @@ export interface PieGestureOptions {
   /** The index of the slice under a point (client coordinates), or null. */
   hit: (point: { clientX: number; clientY: number }) => number | null
   open: (index: number) => void
+  /** True while the level that was just opened is still arriving or moving: a mouse click then does nothing. */
+  blocked?: () => boolean
   holdMs?: number
   slopPx?: number
   /** Test hooks. */
@@ -68,6 +79,9 @@ export function createPieGesture(opts: PieGestureOptions): PieGesture {
   let tap: { at: number; index: number; x: number; y: number } | null = null
   let swallowClick = false
   let lastOpenAt = -Infinity
+  let lastType = '' // the pointerType of the latest press: a click event may not say
+
+  const isMouse = (e: { pointerType?: string }) => (e.pointerType || lastType) === 'mouse'
 
   function open(index: number) {
     lastOpenAt = now()
@@ -86,7 +100,8 @@ export function createPieGesture(opts: PieGestureOptions): PieGesture {
   return {
     pointerdown(e) {
       swallowClick = false // a new press: whatever was left of the last one is over
-      if (e.pointerType === 'mouse' && e.button !== 0) return
+      lastType = e.pointerType
+      if (e.pointerType === 'mouse') return // a mouse opens on click, not on a hold
       if (press && !press.fired && e.pointerId !== press.id) {
         endPress() // a second finger: not a hold
         tap = null
@@ -123,7 +138,6 @@ export function createPieGesture(opts: PieGestureOptions): PieGesture {
         return
       }
       endPress()
-      if (e.pointerType === 'mouse') return // a mouse double-click is the browser's dblclick
       const t = now()
       if (tap && t - tap.at <= DOUBLE_TAP_MS && tap.index === p.index && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) <= TAP_SLOP_PX) {
         open(p.index)
@@ -139,13 +153,20 @@ export function createPieGesture(opts: PieGestureOptions): PieGesture {
       if (e.pointerType === 'mouse') cancelHold()
     },
     click(e) {
-      if (!swallowClick) return
-      swallowClick = false
-      e.preventDefault?.()
-      e.stopPropagation?.()
+      if (swallowClick) {
+        swallowClick = false
+        e.preventDefault?.()
+        e.stopPropagation?.()
+        return
+      }
+      if (!isMouse(e)) return // a tap only shows the tooltip
+      if (opts.blocked?.() || now() - lastOpenAt < GUARD_MS) return // the second click of a double-click: one level only
+      const index = opts.hit(e)
+      if (index !== null) open(index)
     },
     dblclick(e) {
       e.preventDefault?.() // no text selection from a double-click
+      if (isMouse(e)) return // its first click opened already
       if (now() - lastOpenAt < DEDUPE_MS) return // already opened by a hold or a double-tap
       const index = opts.hit(e)
       if (index !== null) open(index)

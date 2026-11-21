@@ -3,10 +3,14 @@
 // pie's SummaryQuery are computed from it, so they cannot disagree.
 //
 // URL (`?section=budget` plus `b_*` params; every other param is left alone, see sectionLink.ts):
-//   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_path (JSON
-//   [[level,key,label],...], omitted = top), b_group=account (omitted = merchant), b_review=1, b_tab=debts.
+//   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_group=account (omitted = merchant),
+//   b_review=1, b_tab=debts.
+// The drill path (category and store names) is NOT in the URL: the repo is public and URLs reach logs and synced
+// history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
+// still carries a `b_path` has it ignored and removed (searchWithoutPath).
 // Everything read back is validated; anything malformed falls back to its default.
-import { computed, reactive, watch } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { createDrillHistory, readMark, readSteps, type DrillHistory } from './drillHistory'
 import { BUDGET_PARAM_PREFIX, budgetSectionOpen } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
@@ -93,24 +97,28 @@ const P = BUDGET_PARAM_PREFIX
 const PERSON_RE = /^[a-z0-9][\w-]{0,23}$/
 const STEP_TEXT_MAX = 120
 
-function parsePath(raw: string | null): DrillStep[] {
-  if (!raw) return []
-  try {
-    const arr = JSON.parse(raw) as unknown
-    if (!Array.isArray(arr) || arr.length > PATH_LEVELS.length) return []
-    const out: DrillStep[] = []
-    for (let i = 0; i < arr.length; i++) {
-      const t = arr[i] as unknown
-      if (!Array.isArray(t) || t[0] !== PATH_LEVELS[i]) return []
-      const key = t[1]
-      const label = t[2]
-      if (typeof key !== 'string' || !key || key.length > STEP_TEXT_MAX) return []
-      out.push({ level: PATH_LEVELS[i], key, label: typeof label === 'string' && label ? label.slice(0, STEP_TEXT_MAX) : key })
-    }
-    return out
-  } catch {
-    return []
+/** Drill steps read back from history.state (anything can be in there): the steps when they are a valid path
+ * (levels in order, at most PATH_LEVELS.length, plain strings), else null. */
+export function parseDrillSteps(raw: unknown): DrillStep[] | null {
+  if (!Array.isArray(raw) || raw.length > PATH_LEVELS.length) return null
+  const out: DrillStep[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const t = raw[i] as unknown
+    if (!t || typeof t !== 'object') return null
+    const { level, key, label } = t as Record<string, unknown>
+    if (level !== PATH_LEVELS[i] || typeof key !== 'string' || !key || key.length > STEP_TEXT_MAX) return null
+    out.push({ level: PATH_LEVELS[i], key, label: typeof label === 'string' && label ? label.slice(0, STEP_TEXT_MAX) : key })
   }
+  return out
+}
+
+/** `search` without the old `b_path` param (drill names do not ride in URLs); every other param kept. */
+export function searchWithoutPath(search: string): string {
+  const q = new URLSearchParams(search)
+  if (!q.has(`${P}path`)) return search
+  q.delete(`${P}path`)
+  const s = q.toString()
+  return s ? `?${s}` : ''
 }
 
 /** The view state a query string names; anything missing or malformed takes its default. */
@@ -130,7 +138,6 @@ export function stateFromSearch(search: string, today: IsoDate = todayIso()): Bu
   }
   const person = q.get(`${P}person`)
   if (person && (person === 'all' || PERSON_RE.test(person))) state.person = person
-  state.path = parsePath(q.get(`${P}path`))
   state.groupBy = q.get(`${P}group`) === 'account' ? 'account' : 'merchant'
   state.reviewOnly = q.get(`${P}review`) === '1'
   state.tab = q.get(`${P}tab`) === 'debts' ? 'debts' : 'spending'
@@ -145,7 +152,6 @@ export function searchWithState(search: string, state: BudgetViewState): string 
   q.set(`${P}from`, state.from)
   q.set(`${P}to`, state.to)
   if (state.person !== 'all') q.set(`${P}person`, state.person)
-  if (state.path.length) q.set(`${P}path`, JSON.stringify(state.path.map((s) => [s.level, s.key, s.label])))
   if (state.groupBy === 'account') q.set(`${P}group`, 'account')
   if (state.reviewOnly) q.set(`${P}review`, '1')
   if (state.tab === 'debts') q.set(`${P}tab`, 'debts')
@@ -190,10 +196,25 @@ export function txnQueryOf(state: BudgetViewState): TxnQuery {
 // ── The live state ────────────────────────────────────────────────────────────────────────────────────────
 export function useBudgetViewState(today: IsoDate = todayIso()) {
   const state = reactive<BudgetViewState>(stateFromSearch(globalThis.location?.search ?? '', today))
+  // The drill path is not in the URL. An old link may still carry one: drop it from the address bar. A reload (or
+  // a Back onto an entry of an earlier visit) puts the path back from the entry's own history.state, when that
+  // still parses; otherwise the section starts at the top.
+  try {
+    const loc = globalThis.location
+    if (loc && budgetSectionOpen(loc.search)) {
+      const clean = searchWithoutPath(loc.search)
+      if (clean !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + clean + loc.hash)
+      const kept = readSteps(globalThis.history?.state, parseDrillSteps)
+      if (kept) state.path = kept
+    }
+  } catch {
+    // history unavailable or sandboxed: the section starts at the top
+  }
   const summaryQuery = computed(() => summaryQueryOf(state))
   const txnQuery = computed(() => txnQueryOf(state))
 
-  // replaceState, not pushState: drilling adds no history entries. Skipped once the section is no longer
+  // replaceState, not pushState: this only rewrites the current entry (the drill's own entries are pushed by
+  // drillHistory.ts, in history.state). Skipped once the section is no longer
   // the one in the address bar (App closed it), so a late write cannot bring `section=budget` back.
   function writeUrl() {
     try {
@@ -207,9 +228,38 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   }
   watch(state, writeUrl, { deep: true })
 
-  /** Re-read the address bar (back/forward). */
-  function readUrl() {
-    Object.assign(state, stateFromSearch(globalThis.location?.search ?? '', today))
+  // Back/Forward over the drill levels (drillHistory.ts): one history entry per level, in history.state only.
+  // Only inside a component; a bare call (tests, tools) touches no history.
+  let drill: DrillHistory<DrillStep> | null = null
+  if (getCurrentInstance() && globalThis.history && globalThis.window) {
+    const copy = () => state.path.map((x) => ({ ...x }))
+    const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy, parseSteps: parseDrillSteps })
+    drill = d
+    // sync: the entry is pushed before writeUrl (later in the flush) stamps the new level on the address bar
+    watch(() => state.path.length, () => d.pathChanged(copy()), { flush: 'sync' })
+    // the steps kept for Forward mean nothing under another range, person, grouping or review filter
+    watch(() => [state.from, state.to, state.person, state.groupBy, state.reviewOnly], () => d.forgetForward())
+    const onPop = (e: PopStateEvent) => d.popped(e.state, budgetSectionOpen(globalThis.location?.search ?? ''))
+    // registered before BudgetSection's own readUrl listener (its onMounted comes after this call), so a foreign
+    // entry is flagged as settling before readUrl changes the path
+    onMounted(() => {
+      d.start()
+      globalThis.addEventListener('popstate', onPop)
+    })
+    onBeforeUnmount(() => {
+      globalThis.removeEventListener('popstate', onPop)
+      d.end() // the entry the user is on (a page the app moved to) keeps no drill state
+    })
+  }
+
+  /** Re-read the address bar (back/forward). A popstate onto one of the drill entries this session pushed
+   * (drillHistory.ts) is left alone: Back/Forward there only moves the drill path, and re-reading the older
+   * entry's address would also roll back the range or person chosen since. */
+  function readUrl(e?: PopStateEvent) {
+    if (e && drill && readMark(e.state)?.s === drill.session) return
+    // the address names no drill path: whatever is on screen stays (drillHistory.ts sets it from the entry)
+    const { path: _path, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
+    Object.assign(state, fromUrl)
   }
   /** False (and nothing changes) for a range the server would refuse. */
   function setRange(from: IsoDate, to: IsoDate): boolean {

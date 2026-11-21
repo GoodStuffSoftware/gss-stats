@@ -98,10 +98,10 @@ describe('SpendingPanel: drilling', () => {
     expect(w.emitted('drill')).toBeUndefined()
   })
 
-  it('a single click on the chart does not drill (it only shows the tooltip); a hint says how to open a slice', () => {
+  it('the chart itself does not drill on a click (the pie gesture does, by input); a hint says how to open a slice', () => {
     const w = mountPanel()
     expect(w.findComponent(DrillPie).props('deliberate')).toBe(true)
-    expect(w.get('[data-testid="pie-hint"]').text()).toContain('Double-click or press and hold')
+    expect(w.get('[data-testid="pie-hint"]').text()).toMatch(/^(Click a slice|Press and hold a slice) to open it$/)
     w.findComponent(ChartStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
     expect(w.emitted('drill')).toBeUndefined()
   })

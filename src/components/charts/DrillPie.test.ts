@@ -265,42 +265,143 @@ describe('DrillPie deliberate picking', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  it('shows a hint under the pie; without deliberate there is none', () => {
-    expect(mountDeliberate().get('[data-testid="pie-hint"]').text()).toBe('Double-click or press and hold a slice to open it')
+  /** A whole mouse click on the chart. */
+  const mouseClick = (w: VueWrapper, x = 50) => {
+    fire(w, 'pointerdown', x)
+    vi.advanceTimersByTime(60)
+    fire(w, 'pointerup', x)
+    fire(w, 'click', x)
+  }
+  const setFinePointer = (fine: boolean) =>
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) =>
+        ({ matches: q === '(hover: hover) and (pointer: fine)' ? fine : false, media: q, addEventListener: () => {}, removeEventListener: () => {} }) as unknown as MediaQueryList,
+    )
+
+  it('the hint matches the input: click on a fine pointer with hover, press and hold otherwise; none without deliberate', () => {
+    setFinePointer(true)
+    expect(mountDeliberate().get('[data-testid="pie-hint"]').text()).toBe('Click a slice to open it')
+    setFinePointer(false)
+    expect(mountDeliberate().get('[data-testid="pie-hint"]').text()).toBe('Press and hold a slice to open it')
     expect(mountPie().find('[data-testid="pie-hint"]').exists()).toBe(false)
   })
 
-  it('a click on the chart, or the chart\'s own long-press, does not pick', () => {
+  it('the hint follows the pointer media query when it changes', async () => {
+    let fine = false
+    let onChange = () => {}
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) =>
+        ({
+          get matches() {
+            return q === '(hover: hover) and (pointer: fine)' && fine
+          },
+          media: q,
+          addEventListener: (_: string, fn: () => void) => (onChange = fn),
+          removeEventListener: () => {},
+        }) as unknown as MediaQueryList,
+    )
+    const w = mountDeliberate()
+    expect(w.get('[data-testid="pie-hint"]').text()).toBe('Press and hold a slice to open it')
+    fine = true
+    onChange()
+    await w.vm.$nextTick()
+    expect(w.get('[data-testid="pie-hint"]').text()).toBe('Click a slice to open it')
+  })
+
+  it('the chart\'s own click and long-press do not pick', () => {
     const w = mountDeliberate()
     w.findComponent(CanvasStub).vm.$emit('point', { index: 1, datasetIndex: 0, x: 0, y: 0 })
-    fire(w, 'pointerdown')
-    vi.advanceTimersByTime(100)
-    fire(w, 'pointerup')
-    fire(w, 'click')
     expect(w.emitted('select')).toBeUndefined()
   })
 
-  it('a double-click picks the slice under the pointer', () => {
+  it('a mouse click picks the slice under the pointer', () => {
     const w = mountDeliberate()
-    fire(w, 'dblclick', 150)
+    mouseClick(w, 150)
     expect(w.emitted('select')).toEqual([['b']])
   })
 
-  it('a hold picks it, and the release after it does not pick again or click through', () => {
+  it('a mouse double-click picks ONE level: the second click and the dblclick are ignored', () => {
     const w = mountDeliberate()
-    fire(w, 'pointerdown', 50)
+    mouseClick(w, 50)
+    vi.advanceTimersByTime(90)
+    mouseClick(w, 50)
+    fire(w, 'dblclick', 50)
+    expect(w.emitted('select')).toEqual([['a']])
+  })
+
+  it('clicks are ignored while the new level is on its way and while it moves, and work again after', async () => {
+    const w = mountDeliberate()
+    mouseClick(w, 50)
+    expect(w.emitted('select')).toEqual([['a']])
+    // the new slices arrive after a while (a fetch): still blocked
+    vi.advanceTimersByTime(1000)
+    mouseClick(w, 150)
+    expect(w.emitted('select')).toEqual([['a']])
+    await w.setProps({ slices: [{ key: 'n1', label: 'N one', value: 5, color: '#111111' }, { key: 'n2', label: 'N two', value: 5, color: '#222222' }], transition: { key: 'a', dir: 'in' } })
+    mouseClick(w, 150) // the motion plays
+    expect(w.emitted('select')).toEqual([['a']])
+    vi.advanceTimersByTime(560 + 250)
+    mouseClick(w, 150)
+    expect(w.emitted('select')).toEqual([['a'], ['n2']])
+  })
+
+  it('a pick that brings no new level does not lock the pie for good', () => {
+    const w = mountDeliberate()
+    mouseClick(w, 50)
+    vi.advanceTimersByTime(1600) // nothing arrived
+    mouseClick(w, 150)
+    expect(w.emitted('select')).toEqual([['a'], ['b']])
+  })
+
+  it('shows a pointer cursor over a slice a click can pick, and none off the pie or over an inert slice', () => {
+    const w = mountDeliberate()
+    const box = w.get('.dp-canvas').element as HTMLElement
+    fire(w, 'pointermove', 50)
+    expect(box.style.cursor).toBe('pointer')
+    vi.spyOn(Chart, 'getChart').mockReturnValue({ getElementsAtEventForMode: () => [] } as never)
+    fire(w, 'pointermove', 500)
+    expect(box.style.cursor).toBe('')
+    vi.spyOn(Chart, 'getChart').mockReturnValue({ getElementsAtEventForMode: () => [{ index: 2, datasetIndex: 0 }] } as never) // "Other (3)", inert
+    fire(w, 'pointermove', 50)
+    expect(box.style.cursor).toBe('')
+  })
+
+  it('a finger moving over the pie sets no cursor, and leaving the pie clears it', () => {
+    const w = mountDeliberate()
+    const box = w.get('.dp-canvas').element as HTMLElement
+    fire(w, 'pointermove', 50, 50, { pointerType: 'touch' })
+    expect(box.style.cursor).toBe('')
+    fire(w, 'pointermove', 50)
+    expect(box.style.cursor).toBe('pointer')
+    box.dispatchEvent(Object.assign(new Event('pointerleave'), { pointerId: 1, pointerType: 'mouse', clientX: 0, clientY: 0 }))
+    expect(box.style.cursor).toBe('')
+  })
+
+  it('a touch tap shows the tooltip only: nothing is picked, not even by the click the browser adds', () => {
+    const w = mountDeliberate()
+    fire(w, 'pointerdown', 50, 50, { pointerType: 'touch' })
+    vi.advanceTimersByTime(80)
+    fire(w, 'pointerup', 50, 50, { pointerType: 'touch' })
+    fire(w, 'click', 50, 50, { pointerType: 'touch' })
+    vi.advanceTimersByTime(2000)
+    expect(w.emitted('select')).toBeUndefined()
+  })
+
+  it('a touch hold picks it, and the release after it does not pick again or click through', () => {
+    const w = mountDeliberate()
+    fire(w, 'pointerdown', 50, 50, { pointerType: 'touch' })
     vi.advanceTimersByTime(500)
     expect(w.emitted('select')).toEqual([['a']])
-    fire(w, 'pointerup', 50)
-    const click = fire(w, 'click', 50)
+    fire(w, 'pointerup', 50, 50, { pointerType: 'touch' })
+    const click = fire(w, 'click', 50, 50, { pointerType: 'touch' })
     expect(click.defaultPrevented).toBe(true)
     expect(w.emitted('select')).toEqual([['a']])
   })
 
-  it('a hold that moves away picks nothing', () => {
+  it('a touch hold that moves away picks nothing', () => {
     const w = mountDeliberate()
-    fire(w, 'pointerdown', 50)
-    fire(w, 'pointermove', 70)
+    fire(w, 'pointerdown', 50, 50, { pointerType: 'touch' })
+    fire(w, 'pointermove', 70, 50, { pointerType: 'touch' })
     vi.advanceTimersByTime(1000)
     expect(w.emitted('select')).toBeUndefined()
   })
@@ -319,9 +420,13 @@ describe('DrillPie deliberate picking', () => {
   it('the folded bucket opens its list by the gesture, and is not reported', async () => {
     const members = [{ key: 'm1', label: 'M1', value: 500, color: '#111111' }, { key: 'm2', label: 'M2', value: 500, color: '#222222' }]
     const w = mountDeliberate({ slices: [SLICES[0], { key: '__b__', label: '2 smaller', value: 1000, color: '#C9C3B8', members }] })
-    fire(w, 'dblclick', 150)
+    mouseClick(w, 150)
     await w.vm.$nextTick()
     expect(w.emitted('select')).toBeUndefined()
+    expect(w.find('[data-testid="pie-members-__b__"]').exists()).toBe(true)
+    // a double-click's second click does not close it again
+    mouseClick(w, 150)
+    await w.vm.$nextTick()
     expect(w.find('[data-testid="pie-members-__b__"]').exists()).toBe(true)
   })
 
@@ -332,7 +437,7 @@ describe('DrillPie deliberate picking', () => {
     await w.setProps({ deliberate: false })
     expect(w.find('[data-testid="pie-hint"]').exists()).toBe(false)
     w.findComponent(CanvasStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
-    fire(w, 'dblclick', 150) // the gesture is off
+    mouseClick(w, 150) // the gesture is off
     expect(w.emitted('select')).toEqual([['b'], ['a']])
   })
 
