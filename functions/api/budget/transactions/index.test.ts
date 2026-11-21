@@ -28,6 +28,14 @@ describe('GET /api/budget/transactions', () => {
       'kind', 'kindSource', 'merchantKey', 'merchantName', 'needsReview', 'note', 'pairId', 'postedDate', 'principalCents', 'reviewReason', 'ruleId', 'storeNo', 'txnDate', 'updatedAt', 'updatedBy'])
   })
 
+  it('returns a stored note, and null when there is none', async () => {
+    const id = insertTxn(db, { merchant_name: 'Note Cafe', posted_date: '2026-12-02', kind: 'spend' })
+    db.sqlite.prepare('UPDATE transactions SET note = ? WHERE id = ?').run('Team lunch (made-up)', id)
+    const page = await json<TxnPage>(await get({ from: '2026-11-01', to: '2026-12-31', limit: '200' }))
+    expect(page.rows.find((r) => r.id === id)!.note).toBe('Team lunch (made-up)')
+    expect(page.rows.filter((r) => r.id !== id).every((r) => r.note === null)).toBe(true)
+  })
+
   it('scope all includes transfers, payments and income', async () => {
     const page = await json<TxnPage>(await get({ ...RANGE, scope: 'all', limit: '200' }))
     expect(new Set(page.rows.map((r) => r.kind))).toContain('card_payment')

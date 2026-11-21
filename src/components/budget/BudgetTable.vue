@@ -101,6 +101,7 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
       <template #cell-merchant="{ row }">
         <span class="bt-merchant" :title="row.description">{{ row.merchantName || row.description }}</span>
         <span v-if="row.needsReview" class="bt-badge" title="Needs a look">Review</span>
+        <span v-if="row.note" class="bt-note" :title="row.note">{{ row.note }}</span>
       </template>
       <template #cell-category="{ row }">
         <span class="bt-cat">
@@ -142,6 +143,16 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bt-note {
+  display: block;
+  max-width: 36ch;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
 }
 .bt-badge {
   margin-left: 6px;
