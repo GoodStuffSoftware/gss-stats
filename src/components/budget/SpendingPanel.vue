@@ -88,43 +88,45 @@ watch(
 
 <template>
   <div class="spending-panel" data-testid="spending-panel" :class="{ refreshing }" :aria-busy="refreshing">
-    <div class="sp-head">
-      <Crumbs :items="crumbItems" label="Spending path" @go="(i) => emit('crumb', i)" />
-      <div class="sp-controls">
-        <div v-if="path.length >= 1" class="sp-seg" role="radiogroup" aria-label="Group by">
+    <div class="sp-top">
+      <div class="sp-head">
+        <Crumbs :items="crumbItems" label="Spending path" @go="(i) => emit('crumb', i)" />
+        <div class="sp-controls">
+          <div v-if="path.length >= 1" class="sp-seg" role="radiogroup" aria-label="Group by">
+            <button
+              type="button"
+              role="radio"
+              class="sp-seg-btn"
+              :aria-checked="groupBy === 'merchant'"
+              data-testid="group-merchant"
+              @click="emit('group-by', 'merchant')"
+            >Stores</button>
+            <button
+              type="button"
+              role="radio"
+              class="sp-seg-btn"
+              :aria-checked="groupBy === 'account'"
+              data-testid="group-account"
+              @click="emit('group-by', 'account')"
+            >Accounts</button>
+          </div>
           <button
+            v-if="summary.reviewCount > 0 || reviewOnly"
             type="button"
-            role="radio"
-            class="sp-seg-btn"
-            :aria-checked="groupBy === 'merchant'"
-            data-testid="group-merchant"
-            @click="emit('group-by', 'merchant')"
-          >Stores</button>
-          <button
-            type="button"
-            role="radio"
-            class="sp-seg-btn"
-            :aria-checked="groupBy === 'account'"
-            data-testid="group-account"
-            @click="emit('group-by', 'account')"
-          >Accounts</button>
+            class="sp-review"
+            :class="{ on: reviewOnly }"
+            :aria-pressed="reviewOnly"
+            data-testid="review-toggle"
+            @click="emit('review-only', !reviewOnly)"
+          >Needs review ({{ summary.reviewCount }})</button>
         </div>
-        <button
-          v-if="summary.reviewCount > 0 || reviewOnly"
-          type="button"
-          class="sp-review"
-          :class="{ on: reviewOnly }"
-          :aria-pressed="reviewOnly"
-          data-testid="review-toggle"
-          @click="emit('review-only', !reviewOnly)"
-        >Needs review ({{ summary.reviewCount }})</button>
       </div>
-    </div>
 
-    <p class="sp-total" data-testid="spending-total">
-      <span class="sp-total-label">Total</span>
-      <strong class="sp-total-value">{{ formatAmount(summary.totalCents) }}</strong>
-    </p>
+      <p class="sp-total" data-testid="spending-total">
+        <span class="sp-total-label">Total</span>
+        <strong class="sp-total-value">{{ formatAmount(summary.totalCents) }}</strong>
+      </p>
+    </div>
 
     <div class="sp-body">
       <DrillPie
@@ -151,6 +153,14 @@ watch(
 }
 .spending-panel.refreshing {
   opacity: 0.6;
+}
+/* The header stack (crumbs, controls, total): ONE grid row of the section's panel layout (BudgetSection.vue), so
+ * the debt panel's header sits in the same row whatever height this one has. */
+.sp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 .sp-head {
   display: flex;

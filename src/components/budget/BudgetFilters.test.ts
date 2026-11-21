@@ -59,4 +59,20 @@ describe('BudgetFilters', () => {
     await w.get('[data-testid="budget-person-all"]').trigger('click')
     expect(w.emitted('person')).toEqual([['p2'], ['all']])
   })
+
+  it('show group: only when `hidden` is given; pressed state follows it; the last chart shown cannot be hidden', async () => {
+    expect(mountFilters().find('[data-testid="budget-show-spending"]').exists()).toBe(false)
+    const both = mountFilters({ hidden: [] })
+    const sp = both.get('[data-testid="budget-show-spending"]')
+    const debts = both.get('[data-testid="budget-show-debts"]')
+    expect([sp.attributes('aria-pressed'), debts.attributes('aria-pressed')]).toEqual(['true', 'true'])
+    expect([sp.attributes('disabled'), debts.attributes('disabled')]).toEqual([undefined, undefined])
+    await debts.trigger('click')
+    expect(both.emitted('toggle-panel')).toEqual([['debts']])
+
+    const one = mountFilters({ hidden: ['debts'] })
+    expect(one.get('[data-testid="budget-show-debts"]').attributes('aria-pressed')).toBe('false')
+    expect(one.get('[data-testid="budget-show-debts"]').attributes('disabled')).toBeUndefined() // the way back
+    expect(one.get('[data-testid="budget-show-spending"]').attributes('disabled')).toBeDefined() // the last one shown
+  })
 })

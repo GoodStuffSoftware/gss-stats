@@ -4,12 +4,21 @@
 // Props: from, to (YYYY-MM-DD), person ('all' or a person id), people (from /meta), today (tests only).
 // Emits: `range` ({from, to}; only ever a range the server accepts) and `person` (id or 'all').
 // Phone: the range select takes the full first row, the person control the second.
+// Also, when `hidden` is given, a "Show: Spending | Debts" group (desktop only: below 1024 px the Spending /
+// Debts tabs pick the one panel). Each button is a pressed-state toggle for one chart; `hidden` lists the
+// charts that are hidden, and the last chart shown cannot be hidden (its button is disabled), so hiding both is
+// not possible (lib/budget/panelVisibility.ts). Emits `toggle-panel` (the chart id); the parent keeps the state.
 import { computed, ref, watch } from 'vue'
 import type { IsoDate, Person, PersonFilter } from '../../lib/budget/types'
+import { canHide, type PanelId } from '../../lib/budget/panelVisibility'
 import { MAX_RANGE_DAYS, RANGE_PRESETS, presetOf, rangeForPreset, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
 
-const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate }>()
-const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter] }>()
+const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[] }>()
+const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter]; 'toggle-panel': [id: PanelId] }>()
+const SHOW_PANELS: { id: PanelId; label: string }[] = [
+  { id: 'spending', label: 'Spending' },
+  { id: 'debts', label: 'Debts' },
+]
 
 const todayStr = computed(() => props.today ?? todayIso())
 const matched = computed(() => presetOf(props.from, props.to, todayStr.value))
@@ -87,6 +96,21 @@ function onCustom() {
         @click="emit('person', p.id)"
       >{{ p.label }}</button>
     </div>
+    <div v-if="hidden" class="bf-person bf-show" role="group" aria-label="Show charts">
+      <span class="bf-label bf-show-label" aria-hidden="true">Show</span>
+      <button
+        v-for="p in SHOW_PANELS"
+        :key="p.id"
+        type="button"
+        class="bf-seg"
+        :class="{ on: !hidden.includes(p.id) }"
+        :aria-pressed="!hidden.includes(p.id)"
+        :disabled="!hidden.includes(p.id) && !canHide(hidden, p.id)"
+        :title="!hidden.includes(p.id) && !canHide(hidden, p.id) ? 'At least one chart stays shown' : undefined"
+        :data-testid="`budget-show-${p.id}`"
+        @click="emit('toggle-panel', p.id)"
+      >{{ p.label }}</button>
+    </div>
     <p v-if="rangeError" class="bf-error" role="alert">{{ rangeError }}</p>
   </div>
 </template>
@@ -137,6 +161,23 @@ function onCustom() {
 }
 .bf-seg:first-child {
   border-left: 0;
+}
+.bf-show {
+  align-items: center;
+}
+.bf-show-label {
+  padding: 0 10px;
+  align-self: center;
+}
+.bf-show .bf-seg:disabled {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+/* Below 1024 px BudgetSection shows one panel at a time (its tabs), so there is nothing to hide. */
+@media (max-width: 1023.98px) {
+  .bf-show {
+    display: none;
+  }
 }
 .bf-seg.on {
   background: rgb(var(--amber));

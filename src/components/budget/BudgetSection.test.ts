@@ -4,6 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 import { resetAccessProbe } from '../../lib/budget/clientRead'
+import { panelsKey } from '../../lib/budget/panelVisibility'
 import type { DebtSlice, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
@@ -425,5 +426,64 @@ describe('BudgetSection: tabs and URL', () => {
     await flushPromises()
     expect(new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams.get('person')).toBe('p2')
     expect(w.get('[data-testid="budget-person-p2"]').attributes('aria-checked')).toBe('true')
+  })
+})
+
+describe('BudgetSection: hide a chart', () => {
+  const key = (email: string) => panelsKey(email)
+  beforeEach(() => localStorage.clear())
+
+  it('both shown by default; hiding one hides its panel, keeps the table, and is saved per account', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
+    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
+    expect(w.find('[data-pane="table"]').exists()).toBe(true)
+    expect(w.get('[data-testid="budget-show-debts"]').attributes('aria-pressed')).toBe('false')
+    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: ['debts'] })
+    expect(localStorage.getItem(key('b@example.com'))).toBeNull()
+  })
+
+  it('restores the saved choice for this account only', async () => {
+    localStorage.setItem(key('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
+    route({ access: () => json({ ok: true, email: 'b@example.com' }) })
+    resetAccessProbe()
+    const other = await mountSection()
+    expect(other.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
+  })
+
+  it('a hidden chart comes back with its button; hiding both is not possible', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    expect(w.get('[data-testid="budget-show-spending"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
+    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: [] })
+  })
+
+  it('works when localStorage throws: hides for the visit, nothing breaks', async () => {
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota')
+    })
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    try {
+      route()
+      const w = await mountSection()
+      expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
+      await w.get('[data-testid="budget-show-debts"]').trigger('click')
+      expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    } finally {
+      set.mockRestore()
+      get.mockRestore()
+    }
   })
 })

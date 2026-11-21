@@ -13,6 +13,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget pies label small slices outside the ring.** A slice with no room for text inside gets its name and share at the end of a short leader line, cut with an ellipsis to the room there is; labels never overlap each other, the ring or the chart edge, and the smallest are dropped when there is no room. The chart has more room at the sides, and the labels appear once the drill motion ends.
 - **Budget table shows a purchase's purpose.** A transaction with a note shows it as a small grey line under the merchant (one line, cut with an ellipsis when long, the full text on hover).
 
+- **Budget charts line up and can be hidden.** On desktop the spending and debt donuts now sit at the same height, with the lists under them starting together, even when the spending header has an extra line; a "Show: Spending | Debts" control beside the filters hides either chart (the other centres, the transactions stay), the last one shown cannot be hidden, and the choice is remembered per signed-in account in this browser.
+
 ### Changed
 - **Opening a spending slice takes a deliberate gesture.** A single click or tap on the pie now only highlights the slice and shows its tooltip; a double-click, a double-tap or pressing and holding for half a second opens it, and a hint under the pie says so. The list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
 
