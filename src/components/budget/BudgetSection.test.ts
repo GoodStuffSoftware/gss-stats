@@ -56,8 +56,8 @@ function route(r: Routes = {}) {
 const callsTo = (path: string) => fetchMock.mock.calls.filter((c) => new URL(c[0], 'http://x').pathname === path)
 
 const mounted: VueWrapper[] = []
-async function mountSection(url = '/?section=budget') {
-  history.replaceState(null, '', url)
+async function mountSection(url = '/?section=budget', state: unknown = null) {
+  history.replaceState(state, '', url)
   const w = mount(BudgetSection, { props: { dark: false, today: TODAY }, attachTo: document.body })
   mounted.push(w)
   await flushPromises()
@@ -168,7 +168,8 @@ describe('BudgetSection: data', () => {
     expect(q.get('category')).toBe('groceries')
     expect(q.get('groupBy')).toBe('merchant')
     expect(w.findComponent(BudgetTable).props('query')).toMatchObject({ category: 'groceries', scope: 'spending' })
-    expect(new URLSearchParams(location.search).get('b_path')).toBe(JSON.stringify([['category', 'groceries', 'Groceries']]))
+    expect(new URLSearchParams(location.search).has('b_path')).toBe(false)
+    expect(location.search).not.toMatch(/groceries/i)
     expect(new URLSearchParams(location.search).get('section')).toBe('budget')
     w.findComponent(SpendingPanel).vm.$emit('crumb', 0)
     await flushPromises()
@@ -229,12 +230,24 @@ describe('BudgetSection: data', () => {
     // the table's own requests carry it too
     const tx = callsTo('/api/budget/transactions').map((c) => new URL(c[0], 'http://x').searchParams)
     expect(tx.at(-1)!.get('account')).toBe('acct-1')
-    // reload from the address bar: same slice on both sides
+    // reload: the address carries the range and grouping, the tab's history.state carries the drill path
     const url = location.pathname + location.search
-    const again = await mountSection(url)
+    expect(url).not.toMatch(/groceries|acct-1/)
+    const again = await mountSection(url, history.state)
     const q2 = new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams
     expect([q2.get('category'), q2.get('account'), q2.get('groupBy')]).toEqual(['groceries', 'acct-1', 'account'])
     expect(again.findComponent(BudgetTable).props('query')).toMatchObject({ category: 'groceries', account: 'acct-1' })
+  })
+
+  it('a reload with no drill path in history.state (a pasted or old link) starts at the top, and an old b_path is dropped from the address', async () => {
+    route()
+    const old = `/?section=budget&b_path=${encodeURIComponent(JSON.stringify([['category', 'groceries', 'Groceries']]))}`
+    const w = await mountSection(old)
+    const q = new URL(callsTo('/api/budget/summary').at(-1)![0], 'http://x').searchParams
+    expect(q.has('category')).toBe(false)
+    expect(w.findComponent(SpendingPanel).props('path')).toEqual([])
+    expect(location.search).not.toContain('b_path')
+    expect(new URLSearchParams(location.search).get('section')).toBe('budget')
   })
 
   it('review-only goes to the table query without refetching the summary', async () => {
@@ -345,7 +358,7 @@ describe('BudgetSection: states', () => {
     // a second drill on the old pie is ignored: its slices are not the ones of the position asked for
     w.findComponent(SpendingPanel).vm.$emit('drill', { level: 'merchant', key: 'chain-x', label: 'Chain X' })
     await flushPromises()
-    expect(new URLSearchParams(location.search).get('b_path')).toBe(JSON.stringify([['category', 'groceries', 'Groceries']]))
+    expect(new URLSearchParams(location.search).has('b_path')).toBe(false)
     release(json({ level: 'merchant', slices: [{ key: 'chain-x', label: 'Chain X', netCents: 3000, count: 2 }], totalCents: 3000, reviewCount: 0 }))
     await flushPromises()
     expect(w.findComponent(SpendingPanel).vm.$.uid).toBe(pie)

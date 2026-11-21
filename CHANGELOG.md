@@ -15,7 +15,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Changed
 - **Opening a spending slice follows your input.** With a mouse, one click opens a slice (the hover tooltip stays, the cursor turns into a pointer, and a double-click opens only one level); on touch and pen a tap only shows the tooltip, and a double-tap or pressing and holding for half a second opens it. A hint under the pie says which, the list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
-- **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before.
+- **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before. Reloading the page keeps you at the level you were on (remembered in the tab, never in the address, so no category or store name appears in a link).
 
 ### Fixed
 - **Budget pie labels stay inside their slice.** A label is drawn only when all of its text fits within the slice, and more slices get one: a long name wraps on two lines, a narrow slice can carry its text across the ring instead of along it, and the amount or share is dropped before the name.

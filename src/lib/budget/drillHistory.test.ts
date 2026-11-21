@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDrillHistory, MARK_KEY, readMark, withMark, type HistoryLike } from './drillHistory'
+import { createDrillHistory, MARK_KEY, readMark, readSteps, withMark, withoutMark, type HistoryLike } from './drillHistory'
 
 // A browser history list that moves like the real one: go() lands later (flush), a push drops the entries ahead.
 class FakeHistory implements HistoryLike {
@@ -47,6 +47,13 @@ const FUEL: Step = { level: 'category', key: 'fuel' }
 const FOOD: Step = { level: 'category', key: 'food' }
 const SHOP: Step = { level: 'merchant', key: 'shop-1' }
 
+/** The section's own check of steps read back from history.state. */
+function parseSteps(raw: unknown): Step[] | null {
+  if (!Array.isArray(raw)) return null
+  const ok = raw.every((s) => s && (s.level === 'category' || s.level === 'merchant') && typeof s.key === 'string' && s.key)
+  return ok ? (raw as Step[]) : null
+}
+
 /** A section: a drill path, the way the view state keeps it, wired to one DrillHistory. */
 function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
   const path: Step[] = startPath.slice()
@@ -62,6 +69,7 @@ function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
       dh.pathChanged(path.slice())
     },
     path: () => path.slice(),
+    parseSteps,
     later: (fn) => later.push(fn),
   })
   h.listener = (state) => dh.popped(state, open())
@@ -100,6 +108,21 @@ describe('the mark', () => {
     expect(withMark({ other: 1 }, { s: 'a', d: 0 })).toEqual({ other: 1, [MARK_KEY]: { s: 'a', d: 0 } })
     expect(withMark([1], { s: 'a', d: 0 })).toEqual({ [MARK_KEY]: { s: 'a', d: 0 } })
   })
+  it('carries the steps when given, and withoutMark takes only the mark off', () => {
+    expect(readMark(withMark(null, { s: 'a', d: 1, p: [FUEL] }))).toEqual({ s: 'a', d: 1, p: [FUEL] })
+    expect(withoutMark(withMark({ other: 1 }, { s: 'a', d: 0 }))).toEqual({ other: 1 })
+    expect(withoutMark(withMark(null, { s: 'a', d: 0 }))).toBeNull()
+    expect(withoutMark('x')).toBeNull()
+  })
+  it('readSteps gives the steps only when they parse and match the mark\'s depth', () => {
+    expect(readSteps(withMark(null, { s: 'a', d: 2, p: [FUEL, SHOP] }), parseSteps)).toEqual([FUEL, SHOP])
+    expect(readSteps(withMark(null, { s: 'a', d: 0, p: [] }), parseSteps)).toEqual([])
+    expect(readSteps(withMark(null, { s: 'a', d: 1 }), parseSteps)).toBeNull() // no steps stored
+    expect(readSteps(withMark(null, { s: 'a', d: 2, p: [FUEL] }), parseSteps)).toBeNull() // depth disagrees
+    expect(readSteps(withMark(null, { s: 'a', d: 1, p: 'junk' }), parseSteps)).toBeNull()
+    expect(readSteps(withMark(null, { s: 'a', d: 1, p: [{ level: 'x', key: 'k' }] }), parseSteps)).toBeNull()
+    expect(readSteps(null, parseSteps)).toBeNull()
+  })
 })
 
 describe('drilling and Back', () => {
@@ -107,7 +130,7 @@ describe('drilling and Back', () => {
     const h = new FakeHistory()
     const s = section(h)
     expect(h.entries).toHaveLength(1)
-    expect(readMark(h.state)).toEqual({ s: s.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
     s.drill(FUEL)
     s.drill(SHOP)
     expect(h.entries).toHaveLength(3)
@@ -141,14 +164,43 @@ describe('drilling and Back', () => {
     expect(s.keys()).toEqual(['fuel'])
   })
 
-  it('stores nothing but the session and depth: no names, no ids, and no address (pushState takes none)', () => {
+  it('stores the session, depth and steps in the state only: pushState and replaceState are never given an address', () => {
     const h = new FakeHistory()
+    const args: unknown[][] = []
+    const push = h.pushState.bind(h)
+    const replace = h.replaceState.bind(h)
+    h.pushState = (...a: unknown[]) => (args.push(a), push(a[0]))
+    h.replaceState = (...a: unknown[]) => (args.push(a), replace(a[0]))
     const s = section(h)
     s.drill(FUEL)
     s.drill(SHOP)
-    const text = JSON.stringify(h.entries)
-    expect(text).not.toMatch(/fuel|shop|category|merchant/i)
-    expect(Object.keys((h.entries[2] as Record<string, unknown>)[MARK_KEY] as object).sort()).toEqual(['d', 's'])
+    expect(args.length).toBeGreaterThan(0)
+    for (const a of args) expect(a).toHaveLength(2) // (state, title): no URL argument
+    expect(Object.keys((h.entries[2] as Record<string, unknown>)[MARK_KEY] as object).sort()).toEqual(['d', 'p', 's'])
+    expect(readMark(h.entries[1])?.p).toEqual([FUEL])
+    expect(readMark(h.entries[2])?.p).toEqual([FUEL, SHOP])
+  })
+
+  it('end() takes this session\'s mark off the entry the user is on, and keeps the rest of its state', () => {
+    const h = new FakeHistory()
+    h.entries = [{ page: 'p1' }]
+    const s = section(h)
+    s.drill(FUEL)
+    expect(readMark(h.state)).not.toBeNull()
+    s.dh.end()
+    expect(h.state).toBeNull()
+    expect(h.entries[0]).toEqual({ [MARK_KEY]: { s: s.dh.session, d: 0, p: [] }, page: 'p1' })
+    h.idx = 0
+    s.dh.end()
+    expect(h.state).toEqual({ page: 'p1' })
+  })
+
+  it('end() leaves an entry that is not this session\'s alone', () => {
+    const h = new FakeHistory()
+    const s = section(h)
+    h.replaceState({ [MARK_KEY]: { s: 'someone-else', d: 1 } })
+    s.dh.end()
+    expect(readMark(h.state)).toEqual({ s: 'someone-else', d: 1 })
   })
 })
 
@@ -245,12 +297,12 @@ describe('a breadcrumb jump', () => {
     h.entries = ['previous page', null]
     h.idx = 1
     const s = section(h, [FUEL]) // opened already inside a category
-    expect(readMark(h.state)).toEqual({ s: s.dh.session, d: 1 })
+    expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 1 })
     s.drill(SHOP)
     s.crumb(0) // below where the history starts: go back to the adopted entry, then re-mark it as the top
     h.flush()
     expect(h.idx).toBe(1)
-    expect(readMark(h.state)).toEqual({ s: s.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
     s.drill(FOOD)
     h.back()
     expect(s.keys()).toEqual([])
@@ -265,7 +317,7 @@ describe('a breadcrumb jump', () => {
     const s = section(h, [FUEL])
     s.crumb(0)
     expect(h.pending).toBeNull() // no navigation
-    expect(readMark(h.state)).toEqual({ s: s.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
     h.back()
     expect(h.state).toBe('previous page')
   })
@@ -279,29 +331,48 @@ describe('stale entries', () => {
     first.drill(SHOP) // the section is left at depth 2 (the entry keeps its mark)
     const second = section(h) // opened again, no path
     expect(second.dh.session).not.toBe(first.dh.session)
-    expect(readMark(h.state)).toEqual({ s: second.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: second.dh.session, d: 0 })
   })
 
-  it('landing on an older visit\'s entry with the section open re-reads the section and adopts that entry, with no navigation', () => {
+  it('landing on an older visit\'s entry with the section open takes the path that entry holds and adopts it, with no navigation', () => {
     const h = new FakeHistory()
     const first = section(h)
     first.drill(FUEL)
     first.drill(SHOP)
     const second = section(h) // a later visit on the same entry (depth 2 of the first visit's mark)
+    expect(second.keys()).toEqual([])
     h.back() // onto the first visit's entry for depth 1
     expect(second.dh.settling).toBe(true)
-    second.path.splice(0, second.path.length, FUEL) // the section's own re-read of the address bar
-    second.dh.pathChanged(second.path.slice()) // ignored while settling
-    expect(h.entries).toHaveLength(3)
-    expect(h.pending).toBeNull()
+    expect(second.keys()).toEqual(['fuel']) // the path that entry stands for
+    expect(h.entries).toHaveLength(3) // nothing pushed while settling
+    expect(h.pending).toBeNull() // and no go()
     second.runLater()
     expect(second.dh.settling).toBe(false)
-    expect(readMark(h.state)).toEqual({ s: second.dh.session, d: 1 })
+    expect(readMark(h.state)).toMatchObject({ s: second.dh.session, d: 1, p: [FUEL] })
     h.back() // the next entry down is stale too: adopted the same way, never skipped over or looped on
     expect(second.dh.settling).toBe(true)
-    second.path.splice(0)
+    expect(second.keys()).toEqual([])
     second.runLater()
-    expect(readMark(h.state)).toEqual({ s: second.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: second.dh.session, d: 0 })
+  })
+
+  it('a stale entry whose steps are missing, broken or disagree with its depth is shown at the top', () => {
+    for (const stale of [
+      { [MARK_KEY]: { s: 'old', d: 1 } },
+      { [MARK_KEY]: { s: 'old', d: 1, p: 'junk' } },
+      { [MARK_KEY]: { s: 'old', d: 2, p: [FUEL] } },
+      { [MARK_KEY]: { s: 'old', d: 1, p: [{ level: 'other', key: 'k' }] } },
+      null,
+    ]) {
+      const h = new FakeHistory()
+      h.entries = [stale, null]
+      h.idx = 1
+      const s = section(h, [FUEL])
+      h.back()
+      expect(s.keys()).toEqual([])
+      s.runLater()
+      expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
+    }
   })
 
   it('an entry with no mark at all, landed on with the section open, is adopted the same way', () => {
@@ -312,7 +383,7 @@ describe('stale entries', () => {
     h.back()
     expect(s.dh.settling).toBe(true)
     s.runLater()
-    expect(readMark(h.state)).toEqual({ s: s.dh.session, d: 0 })
+    expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
     expect(h.entries).toHaveLength(2)
   })
 

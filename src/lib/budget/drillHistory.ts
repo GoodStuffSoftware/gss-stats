@@ -2,26 +2,29 @@
 // so Back goes up one level (toolbar button, mouse back button, Alt+Left, a trackpad swipe, Android back) and
 // Forward re-opens the level it came from.
 //
-// What is stored: history.state only, a small mark `{ s: <session>, d: <depth> }` (no names, no ids, no URL
-// change: the entries it adds share the URL of the entry they were pushed from). The steps themselves (what a
-// level is) live in memory in this object, for Forward.
+// What is stored: history.state only, never the address. Every entry this module pushes or marks carries
+// `{ s: <session>, d: <depth>, p: <the drill steps down to that depth> }`, and the entries share the URL of the
+// entry they were pushed from: the URL does not change and never names a category, store or purchase. (history.state
+// is kept by the browser in this tab's session and is not part of any URL, log or synced history.) `p` is what lets
+// a reload, or a Back onto an entry of an earlier visit, put the drill path back (see `readSteps`).
 //
 // Model: one `session` per mounted section; `depth` is how many levels the entry the user is on stands for
 // (= the drill path's length); `base` is the depth the first entry of this session was adopted at (0 on a
-// normal open, more after a reload that restored a path from the address bar), so entries below it are not ours
-// to go back through.
+// normal open, more after a reload that restored a path), so entries below it are not ours to go back through.
 //   - a drill (path longer): push one entry per new level.
 //   - a breadcrumb jump or any other path cut (path shorter by n): history.go(-n) over our own entries, so Back
 //     after the jump never re-enters a level just left; the dropped steps wait in `forward` (the entries ahead
 //     are still in the browser's list). Cut below `base`: the entry is re-marked instead (nothing behind to use).
 //   - popstate onto one of our entries: shallower = Back (cut the path), deeper = Forward (drill again with the
 //     remembered steps; if they are gone, step back so the entry cannot show a level that no longer exists).
-//   - popstate onto an entry that is NOT of this session (a stale one a previous visit to Budget left behind, or
-//     one with no mark): the section re-reads its own state from the address bar (viewState.readUrl, which runs
-//     right after this) and this entry is adopted as the new top: re-marked with the current depth, `forward`
-//     dropped. Nothing is navigated, so no Back press is ever swallowed by a loop.
+//   - popstate onto an entry that is NOT of this session (a stale one an earlier visit left behind, or one with
+//     no mark) with the section open: the path is set from that entry's own `p` (the top when it has none or it
+//     does not parse), and the entry is adopted as the new top of this session: re-marked with the current depth,
+//     `forward` dropped. Nothing is navigated, so no Back press is ever swallowed by a loop.
 // Stale entries are therefore never acted on, only adopted when the user lands on one with the section open.
 // Landing on one with the section closed (App closes it) is none of this module's business.
+// When the section goes away (`end`), the mark is taken off the entry the user is then on, so a page the app
+// moved to keeps no drill state and opening the section again from it starts at the top.
 //
 // Pure of Vue and the DOM: the caller hands over a `history`-like object and what to do with the path.
 
@@ -30,6 +33,8 @@ export const MARK_KEY = 'gssBudgetDrill'
 export interface DrillMark {
   s: string
   d: number
+  /** The drill steps down to depth `d`, as stored (not yet validated: see `readSteps`). */
+  p?: unknown
 }
 export interface HistoryLike {
   readonly state: unknown
@@ -43,13 +48,27 @@ export function readMark(state: unknown): DrillMark | null {
   if (!state || typeof state !== 'object') return null
   const m = (state as Record<string, unknown>)[MARK_KEY]
   if (!m || typeof m !== 'object') return null
-  const { s, d } = m as Record<string, unknown>
-  return typeof s === 'string' && s && typeof d === 'number' && Number.isInteger(d) && d >= 0 ? { s, d } : null
+  const { s, d, p } = m as Record<string, unknown>
+  if (!(typeof s === 'string' && s && typeof d === 'number' && Number.isInteger(d) && d >= 0)) return null
+  return p === undefined ? { s, d } : { s, d, p }
 }
 /** `state` with the mark set; whatever else it held (an object) is kept. */
 export function withMark(state: unknown, mark: DrillMark): Record<string, unknown> {
   const base = state && typeof state === 'object' && !Array.isArray(state) ? (state as Record<string, unknown>) : {}
-  return { ...base, [MARK_KEY]: { s: mark.s, d: mark.d } }
+  return { ...base, [MARK_KEY]: mark.p === undefined ? { s: mark.s, d: mark.d } : { s: mark.s, d: mark.d, p: mark.p } }
+}
+/** `state` without the mark (null when nothing else is left in it). */
+export function withoutMark(state: unknown): Record<string, unknown> | null {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return null
+  const { [MARK_KEY]: _mark, ...rest } = state as Record<string, unknown>
+  return Object.keys(rest).length ? rest : null
+}
+/** The steps an entry's mark holds, when `parse` accepts them and they are as many as the mark's depth; else null. */
+export function readSteps<Step>(state: unknown, parse: (raw: unknown) => Step[] | null): Step[] | null {
+  const m = readMark(state)
+  if (!m || m.p === undefined) return null
+  const steps = parse(m.p)
+  return steps && steps.length === m.d ? steps : null
 }
 
 let sessionCounter = 0
@@ -64,8 +83,10 @@ export interface DrillHistoryOptions<Step> {
   drill: (step: Step) => void
   /** Cut the path back to `depth` steps (the section's own popTo). */
   popTo: (depth: number) => void
-  /** The section's drill path right now (used when it re-reads itself after a foreign entry). */
+  /** The section's drill path right now. */
   path: () => Step[]
+  /** Checks steps read back from history.state (anything may be in there): the valid steps, or null. */
+  parseSteps: (raw: unknown) => Step[] | null
   /** Run `fn` after the other popstate listeners and the reactive flush (a macrotask in the browser). */
   later?: (fn: () => void) => void
   session?: string
@@ -75,6 +96,8 @@ export interface DrillHistory<Step> {
   readonly session: string
   /** Adopt the entry the user is on as the top of this session, at the path's depth. Call once, when mounted. */
   start(): void
+  /** The section is going away: take this session's mark off the entry the user is on. */
+  end(): void
   /** The path changed (synchronously, in the same call that changed it). */
   pathChanged(path: Step[]): void
   /** The steps remembered for Forward no longer mean anything (the range, person or grouping changed). */
@@ -99,8 +122,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
   let settling = false
   let applying = false // the path is being changed by this module (Back, Forward): pathChanged must not answer it
 
-  const mark = (d: number) => h.replaceState(withMark(h.state, { s: session, d }), '')
-
+  const mark = (d: number) => h.replaceState(withMark(h.state, { s: session, d, p: known.slice(0, d) }), '')
   function apply(fn: () => void) {
     applying = true
     try {
@@ -126,18 +148,21 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
     start() {
       adopt()
     },
+    end() {
+      if (readMark(h.state)?.s === session) h.replaceState(withoutMark(h.state), '')
+    },
     forgetForward() {
       forward = []
     },
     pathChanged(path) {
-      if (settling || applying) return // an outside re-read (settled later) or this module itself is changing it
+      if (settling || applying) return // an outside change (settled later) or this module itself is changing it
       const n = path.length
       if (n === depth) {
         known = path.slice()
         return
       }
       if (n > depth) {
-        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(null, { s: session, d }), '')
+        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(null, { s: session, d, p: path.slice(0, d) }), '')
         forward = [] // a push drops the entries ahead
         depth = n
         known = path.slice()
@@ -145,9 +170,10 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
       }
       // shorter: back over our own entries
       const floor = Math.max(n, base)
-      const dropped = known.slice(floor, depth)
       const cut = depth - floor
-      forward = dropped.concat(forward)
+      forward = known.slice(floor, depth).concat(forward)
+      depth = n
+      known = path.slice()
       if (cut > 0) {
         expect = { depth: floor, rebase: n < base ? n : null }
         h.go(-cut)
@@ -157,8 +183,6 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
         base = n
         mark(n)
       }
-      depth = n
-      known = path.slice()
     },
     popped(state, sectionOpen) {
       if (!sectionOpen) return
@@ -198,9 +222,14 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
         h.go(depth - m.d) // a level that no longer exists: go back to where the path is
         return
       }
-      // not an entry of this session: the section re-reads itself; adopt the entry once that has happened
+      // not an entry of this session: take the path it holds (else the top), then adopt it as the new top
       expect = null
       settling = true
+      const steps = readSteps(state, opts.parseSteps) ?? []
+      apply(() => {
+        opts.popTo(0)
+        steps.forEach((s) => opts.drill(s))
+      })
       later(() => {
         settling = false
         adopt()

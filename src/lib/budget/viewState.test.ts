@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
-import { MARK_KEY, readMark } from './drillHistory'
+import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
-  defaultViewState, presetOf, rangeForPreset, rangeValid, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
+  defaultViewState, parseDrillSteps, presetOf, rangeForPreset, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   useBudgetViewState, type BudgetViewState,
 } from './viewState'
 
@@ -45,20 +45,28 @@ describe('rangeValid', () => {
 })
 
 describe('URL round trip', () => {
-  it('{from,to,person,path,groupBy,reviewOnly,tab} survives state -> search -> state', () => {
+  it('{from,to,person,groupBy,reviewOnly,tab} survives state -> search -> state; the drill path is not in the URL', () => {
     const s: BudgetViewState = {
       from: '2026-09-01',
       to: '2026-10-31',
       person: 'p2',
-      path: [
-        { level: 'category', key: 'groceries', label: 'Groceries' },
-        { level: 'merchant', key: 'chain-x', label: 'Chain X & "Sons"' },
-      ],
+      path: [],
       groupBy: 'merchant',
       reviewOnly: true,
       tab: 'debts',
     }
     expect(stateFromSearch(searchWithState('', s), TODAY)).toEqual(s)
+    const drilled: BudgetViewState = {
+      ...s,
+      path: [
+        { level: 'category', key: 'groceries', label: 'Groceries' },
+        { level: 'merchant', key: 'chain-x', label: 'Chain X & "Sons"' },
+      ],
+    }
+    const written = searchWithState('', drilled)
+    expect(written).toBe(searchWithState('', s)) // the path changes nothing in the address
+    expect(written).not.toMatch(/groceries|chain|path/i)
+    expect(stateFromSearch(written, TODAY).path).toEqual([])
     const acct: BudgetViewState = { ...s, groupBy: 'account', reviewOnly: false, tab: 'spending', person: 'all' }
     expect(stateFromSearch(searchWithState('', acct), TODAY)).toEqual(acct)
   })
@@ -79,12 +87,36 @@ describe('URL round trip', () => {
     expect(stateFromSearch('?b_from=2026-13-01&b_to=2026-11-02', TODAY)).toEqual(d)
     expect(stateFromSearch('?b_from=2026-11-05&b_to=2026-11-01', TODAY)).toEqual(d)
     expect(stateFromSearch('?b_person=%3Cscript%3E', TODAY).person).toBe('all')
-    expect(stateFromSearch('?b_path=notjson', TODAY).path).toEqual([])
-    // wrong level order, too deep, wrong shapes
-    expect(stateFromSearch(`?b_path=${encodeURIComponent(JSON.stringify([['merchant', 'a', 'A']]))}`, TODAY).path).toEqual([])
-    expect(stateFromSearch(`?b_path=${encodeURIComponent(JSON.stringify([['category', 'a', 'A'], ['merchant', 'b', 'B'], ['x', 'c', 'C']]))}`, TODAY).path).toEqual([])
-    expect(stateFromSearch(`?b_path=${encodeURIComponent(JSON.stringify([['category', 5, 'A']]))}`, TODAY).path).toEqual([])
     expect(stateFromSearch('?b_tab=weird&b_group=weird&b_review=yes', TODAY)).toEqual(d)
+  })
+
+  it('an old link\'s b_path is ignored, and searchWithoutPath removes it, keeping every other param', () => {
+    const old = `?section=budget&page=p1&b_path=${encodeURIComponent(JSON.stringify([['category', 'a', 'A']]))}&b_person=p2`
+    expect(stateFromSearch(old, TODAY).path).toEqual([])
+    expect(stateFromSearch(old, TODAY).person).toBe('p2')
+    expect(searchWithoutPath(old)).toBe('?section=budget&page=p1&b_person=p2')
+    expect(searchWithoutPath('?b_path=x')).toBe('')
+    expect(searchWithoutPath('?section=budget')).toBe('?section=budget') // nothing to remove: untouched
+    expect(searchWithoutPath('')).toBe('')
+  })
+})
+
+describe('parseDrillSteps (what history.state may hold)', () => {
+  const ok = [{ level: 'category', key: 'a', label: 'A' }, { level: 'merchant', key: 'b', label: 'B' }]
+  it('accepts a path in level order, up to two steps; a missing label falls back to the key', () => {
+    expect(parseDrillSteps([])).toEqual([])
+    expect(parseDrillSteps(ok)).toEqual(ok)
+    expect(parseDrillSteps([{ level: 'category', key: 'a' }])).toEqual([{ level: 'category', key: 'a', label: 'a' }])
+  })
+  it('refuses wrong level order, too deep, wrong shapes and oversize text', () => {
+    expect(parseDrillSteps([{ level: 'merchant', key: 'a', label: 'A' }])).toBeNull()
+    expect(parseDrillSteps([...ok, { level: 'merchant', key: 'c', label: 'C' }])).toBeNull()
+    expect(parseDrillSteps([{ level: 'category', key: 5, label: 'A' }])).toBeNull()
+    expect(parseDrillSteps([['category', 'a', 'A']])).toBeNull()
+    expect(parseDrillSteps([{ level: 'category', key: '', label: 'A' }])).toBeNull()
+    expect(parseDrillSteps([{ level: 'category', key: 'x'.repeat(121), label: 'A' }])).toBeNull()
+    expect(parseDrillSteps('nope')).toBeNull()
+    expect(parseDrillSteps(null)).toBeNull()
   })
 })
 
@@ -147,7 +179,8 @@ describe('useBudgetViewState', () => {
     expect(p.get('page')).toBe('p1')
     expect(p.get('b_person')).toBe('p2')
     expect(p.get('b_tab')).toBe('debts')
-    expect(JSON.parse(p.get('b_path')!)).toEqual([['category', 'dining', 'Dining']])
+    expect(p.has('b_path')).toBe(false) // the drill path is not in the address
+    expect(location.search).not.toMatch(/dining/i)
     expect(history.length).toBe(len)
   })
 
@@ -232,19 +265,72 @@ describe('useBudgetViewState: browser Back and Forward over the drill levels', (
     w.unmount()
   })
 
-  it('a drill pushes one entry per level carrying no address, names or ids', async () => {
+  it('a drill pushes one entry per level; the address never changes and never names a level', async () => {
     const push = vi.spyOn(history, 'pushState')
     const { view, w } = mountSection()
+    await nextTick()
     view.pushStep(FUEL)
     view.pushStep(CHAIN)
     await nextTick()
     expect(push).toHaveBeenCalledTimes(2)
     for (const call of push.mock.calls) {
       expect(call).toHaveLength(2) // state and title: no URL argument, so the address cannot change
-      expect(JSON.stringify(call[0])).not.toMatch(/fuel|chain/i)
     }
+    expect(location.href).not.toMatch(/fuel|chain/i)
+    // the steps ride in history.state (this tab's session history), which is not part of any URL
     expect(readMark(history.state)).toMatchObject({ d: 2 })
+    expect(readSteps(history.state, parseDrillSteps)?.map((s) => s.key)).toEqual(['fuel', 'chain-x'])
     w.unmount()
+  })
+
+  it('never writes b_path to the address, and strips one an old link brought', async () => {
+    history.replaceState(null, '', `/?section=budget&page=p1&b_path=${encodeURIComponent(JSON.stringify([['category', 'fuel', 'Fuel']]))}&b_person=p2`)
+    const { view, w } = mountSection()
+    expect(view.state.path).toEqual([]) // an old link's path is ignored
+    expect(view.state.person).toBe('p2') // the other params stay
+    expect(location.search).toBe('?section=budget&page=p1&b_person=p2')
+    view.pushStep(FUEL)
+    await nextTick()
+    expect(location.search).not.toContain('b_path')
+    expect(location.href).not.toMatch(/fuel/i)
+    w.unmount()
+  })
+
+  it('a reload restores the drill path from history.state when it still parses', () => {
+    history.replaceState(
+      { [MARK_KEY]: { s: 'earlier-visit', d: 2, p: [{ level: 'category', key: 'fuel', label: 'Fuel' }, { level: 'merchant', key: 'chain-x', label: 'Chain X' }] } },
+      '',
+    )
+    const { view, w } = mountSection()
+    expect(view.state.path.map((s) => s.key)).toEqual(['fuel', 'chain-x'])
+    expect(readMark(history.state)).toMatchObject({ d: 2 }) // adopted as this session's entry
+    w.unmount()
+  })
+
+  it('a reload starts at the top when the state holds no path, a broken one, or one that disagrees with its depth', () => {
+    for (const state of [
+      null,
+      { [MARK_KEY]: { s: 'x', d: 1 } },
+      { [MARK_KEY]: { s: 'x', d: 1, p: 'junk' } },
+      { [MARK_KEY]: { s: 'x', d: 2, p: [{ level: 'category', key: 'fuel', label: 'Fuel' }] } },
+      { [MARK_KEY]: { s: 'x', d: 1, p: [{ level: 'merchant', key: 'chain-x', label: 'C' }] } },
+    ]) {
+      history.replaceState(state, '')
+      const { view, w } = mountSection()
+      expect(view.state.path).toEqual([])
+      w.unmount()
+    }
+  })
+
+  it('closing the section takes its mark off the entry, so a later open starts at the top', () => {
+    const { view, w } = mountSection()
+    view.pushStep(FUEL)
+    expect(readMark(history.state)).toMatchObject({ d: 1 })
+    w.unmount()
+    expect(readMark(history.state)).toBeNull()
+    const again = mountSection()
+    expect(again.view.state.path).toEqual([])
+    again.w.unmount()
   })
 
   it('Back (a popstate onto the entry below) cuts the path one level and leaves the range and person alone', async () => {
