@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { nextTick } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { MARK_KEY, readMark } from './drillHistory'
 import {
   defaultViewState, presetOf, rangeForPreset, rangeValid, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   useBudgetViewState, type BudgetViewState,
@@ -191,5 +193,124 @@ describe('useBudgetViewState', () => {
     history.replaceState(null, '', '/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
     v.readUrl()
     expect(v.state).toMatchObject({ person: 'p2', from: '2026-10-01', to: '2026-10-31' })
+  })
+})
+
+// Back / Forward over the drill levels, in a mounted section (drillHistory.ts has the pure logic and its tests).
+describe('useBudgetViewState: browser Back and Forward over the drill levels', () => {
+  const FUEL = { level: 'category', key: 'fuel', label: 'Fuel' } as const
+  const CHAIN = { level: 'merchant', key: 'chain-x', label: 'Chain X' } as const
+  type View = ReturnType<typeof useBudgetViewState>
+  // The way BudgetSection uses it: the composable, then its own popstate listener for readUrl (registered later).
+  function mountSection() {
+    let view!: View
+    const w = mount(
+      defineComponent({
+        setup() {
+          view = useBudgetViewState(TODAY)
+          onMounted(() => window.addEventListener('popstate', view.readUrl))
+          onBeforeUnmount(() => window.removeEventListener('popstate', view.readUrl))
+          return () => null
+        },
+      }),
+    )
+    return { view, w }
+  }
+  const pop = (state: unknown) => window.dispatchEvent(new PopStateEvent('popstate', { state }))
+  const session = () => readMark(history.state)!.s
+
+  beforeEach(() => history.replaceState(null, '', '/?section=budget&page=p1'))
+  afterEach(() => {
+    vi.restoreAllMocks()
+    history.replaceState(null, '', '/')
+  })
+
+  it('marks the entry it opens on, in history.state only', () => {
+    const { w } = mountSection()
+    expect(readMark(history.state)).toMatchObject({ d: 0 })
+    expect(location.search).not.toContain(MARK_KEY)
+    w.unmount()
+  })
+
+  it('a drill pushes one entry per level carrying no address, names or ids', async () => {
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    view.pushStep(FUEL)
+    view.pushStep(CHAIN)
+    await nextTick()
+    expect(push).toHaveBeenCalledTimes(2)
+    for (const call of push.mock.calls) {
+      expect(call).toHaveLength(2) // state and title: no URL argument, so the address cannot change
+      expect(JSON.stringify(call[0])).not.toMatch(/fuel|chain/i)
+    }
+    expect(readMark(history.state)).toMatchObject({ d: 2 })
+    w.unmount()
+  })
+
+  it('Back (a popstate onto the entry below) cuts the path one level and leaves the range and person alone', async () => {
+    const { view, w } = mountSection()
+    view.pushStep(FUEL)
+    view.pushStep(CHAIN)
+    view.setPerson('p2')
+    await nextTick()
+    pop({ [MARK_KEY]: { s: session(), d: 1 } })
+    expect(view.state.path.map((s) => s.key)).toEqual(['fuel'])
+    expect(view.state.person).toBe('p2') // readUrl skipped: it would roll back to the older entry's address
+    w.unmount()
+  })
+
+  it('Forward drills again with the remembered steps', () => {
+    const { view, w } = mountSection()
+    const s = session()
+    view.pushStep(FUEL)
+    view.pushStep(CHAIN)
+    pop({ [MARK_KEY]: { s, d: 0 } })
+    expect(view.state.path).toEqual([])
+    pop({ [MARK_KEY]: { s, d: 1 } })
+    expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+    pop({ [MARK_KEY]: { s, d: 2 } })
+    expect(view.state.path.map((x) => x.key)).toEqual(['fuel', 'chain-x'])
+    w.unmount()
+  })
+
+  it('a breadcrumb jump goes back over our own entries', () => {
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {})
+    const { view, w } = mountSection()
+    view.pushStep(FUEL)
+    view.pushStep(CHAIN)
+    view.popTo(0)
+    expect(go).toHaveBeenCalledWith(-2)
+    w.unmount()
+  })
+
+  it('an entry that is not this visit\'s is read from the address bar as before, and is not answered with new entries', async () => {
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    history.replaceState(null, '', '/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
+    pop({ [MARK_KEY]: { s: 'an-older-visit', d: 1 } })
+    expect(view.state).toMatchObject({ person: 'p2', from: '2026-10-01' })
+    await new Promise((r) => setTimeout(r, 5)) // the entry is adopted afterwards
+    expect(readMark(history.state)).toMatchObject({ s: session(), d: 0 })
+    expect(push).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('removes its listener when the section unmounts: a later popstate does nothing', () => {
+    const { view, w } = mountSection()
+    view.pushStep(FUEL)
+    const s = session()
+    w.unmount()
+    pop({ [MARK_KEY]: { s, d: 0 } })
+    expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+  })
+
+  it('a bare call (no component) never touches history', () => {
+    const push = vi.spyOn(history, 'pushState')
+    const go = vi.spyOn(history, 'go')
+    const v = useBudgetViewState(TODAY)
+    v.pushStep(FUEL)
+    v.popTo(0)
+    expect(push).not.toHaveBeenCalled()
+    expect(go).not.toHaveBeenCalled()
   })
 })

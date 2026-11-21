@@ -14,7 +14,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget table shows a purchase's purpose.** A transaction with a note shows it as a small grey line under the merchant (one line, cut with an ellipsis when long, the full text on hover).
 
 ### Changed
-- **Opening a spending slice takes a deliberate gesture.** A single click or tap on the pie now only highlights the slice and shows its tooltip; a double-click, a double-tap or pressing and holding for half a second opens it, and a hint under the pie says so. The list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
+- **Opening a spending slice follows your input.** With a mouse, one click opens a slice (the hover tooltip stays, the cursor turns into a pointer, and a double-click opens only one level); on touch and pen a tap only shows the tooltip, and a double-tap or pressing and holding for half a second opens it. A hint under the pie says which, the list rows and breadcrumbs still open with one click, the purchase level (nothing to open) has no hint, and the debt pie is unchanged.
+- **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before.
 
 ### Fixed
 - **Budget pie labels stay inside their slice.** A label is drawn only when all of its text fits within the slice, and more slices get one: a long name wraps on two lines, a narrow slice can carry its text across the ring instead of along it, and the amount or share is dropped before the name.

@@ -6,7 +6,8 @@
 //   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_path (JSON
 //   [[level,key,label],...], omitted = top), b_group=account (omitted = merchant), b_review=1, b_tab=debts.
 // Everything read back is validated; anything malformed falls back to its default.
-import { computed, reactive, watch } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { createDrillHistory, readMark, type DrillHistory } from './drillHistory'
 import { BUDGET_PARAM_PREFIX, budgetSectionOpen } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
@@ -193,7 +194,8 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   const summaryQuery = computed(() => summaryQueryOf(state))
   const txnQuery = computed(() => txnQueryOf(state))
 
-  // replaceState, not pushState: drilling adds no history entries. Skipped once the section is no longer
+  // replaceState, not pushState: this only rewrites the current entry (the drill's own entries are pushed by
+  // drillHistory.ts, in history.state). Skipped once the section is no longer
   // the one in the address bar (App closed it), so a late write cannot bring `section=budget` back.
   function writeUrl() {
     try {
@@ -207,8 +209,32 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   }
   watch(state, writeUrl, { deep: true })
 
-  /** Re-read the address bar (back/forward). */
-  function readUrl() {
+  // Back/Forward over the drill levels (drillHistory.ts): one history entry per level, in history.state only.
+  // Only inside a component; a bare call (tests, tools) touches no history.
+  let drill: DrillHistory<DrillStep> | null = null
+  if (getCurrentInstance() && globalThis.history && globalThis.window) {
+    const copy = () => state.path.map((x) => ({ ...x }))
+    const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy })
+    drill = d
+    // sync: the entry is pushed before writeUrl (later in the flush) stamps the new level on the address bar
+    watch(() => state.path.length, () => d.pathChanged(copy()), { flush: 'sync' })
+    // the steps kept for Forward mean nothing under another range, person, grouping or review filter
+    watch(() => [state.from, state.to, state.person, state.groupBy, state.reviewOnly], () => d.forgetForward())
+    const onPop = (e: PopStateEvent) => d.popped(e.state, budgetSectionOpen(globalThis.location?.search ?? ''))
+    // registered before BudgetSection's own readUrl listener (its onMounted comes after this call), so a foreign
+    // entry is flagged as settling before readUrl changes the path
+    onMounted(() => {
+      d.start()
+      globalThis.addEventListener('popstate', onPop)
+    })
+    onBeforeUnmount(() => globalThis.removeEventListener('popstate', onPop))
+  }
+
+  /** Re-read the address bar (back/forward). A popstate onto one of the drill entries this session pushed
+   * (drillHistory.ts) is left alone: Back/Forward there only moves the drill path, and re-reading the older
+   * entry's address would also roll back the range or person chosen since. */
+  function readUrl(e?: PopStateEvent) {
+    if (e && drill && readMark(e.state)?.s === drill.session) return
     Object.assign(state, stateFromSearch(globalThis.location?.search ?? '', today))
   }
   /** False (and nothing changes) for a range the server would refuse. */

@@ -2,9 +2,10 @@
 // The spending pie: DrillPie of the current /summary answer, the crumbs back up, the total, the "Needs review
 // (n)" toggle and, once inside a category, a switch for what the next level groups by. BudgetSection owns the
 // state and the fetching (and the loading / error / empty-range screens); this panel only draws and reports
-// clicks. A slice on the pie opens with a double-click, a double-tap or a press held for half a second (a single
-// click only shows its tooltip; a hint under the pie says so); at the purchase level a click picks, as there is
-// nothing to open. The list rows under the pie and the crumbs open with one click.
+// clicks. A slice on the pie opens with one mouse click, or on touch and pen with a double-tap or a press held for
+// half a second (a tap only shows its tooltip; a hint under the pie says which); at the purchase level a click
+// picks, as there is nothing to open. The list rows under the pie and the crumbs open with one click. Browser
+// Back and Forward over the levels are the view state's (lib/budget/drillHistory.ts).
 //
 // Props
 //   summary:    SummaryResponse   the answer for the CURRENT state; never null, never empty at the top level.

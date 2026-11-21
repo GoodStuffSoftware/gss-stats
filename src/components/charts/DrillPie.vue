@@ -47,16 +47,20 @@ export function sliceLabelParts(amount: string, share: number): string[] {
 // share (or just one of them) when those fit too; a slice with no room gets its name and share outside the ring
 // on a leader line (cut with an ellipsis to the room there is; dropped, smallest first, when there is none), once
 // the motion has settled. The chart's layout padding is the room for them, wider as the chart is.
-// Picking: by default a click on a slice picks it. With `deliberate`, a click or tap only shows the tooltip, and a
-// double-click, a double-tap or a press held for half a second picks it (lib/pieGesture.ts); a hint says so. The
-// list rows pick with one click either way.
+// Picking: by default a click on a slice picks it. With `deliberate`, picking follows the input (lib/pieGesture.ts):
+// a mouse picks with one click (the hover tooltip stays; a double-click still opens one level only, because clicks
+// are ignored while the new level arrives and moves, and for a moment after), and a touch or pen shows only the
+// tooltip on a tap and picks with a double-tap or a press held for half a second. A hint under the pie says which
+// (a fine pointer with hover: click; anything else: press and hold), and the mouse cursor is a pointer over a slice
+// that can be picked. The list rows pick with one click either way.
 //
 // Props
 //   slices:  PieSlice[]
 //   dark:    boolean                       site theme (the slice border)
 //   animate: boolean (true)                false = no motion at all
 //   transition: PieTransition              where the next set of slices comes from (see above)
-//   deliberate: boolean (false)            picking a slice on the chart takes a double-click, double-tap or hold
+//   deliberate: boolean (false)            picking a slice on the chart follows the input: click (mouse), or
+//                                          double-tap / hold (touch, pen)
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
 // Emits
@@ -66,7 +70,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { Chart, type ChartConfiguration } from 'chart.js'
 import { arcLabelsPlugin } from '../../lib/charts'
 import { createPieGesture, type PieGesture } from '../../lib/pieGesture'
-import { pieMotionPlugin, type PieMotion } from '../../lib/pieMotion'
+import { MOTION_MS, pieMotionPlugin, type PieMotion } from '../../lib/pieMotion'
 import BaseChart from './BaseChart.vue'
 
 const props = withDefaults(
@@ -203,6 +207,28 @@ const signature = computed(() =>
   JSON.stringify([drawn.value.map((x) => [x.key, x.label, x.value, x.color]), props.dark, props.animate]),
 )
 const keysSignature = computed(() => keysOf(drawn.value).join('\u0001'))
+// A mouse click picks a slice (see the gesture), so a habitual double-click must not pick twice: after a pick,
+// mouse clicks are ignored until the new slices have arrived (at most WAIT_MAX_MS: a pick that opens nothing new
+// must not lock the pie), while the motion plays, and for SETTLE_MS after it. Plain variables: only the gesture
+// reads them.
+const WAIT_MAX_MS = 1500
+const SETTLE_MS = 250
+let waiting = false
+let lockedUntil = 0
+let waitTimer: ReturnType<typeof setTimeout> | undefined
+function startWaiting() {
+  waiting = true
+  clearTimeout(waitTimer)
+  waitTimer = setTimeout(() => {
+    waiting = false
+  }, WAIT_MAX_MS)
+}
+function arrived(motion: PieMotion) {
+  waiting = false
+  clearTimeout(waitTimer)
+  lockedUntil = Date.now() + (motion.kind === 'none' ? 0 : MOTION_MS[motion.kind]) + SETTLE_MS
+}
+const blocked = () => waiting || Date.now() < lockedUntil
 let playedFor: string | null = null
 let onScreen: PieSlice[] = [] // the slices of the pie now drawn
 let handled: PieTransition | undefined // the transition already used (or found not to apply)
@@ -215,6 +241,7 @@ function build(): ChartConfiguration {
   const motion: PieMotion = replay ? chooseMotion(before, drawn.value) : { kind: 'none' }
   handled = props.transition
   if (replay) opened.value = new Set() // a new level starts with every folded bucket closed
+  if (replay && waiting) arrived(motion)
   return buildConfig(motion)
 }
 const config = shallowRef<ChartConfiguration>(build())
@@ -239,6 +266,14 @@ function onPoint(p: { index: number }) {
   if (s) pick(s)
 }
 
+// Which hint fits the input: a fine pointer that can hover (a mouse, a trackpad) clicks; anything else holds.
+const FINE_POINTER = '(hover: hover) and (pointer: fine)'
+const fineQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(FINE_POINTER) : null
+const finePointer = ref(!!fineQuery?.matches)
+const onFineChange = () => {
+  finePointer.value = !!fineQuery?.matches
+}
+
 // The deliberate gesture (props.deliberate): listens on the canvas's wrapper, ahead of the chart's own handlers.
 const canvasBox = ref<HTMLElement | null>(null)
 let gesture: PieGesture | null = null
@@ -254,12 +289,22 @@ onMounted(() => {
   if (!box) return
   const g = createPieGesture({
     hit: sliceAt,
+    blocked,
     open: (i) => {
       const s = drawn.value[i]
-      if (s) pick(s)
+      if (!s) return
+      if (!s.members?.length && !s.inert) startWaiting() // a new level is on its way: see blocked
+      pick(s)
     },
   })
   gesture = g
+  // a pointer cursor over a slice that a click can pick (a mouse only: a finger has no cursor)
+  const setCursor = (e: { pointerType?: string; clientX: number; clientY: number }) => {
+    if (e.pointerType && e.pointerType !== 'mouse') return
+    const i = sliceAt(e)
+    const s = i === null ? undefined : drawn.value[i]
+    box.style.cursor = s && !s.inert ? 'pointer' : ''
+  }
   const on = (type: string, fn: (e: never) => void) => {
     const handler = (e: Event) => {
       if (props.deliberate) fn(e as never)
@@ -269,18 +314,36 @@ onMounted(() => {
   }
   const offs = [
     on('pointerdown', (e) => g.pointerdown(e)),
-    on('pointermove', (e) => g.pointermove(e)),
+    on('pointermove', (e) => {
+      g.pointermove(e)
+      setCursor(e)
+    }),
     on('pointerup', (e) => g.pointerup(e)),
     on('pointercancel', (e) => g.pointercancel(e)),
-    on('pointerleave', (e) => g.pointerleave(e)),
+    on('pointerleave', (e) => {
+      g.pointerleave(e)
+      box.style.cursor = ''
+    }),
     on('click', (e) => g.click(e)),
     on('dblclick', (e) => g.dblclick(e)),
   ]
   detach = () => offs.forEach((off) => off())
 })
+onMounted(() => {
+  fineQuery?.addEventListener?.('change', onFineChange)
+  onFineChange()
+})
+watch(
+  () => props.deliberate,
+  (on) => {
+    if (!on && canvasBox.value) canvasBox.value.style.cursor = ''
+  },
+)
 onBeforeUnmount(() => {
   detach?.()
   gesture?.destroy()
+  clearTimeout(waitTimer)
+  fineQuery?.removeEventListener?.('change', onFineChange)
 })
 </script>
 
@@ -289,7 +352,7 @@ onBeforeUnmount(() => {
     <div ref="canvasBox" class="dp-canvas" role="img" :aria-label="label">
       <BaseChart :config="config" :drill-open="false" @point="onPoint" />
     </div>
-    <p v-if="deliberate" class="dp-hint" data-testid="pie-hint">Double-click or press and hold a slice to open it</p>
+    <p v-if="deliberate" class="dp-hint" data-testid="pie-hint">{{ finePointer ? 'Click a slice to open it' : 'Press and hold a slice to open it' }}</p>
     <ul class="dp-list" :aria-label="`${label}: slices`">
       <li v-for="s in drawn" :key="s.key" class="dp-item">
         <component
