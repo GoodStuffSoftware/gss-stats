@@ -42,6 +42,37 @@ describe('POST /api/budget/rules', () => {
     expect(edits.every((e) => e.new_category_id === 'shopping' && e.edited_by === 'user-a@example.com')).toBe(true)
   })
 
+  describe('keys a rule would stretch past one merchant', () => {
+    const sharedRow = (name: string, over: Record<string, unknown> = {}) => insertTxn(db, { merchant_key: 'shared-key', merchant_name: name, ...over })
+    const ruleCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM merchant_rules WHERE source = 'edit'")!.n
+
+    it('refuses with 409 when rows under the key carry more than one display name, and writes nothing', async () => {
+      const taught = sharedRow('Merchant One', { category_id: 'shopping', category_source: 'manual', store_no: '5' })
+      const other = sharedRow('Merchant Two')
+      const res = await post({ txnId: taught, scope: 'merchant' })
+      expect(res.status).toBe(409)
+      expect((await json<{ error: string; message: string }>(res)).message).toContain('other merchants')
+      expect(ruleCount()).toBe(0)
+      expect(row(other)).toMatchObject({ category_id: null, category_source: 'none' })
+      expect((await post({ txnId: taught, scope: 'merchant_store' })).status).toBe(409)
+    })
+
+    it('a key whose rows all carry one display name is still fine', async () => {
+      const taught = sharedRow('Merchant One', { category_id: 'shopping', category_source: 'manual' })
+      sharedRow('Merchant One')
+      expect((await post({ txnId: taught, scope: 'merchant' })).status).toBe(200)
+      expect(ruleCount()).toBe(1)
+    })
+
+    it.each(['paypal', 'ach-debit-paypal', 'venmo-sam', 'zelle-pat', 'cash-app-lee'])('refuses the payment-service key %s even with one name', async (key) => {
+      const taught = insertTxn(db, { merchant_key: key, merchant_name: 'Made Up Merchant', category_id: 'shopping', category_source: 'manual' })
+      const res = await post({ txnId: taught, scope: 'merchant' })
+      expect(res.status).toBe(409)
+      expect((await json<{ message: string }>(res)).message).toContain('payment-service')
+      expect(ruleCount()).toBe(0)
+    })
+  })
+
   it('scope merchant_store makes a rule for that store only', async () => {
     const taught = manualRow({ store_no: '77' })
     const same = autoRow({ store_no: '77' })
@@ -92,6 +123,8 @@ describe('POST /api/budget/rules', () => {
   })
 
   it('a more specific existing rule still wins: the seed store rules keep their rows', async () => {
+    // The fixture's store rules give chain-x rows two display names; this test is about rule specificity, so make it one merchant.
+    db.sqlite.prepare("UPDATE transactions SET merchant_name = 'Chain X' WHERE merchant_key = 'chain-x'").run()
     const taught = insertTxn(db, { merchant_key: 'chain-x', merchant_name: 'Chain X', store_no: '7777', category_id: 'dining', category_source: 'manual' })
     const unknownStore = insertTxn(db, { merchant_key: 'chain-x', merchant_name: 'Chain X', store_no: '6666', category_id: 'groceries', category_source: 'rule' })
     const specific = "SELECT id, category_id, updated_at FROM transactions WHERE merchant_key = 'chain-x' AND (store_no IN ('1001', '2002') OR (store_no = '3003' AND amount_cents = -9000)) ORDER BY id"

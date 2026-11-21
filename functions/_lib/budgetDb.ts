@@ -18,6 +18,7 @@ import type {
 } from '../../src/lib/budget/types'
 import { SPENDING_KINDS, TXN_KINDS, UNCATEGORIZED } from '../../src/lib/budget/types'
 import { categorize, ruleIdFor } from '../../src/lib/budget/rules'
+import { isPaymentServiceKey } from '../../src/lib/budget/merchant'
 import { BUDGET_DENIED } from './auth'
 import { budgetJson, type BudgetData, type BudgetEnv } from './budgetAccess'
 
@@ -432,9 +433,42 @@ export async function runTxnList(db: D1Database, q: TxnQuery & { limit: number }
   const ids = await accountIdsFor(db, q.person)
   const built = buildTxnList(q, JSON.stringify(ids))
   const { results } = await db.prepare(built.sql).bind(...built.params).all<Row>()
-  const page = results.slice(0, q.limit).map(mapTxn)
+  const page = await withRuleSafe(db, results.slice(0, q.limit).map(mapTxn))
   const next = results.length > q.limit && page.length > 0 ? encodeCursor(page[page.length - 1].postedDate, page[page.length - 1].id) : null
   return { rows: page, nextCursor: next }
+}
+
+// ---------- rule safety: does a rule on a merchant key reach only the merchant the row names? -----
+
+/**
+ * Why a rule on each key would reach other merchants than the row names, for the keys where it would (a key absent from the
+ * map is safe). Two cases: a payment-service key (processor, wallet or person-to-person rail: many merchants pay through it),
+ * and a key whose rows carry more than one display name (a shared key whose real merchants were named from receipts).
+ * One grouped read over those keys' rows; payment-service keys need no read.
+ */
+export async function ruleUnsafeReasons(db: D1Database, keys: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const toCheck: string[] = []
+  for (const k of new Set(keys.filter((x) => x !== ''))) {
+    if (isPaymentServiceKey(k)) out.set(k, 'a payment-service key: many merchants pay through it')
+    else toCheck.push(k)
+  }
+  if (toCheck.length > 0) {
+    const { results } = await db.prepare(
+      `SELECT merchant_key AS k FROM transactions WHERE merchant_key IN (SELECT value FROM json_each(?))
+       GROUP BY merchant_key HAVING COUNT(DISTINCT merchant_name) > 1`,
+    ).bind(JSON.stringify(toCheck)).all<Row>()
+    for (const r of results) out.set(str(r.k), 'shared by more than one merchant name')
+  }
+  return out
+}
+
+/** Fill `ruleSafe` on the rows a rule could be made from (a manual category or kind); the others get false, as no rule can
+ *  come from them yet (POST /rules refuses them), and need no read. */
+export async function withRuleSafe(db: D1Database, txns: Txn[]): Promise<Txn[]> {
+  const teachable = (t: Txn) => t.merchantKey !== '' && (t.categorySource === 'manual' || t.kindSource === 'manual')
+  const unsafe = await ruleUnsafeReasons(db, txns.filter(teachable).map((t) => t.merchantKey))
+  return txns.map((t) => ({ ...t, ruleSafe: teachable(t) && !unsafe.has(t.merchantKey) }))
 }
 
 // ---------- transactions: one row, the write stamp -----------------------------------------------

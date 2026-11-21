@@ -21,6 +21,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget legends read better.** Purchases show a short date ("Aug 11") instead of the full ISO date, a long debt name wraps instead of being cut off, the two panel headers line up on desktop, and every category gets its own colour.
 - **Budget shows why a purchase needs review, and lets you confirm it in one tap.** A flagged row now says why under the merchant (and on hover), and a small ✓ "Looks right" button saves it as it stands, so it leaves the review list and the "Needs review" count drops straight away.
 - **Budget pie outside labels keep the whole name.** When a name would be cut, the share is dropped first and the full name shows if it fits; the name is cut only when even it does not.
+- **Budget no longer offers "Use for all" where it would recategorize other merchants.** After an edit or a ✓, the offer shows only when every row under that merchant's key carries one name and the key is not a payment service (PayPal, Venmo, Cash App, Zelle); the server refuses such a rule too.
 
 ## [0.79.2] — 2026-11-20
 

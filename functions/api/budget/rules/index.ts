@@ -5,12 +5,14 @@
 // the row must have a store number). The row must carry a manual category (and/or a manual kind): that is
 // what the rule teaches. The rule id is deterministic (ruleIdFor), so repeating the call upserts. The rule
 // is then re-applied to the merchant's rows with the engine (manual rows never change, a more specific
-// existing rule still wins); `reapplied` is how many rows changed.
+// existing rule still wins); `reapplied` is how many rows changed. Refused with 409 when the key is a payment-service
+// key or its rows carry more than one display name (the rule would reach other merchants).
 
 import type { RuleResponse } from '../../../../src/lib/budget/types'
 import { budgetJson } from '../../../_lib/budgetAccess'
 import {
-  MAX_BODY, RULE_COLUMNS, applyRules, assertCategory, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject, ruleFromTxn,
+  BudgetHttpError, MAX_BODY, RULE_COLUMNS, applyRules, assertCategory, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject,
+  ruleFromTxn, ruleUnsafeReasons,
 } from '../../../_lib/budgetDb'
 
 export const onRequest = defineRoute({
@@ -30,6 +32,9 @@ export const onRequest = defineRoute({
     const learned = await ruleFromTxn({ ...txn, categoryId: txn.categorySource === 'manual' ? txn.categoryId : null }, body.scope)
     if (!learned.setCategoryId && !learned.setKind) throw badRequest('txnId: this row has no manual category or kind to learn from')
 
+    // A key shared by several merchants (or a payment service's key) would make the rule reach merchants the row does not name.
+    const unsafe = (await ruleUnsafeReasons(db, [txn.merchantKey])).get(txn.merchantKey)
+    if (unsafe) throw new BudgetHttpError(409, 'rule_unsafe', `A rule on this row's merchant key would reach other merchants (${unsafe}). Edit the rows one at a time instead.`)
     const who = ctx.data.budgetEmail!
     const now = new Date().toISOString()
     await db.prepare(

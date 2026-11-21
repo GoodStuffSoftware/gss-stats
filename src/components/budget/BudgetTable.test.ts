@@ -21,7 +21,7 @@ function txn(id: string, over: Partial<Txn> = {}): Txn {
     id, accountId: 'a1', postedDate: '2026-10-05', txnDate: null, amountCents: -1234, description: 'CHAIN X 0001', merchantKey: 'chain-x',
     merchantName: 'Chain X', storeNo: null, kind: 'spend', kindSource: 'auto', categoryId: 'groceries', categorySource: 'auto', ruleId: null,
     confidence: 50, needsReview: false, reviewReason: null, pairId: null, debtAccountId: null, principalCents: null, interestCents: null,
-    note: null, updatedAt: '2026-10-06T00:00:00Z', updatedBy: 'user@example.com', ...over,
+    note: null, updatedAt: '2026-10-06T00:00:00Z', updatedBy: 'user@example.com', ruleSafe: true, ...over,
   }
 }
 
@@ -254,6 +254,17 @@ describe('BudgetTable "Use for all"', () => {
       [{ txnId: 't1', ruleApplied: true, reapplied: 3 }],
     ])
     expect(selectOf(w, 't2').value).toBe('fuel') // the other row of that merchant on the page followed
+  })
+
+  it('shows no "Use for all" when the row\'s key is shared (ruleSafe false), and a confirm does not offer it either', async () => {
+    mockFetch((url, init) => (init?.method === 'PATCH'
+      ? json({ txn: txn('t1', { categoryId: 'fuel', categorySource: 'manual', updatedAt: 'N', ruleSafe: false }) })
+      : json({ rows: [txn('t1', { ruleSafe: false })], nextCursor: null })))
+    const w = await mountTable()
+    await w.get('[data-row-key="t1"] select').setValue('fuel')
+    await flushPromises()
+    expect(w.find('button.et-action').exists()).toBe(false)
+    expect(calls.some((c) => c.url.pathname === '/api/budget/rules')).toBe(false)
   })
 
   it('says so when no other row changed', async () => {

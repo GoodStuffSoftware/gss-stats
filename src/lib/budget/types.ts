@@ -42,7 +42,10 @@ export interface Txn { id: string; accountId: string; postedDate: IsoDate; txnDa
   kindSource: 'manual' | 'rule' | 'auto' | 'hint'; categoryId: string | null; categorySource: Source; ruleId: string | null
   confidence: number; needsReview: boolean; reviewReason: ReviewReason | null; pairId: string | null
   debtAccountId: string | null; principalCents: Cents | null; interestCents: Cents | null; note: string | null
-  updatedAt: string; updatedBy: string }
+  updatedAt: string; updatedBy: string
+  /** Set by the transactions API: a rule on this row's merchant key would affect only the merchant the row names (one display
+   *  name under the key, not a payment-service key). Absent or false: no "Use for all" offer. */
+  ruleSafe?: boolean }
 /** What pairing changes on a row: it is the row's classification as it stood before it was paired. */
 export type UnpairedFields = Pick<Txn, 'kind' | 'categoryId' | 'categorySource' | 'confidence' | 'needsReview' | 'reviewReason'>
 export interface TxnInsert extends Txn { importId: string; statementEnd: IsoDate | null

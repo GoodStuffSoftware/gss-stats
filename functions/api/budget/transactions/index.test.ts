@@ -25,7 +25,21 @@ describe('GET /api/budget/transactions', () => {
     const fuel = page.rows.find((r) => r.storeNo === '1001')!
     expect(fuel).toMatchObject({ amountCents: -6200, categoryId: 'fuel', categorySource: 'rule', kind: 'spend', kindSource: 'auto', accountId: 'chk-a', note: null })
     expect(Object.keys(fuel).sort()).toEqual(['accountId', 'amountCents', 'categoryId', 'categorySource', 'confidence', 'debtAccountId', 'description', 'id', 'interestCents',
-      'kind', 'kindSource', 'merchantKey', 'merchantName', 'needsReview', 'note', 'pairId', 'postedDate', 'principalCents', 'reviewReason', 'ruleId', 'storeNo', 'txnDate', 'updatedAt', 'updatedBy'])
+      'kind', 'kindSource', 'merchantKey', 'merchantName', 'needsReview', 'note', 'pairId', 'postedDate', 'principalCents', 'reviewReason', 'ruleId', 'ruleSafe', 'storeNo', 'txnDate', 'updatedAt', 'updatedBy'])
+  })
+
+  it('ruleSafe: true only on a manual row whose key has one display name and is no payment service', async () => {
+    const mk = (key: string, name: string, manual = true) => insertTxn(db, {
+      merchant_key: key, merchant_name: name, posted_date: '2026-12-03', ...(manual ? { category_id: 'shopping', category_source: 'manual' } : {}),
+    })
+    const single = mk('solo-shop', 'Solo Shop')
+    const auto = mk('solo-shop', 'Solo Shop', false)
+    const sharedA = mk('shared-key', 'Merchant One')
+    mk('shared-key', 'Merchant Two', false)
+    const rail = mk('paypal-purchase', 'Made Up Merchant')
+    const page = await json<TxnPage>(await get({ from: '2026-11-01', to: '2026-12-31', limit: '200' }))
+    const flag = (id: string) => page.rows.find((r) => r.id === id)!.ruleSafe
+    expect([flag(single), flag(auto), flag(sharedA), flag(rail)]).toEqual([true, false, false, false])
   })
 
   it('returns a stored note, and null when there is none', async () => {

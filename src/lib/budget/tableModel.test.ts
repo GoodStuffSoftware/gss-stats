@@ -21,7 +21,7 @@ function txn(id: string, over: Partial<Txn> = {}): Txn {
     id, accountId: 'a1', postedDate: '2026-10-05', txnDate: null, amountCents: -1234, description: 'CHAIN X 0001', merchantKey: 'chain-x',
     merchantName: 'Chain X', storeNo: null, kind: 'spend', kindSource: 'auto', categoryId: 'groceries', categorySource: 'auto', ruleId: null,
     confidence: 50, needsReview: false, reviewReason: null, pairId: null, debtAccountId: null, principalCents: null, interestCents: null,
-    note: null, updatedAt: '2026-10-06T00:00:00Z', updatedBy: 'user@example.com', ...over,
+    note: null, updatedAt: '2026-10-06T00:00:00Z', updatedBy: 'user@example.com', ruleSafe: true, ...over,
   }
 }
 
@@ -235,6 +235,23 @@ describe('use for all', () => {
     expect(model.rows.value.find((r) => r.id === 't3')?.categoryId).toBe('groceries') // manual rows are never touched
     expect(model.rows.value.find((r) => r.id === 't4')?.categoryId).toBe('groceries')
     expect(edited.at(-1)).toEqual({ txnId: 't1', ruleApplied: true, reapplied: 1 })
+  })
+
+  it('offers no rule when the server says a rule on this key would reach other merchants (ruleSafe false)', async () => {
+    const { model, deps } = setup([txn('t1', { merchantKey: 'shared-key', merchantName: 'Merchant One', ruleSafe: false })])
+    await model.load(Q)
+    await model.setSelection('t1', 'fuel')
+    expect(model.rowState.t1?.action).toBeUndefined()
+    expect(model.status.value).toContain('Fuel') // the edit itself still saves
+    await model.useForAll('t1')
+    expect(deps.createRule).not.toHaveBeenCalled()
+  })
+
+  it('a row without the flag gets no offer either', async () => {
+    const { model } = setup([txn('t1', { ruleSafe: undefined })])
+    await model.load(Q)
+    await model.setSelection('t1', 'fuel')
+    expect(model.rowState.t1?.action).toBeUndefined()
   })
 
   it('a failed rule keeps the offer and says why', async () => {

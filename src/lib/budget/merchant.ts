@@ -7,6 +7,16 @@ const PROCESSOR_PREFIXES = new Set(['SQ', 'TST', 'SP', 'PP', 'PAYPAL'])
 /** Person-to-person rails: the payee is a person, so no merchant is visible. */
 const P2P_PREFIXES = new Set(['VENMO', 'ZELLE', 'CASH APP'])
 
+/** Payment-service rails as a segment of a kebab merchant key (the same rails PROCESSOR_PREFIXES and P2P_PREFIXES name). */
+const SERVICE_SEGMENTS = new Set(['paypal', 'venmo', 'zelle', 'cashapp'])
+
+/** True when the key belongs to a payment service (`paypal`, `ach-debit-paypal`, `venmo-<payee>`, `cash-app`): no single
+ *  merchant sits behind it, so a rule on it would recategorize every merchant that pays through the service. */
+export function isPaymentServiceKey(key: string): boolean {
+  const segs = key.toLowerCase().split('-').filter(Boolean)
+  return segs.some((s, i) => SERVICE_SEGMENTS.has(s) || (s === 'cash' && segs[i + 1] === 'app'))
+}
+
 export interface MerchantKey { key: string; name: string; aggregator: boolean }
 
 /** Rail wording that is not a payee: skipped when looking for the name after a person-to-person prefix. */

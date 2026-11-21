@@ -242,7 +242,8 @@ export function createTxnTable(deps: TableDeps, getCategories: () => Category[],
       if (j >= 0) rows.value[j] = res.txn
       setState(id, null)
       markIfMoved(res.txn)
-      const offer = patch.categoryId != null && !!res.txn.merchantKey
+      // Only when a rule on this merchant key reaches just the merchant the label names (the server says so in ruleSafe).
+      const offer = patch.categoryId != null && !!res.txn.merchantKey && res.txn.ruleSafe === true
       if (offer) setState(id, { ...rowState[id], action: { id: 'rule', label: `Use for all ${res.txn.merchantName || res.txn.merchantKey}` } })
       status.value = `Saved. ${res.txn.merchantName || 'Row'} is now ${categoryLabel(cats, res.txn)}.`
       onEdited({ txnId: id, ruleApplied: false, reapplied: 0 })

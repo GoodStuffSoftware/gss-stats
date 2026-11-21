@@ -13,7 +13,7 @@ import { UNCATEGORIZED } from '../../../../src/lib/budget/types'
 import { budgetJson } from '../../../_lib/budgetAccess'
 import {
   BudgetHttpError, MAX_BODY, TXN_COLUMNS, assertCategory, badRequest, defineRoute, getTxn, isKind, isTxnId, mapTxn, nextStamp, notFound,
-  readJsonObject,
+  readJsonObject, withRuleSafe,
 } from '../../../_lib/budgetDb'
 
 const conflict = (current: unknown) => new BudgetHttpError(409, 'conflict', 'the row changed since you loaded it', { current })
@@ -71,7 +71,7 @@ export const onRequest = defineRoute({
     const results = await db.batch(stmts)
     const row = results[results.length - 1].results[0] as Record<string, unknown> | undefined
     if (Number(results[0].meta?.changes ?? 0) === 0) throw conflict(row ? mapTxn(row) : before)
-    const body200: TxnPatchResponse = { txn: mapTxn(row!) }
+    const body200: TxnPatchResponse = { txn: (await withRuleSafe(db, [mapTxn(row!)]))[0] }
     return budgetJson(200, body200)
   },
 })

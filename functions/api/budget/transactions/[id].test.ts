@@ -28,6 +28,16 @@ describe('PATCH /api/budget/transactions/:id', () => {
       .toEqual([{ txn_id: id, old_category_id: 'groceries', new_category_id: 'fuel', old_kind: 'spend', new_kind: 'spend', edited_at: txn.updatedAt, edited_by: 'user-a@example.com' }])
   })
 
+  it('the edited row comes back with ruleSafe: true for a single-merchant key, false for a shared or payment-service key', async () => {
+    const solo = insertTxn(db, { merchant_key: 'solo-shop', merchant_name: 'Solo Shop' })
+    const a = insertTxn(db, { merchant_key: 'shared-key', merchant_name: 'Merchant One' })
+    insertTxn(db, { merchant_key: 'shared-key', merchant_name: 'Merchant Two' })
+    const rail = insertTxn(db, { merchant_key: 'venmo-sam', merchant_name: 'Made Up Merchant' })
+    const flags: Array<boolean | undefined> = []
+    for (const id of [solo, a, rail]) flags.push((await json<TxnPatchResponse>(await patch(id, { categoryId: 'fuel', expectedUpdatedAt: SEED_STAMP }))).txn.ruleSafe)
+    expect(flags).toEqual([true, false, false])
+  })
+
   it('the same category as it stands is accepted: it becomes a manual edit and the review flag clears ("Looks right")', async () => {
     const id = idOf("store_no = '9999'")
     expect(row(id)).toMatchObject({ needs_review: 1, review_reason: 'ambiguous_store', category_id: 'groceries', category_source: 'rule' })
@@ -69,7 +79,7 @@ describe('PATCH /api/budget/transactions/:id', () => {
     expect(res.status).toBe(409)
     const body = await json<{ error: string; message: string; current: Txn }>(res)
     expect(body.error).toBe('conflict')
-    expect(body.current).toEqual(first.txn)
+    expect(body.current).toEqual({ ...first.txn, ruleSafe: undefined }) // the conflict copy carries no flag
     expect(row(id).category_id).toBe('dining')
     expect(db.all('SELECT * FROM category_edits').length).toBe(1)
     // and with the fresh stamp it goes through

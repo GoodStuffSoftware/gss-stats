@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { merchantKey as mk, withCounterparty } from './merchant'
+import { isPaymentServiceKey, merchantKey as mk, withCounterparty } from './merchant'
 
 describe('merchantKey', () => {
   it('keeps the first one to three words, kebab-cased, with a title-cased name', () => {
@@ -117,5 +117,17 @@ describe('merchantKey: display names (the key never changes with them)', () => {
     expect(mk('BRAMBLEWOOD MARKET #12 SPRINGFIELD').name).toBe('Bramblewood Market')
     expect(mk('FOOD STORE')).toMatchObject({ key: 'food-store', name: 'Food Store' })
     expect(mk('SPRINGFIELD SPORTS').name).toBe('Springfield Sports')
+  })
+})
+
+describe('isPaymentServiceKey', () => {
+  it('flags payment-service rails by segment, not ordinary merchant keys', () => {
+    for (const k of ['paypal', 'paypal-purchase', 'ach-debit-paypal', 'venmo', 'venmo-sam', 'zelle-pat', 'cash-app', 'cash-app-lee', 'cashapp']) {
+      expect(isPaymentServiceKey(k), k).toBe(true)
+    }
+    for (const k of ['gadget-hut', 'chain-x', 'cash-store', 'zellers-hut', 'paypalish-shop', 'unknown', '']) expect(isPaymentServiceKey(k), k).toBe(false)
+  })
+  it('flags the key merchantKey itself builds for the rails', () => {
+    for (const d of ['PAYPAL PURCHASE', 'ACH DEBIT PAYPAL', 'VENMO PAYMENT SAM', 'ZELLE FROM PAT', 'CASH APP LEE']) expect(isPaymentServiceKey(mk(d).key), d).toBe(true)
   })
 })
