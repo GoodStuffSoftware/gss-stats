@@ -92,7 +92,7 @@ describe('row mappers', () => {
     const txn = await getTxn(db.d1, (db.get<{ id: string }>("SELECT id FROM transactions WHERE store_no = '1001'")!).id)
     expect(txn).toMatchObject({ accountId: 'chk-a', amountCents: -6200, merchantKey: 'chain-x', storeNo: '1001', kind: 'spend', categoryId: 'fuel', categorySource: 'rule', needsReview: false })
     expect(Object.keys(mapTxn(db.get('SELECT * FROM transactions LIMIT 1')!)).sort()).toEqual([
-      'accountId', 'amountCents', 'categoryId', 'categorySource', 'confidence', 'debtAccountId', 'description', 'id', 'interestCents', 'kind', 'kindSource',
+      'accountId', 'amountCents', 'categoryId', 'categorySource', 'confidence', 'debtAccountId', 'description', 'id', 'included', 'interestCents', 'kind', 'kindSource',
       'merchantKey', 'merchantName', 'needsReview', 'note', 'pairId', 'postedDate', 'principalCents', 'reviewReason', 'ruleId', 'storeNo', 'txnDate',
       'updatedAt', 'updatedBy',
     ])
