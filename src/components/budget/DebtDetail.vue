@@ -15,7 +15,8 @@
 import { computed, ref, watch } from 'vue'
 import { balanceLineConfig } from '../../lib/budget/balanceChart'
 import { fetchDebtDetail, putManualBalance } from '../../lib/budget/clientRead'
-import { monthlyInterestCents, monthlyPaymentCents, monthsToPayoff, payoffMonth } from '../../lib/budget/loanMath'
+import { daysBetween } from '../../lib/budget/dates'
+import { debtAprBp, loanMonthlyPayment, monthlyInterestCents, monthsToPayoff, payoffMonth } from '../../lib/budget/loanMath'
 import { formatApr } from '../../lib/budget/pieModel'
 import { formatAmount, formatDate } from '../../lib/budget/tableModel'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
@@ -57,13 +58,10 @@ const latest = computed(() => {
   return h.length ? [...h].sort((a, b) => a.asOf.localeCompare(b.asOf)).at(-1)! : null
 })
 const history = computed(() => [...(detail.value?.history ?? [])].sort((a, b) => a.asOf.localeCompare(b.asOf)))
-/** The account's own rate, else the newest statement's. */
+/** The same rate the Loans list shows (loanMath.debtAprBp): the newest balance's own rate, else the account's. */
 const rateBp = computed(() => {
   const d = detail.value
-  if (!d) return null
-  if (d.account.aprBp !== null) return d.account.aprBp
-  const p = [...d.periods].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd)).find((x) => x.aprBp !== null)
-  return p ? p.aprBp : null
+  return d ? debtAprBp(d.history, d.account.aprBp) : null
 })
 const title = computed(() => {
   const a = detail.value?.account
@@ -154,7 +152,7 @@ const payoff = computed(() => {
   const bal = latest.value
   if (!bal) return null
   const t = terms.value
-  const pay = monthlyPaymentCents(t ? { paymentCents: t.paymentCents, every: t.paymentEvery } : null, props.recentPaymentsCents)
+  const pay = loanMonthlyPayment({ terms: t, recentMonthTotalsCents: props.recentPaymentsCents ?? [] })
   const res = pay ? monthsToPayoff(bal.balanceCents, rateBp.value, pay.cents) : null
   let text = ''
   if (res?.kind === 'payoff' || res?.kind === 'rate_unknown') {
@@ -169,12 +167,6 @@ const payoff = computed(() => {
 })
 
 const SOON_DAYS = 60
-function daysUntil(iso: string): number {
-  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayIso())
-  if (!a || !b) return Infinity
-  return Math.round((Date.UTC(+a[1], +a[2] - 1, +a[3]) - Date.UTC(+b[1], +b[2] - 1, +b[3])) / 86_400_000)
-}
 const promoRows = computed(() =>
   [...(detail.value?.promos ?? [])]
     .sort((a, b) => (a.endsOn ?? '9999').localeCompare(b.endsOn ?? '9999') || a.seq - b.seq)
@@ -184,7 +176,7 @@ const promoRows = computed(() =>
       apr: p.aprBp === null ? dash : formatApr(p.aprBp),
       endsOn: p.endsOn ? formatDate(p.endsOn) : dash,
       atRisk: money(p.deferredInterestCents),
-      soon: p.endsOn !== null && daysUntil(p.endsOn) < SOON_DAYS,
+      soon: p.endsOn !== null && daysBetween(todayIso(), p.endsOn) < SOON_DAYS,
     })),
 )
 

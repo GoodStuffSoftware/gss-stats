@@ -80,3 +80,26 @@ export function totalOwed(debts: OwedDebt[]): { totalCents: number; cosignedCent
   }
   return { totalCents, cosignedCents, missingCount }
 }
+
+export interface AprCandidate { asOf: string; source: 'statement' | 'manual'; aprBp?: number | null }
+
+/**
+ * A debt's rate, one rule for the Loans list and the detail: the newest balance's own rate (a typed balance when it
+ * is newer than the latest statement balance; a tie goes to the statement), else the account's rate. Null when none.
+ */
+export function debtAprBp(balances: AprCandidate[], accountAprBp: number | null): number | null {
+  let best: AprCandidate | null = null
+  for (const b of balances) {
+    if (!best || b.asOf > best.asOf || (b.asOf === best.asOf && b.source === 'statement' && best.source !== 'statement')) best = b
+  }
+  return best?.aprBp ?? accountAprBp
+}
+
+export interface LoanPaymentInput {
+  terms: { paymentCents: number | null; paymentEvery: PaymentEvery | null } | null
+  recentMonthTotalsCents: number[]
+}
+/** The monthly payment, one rule for list and detail: scheduled (biweekly x 26/12), else the 3-month average. */
+export function loanMonthlyPayment(i: LoanPaymentInput): MonthlyPayment | null {
+  return monthlyPaymentCents(i.terms ? { paymentCents: i.terms.paymentCents, every: i.terms.paymentEvery } : null, i.recentMonthTotalsCents)
+}

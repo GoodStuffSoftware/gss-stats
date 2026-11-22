@@ -1083,7 +1083,7 @@ function toggleDark() {
       <span>Couldn't load your saved layout — showing the default one. Changes made now aren't saved, and are replaced when your layout loads.</span>
       <button class="btn btn-primary" :disabled="retryingLoad" @click="retryLoad">{{ retryingLoad ? 'Loading…' : 'Try again' }}</button>
     </div>
-    <header class="topbar">
+    <header class="topbar" :class="{ 'topbar-budget': budgetOpen }">
       <h1 class="visually-hidden">Stats</h1>
       <!-- ☰: the page drawer (components/nav/NavDrawer.vue), with the current group's badge. -->
       <button
@@ -1739,6 +1739,26 @@ function toggleDark() {
   }
   .top-actions {
     flex-wrap: wrap;
+  }
+  /* Budget: the crumb is short enough to cut with an ellipsis, so the theme button and Sign out stay on the first row. */
+  .topbar-budget .top-actions {
+    order: 0;
+    flex-basis: auto;
+    flex-wrap: nowrap;
+  }
+  .topbar-budget .topbar-crumbs :deep(.crumbs) {
+    overflow: hidden;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-list),
+  .topbar-budget .topbar-crumbs :deep(.cr-item:last-child) {
+    min-width: 0;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-here) {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    line-height: 44px;
+    text-overflow: ellipsis;
   }
 }
 </style>

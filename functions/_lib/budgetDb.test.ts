@@ -3,7 +3,7 @@
 // uses an index), the rule engine's write path, and the route wrapper.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_PAYMENTS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
+  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_LATEST_SQL, LOAN_PAYMENTS_SQL, LOAN_PROMOS_SQL, LOAN_TERMS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
   encodeCursor, getTxn, isIsoDate, loadDebts, mapAccount, mapRule, mapTxn, nextStamp, parseManualBalance, parseRange, parseSummaryQuery,
   parseTxnQuery, readJsonObject, runSummary, runTxnList,
 } from './budgetDb'
@@ -196,6 +196,14 @@ describe('every query shape is index-backed (EXPLAIN QUERY PLAN)', () => {
     for (const sql of [TERMS_SQL, LATEST_ONE_SQL, PROMOS_ONE_SQL]) {
       const plan = db.explain(sql, ['card-a'])
       expect(plan.join('\n'), plan.join('\n')).not.toMatch(/SCAN (transactions|statements|statement_promos|debt_terms)/)
+    }
+  })
+  it('the /loans batch terms, latest and promos reads never scan statements, statement_promos or debt_terms', () => {
+    for (const sql of [LOAN_TERMS_SQL, LOAN_LATEST_SQL, LOAN_PROMOS_SQL]) {
+      const plan = db.explain(sql, ['all'])
+      expect(plan.join('
+'), plan.join('
+')).not.toMatch(/SCAN (s|s2|p|statements|statement_promos|debt_terms)/)
     }
   })
   it('a rule re-apply reads only the keyed merchants rows, through idx_txn_merchant', () => {

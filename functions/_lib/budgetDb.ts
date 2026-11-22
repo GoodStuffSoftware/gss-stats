@@ -18,6 +18,7 @@ import type {
 } from '../../src/lib/budget/types'
 import { SPENDING_KINDS, TXN_KINDS, UNCATEGORIZED } from '../../src/lib/budget/types'
 import { categorize, ruleIdFor } from '../../src/lib/budget/rules'
+import { debtAprBp } from '../../src/lib/budget/loanMath'
 import { isPaymentServiceKey } from '../../src/lib/budget/merchant'
 import { BUDGET_DENIED } from './auth'
 import { budgetJson, type BudgetData, type BudgetEnv } from './budgetAccess'
@@ -672,7 +673,10 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
       balanceCents: chosen ? Number(useManual ? m!.balance_cents : s!.closing_balance_cents) : null,
       asOf: chosen ? str(useManual ? m!.as_of : s!.period_end) : null,
       source: chosen ? (useManual ? 'manual' : 'statement') : null,
-      aprBp: numOrNull(chosen?.apr_bp) ?? a.aprBp,
+      aprBp: debtAprBp([
+        ...(s ? [{ asOf: str(s.period_end), source: 'statement' as const, aprBp: numOrNull(s.apr_bp) }] : []),
+        ...(m ? [{ asOf: str(m.as_of), source: 'manual' as const, aprBp: numOrNull(m.apr_bp) }] : []),
+      ], a.aprBp),
       creditLimitCents: numOrNull(s?.credit_limit_cents) ?? a.creditLimitCents,
     }
   })
@@ -730,20 +734,21 @@ export function lastFullMonths(now: Date, count = 3): { months: string[]; from: 
   return { months, from: `${months[0]}-01` as IsoDate, to: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-01` as IsoDate }
 }
 
+/** The /loans batch's terms, latest-statement and promo reads (one per account set; ?1 = person). The test asserts their plans. */
+export const LOAN_TERMS_SQL = `SELECT ${TERMS_COLUMNS} FROM debt_terms WHERE account_id IN (${LOAN_SCOPE})`
+export const LOAN_LATEST_SQL = `SELECT ${LATEST_COLUMNS} FROM statements s WHERE s.account_id IN (${LOAN_SCOPE})
+         AND s.period_end = (SELECT MAX(s2.period_end) FROM statements s2 WHERE s2.account_id = s.account_id)`
+export const LOAN_PROMOS_SQL = `SELECT ${PROMO_COLUMNS} FROM statement_promos p WHERE p.account_id IN (${LOAN_SCOPE})
+         AND p.period_end = (SELECT MAX(s.period_end) FROM statements s WHERE s.account_id = p.account_id) ORDER BY p.account_id, p.seq`
+
 /** Everything the Loans page needs; the debt rows are exactly loadDebts' (same scope, same newer-wins rule). */
 export async function loadLoans(db: D1Database, person: string, now: Date = new Date()): Promise<LoansResponse> {
   const debts = await loadDebts(db, person)
   const { months, from, to } = lastFullMonths(now)
   const [terms, latest, promos, ext, own] = await db.batch<Row>([
-    db.prepare(`SELECT ${TERMS_COLUMNS} FROM debt_terms WHERE account_id IN (${LOAN_SCOPE})`).bind(person),
-    db.prepare(
-      `SELECT ${LATEST_COLUMNS} FROM statements s WHERE s.account_id IN (${LOAN_SCOPE})
-         AND s.period_end = (SELECT MAX(s2.period_end) FROM statements s2 WHERE s2.account_id = s.account_id)`,
-    ).bind(person),
-    db.prepare(
-      `SELECT ${PROMO_COLUMNS} FROM statement_promos p WHERE p.account_id IN (${LOAN_SCOPE})
-         AND p.period_end = (SELECT MAX(s.period_end) FROM statements s WHERE s.account_id = p.account_id) ORDER BY p.account_id, p.seq`,
-    ).bind(person),
+    db.prepare(LOAN_TERMS_SQL).bind(person),
+    db.prepare(LOAN_LATEST_SQL).bind(person),
+    db.prepare(LOAN_PROMOS_SQL).bind(person),
     db.prepare(LOAN_PAYMENTS_SQL.external).bind(person, from, to),
     db.prepare(LOAN_PAYMENTS_SQL.account).bind(person, from, to),
   ])
@@ -785,15 +790,15 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
     db.prepare(
       `SELECT period_end, closing_balance_cents, apr_bp, interest_cents, principal_paid_cents, advances_cents FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 24`,
     ).bind(id),
-    db.prepare(`SELECT as_of, balance_cents FROM debt_balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 24`).bind(id),
+    db.prepare(`SELECT as_of, balance_cents, apr_bp FROM debt_balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 24`).bind(id),
     db.prepare(paymentSql).bind(id),
     db.prepare(TERMS_SQL).bind(id),
     db.prepare(LATEST_ONE_SQL).bind(id),
     db.prepare(PROMOS_ONE_SQL).bind(id),
   ])
   const history: DebtDetail['history'] = [
-    ...statements.results.filter((r) => r.closing_balance_cents !== null).map((r) => ({ asOf: str(r.period_end), balanceCents: Number(r.closing_balance_cents), source: 'statement' as const })),
-    ...manual.results.map((r) => ({ asOf: str(r.as_of), balanceCents: Number(r.balance_cents), source: 'manual' as const })),
+    ...statements.results.filter((r) => r.closing_balance_cents !== null).map((r) => ({ asOf: str(r.period_end), balanceCents: Number(r.closing_balance_cents), source: 'statement' as const, aprBp: numOrNull(r.apr_bp) })),
+    ...manual.results.map((r) => ({ asOf: str(r.as_of), balanceCents: Number(r.balance_cents), source: 'manual' as const, aprBp: numOrNull(r.apr_bp) })),
   ].sort((a, b) => (a.asOf < b.asOf ? -1 : a.asOf > b.asOf ? 1 : a.source === b.source ? 0 : a.source === 'statement' ? -1 : 1))
   const periods: DebtDetail['periods'] = statements.results.map((r) => ({
     periodEnd: str(r.period_end), aprBp: numOrNull(r.apr_bp), interestCents: numOrNull(r.interest_cents),

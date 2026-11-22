@@ -116,7 +116,7 @@ async function loadSummary() {
 }
 // One fetch per distinct query (and per refreshKey bump); the key is null until the data may be read.
 watch(
-  () => (ready.value ? JSON.stringify(summaryQuery.value) + '|' + refreshKey.value : null),
+  () => (ready.value && state.page === 'overview' ? JSON.stringify(summaryQuery.value) + '|' + refreshKey.value : null),
   (key) => {
     if (key !== null) void loadSummary()
   },
@@ -152,7 +152,7 @@ async function loadDebts() {
   }
 }
 watch(
-  () => (ready.value ? state.person + '|' + debtsRefresh.value : null),
+  () => (ready.value && state.page === 'overview' ? state.person + '|' + debtsRefresh.value : null),
   (key) => {
     if (key !== null) void loadDebts()
   },

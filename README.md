@@ -2733,7 +2733,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `--remote` is required), then one aggregate check. The database is shared by Preview and Production, so a
   preview apply changes production's file too. The rollback is the comment block at the end of the file (it
   cannot be a second `.sql` there, since every file in the directory is applied); the tests run both ways.
-- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry.
+- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
   `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no

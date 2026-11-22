@@ -95,6 +95,8 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    production's file too (the section stays 403 there). These tables are written only by the private load
    (as in point 7); no route writes them. Rollback is the commented block at the end of the migration (drop
    the two tables, then the two columns), with the pre-migration Time Travel bookmark as the last resort.
+   Layout: an open loan replaces the facts row and the list at every width (the same on phone and desktop;
+   "← Loans" and Back return to the list), instead of keeping them above the open loan on wide screens.
 
 ## Consequences
 

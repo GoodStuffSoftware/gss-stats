@@ -5,6 +5,7 @@ import { defineComponent } from 'vue'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
 import { todayIso } from '../../lib/budget/viewState'
 import DebtDetail from './DebtDetail.vue'
+import LoansList from './LoansList.vue'
 
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 
@@ -12,8 +13,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const DETAIL: DebtDetailData = {
   account: { id: 'acct-9', label: 'Card A', kind: 'card', personId: 'p1', last4: '0001', isDebt: true, inSpending: true, creditLimitCents: 500000, aprBp: null },
   history: [
-    { asOf: '2026-09-30', balanceCents: 120000, source: 'statement' },
-    { asOf: '2026-10-31', balanceCents: 90000, source: 'statement' },
+    { asOf: '2026-09-30', balanceCents: 120000, source: 'statement', aprBp: 1999 },
+    { asOf: '2026-10-31', balanceCents: 90000, source: 'statement', aprBp: 1999 },
   ],
   periods: [
     { periodEnd: '2026-09-30', aprBp: 1999, interestCents: 2100, principalPaidCents: 5000, advancesCents: null },
@@ -294,5 +295,28 @@ describe('DebtDetail: loan facts', () => {
     expect(items[0].text()).toContain('$123.45')
     expect(items[0].classes()).toContain('dd-promo-soon')
     expect(items[1].classes()).not.toContain('dd-promo-soon')
+  })
+})
+
+describe('DebtDetail and LoansList agree', () => {
+  it('a biweekly debt with a typed rate and no statements shows the same rate and payoff month in both', async () => {
+    const terms = { accountId: 'acct-5', originalCents: null, openedOn: null, maturityOn: null, termMonths: null, paymentCents: 30000,
+      paymentEvery: 'biweekly' as const, cosigned: false, updatedAt: '', updatedBy: '' }
+    const acct = { id: 'acct-5', label: 'Loan C', kind: 'external_debt' as const, personId: 'p1', last4: null, isDebt: true, inSpending: false, creditLimitCents: null, aprBp: null }
+    const detail: DebtDetailData = {
+      account: acct, history: [{ asOf: '2026-10-31', balanceCents: 1_000_000, source: 'manual', aprBp: 1200 }],
+      periods: [], payments: [], terms, latest: null, promos: [],
+    }
+    route(detail)
+    const w = await mountDetail({ accountId: 'acct-5' })
+    const list = mount(LoansList, { props: { loading: false, failed: false, data: { months: [], debts: [{
+      accountId: 'acct-5', label: 'Loan C', kind: 'external_debt', last4: null, personId: 'p1', balanceCents: 1_000_000, asOf: '2026-10-31',
+      source: 'manual', aprBp: 1200, creditLimitCents: null, terms, latest: null, promos: [], payments: [] }] } } })
+    expect(w.get('[data-testid="debt-rate"]').text()).toBe('12.00% APR')
+    expect(list.get('[data-row-key=acct-5]').text()).toContain('12.00%')
+    const month = /\((\w{3} \d{4})\)/.exec(w.get('[data-testid="payoff-months"]').text())![1]!
+    expect(list.get('[data-row-key=acct-5]').text()).toContain(month)
+    expect(w.get('[data-testid="payoff-months"]').text()).not.toContain('rate unknown')
+    w.unmount()
   })
 })

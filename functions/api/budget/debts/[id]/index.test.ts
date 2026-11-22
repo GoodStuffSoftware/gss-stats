@@ -16,7 +16,7 @@ describe('GET /api/budget/debts/:id', () => {
     const d = await json<DebtDetail>(res)
     expect(Object.keys(d).sort()).toEqual(['account', 'history', 'latest', 'payments', 'periods', 'promos', 'terms'])
     expect(d.account).toMatchObject({ id: 'card-a', kind: 'card', isDebt: true, aprBp: 2199, creditLimitCents: 500_000 })
-    expect(d.history).toEqual([{ asOf: '2026-12-04', balanceCents: 18_000, source: 'statement' }])
+    expect(d.history).toEqual([{ asOf: '2026-12-04', balanceCents: 18_000, source: 'statement', aprBp: 2199 }])
     expect(d.periods).toEqual([{ periodEnd: '2026-12-04', aprBp: 2199, interestCents: 1900, principalPaidCents: null, advancesCents: null }])
     expect(d.payments.length).toBe(1)
     expect(d.payments[0]).toMatchObject({ postedDate: '2026-11-12', amountCents: 20_000, principalCents: null, interestCents: null })

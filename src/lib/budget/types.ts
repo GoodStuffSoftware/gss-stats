@@ -91,7 +91,7 @@ export interface DebtSlice { accountId: string; label: string; kind: AccountKind
   aprBp: number | null; creditLimitCents: Cents | null }
 export interface DebtsResponse { debts: DebtSlice[] }
 export interface DebtDetail { account: Account
-  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual' }>
+  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual'; aprBp?: number | null }>
   periods: Array<{ periodEnd: IsoDate; aprBp: number | null; interestCents: Cents | null
     principalPaidCents: Cents | null; advancesCents: Cents | null }>
   payments: Array<{ id: string; postedDate: IsoDate; amountCents: Cents; principalCents: Cents | null; interestCents: Cents | null }>

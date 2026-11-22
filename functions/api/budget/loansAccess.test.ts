@@ -59,6 +59,9 @@ describe.each(ROUTES)('$name', (route) => {
     expect(res.status).toBe(403)
     expect(((await res.json()) as { error: string }).error).toBe('budget_denied')
   })
+  it('HEAD is 403 for a signed-in identity that is not on the allowlist', async () => {
+    expect((await call(route, 'HEAD', UNLISTED)).status).toBe(403)
+  })
   it('the route itself answers 403 when no identity reached it', async () => {
     const request = new Request(ORIGIN + route.path)
     const res = await route.handler({ request, env, data: {}, params: route.params, waitUntil: () => {} })

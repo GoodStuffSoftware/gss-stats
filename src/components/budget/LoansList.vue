@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import { daysBetween } from '../../lib/budget/dates'
 import {
-  monthlyInterestCents, monthlyPaymentCents, monthsToPayoff, payoffMonth, totalOwed,
+  loanMonthlyPayment, monthlyInterestCents, monthsToPayoff, payoffMonth, totalOwed,
 } from '../../lib/budget/loanMath'
 import { formatApr } from '../../lib/budget/pieModel'
 import { formatAmount, formatDate } from '../../lib/budget/tableModel'
@@ -44,11 +44,8 @@ function monthIndex(asOf: string, months: number): number {
 }
 function calc(row: LoanRow, today: string): Calc {
   const cosigned = row.terms?.cosigned === true
-  const payment = monthlyPaymentCents(
-    row.terms ? { paymentCents: row.terms.paymentCents, every: row.terms.paymentEvery } : null,
-    row.payments.map((p) => p.amountCents),
-  )
-  const openEnd = row.kind === 'line_of_credit' || /heloc|open end/i.test(row.label)
+  const payment = loanMonthlyPayment({ terms: row.terms, recentMonthTotalsCents: row.payments.map((p) => p.amountCents) })
+  const openEnd = row.kind === 'line_of_credit'
   const res = monthsToPayoff(row.balanceCents, row.aprBp, payment?.cents ?? null)
   const base = row.asOf ?? today
   let payoff = dash
@@ -91,7 +88,7 @@ const facts = computed(() => {
 
 interface ListRow {
   id: string; debt: string; cosigned: boolean; balance: string; asOf: string; apr: string; payment: string
-  paymentSource: string; interest: string; payoff: string; due: string; minDue: string; promo: string; promoSoon: boolean
+  noData: boolean; paymentSource: string; interest: string; payoff: string; due: string; minDue: string; promo: string; promoSoon: boolean
 }
 const columns: EditableColumn<ListRow>[] = [
   { key: 'debt', label: 'Debt', editor: null },
@@ -122,6 +119,7 @@ function toRow(c: Calc): ListRow {
     minDue: money(r.latest?.minDueCents ?? null),
     promo: c.promoEnd ? formatDate(c.promoEnd) : dash,
     promoSoon: c.promoSoon,
+    noData: r.balanceCents === null && r.aprBp === null && !c.payment && !r.latest && !r.terms && !c.promoEnd,
   }
 }
 const loanRows = computed(() => calcs.value.filter((c) => c.row.kind !== 'card').map(toRow))
@@ -179,6 +177,7 @@ function onClick(e: MouseEvent) {
           <template #cell-debt="{ row }">
             <button type="button" class="ll-open" @click.stop="emit('open', row.id)">{{ row.debt }}</button>
             <span v-if="row.cosigned" class="ll-badge" data-testid="cosigned-badge">Cosigned</span>
+            <span v-if="row.noData" class="ll-nodata" data-testid="no-details">No details yet</span>
           </template>
           <template #cell-payment="{ row }">
             {{ row.payment }}<span v-if="row.paymentSource" class="ll-src"> ({{ row.paymentSource }})</span>
@@ -282,6 +281,34 @@ function onClick(e: MouseEvent) {
   color: rgb(var(--amber-hover));
   font-weight: 600;
 }
+.ll-nodata {
+  display: none;
+  margin-inline-start: 6px;
+  font-size: 12px;
+  color: rgb(var(--ink-3));
+}
+/* Phone cards: a debt with nothing known keeps its name, balance and one "No details yet" line. */
+.loans-list :deep(.et-cards) .ll-nodata {
+  display: block;
+  margin-inline-start: 0;
+}
+.loans-list :deep(.et-card:has(.ll-nodata) .et-line1 .et-part:nth-child(n + 3)) {
+  display: none;
+}
+/* Desktop tables: both groups share one column grid, so Loans and Cards line up. */
+.loans-list :deep(.et-table) {
+  table-layout: fixed;
+}
+.loans-list :deep(.et-table th:nth-child(1)) { width: 17%; }
+.loans-list :deep(.et-table th:nth-child(2)) { width: 9%; }
+.loans-list :deep(.et-table th:nth-child(3)) { width: 8%; }
+.loans-list :deep(.et-table th:nth-child(4)) { width: 6%; }
+.loans-list :deep(.et-table th:nth-child(5)) { width: 12%; }
+.loans-list :deep(.et-table th:nth-child(6)) { width: 9%; }
+.loans-list :deep(.et-table th:nth-child(7)) { width: 15%; }
+.loans-list :deep(.et-table th:nth-child(8)) { width: 8%; }
+.loans-list :deep(.et-table th:nth-child(9)) { width: 8%; }
+.loans-list :deep(.et-table th:nth-child(10)) { width: 8%; }
 @media (max-width: 1023px) {
   .ll-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));

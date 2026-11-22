@@ -310,6 +310,8 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   function readUrl(e?: PopStateEvent) {
     syncPage(e ? e.state : globalThis.history?.state)
     if (e && drill && readMark(e.state)?.s === drill.session) return
+    // a loan step of this session: Back/Forward only moves the open loan, the person and range stay as chosen
+    if (e && loanHist && readMark(e.state, LOAN_MARK_KEY)?.s === loanHist.session) return
     // the address names no drill path: whatever is on screen stays (drillHistory.ts sets it from the entry)
     const { path: _path, page: _page, loan: _loan, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
     Object.assign(state, fromUrl)
@@ -354,6 +356,9 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
       pageSwitching = false
     }
     if (state.page === 'loans') loanHist?.start()
+    // the new Overview entry carries no drill mark yet: mark it with the path still on screen, so crumbing to the top
+    // re-marks instead of go(-1) onto the Loans entry, and Back onto it restores the drill
+    if (state.page === 'overview') drill?.start()
   }
   /** False (and nothing changes) for a range the server would refuse. */
   function setRange(from: IsoDate, to: IsoDate): boolean {
