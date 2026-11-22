@@ -8,6 +8,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 
 ### Added
+- **Count in totals switch for each purchase** — each transaction now has a switch right of its amount, on by default; turning it off takes that purchase out of every spending total, pie and trend, and turning it back on restores it.
 - **Months shown with the Budget range** — the range picker and a line under it now name the months covered (for example "Last 3 months · Aug – Oct 2026", with "(to date)" when it runs to today), and the loan payoff average names its months.
 - **Loan payoff without a scheduled payment** — a loan with no scheduled payment now gets its payoff estimate from the average of the last 3 full months of payments, labelled as such.
 - **Loans list in Budget** — every loan and card with its balance, rate, monthly payment, interest, payoff month, due date and soonest promo end, under totals for what is owed and paid.

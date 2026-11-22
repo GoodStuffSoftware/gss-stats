@@ -114,9 +114,10 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
     { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
     { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
-    // On (the default) = the purchase counts in every spending total, pie and trend; off = excluded. The checkbox is the editor slot in BudgetTable.vue.
-    { key: 'included', label: 'Included', editor: 'select', value: (t) => (t.included === false ? 'Excluded' : 'Included'), options: () => [], cardLine: 2 },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
+    // Included is an on/off switch right of the amount (BudgetTable.vue draws it), not a category. On (the default) = the
+    // purchase counts in every spending total, pie and trend.
+    { key: 'included', label: 'Included', editor: null, value: (t) => (t.included === false ? 'Excluded' : 'Included'), cardLine: 1 },
   ]
 }
 

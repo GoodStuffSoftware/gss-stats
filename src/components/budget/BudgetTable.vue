@@ -142,19 +142,23 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
         />
       </template>
       <template #cell-included="{ row }">
-        <span :class="{ 'bt-excluded': row.included === false }">{{ row.included === false ? 'Excluded' : 'Included' }}</span>
-      </template>
-      <template #editor-included="{ row, disabled }">
-        <label class="bt-included">
+        <label
+          class="bt-included"
+          :class="{ 'bt-excluded': row.included === false }"
+          title="Count in totals"
+          @click.stop
+          @pointerdown.stop
+          @touchstart.stop
+          @contextmenu.stop
+        >
           <input
             type="checkbox"
             :checked="row.included !== false"
-            :disabled="disabled"
-            :aria-label="'Included in spending: ' + rowLabel(row)"
+            :disabled="!canEdit || !!rowState[row.id]?.pending"
+            :aria-label="'Count in totals: ' + rowLabel(row)"
             data-testid="included-toggle"
             @change="model.setIncluded(row.id, ($event.target as HTMLInputElement).checked)"
           />
-          <span>{{ row.included === false ? 'Excluded' : 'Included' }}</span>
         </label>
       </template>
       <template #empty>No transactions in this view.</template>
@@ -244,6 +248,28 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+/* The Included switch: a 44px touch target (a 24px box) that fits beside the amount at 320px; off reads as an empty box. */
+.bt-included {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.bt-included input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  cursor: inherit;
+  accent-color: rgb(var(--ink));
+}
+.bt-included input:disabled {
+  cursor: default;
+}
+.bt-excluded input {
+  opacity: 0.7;
 }
 .bt-dot {
   flex: none;

@@ -231,7 +231,7 @@ describe('BudgetTable editing', () => {
   it('read-only when canEdit is false: no category field, no buttons, the category as text', async () => {
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable({ canEdit: false })
-    expect(w.find('input').exists()).toBe(false)
+    expect(w.find('input:not([data-testid="included-toggle"])').exists()).toBe(false)
     expect(w.find('tbody button').exists()).toBe(false)
     expect(rowEl(w, 't1').text()).toContain('Groceries')
   })
@@ -577,5 +577,102 @@ describe('BudgetTable search and "Add category"', () => {
     expect(added).toHaveLength(1)
     expect(comboValue(wrapper, 't1')).toBe('Dining')
     expect(wrapper.get('[role="alert"]').text()).toContain('Changed by someone else')
+  })
+})
+
+describe('BudgetTable Included switch', () => {
+  const toggleOf = (w: VueWrapper, id: string) => rowEl(w, id).get('[data-testid="included-toggle"]')
+  const checked = (w: VueWrapper, id: string) => (toggleOf(w, id).element as HTMLInputElement).checked
+
+  it('is the last column, right after Amount, headed Included, and is on by default', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    const heads = w.findAll('thead th').map((h) => h.text())
+    expect(heads.at(-1)).toBe('Included')
+    expect(heads.at(-2)).toBe('Amount')
+    const cells = rowEl(w, 't1').findAll('td')
+    expect(cells.at(-2)!.text()).toContain('-$12.34')
+    expect(cells.at(-1)!.find('[data-testid="included-toggle"]').exists()).toBe(true)
+    expect(checked(w, 't1')).toBe(true)
+    expect(cells.at(-1)!.get('label').attributes('title')).toBe('Count in totals')
+  })
+
+  it('is never in the category picker', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    await comboOf(w, 't1').trigger('click')
+    await flushPromises()
+    expect(optionsShown(w).map((o) => o.text()).join(' ')).not.toMatch(/included|count in totals/i)
+  })
+
+  it.each([390, 320])('in the card layout at %i px it sits on line 1, right of the amount', async (px) => {
+    width = px
+    mockFetch(() => json({ rows: [txn('t1', { included: false })], nextCursor: null }))
+    const w = await mountTable()
+    const parts = w.get('li[data-row-key="t1"] .et-line1').findAll('.et-part')
+    expect(parts.at(-2)!.text()).toContain('-$12.34')
+    expect(parts.at(-1)!.find('[data-testid="included-toggle"]').exists()).toBe(true)
+    expect(checked(w, 't1')).toBe(false)
+  })
+
+  it('turning it off sends only { included, expectedUpdatedAt }, shows it off at once, emits edited, and leaves category and kind alone', async () => {
+    let release: (r: Response) => void = () => {}
+    mockFetch((url, init) => {
+      if (init?.method === 'PATCH') return new Promise<Response>((res) => { release = res }) as never
+      return json({ rows: [txn('t1')], nextCursor: null })
+    })
+    const w = await mountTable()
+    await toggleOf(w, 't1').setValue(false)
+    expect(checked(w, 't1')).toBe(false)
+    expect(comboValue(w, 't1')).toBe('Groceries')
+    const patch = calls.find((c) => c.method === 'PATCH')!
+    expect(patch.url.pathname).toBe('/api/budget/transactions/t1')
+    expect(patch.body).toEqual({ included: false, expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    expect(w.emitted('edited')).toBeUndefined()
+    release(json({ txn: txn('t1', { included: false, updatedAt: '2026-10-07T00:00:00Z' }) }))
+    await flushPromises()
+    expect(w.emitted('edited')).toEqual([[{ txnId: 't1', ruleApplied: false, reapplied: 0 } satisfies BudgetEditedEvent]])
+    expect(checked(w, 't1')).toBe(false)
+    expect(comboValue(w, 't1')).toBe('Groceries')
+    expect(rowEl(w, 't1').text()).toContain('Chain X')
+  })
+
+  it('turning it back on sends included true', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH'
+      ? json({ txn: txn('t1', { included: true, updatedAt: '2026-10-08T00:00:00Z' }) })
+      : json({ rows: [txn('t1', { included: false })], nextCursor: null }))
+    const w = await mountTable()
+    await toggleOf(w, 't1').setValue(true)
+    await flushPromises()
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ included: true, expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    expect(checked(w, 't1')).toBe(true)
+  })
+
+  it('a failed save puts the switch back and says so', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH' ? json({ error: 'x' }, 500) : json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    await toggleOf(w, 't1').setValue(false)
+    await flushPromises()
+    expect(checked(w, 't1')).toBe(true)
+    expect(w.get('[role="alert"]').text()).toContain('Couldn’t save')
+    expect(w.emitted('edited')).toBeUndefined()
+  })
+
+  it('is disabled when the viewer cannot edit', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable({ canEdit: false })
+    expect((toggleOf(w, 't1').element as HTMLInputElement).disabled).toBe(true)
+  })
+
+  it('a click, a tap and a press-and-hold on it reach nothing outside: no event bubbles to the row, no drill', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH' ? json({ txn: txn('t1', { included: false }) }) : json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    const seen: string[] = []
+    const row = rowEl(w, 't1').element
+    for (const ev of ['click', 'pointerdown', 'touchstart', 'contextmenu']) row.addEventListener(ev, () => seen.push(ev))
+    const label = rowEl(w, 't1').get('label.bt-included')
+    for (const ev of ['click', 'pointerdown', 'touchstart', 'contextmenu']) await label.trigger(ev)
+    expect(seen).toEqual([])
+    expect(w.emitted('drill')).toBeUndefined()
   })
 })
