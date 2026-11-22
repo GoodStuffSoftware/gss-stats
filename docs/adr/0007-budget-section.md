@@ -97,6 +97,24 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    the two tables, then the two columns), with the pre-migration Time Travel bookmark as the last resort.
    Layout: an open loan replaces the facts row and the list at every width (the same on phone and desktop;
    "← Loans" and Back return to the list), instead of keeping them above the open loan on wide screens.
+10. **A purchase is excluded with a flag, not a category (`0003_included.sql`).** `transactions.included` (1 = counts,
+   the default; 0 = a person took it out) is an additive column; `category_edits` gains the NULLable `old_included` and
+   `new_included`, so the one audit log also records an include change. A category would have lost the purchase's real
+   category and mixed two questions (what is it, and does it count); the flag leaves category, kind and the review flag alone.
+   Only the spending totals, pies and drills filter on it (`included = 1`); the review count, the transaction list, Debts and
+   Loans do not, so an excluded row stays listed with its switch off. Only `PATCH transactions/:id` (`included`, true or
+   false) writes it, and a value equal to the current one writes nothing. The switch is shown on spend, refund and fee rows
+   only (the kinds that are spending; a row already excluded keeps it so it can be turned back on). No partial index: no
+   code reads `included = 0`. The database is shared by Preview and Production, so applying the migration for the preview
+   changes production's file too; it is additive, and the code now on production names its columns, so it is unaffected.
+   Rollback is the commented block at the end of the migration (drop the three columns, then delete its `d1_migrations`
+   row so a later apply re-adds them), with the pre-migration Time Travel bookmark as the last resort.
+   **Trade-off kept on purpose:** the load's pairing update (`pairUpdateSql`) skips any row whose `updated_by` holds an
+   address, which is broader than the switch needs (that update never writes `included`, and the load's INSERT never
+   touches an existing row). Repo rule: a row last edited by a person is never changed by a script. The cost: a row whose
+   only edit was a note, or that `rules/apply` stamped, no longer auto-pairs as a transfer and stays a spend until it is
+   fixed by hand in the table. To undo, remove the two `instr(updated_by, '@') = 0` terms in `pairUpdateSql`
+   (`src/lib/budget/sqlFile.ts`) and the matching test.
 
 ## Consequences
 

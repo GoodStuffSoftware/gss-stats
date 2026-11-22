@@ -98,7 +98,7 @@ export function monthsLabel(from: string, to: string, toDate = false): string {
   const b = /^(\d{4})-(\d{2})/.exec(to)
   if (!a || !b) return ''
   const [y1, m1, y2, m2] = [Number(a[1]), Number(a[2]) - 1, Number(b[1]), Number(b[2]) - 1]
-  if (m1 > 11 || m2 > 11) return ''
+  if (m1 < 0 || m2 < 0 || m1 > 11 || m2 > 11) return ''
   const tail = toDate ? ' (to date)' : ''
   if (y1 === y2 && m1 === m2) return `${MONTH_LONG[m1]} ${y1}${tail}`
   if (y1 === y2) return `${MONTH_SHORT[m1]} – ${MONTH_SHORT[m2]} ${y1}${tail}`

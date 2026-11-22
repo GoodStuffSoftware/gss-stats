@@ -191,6 +191,14 @@ describe('PATCH /api/budget/transactions/:id', () => {
     expect(db.all('SELECT old_included, new_included FROM category_edits ORDER BY id DESC LIMIT 1')).toEqual([{ old_included: null, new_included: null }])
   })
 
+  it('included equal to the current value changes nothing: no stamp bump, no audit row', async () => {
+    const id = idOf("store_no = '9999'")
+    const same = await json<TxnPatchResponse>(await patch(id, { included: true, expectedUpdatedAt: SEED_STAMP }))
+    expect(same.txn).toMatchObject({ included: true, updatedAt: SEED_STAMP })
+    expect(row(id).updated_at).toBe(SEED_STAMP)
+    expect(db.all('SELECT id FROM category_edits')).toEqual([])
+  })
+
   it('included must be a boolean; a stale stamp is a 409 and writes nothing', async () => {
     const id = idOf("store_no = '1001'")
     for (const v of ['no', 0, null]) expect((await patch(id, { included: v, expectedUpdatedAt: SEED_STAMP })).status, String(v)).toBe(400)

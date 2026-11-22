@@ -2733,6 +2733,19 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `--remote` is required), then one aggregate check. The database is shared by Preview and Production, so a
   preview apply changes production's file too. The rollback is the comment block at the end of the file (it
   cannot be a second `.sql` there, since every file in the directory is applied); the tests run both ways.
+- **Included schema.** `migrations/gss-budget/0003_included.sql` is additive: `transactions.included` (1 = counts in
+  spending, the default; 0 = excluded by a person) and the NULLable `category_edits.old_included` / `new_included`
+  (the audit of an include change). `PATCH /api/budget/transactions/:id` takes `included` (true or false, alone or
+  with `categoryId`, `kind`, `note`); it is a manual edit (stamps `updated_by`, audited), and a value equal to the
+  current one writes nothing. Only spend, refund and fee rows show the switch. Spending totals, pies and drills filter on
+  `included = 1`; the transaction list, review count, Debts and Loans do not. A re-import never resets it. Applied by
+  hand, once, never by an agent or CI: Time Travel bookmark first, `npx wrangler d1 migrations list gss-budget --remote`
+  (read-only), `npx wrangler d1 migrations apply gss-budget --remote` (if 0001 or 0002 were applied by `execute --file`
+  and show as pending, run `npx wrangler d1 execute gss-budget --remote --file migrations/gss-budget/0003_included.sql`
+  instead), then one aggregate check (`SELECT COUNT(*) FROM transactions WHERE included = 0` returns 0). Apply it
+  before deploying the code that names the column (that code answers 500 until it exists). The rollback is the comment
+  block at the end of the file. The load's pairing update never changes a row whose `updated_by` holds an address, so a
+  row whose only edit was a note is paired by hand ([ADR 0007](docs/adr/0007-budget-section.md) point 10).
 - **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`

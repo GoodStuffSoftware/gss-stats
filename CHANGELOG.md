@@ -8,8 +8,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 
 ### Added
-- **Count in totals switch for each purchase** — each transaction now has a switch right of its amount, on by default; turning it off takes that purchase out of every spending total, pie and trend, and turning it back on restores it.
-- **Months shown with the Budget range** — the range picker and a line under it now name the months covered (for example "Last 3 months · Aug – Oct 2026", with "(to date)" when it runs to today), and the loan payoff average names its months.
+- **Count in totals switch for each purchase** — each purchase, refund and fee now has a switch right of its amount, on by default; turning it off takes it out of every spending total, pie and trend, and turning it back on restores it. Transfers, card and loan payments and income have no switch, since they never count as spending.
+- **Months shown with the Budget range** — the range picker and a line under it now name the months covered (for example "Last 3 months · Sep – Nov 2026", and the line under it reads "Covers Sep – Nov 2026 (to date)" when it runs to today), and the loan payoff average names its months.
 - **Loan payoff without a scheduled payment** — a loan with no scheduled payment now gets its payoff estimate from the average of the last 3 full months of payments, labelled as such.
 - **Loans list in Budget** — every loan and card with its balance, rate, monthly payment, interest, payoff month, due date and soonest promo end, under totals for what is owed and paid.
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
@@ -26,6 +26,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before. Reloading the page keeps you at the level you were on (remembered in the tab, never in the address, so no category or store name appears in a link).
 
 ### Fixed
+- **Top-bar trail on a very narrow phone.** Below about 360 px the trail shows only the current page ("Loans") instead of a clipped "› B Loans".
 - **Back and Forward after a reload.** After reloading on a loan opened from the Overview debt pie, Back returns to the Overview as you left it and Forward reopens the drill and the loan instead of jumping back on its own.
 - **Cosigned debt is out of the Overview debt total.** The debt pie and its total leave cosigned debt out, as the Loans page does, with a "+ cosigned" line and a badged list so it can still be opened.
 - **Loan tables line up.** The number column headings in a loan's Payments and Interest by statement tables now sit right-aligned over their figures.

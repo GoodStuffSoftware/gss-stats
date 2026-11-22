@@ -1,6 +1,7 @@
 // migrations/gss-budget/0003_included.sql against a real SQLite (node:sqlite, D1's dialect), with made-up values only.
 // Covers: it applies on top of 0001 + 0002 and on a database that already holds rows, new rows default to included,
-// the deployed code's old-shape INSERTs still work, the constraints, a re-import never resets an exclusion, and the rollback block.
+// the deployed code's old-shape INSERTs still work, the constraints, a re-import never resets an exclusion, and the rollback block
+// (including un-recording the migration).
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -93,17 +94,6 @@ describe('0003_included.sql applied after 0001 and 0002', () => {
     expect(db.prepare('SELECT included FROM transactions WHERE id = ?').get(id)).toEqual({ included: 0 })
   })
 
-  it('indexes only the excluded rows, by date', () => {
-    const db = migrated()
-    db.exec(seedSql)
-    const idx = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_txn_excluded'").get() as { sql: string }
-    expect(idx.sql).toMatch(/WHERE included = 0/)
-    const id = firstId(db)
-    db.exec(`UPDATE transactions SET included = 0 WHERE id = '${id}'`)
-    const plan = db.prepare("EXPLAIN QUERY PLAN SELECT id FROM transactions WHERE included = 0 AND posted_date >= '2000-01-01'").all() as { detail: string }[]
-    expect(plan.map((p) => p.detail).join(' ')).toMatch(/idx_txn_excluded/)
-  })
-
   it('can be re-applied only once (a second run fails cleanly)', () => {
     const db = migrated()
     expect(() => db.exec(M3)).toThrow(/duplicate column name|already exists/)
@@ -111,20 +101,28 @@ describe('0003_included.sql applied after 0001 and 0002', () => {
 })
 
 describe('the rollback block in the file', () => {
-  it('lists four statements in an order that works and leaves a database equal to 0002 plus its data', () => {
-    const rollback = M3.split(/\r?\n/).filter((l) => /^--\s{3}(DROP|ALTER)/.test(l)).map((l) => l.replace(/^--\s{3}/, ''))
+  it('lists its statements in an order that works and leaves a database equal to 0002 plus its data', () => {
+    const rollback = M3.split(/\r?\n/).filter((l) => /^--\s{3}(DROP|ALTER|DELETE)/.test(l)).map((l) => l.replace(/^--\s{3}/, ''))
     expect(rollback).toEqual([
-      'DROP INDEX IF EXISTS idx_txn_excluded;',
       'ALTER TABLE category_edits DROP COLUMN new_included;',
       'ALTER TABLE category_edits DROP COLUMN old_included;',
       'ALTER TABLE transactions DROP COLUMN included;',
+      "DELETE FROM d1_migrations WHERE name = '0003_included.sql';",
     ])
+    // wrangler's own bookkeeping table: the rollback un-records 0003 so a later apply re-adds the columns.
+    const ledger = (d: DatabaseSync, names: string[]): void => {
+      d.exec('CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)')
+      for (const n of names) d.exec(`INSERT INTO d1_migrations (name) VALUES ('${n}')`)
+    }
     const db = migrated()
+    ledger(db, ['0001_init.sql', '0002_loans.sql', '0003_included.sql'])
     db.exec(seedSql)
     db.exec(`UPDATE transactions SET included = 0 WHERE id = '${firstId(db)}'`)
     db.exec(rollback.join('\n'))
     const base = upTo2()
+    ledger(base, ['0001_init.sql', '0002_loans.sql'])
     base.exec(seedSql)
+    expect(db.prepare('SELECT name FROM d1_migrations ORDER BY id').all()).toEqual([{ name: '0001_init.sql' }, { name: '0002_loans.sql' }])
     const sch = (d: DatabaseSync): string => JSON.stringify(d.prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all())
     expect(sch(db)).toBe(sch(base))
     expect(cols(db, 'transactions')).toEqual(cols(base, 'transactions'))

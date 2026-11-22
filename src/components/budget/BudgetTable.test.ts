@@ -597,6 +597,18 @@ describe('BudgetTable Included switch', () => {
     expect(cells.at(-1)!.get('label').attributes('title')).toBe('Count in totals')
   })
 
+  it('shows the switch only on spend, refund and fee rows (a transfer, card payment or income row has none), unless already excluded', async () => {
+    mockFetch(() => json({ rows: [
+      txn('s1'), txn('r1', { kind: 'refund' }), txn('f1', { kind: 'fee' }),
+      txn('x1', { kind: 'transfer', categoryId: null }), txn('c1', { kind: 'card_payment', categoryId: null }), txn('i1', { kind: 'income', categoryId: null }),
+      txn('x2', { kind: 'transfer', categoryId: null, included: false }),
+    ], nextCursor: null }))
+    const w = await mountTable()
+    const has = (id: string) => rowEl(w, id).find('[data-testid="included-toggle"]').exists()
+    for (const id of ['s1', 'r1', 'f1', 'x2']) expect(has(id), id).toBe(true)
+    for (const id of ['x1', 'c1', 'i1']) expect(has(id), id).toBe(false)
+  })
+
   it('is never in the category picker', async () => {
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable()

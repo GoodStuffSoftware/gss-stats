@@ -34,6 +34,17 @@ describe('Crumbs', () => {
     expect(mount(Crumbs, { props: { items: ITEMS, label: 'Spending path' } }).get('nav').attributes('aria-label')).toBe('Spending path')
   })
 
+  it('below 360 px only the current place shows: the earlier items and the separator are hidden (CSS, so the items stay in the DOM)', () => {
+    const w = mount(Crumbs, { props: { items: ITEMS } })
+    expect(w.findAll('.cr-item')).toHaveLength(3)
+    expect(w.findAll('.cr-sep')).toHaveLength(2)
+    const rule = /@media \(max-width: 359px\) \{([^}]*)\}/.exec(source)
+    expect(rule, 'a max-width: 359px media rule').not.toBeNull()
+    expect(rule![1]).toContain('.cr-item:not(:last-child)')
+    expect(rule![1]).toContain('.cr-sep')
+    expect(rule![1]).toMatch(/display:\s*none/)
+  })
+
   it('is generic (ADR 0005: no one-off widgets)', () => {
     expect(source).not.toMatch(/budget|categor|merchant|transaction|cents|account|debt|spend/i)
   })

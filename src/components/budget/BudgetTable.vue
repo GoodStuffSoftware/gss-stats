@@ -16,7 +16,7 @@ import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { budgetColumns, categoryOptions, createTxnTable, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
-import type { BudgetEditedEvent, BudgetTableProps, Category, Txn } from '../../lib/budget/types'
+import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
 const props = defineProps<BudgetTableProps>()
 const emit = defineEmits<{ edited: [e: BudgetEditedEvent]; 'category-added': [c: Category] }>()
@@ -73,6 +73,7 @@ function onAction(rowKey: string, id: string) {
   if (id === 'rule') void model.useForAll(rowKey)
 }
 const rowLabel = (t: Txn) => t.merchantName || t.description
+const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included === false
 </script>
 
 <template>
@@ -142,7 +143,10 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
         />
       </template>
       <template #cell-included="{ row }">
+        <!-- Only spend, refund and fee rows are in the spending totals, so only they get the switch (a row already
+             excluded keeps it, so a person can always turn it back on). -->
         <label
+          v-if="canExclude(row)"
           class="bt-included"
           :class="{ 'bt-excluded': row.included === false }"
           title="Count in totals"

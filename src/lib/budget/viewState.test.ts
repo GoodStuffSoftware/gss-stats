@@ -770,6 +770,8 @@ describe('month labels', () => {
     expect(monthsLabel('2026-08', '2026-10')).toBe('Aug – Oct 2026')
     expect(monthsLabel('2026-11-01', '2026-11-20', true)).toBe('November 2026 (to date)')
     expect(monthsLabel('nope', '2026-10-31')).toBe('')
+    expect(monthsLabel('2026-00-01', '2026-10-31')).toBe('')
+    expect(monthsLabel('2026-08-01', '2026-00-31')).toBe('')
   })
   it('rangeMonths adds to date only when the range runs to today', () => {
     expect(rangeMonths('2026-11-01', '2026-11-20', TODAY)).toBe('November 2026 (to date)')

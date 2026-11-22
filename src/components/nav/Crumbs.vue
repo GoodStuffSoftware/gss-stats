@@ -59,6 +59,13 @@ const emit = defineEmits<{ go: [index: number] }>()
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Under about 360 px there is no room for the trail: only the current place is shown (no parent, no separator). */
+@media (max-width: 359px) {
+  .cr-item:not(:last-child),
+  .cr-sep {
+    display: none;
+  }
+}
 .cr-sep {
   color: rgb(var(--ink-3));
   padding: 0 2px;

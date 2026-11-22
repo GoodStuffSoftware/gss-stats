@@ -103,6 +103,12 @@ function txnSql(row: TxnInsert): string {
  * taken for spending or for an outside payee becomes a plain transfer, leaves its category and drops
  * the review reasons the pairing answered. The partner has to be free to pair too, so a pair lands on
  * both rows or on neither (a new row of a skipped pair stays unpaired, with its own classification).
+ *
+ * A row whose updated_by holds an address ('@': a person's edit) is never changed by this script (repo rule: manual edits
+ * are not touched by scripts). Trade-off, kept on purpose: the guard is broader than the include switch needs (this never
+ * writes `included`), so a row whose only edit was a note, or that POST /rules/apply stamped, is no longer auto-paired as a
+ * transfer; such a row is fixed by hand in the table. To drop the guard, remove the two instr(updated_by, '@') terms below
+ * (ADR 0007 point 10).
  */
 export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, updatedBy: string): string {
   const re = `kind IN ${REKIND}`
