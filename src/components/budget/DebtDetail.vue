@@ -12,9 +12,10 @@
 // Emits
 //   close()   "Back to debts".
 //   saved()   a manual balance was PUT: BudgetSection refetches /debts so the pie and list update.
-import type { ChartConfiguration } from 'chart.js'
 import { computed, ref, watch } from 'vue'
+import { balanceLineConfig } from '../../lib/budget/balanceChart'
 import { fetchDebtDetail, putManualBalance } from '../../lib/budget/clientRead'
+import { monthlyInterestCents, monthlyPaymentCents, monthsToPayoff, payoffMonth } from '../../lib/budget/loanMath'
 import { formatApr } from '../../lib/budget/pieModel'
 import { formatAmount, formatDate } from '../../lib/budget/tableModel'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
@@ -107,39 +108,86 @@ const paymentRows = computed<PaymentRow[]>(() =>
   })),
 )
 
-// ── Balance line ─────────────────────────────────────────────────────────────────────────────────────────
-const chartConfig = computed<ChartConfiguration>(() => {
-  const ink = props.dark ? '#A89F92' : '#8A8278'
-  const grid = props.dark ? 'rgba(255,255,255,0.08)' : '#E7E2D7'
-  return {
-    type: 'line',
-    data: {
-      labels: history.value.map((h) => formatDate(h.asOf)),
-      datasets: [
-        {
-          data: history.value.map((h) => h.balanceCents / 100),
-          borderColor: '#E0722C',
-          backgroundColor: 'rgba(224,114,44,0.15)',
-          fill: true,
-          tension: 0.2,
-          pointRadius: 3,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => formatAmount(Math.round(Number(ctx.raw) * 100)) } },
-      },
-      scales: {
-        x: { ticks: { color: ink, maxTicksLimit: 6 }, grid: { display: false } },
-        y: { ticks: { color: ink, callback: (v) => formatAmount(Math.round(Number(v) * 100)) }, grid: { color: grid } },
-      },
-    },
-  } as ChartConfiguration
+// ── Statement facts, terms, promos, payoff ───────────────────────────────────────────────────────────────
+const latestStmt = computed(() => detail.value?.latest ?? null)
+const terms = computed(() => detail.value?.terms ?? null)
+/** The newest balance that came off a statement (not a typed one). */
+const stmtBalance = computed(() => [...history.value].reverse().find((h) => h.source === 'statement') ?? null)
+const lastPeriod = computed(() => {
+  const ls = latestStmt.value
+  return ls ? (detail.value?.periods ?? []).find((p) => p.periodEnd === ls.periodEnd) ?? null : null
 })
+interface Fact { label: string; value: string; sub?: string; testid: string }
+const known = (f: Fact) => f.value !== dash
+const statementFacts = computed<Fact[]>(() => {
+  const ls = latestStmt.value
+  const sb = stmtBalance.value
+  return [
+    { label: 'Statement balance', value: sb ? money(sb.balanceCents) : dash, sub: sb ? `period ending ${formatDate(sb.asOf)}` : undefined, testid: 'fact-stmt-balance' },
+    { label: 'Payoff amount', value: money(ls?.payoffCents ?? null), sub: ls && ls.payoffCents !== null ? `good through ${formatDate(ls.periodEnd)}` : undefined, testid: 'fact-payoff' },
+    { label: 'Due date', value: ls?.dueDate ? formatDate(ls.dueDate) : dash, testid: 'fact-due' },
+    { label: 'Minimum due', value: money(ls?.minDueCents ?? null), testid: 'fact-min-due' },
+    { label: 'Principal, last period', value: money(lastPeriod.value?.principalPaidCents ?? null), testid: 'fact-principal' },
+    { label: 'Interest, last period', value: money(ls?.interestCents ?? null), testid: 'fact-interest' },
+    { label: 'Escrow, last period', value: money(ls?.escrowCents ?? null), testid: 'fact-escrow' },
+  ]
+})
+const hasStatement = computed(() => statementFacts.value.some(known))
+const cadence = { monthly: 'monthly', semimonthly: 'twice a month', biweekly: 'every two weeks' } as const
+const termFacts = computed<Fact[]>(() => {
+  const t = terms.value
+  return [
+    { label: 'Original amount', value: money(t?.originalCents ?? null), testid: 'fact-original' },
+    { label: 'Opened', value: t?.openedOn ? formatDate(t.openedOn) : dash, testid: 'fact-opened' },
+    { label: 'Term', value: t?.termMonths ? `${t.termMonths} months` : dash, testid: 'fact-term' },
+    { label: 'Maturity', value: t?.maturityOn ? formatDate(t.maturityOn) : dash, testid: 'fact-maturity' },
+    { label: 'Scheduled payment', value: money(t?.paymentCents ?? null), sub: t?.paymentCents != null && t.paymentEvery ? cadence[t.paymentEvery] : undefined, testid: 'fact-payment' },
+  ]
+})
+const cosigned = computed(() => terms.value?.cosigned === true)
+const hasTerms = computed(() => termFacts.value.some(known) || cosigned.value)
+
+/** Payoff at the scheduled payment, and the interest estimate beside the last statement's actual interest. */
+const payoff = computed(() => {
+  const bal = latest.value
+  if (!bal) return null
+  const t = terms.value
+  const pay = monthlyPaymentCents(t ? { paymentCents: t.paymentCents, every: t.paymentEvery } : null)
+  const res = pay ? monthsToPayoff(bal.balanceCents, rateBp.value, pay.cents) : null
+  let text = ''
+  if (res?.kind === 'payoff' || res?.kind === 'rate_unknown') {
+    const when = payoffMonth(bal.asOf, res.months)
+    text = `${res.months} month${res.months === 1 ? '' : 's'}${when ? ` (${when})` : ''}${res.kind === 'rate_unknown' ? ', rate unknown' : ''}`
+  } else if (res?.kind === 'not_paid_off') text = 'Not paid off at this payment'
+  else if (res?.kind === 'paid_off') text = 'Paid off'
+  const est = monthlyInterestCents(bal.balanceCents, rateBp.value)
+  if (!text && est === null) return null
+  const actual = latestStmt.value?.interestCents ?? null
+  return { text, estInterest: est === null ? null : formatAmount(est), actualInterest: actual === null ? null : formatAmount(actual) }
+})
+
+const SOON_DAYS = 60
+function daysUntil(iso: string): number {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayIso())
+  if (!a || !b) return Infinity
+  return Math.round((Date.UTC(+a[1], +a[2] - 1, +a[3]) - Date.UTC(+b[1], +b[2] - 1, +b[3])) / 86_400_000)
+}
+const promoRows = computed(() =>
+  [...(detail.value?.promos ?? [])]
+    .sort((a, b) => (a.endsOn ?? '9999').localeCompare(b.endsOn ?? '9999') || a.seq - b.seq)
+    .map((p) => ({
+      key: `${p.periodEnd}-${p.seq}`,
+      balance: formatAmount(p.balanceCents),
+      apr: p.aprBp === null ? dash : formatApr(p.aprBp),
+      endsOn: p.endsOn ? formatDate(p.endsOn) : dash,
+      atRisk: money(p.deferredInterestCents),
+      soon: p.endsOn !== null && daysUntil(p.endsOn) < SOON_DAYS,
+    })),
+)
+
+// ── Balance line ─────────────────────────────────────────────────────────────────────────────────────────
+const chartConfig = computed(() => balanceLineConfig(history.value, props.dark))
 
 // ── The balance form ─────────────────────────────────────────────────────────────────────────────────────
 const MAX_CENTS = 99_999_999_999 // $999,999,999.99
@@ -210,6 +258,15 @@ async function submit() {
     </div>
 
     <template v-else-if="detail">
+      <div class="dd-top" :class="{ 'dd-top-solo': !history.length }">
+      <section v-if="history.length" class="dd-section dd-chart-col" aria-label="Balance history">
+        <h3 class="dd-h3">Balance over time</h3>
+        <div class="dd-chart" role="img" :aria-label="`Balance history of ${title}`" data-testid="debt-chart">
+          <BaseChart :config="chartConfig" :drill-open="false" />
+        </div>
+      </section>
+
+      <div class="dd-side">
       <dl class="dd-facts">
         <div>
           <dt>Balance</dt>
@@ -226,13 +283,63 @@ async function submit() {
         </div>
       </dl>
 
-      <section v-if="history.length" class="dd-section" aria-label="Balance history">
-        <h3 class="dd-h3">Balance over time</h3>
-        <div class="dd-chart" role="img" :aria-label="`Balance history of ${title}`" data-testid="debt-chart">
-          <BaseChart :config="chartConfig" :drill-open="false" />
-        </div>
+      <section v-if="hasStatement" class="dd-section" aria-label="Statement details" data-testid="statement-facts">
+        <h3 class="dd-h3">Last statement</h3>
+        <dl class="dd-grid">
+          <div v-for="f in statementFacts" :key="f.testid">
+            <dt>{{ f.label }}</dt>
+            <dd :data-testid="f.testid">{{ f.value }}</dd>
+            <dd v-if="f.sub" class="dd-sub">{{ f.sub }}</dd>
+          </div>
+        </dl>
       </section>
 
+      <section v-if="hasTerms" class="dd-section" aria-label="Loan terms" data-testid="terms-facts">
+        <h3 class="dd-h3">
+          Terms
+          <span v-if="cosigned" class="dd-badge" data-testid="cosigned-badge">Cosigned</span>
+        </h3>
+        <dl class="dd-grid">
+          <div v-for="f in termFacts" :key="f.testid">
+            <dt>{{ f.label }}</dt>
+            <dd :data-testid="f.testid">{{ f.value }}</dd>
+            <dd v-if="f.sub" class="dd-sub">{{ f.sub }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <p v-if="!hasStatement && !hasTerms" class="dd-empty" data-testid="no-statement-details">No statement details yet</p>
+
+      <section v-if="payoff" class="dd-section" aria-label="Payoff estimate" data-testid="payoff-estimate">
+        <h3 class="dd-h3">Payoff estimate</h3>
+        <dl class="dd-grid">
+          <div v-if="payoff.text">
+            <dt>At the scheduled payment</dt>
+            <dd data-testid="payoff-months">{{ payoff.text }}</dd>
+          </div>
+          <div v-if="payoff.estInterest">
+            <dt>Interest per month (estimate)</dt>
+            <dd data-testid="payoff-interest">{{ payoff.estInterest }}</dd>
+            <dd v-if="payoff.actualInterest" class="dd-sub">last statement: {{ payoff.actualInterest }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section v-if="promoRows.length" class="dd-section" aria-label="Promotional balances" data-testid="promos">
+        <h3 class="dd-h3">Promotional balances</h3>
+        <ul class="dd-promos">
+          <li v-for="p in promoRows" :key="p.key" class="dd-promo" :class="{ 'dd-promo-soon': p.soon }" data-testid="promo">
+            <span class="dd-promo-bal">{{ p.balance }}</span>
+            <span>{{ p.apr }} APR</span>
+            <span data-testid="promo-ends">ends {{ p.endsOn }}</span>
+            <span>deferred interest at risk {{ p.atRisk }}</span>
+          </li>
+        </ul>
+      </section>
+      </div>
+      </div>
+
+      <div class="dd-tables">
       <section v-if="periodRows.length" class="dd-section" aria-label="Interest by period">
         <h3 class="dd-h3">Interest by statement</h3>
         <EditableTable :columns="periodColumns" :rows="periodRows" row-key="periodEnd" label="Interest by statement" card-labels />
@@ -244,6 +351,7 @@ async function submit() {
           <template #empty><span data-testid="debt-no-payments">No payments recorded.</span></template>
         </EditableTable>
       </section>
+      </div>
 
       <section v-if="canEdit" class="dd-section" aria-label="Type a balance">
         <h3 class="dd-h3">Type a balance</h3>
@@ -334,6 +442,88 @@ async function submit() {
 }
 .dd-section {
   min-width: 0;
+}
+.dd-top,
+.dd-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+.dd-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+@media (min-width: 1024px) {
+  .dd-top:not(.dd-top-solo),
+  .dd-tables {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1600px) {
+  .dd-top:not(.dd-top-solo) {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+.dd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 20px;
+  margin: 0;
+}
+.dd-grid dt {
+  font-size: 12px;
+  color: rgb(var(--ink-3));
+}
+.dd-grid dd {
+  margin: 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.dd-grid dd.dd-sub {
+  font-size: 12px;
+  color: rgb(var(--ink-3));
+}
+.dd-empty {
+  margin: 0;
+  font-size: 14px;
+  color: rgb(var(--ink-3));
+}
+.dd-badge {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(var(--ink-2));
+}
+.dd-promos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dd-promo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.dd-promo-bal {
+  font-weight: 600;
+}
+.dd-promo-soon {
+  border-color: rgb(var(--amber));
+  background: rgb(var(--amber) / 0.12);
 }
 .dd-h3 {
   margin: 0 0 6px;
