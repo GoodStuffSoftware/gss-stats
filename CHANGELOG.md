@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.79.4] — 2026-11-22
+
 ### Fixed
 - **Navigation state follows the login.** Where you were, and which groups you folded, is now saved in this browser per signed-in account, so two people on one computer no longer share it; the state already saved here carries over to the first account that signs in.
 
