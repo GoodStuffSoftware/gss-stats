@@ -99,6 +99,26 @@ function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
   }
 }
 
+describe('a second instance with its own markKey', () => {
+  it('marks and reads entries under its own key, independent of the default one', () => {
+    const h = new FakeHistory()
+    const mk = (markKey?: string) => {
+      const path: Step[] = []
+      const dh = createDrillHistory<Step>({
+        history: h, markKey, drill: (s) => void path.push(s), popTo: (d) => void path.splice(d), path: () => path.slice(), parseSteps,
+      })
+      dh.start()
+      return dh
+    }
+    mk()
+    const b = mk('otherKey')
+    b.pathChanged([FUEL])
+    expect(readMark(h.state, 'otherKey')).toMatchObject({ d: 1 })
+    expect(readMark(h.state)).toBeNull() // a step of the second instance never carries the default key
+    expect(readSteps(h.state, parseSteps, 'otherKey')).toEqual([FUEL])
+  })
+})
+
 describe('the mark', () => {
   it('is read back from a state that carries it, and from nothing else', () => {
     expect(readMark(withMark(null, { s: 'a', d: 2 }))).toEqual({ s: 'a', d: 2 })

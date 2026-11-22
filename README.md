@@ -2730,6 +2730,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `u-<slug>` (a numbered suffix on a clash), it sorts after the spending categories, and the next palette
   colour is its colour. The `u-` prefix is reserved: a seed or re-import never deletes, renames or recolours
   such a category, and a manual edit to it is never re-pointed. No schema change; the creator is not recorded.
+- **Pages.** Budget has Overview (the default) and Loans, listed under Budget in the ☰ menu and shown in the top bar as `Budget › Loans`. Loans is `?section=budget&b_page=loans` (Overview writes nothing; any other value reads as Overview), and the Budget row reopens the page this login used last (saved per login in this browser). A page change adds one history entry, so Back returns to the page as it was. The loan open on Loans (an account id, which names an institution) lives in `history.state` only, never in the URL; opening a debt from Overview is one entry (Loans page and loan together). Loans shows the person filter but no range or chart toggles.
 - **Local setup.** `npm run budget:migrate:local` creates the local database. Turn a private seed plus a
   folder of import requests into one SQL file with
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run
