@@ -648,7 +648,7 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
     if (!p) throw badRequest('person: unknown person')
   }
   const scope = `SELECT id FROM accounts WHERE is_debt = 1 AND archived = 0 AND (?1 = 'all' OR person_id = ?1 OR person_id IS NULL)`
-  const [accounts, statements, manual] = await db.batch<DebtRow>([
+  const [accounts, statements, manual, cosigned] = await db.batch<DebtRow>([
     db.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE is_debt = 1 AND archived = 0 AND (?1 = 'all' OR person_id = ?1 OR person_id IS NULL) ORDER BY sort, id`).bind(person),
     db.prepare(
       `SELECT s.account_id, s.period_end, s.closing_balance_cents, s.apr_bp, s.credit_limit_cents FROM statements s
@@ -659,7 +659,9 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
       `SELECT b.account_id, b.as_of, b.balance_cents, b.apr_bp FROM debt_balances b
        WHERE b.account_id IN (${scope}) AND b.as_of = (SELECT MAX(b2.as_of) FROM debt_balances b2 WHERE b2.account_id = b.account_id)`,
     ).bind(person),
+    db.prepare(`SELECT account_id FROM debt_terms WHERE cosigned = 1 AND account_id IN (${scope})`).bind(person),
   ])
+  const cosignedIds = new Set(cosigned.results.map((r) => str(r.account_id)))
   const stmtBy = new Map(statements.results.map((r) => [str(r.account_id), r]))
   const manualBy = new Map(manual.results.map((r) => [str(r.account_id), r]))
   return accounts.results.map((row) => {
@@ -678,6 +680,7 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
         ...(m ? [{ asOf: str(m.as_of), source: 'manual' as const, aprBp: numOrNull(m.apr_bp) }] : []),
       ], a.aprBp),
       creditLimitCents: numOrNull(s?.credit_limit_cents) ?? a.creditLimitCents,
+      cosigned: cosignedIds.has(a.id),
     }
   })
 }

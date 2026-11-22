@@ -88,7 +88,9 @@ export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_sto
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null
   personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: 'statement' | 'manual' | null
-  aprBp: number | null; creditLimitCents: Cents | null }
+  aprBp: number | null; creditLimitCents: Cents | null
+  /** Cosigned (debt_terms): shown, but kept out of the total owed and the pie. Absent = not cosigned. */
+  cosigned?: boolean }
 export interface DebtsResponse { debts: DebtSlice[] }
 export interface DebtDetail { account: Account
   history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual'; aprBp?: number | null }>

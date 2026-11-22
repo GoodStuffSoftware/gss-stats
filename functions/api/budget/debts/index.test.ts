@@ -15,9 +15,9 @@ describe('GET /api/budget/debts', () => {
     expect(res.headers.get('Cache-Control')).toBe('private, no-store')
     const { debts } = await json<DebtsResponse>(res)
     expect(debts.map((d) => d.accountId).sort()).toEqual(['card-a', 'loan-a', 'loc-a', 'mtg', 'store-card'])
-    for (const d of debts) expect(Object.keys(d).sort()).toEqual(['accountId', 'aprBp', 'asOf', 'balanceCents', 'creditLimitCents', 'kind', 'label', 'last4', 'personId', 'source'])
+    for (const d of debts) expect(Object.keys(d).sort()).toEqual(['accountId', 'aprBp', 'asOf', 'balanceCents', 'cosigned', 'creditLimitCents', 'kind', 'label', 'last4', 'personId', 'source'])
     expect(debts.find((d) => d.accountId === 'card-a')).toEqual({
-      accountId: 'card-a', label: 'Card A', kind: 'card', last4: '0003', personId: 'pa', balanceCents: 18_000, asOf: '2026-12-04', source: 'statement', aprBp: 2199, creditLimitCents: 500_000,
+      accountId: 'card-a', label: 'Card A', kind: 'card', last4: '0003', personId: 'pa', balanceCents: 18_000, asOf: '2026-12-04', source: 'statement', aprBp: 2199, creditLimitCents: 500_000, cosigned: false,
     })
     // a debt with no statement and no typed balance is listed with a null balance
     expect(debts.find((d) => d.accountId === 'mtg')).toMatchObject({ balanceCents: null, asOf: null, source: null, aprBp: 450, personId: null })

@@ -15,13 +15,16 @@ import { computed } from 'vue'
 import { debtSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { DebtSlice } from '../../lib/budget/types'
+import { totalOwed } from '../../lib/budget/loanMath'
 import DrillPie from '../charts/DrillPie.vue'
 
 const props = defineProps<{ debts: DebtSlice[]; dark: boolean; canEdit: boolean }>()
 const emit = defineEmits<{ open: [accountId: string] }>()
 
 const model = computed(() => debtSlices(props.debts))
-const totalCents = computed(() => props.debts.reduce((n, d) => n + Math.max(0, d.balanceCents ?? 0), 0))
+// the Loans page's rule: a cosigned debt is shown but kept out of the total (and the pie), with its own line
+const owed = computed(() => totalOwed(props.debts.map((d) => ({ balanceCents: d.balanceCents === null ? null : Math.max(0, d.balanceCents), cosigned: d.cosigned === true }))))
+const totalCents = computed(() => owed.value.totalCents)
 const others = computed(() => [...model.value.noBalance, ...model.value.settled])
 
 function onSelect(key: string) {
@@ -35,6 +38,7 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
     <p class="dp-total" data-testid="debt-total">
       <span class="dp-total-label">Total owed</span>
       <strong class="dp-total-value">{{ formatAmount(totalCents) }}</strong>
+      <span v-if="owed.cosignedCents > 0" class="dp-total-sub" data-testid="debt-cosigned">+ {{ formatAmount(owed.cosignedCents) }} cosigned</span>
     </p>
 
     <DrillPie
@@ -46,6 +50,16 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
       @select="onSelect"
     />
     <p v-else class="dp-none" data-testid="debt-none">No balances yet.</p>
+
+    <ul v-if="model.cosigned.length" class="dp-others" aria-label="Cosigned debts">
+      <li v-for="d in model.cosigned" :key="d.accountId" class="dp-other">
+        <span class="dp-other-text">
+          <span class="dp-other-label">{{ d.label }}<template v-if="d.last4"> ••{{ d.last4 }}</template> <span class="dp-badge" data-testid="cosigned-badge">Cosigned</span></span>
+          <span class="dp-other-note">{{ formatAmount(d.balanceCents ?? 0) }} {{ asOf(d) }}</span>
+        </span>
+        <button type="button" class="btn dp-add" :data-testid="`debt-open-${d.accountId}`" @click="emit('open', d.accountId)">Details</button>
+      </li>
+    </ul>
 
     <ul v-if="others.length" class="dp-others" aria-label="Debts without a balance">
       <li v-for="d in others" :key="d.accountId" class="dp-other">
@@ -86,6 +100,19 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   gap: 8px;
   min-height: 44px;
   margin: 0;
+}
+.dp-total-sub {
+  margin-inline-start: 8px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+}
+.dp-badge {
+  margin-inline-start: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(var(--sunken));
+  font-size: 11px;
+  color: rgb(var(--ink-2));
 }
 .dp-total-label {
   font-size: 14px;
