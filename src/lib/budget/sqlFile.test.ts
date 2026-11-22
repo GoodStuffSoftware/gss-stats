@@ -15,7 +15,7 @@ const freshDb = (): DatabaseSync => {
   return db
 }
 const count = (db: DatabaseSync, table: string): number => (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
-const plan = (req: ImportRequest = syntheticRequest(), ctx = emptyContext()): Promise<ImportPlan> => planImport(req, ctx, 'tester@example.com', NOW)
+const plan = (req: ImportRequest = syntheticRequest(), ctx = emptyContext()): Promise<ImportPlan> => planImport(req, ctx, 'tool:test', NOW)
 
 let full: ImportPlan
 beforeAll(async () => { full = await plan() })
@@ -166,6 +166,18 @@ describe('the SQL against the real migration (local SQLite)', () => {
     expect(done).toEqual({ p: other.id, kind: 'transfer', c: null, cs: 'none', confidence: 85 })
     db.exec(pairUpdateSql(spend.id, 'another', NOW, 'u')) // already paired: no change
     expect((db.prepare('SELECT pair_id AS p FROM transactions WHERE id = ?').get(spend.id) as { p: string }).p).toBe(other.id)
+  })
+
+  it('a pair update skips a row, or a partner, last written by a signed-in person (updated_by holds an @)', () => {
+    const spend = full.txns.find((t) => t.kind === 'spend' && t.pairId === null && t.kindSource === 'auto')!
+    const other = full.txns.find((t) => t.id !== spend.id && t.kind === 'spend' && t.pairId === null)!
+    for (const who of [spend.id, other.id]) {
+      const db = freshDb()
+      db.exec(renderPlanSql({ ...full, pairs: [] }))
+      db.prepare("UPDATE transactions SET kind_source = 'auto', category_source = 'auto', pair_id = NULL, updated_by = 'person@example.com' WHERE id = ?").run(who)
+      db.exec(pairUpdateSql(spend.id, other.id, NOW, 'u'))
+      expect((db.prepare('SELECT pair_id AS p FROM transactions WHERE id = ?').get(spend.id) as { p: string | null }).p).toBeNull()
+    }
   })
 
   it('a later load never pairs away a hand-edited category: loaded unpaired, edited, partner arrives later', async () => {
