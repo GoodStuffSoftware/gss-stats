@@ -13,8 +13,17 @@ describe('BudgetFilters', () => {
   it('lists the five presets and marks the matching one', () => {
     const w = mountFilters()
     const sel = w.get('[data-testid="budget-range"]')
-    expect(sel.findAll('option').map((o) => o.text())).toEqual(['This month', 'Last month', 'Last 3 months', 'Year to date', 'Custom'])
+    expect(sel.findAll('option').map((o) => o.text())).toEqual(['This month · November 2026', 'Last month · October 2026', 'Last 3 months · Sep – Nov 2026', 'Year to date · Jan – Nov 2026', 'Custom'])
     expect((sel.element as unknown as HTMLSelectElement).value).toBe('this-month')
+  })
+
+  it('says the months covered under the picker, with to date when it runs to today', async () => {
+    const w = mountFilters()
+    expect(w.get('[data-testid="budget-range-months"]').text()).toBe('Covers November 2026 (to date)')
+    const past = mountFilters({ from: '2026-10-01', to: '2026-10-31' })
+    expect(past.get('[data-testid="budget-range-months"]').text()).toBe('Covers October 2026')
+    const custom = mountFilters({ from: '2025-12-15', to: '2026-02-03' })
+    expect(custom.get('[data-testid="budget-range-months"]').text()).toBe('Covers Dec 2025 – Feb 2026')
   })
 
   it('picking a preset emits its range', async () => {

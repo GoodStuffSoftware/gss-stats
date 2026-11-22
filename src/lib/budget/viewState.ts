@@ -86,6 +86,35 @@ export function rangeForPreset(preset: RangePreset, today: IsoDate): { from: Iso
     default: return null
   }
 }
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+/**
+ * The calendar months a range of whole days touches, as text: one month 'October 2026'; several 'Aug – Oct 2026'
+ * (the year shown once when both ends share it, else 'Dec 2025 – Feb 2026'). `toDate` appends ' (to date)'.
+ * Works on 'YYYY-MM-DD' or 'YYYY-MM' ends. '' when an end is not a date.
+ */
+export function monthsLabel(from: string, to: string, toDate = false): string {
+  const a = /^(\d{4})-(\d{2})/.exec(from)
+  const b = /^(\d{4})-(\d{2})/.exec(to)
+  if (!a || !b) return ''
+  const [y1, m1, y2, m2] = [Number(a[1]), Number(a[2]) - 1, Number(b[1]), Number(b[2]) - 1]
+  if (m1 > 11 || m2 > 11) return ''
+  const tail = toDate ? ' (to date)' : ''
+  if (y1 === y2 && m1 === m2) return `${MONTH_LONG[m1]} ${y1}${tail}`
+  if (y1 === y2) return `${MONTH_SHORT[m1]} – ${MONTH_SHORT[m2]} ${y1}${tail}`
+  return `${MONTH_SHORT[m1]} ${y1} – ${MONTH_SHORT[m2]} ${y2}${tail}`
+}
+/** The months a picked range covers; 'to date' when it ends today (or later), i.e. its last month is still running. */
+export function rangeMonths(from: string, to: string, today: IsoDate): string {
+  return monthsLabel(from, to, to >= today)
+}
+/** A preset's picker text: 'Last month · October 2026'. The preset's range comes from rangeForPreset, the same
+ * code the queries use; 'custom' stays 'Custom' (its dates are shown beside it). */
+export function presetLabel(preset: RangePreset, today: IsoDate): string {
+  const base = RANGE_PRESETS.find((p) => p.id === preset)?.label ?? ''
+  const r = rangeForPreset(preset, today)
+  return r ? `${base} · ${monthsLabel(r.from, r.to)}` : base
+}
 /** Which preset a range is on `today`, else 'custom'. */
 export function presetOf(from: string, to: string, today: IsoDate): RangePreset {
   for (const p of RANGE_PRESETS) {

@@ -11,7 +11,7 @@
 import { computed, ref, watch } from 'vue'
 import type { IsoDate, Person, PersonFilter } from '../../lib/budget/types'
 import { canHide, type PanelId } from '../../lib/budget/panelVisibility'
-import { MAX_RANGE_DAYS, RANGE_PRESETS, presetOf, rangeForPreset, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
+import { MAX_RANGE_DAYS, RANGE_PRESETS, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
 
 const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[]; rangeHidden?: boolean }>()
 const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter]; 'toggle-panel': [id: PanelId] }>()
@@ -36,6 +36,8 @@ watch(() => [props.from, props.to], () => {
   customTo.value = props.to
 })
 const rangeError = ref('')
+// The months the picked range covers, from the same range the queries use (props.from / props.to).
+const covers = computed(() => rangeMonths(props.from, props.to, todayStr.value))
 
 function onPreset(e: Event) {
   const id = (e.target as HTMLSelectElement).value as RangePreset
@@ -66,13 +68,14 @@ function onCustom() {
     <div v-if="!rangeHidden" class="bf-range">
       <label class="bf-label" for="budget-range">Range</label>
       <select id="budget-range" class="bf-select" :value="selected" data-testid="budget-range" @change="onPreset">
-        <option v-for="p in RANGE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+        <option v-for="p in RANGE_PRESETS" :key="p.id" :value="p.id">{{ presetLabel(p.id, todayStr) }}</option>
       </select>
       <span v-if="selected === 'custom'" class="bf-custom">
         <input v-model="customFrom" type="date" class="bf-date" aria-label="From date" data-testid="budget-from" @change="onCustom" />
         <span aria-hidden="true">–</span>
         <input v-model="customTo" type="date" class="bf-date" aria-label="To date" data-testid="budget-to" @change="onCustom" />
       </span>
+      <span v-if="covers" class="bf-covers" data-testid="budget-range-months">Covers {{ covers }}</span>
     </div>
     <div class="bf-person" role="radiogroup" aria-label="Person">
       <button
@@ -195,7 +198,15 @@ function onCustom() {
   font-size: 12px;
   color: #b3261e;
 }
+.bf-covers {
+  font-size: 12px;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 700px) {
+  .bf-covers {
+    flex-basis: 100%;
+  }
   .bf-range {
     flex-basis: 100%;
   }

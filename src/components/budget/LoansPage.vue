@@ -57,7 +57,7 @@ function onSaved() {
     <template v-if="loanId">
       <button type="button" class="btn lp-back" data-testid="loans-back" @click="emit('close')">← Loans</button>
       <DebtDetail
-        :account-id="loanId" :can-edit="canEdit" :dark="dark" hide-back :recent-payments-cents="recentPayments"
+        :account-id="loanId" :can-edit="canEdit" :dark="dark" hide-back :recent-payments-cents="recentPayments" :recent-months="data?.months"
         @close="emit('close')" @saved="onSaved"
       />
     </template>

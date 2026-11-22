@@ -20,14 +20,19 @@ import { debtAprBp, loanMonthlyPayment, monthlyInterestCents, monthsToPayoff, pa
 import { formatApr } from '../../lib/budget/pieModel'
 import { formatAmount, formatDate } from '../../lib/budget/tableModel'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
-import { rangeValid, todayIso } from '../../lib/budget/viewState'
+import { monthsLabel, rangeValid, todayIso } from '../../lib/budget/viewState'
 import BaseChart from '../charts/BaseChart.vue'
 import EditableTable, { type EditableColumn } from '../table/EditableTable.vue'
 
 // `recentPaymentsCents`: the totals paid in the last 3 full months (the Loans page passes them), the payoff fallback
 // when the loan has no scheduled payment.
-const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean; hideBack?: boolean; recentPaymentsCents?: number[] }>()
+const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean; hideBack?: boolean; recentPaymentsCents?: number[]; recentMonths?: string[] }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
+// The months the average covers (LoansResponse.months, 'YYYY-MM', oldest first).
+const recentLabel = computed(() => {
+  const m = props.recentMonths
+  return (m && m.length ? monthsLabel(m[0], m[m.length - 1]) : '') || 'last 3 months'
+})
 
 // ── Loading ──────────────────────────────────────────────────────────────────────────────────────────────
 const detail = ref<DebtDetailData | null>(null)
@@ -308,7 +313,7 @@ async function submit() {
         <h3 class="dd-h3">Payoff estimate</h3>
         <dl class="dd-grid">
           <div v-if="payoff.text">
-            <dt>{{ payoff.source === 'from payments' ? 'At the average payment (last 3 months)' : 'At the scheduled payment' }}</dt>
+            <dt>{{ payoff.source === 'from payments' ? `At the average payment (${recentLabel})` : 'At the scheduled payment' }}</dt>
             <dd data-testid="payoff-months">{{ payoff.text }}</dd>
           </div>
           <div v-if="payoff.estInterest">

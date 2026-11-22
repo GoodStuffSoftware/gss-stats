@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
-  LOAN_MARK_KEY, defaultViewState, parseDrillSteps, parseLoanSteps, presetOf, rangeForPreset, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
+  LOAN_MARK_KEY, defaultViewState, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   useBudgetViewState, type BudgetViewState,
 } from './viewState'
 
@@ -759,5 +759,27 @@ describe('Budget pages: Overview and Loans', () => {
       expect(view.state.loan).toBe('acct-1')
       w.unmount()
     })
+  })
+})
+
+describe('month labels', () => {
+  it('names one month, a span in one year, and a span across years', () => {
+    expect(monthsLabel('2026-10-01', '2026-10-31')).toBe('October 2026')
+    expect(monthsLabel('2026-08-01', '2026-10-31')).toBe('Aug – Oct 2026')
+    expect(monthsLabel('2025-12-01', '2026-02-28')).toBe('Dec 2025 – Feb 2026')
+    expect(monthsLabel('2026-08', '2026-10')).toBe('Aug – Oct 2026')
+    expect(monthsLabel('2026-11-01', '2026-11-20', true)).toBe('November 2026 (to date)')
+    expect(monthsLabel('nope', '2026-10-31')).toBe('')
+  })
+  it('rangeMonths adds to date only when the range runs to today', () => {
+    expect(rangeMonths('2026-11-01', '2026-11-20', TODAY)).toBe('November 2026 (to date)')
+    expect(rangeMonths('2026-10-01', '2026-10-31', TODAY)).toBe('October 2026')
+    expect(rangeMonths('2026-09-01', '2026-11-20', TODAY)).toBe('Sep – Nov 2026 (to date)')
+  })
+  it('preset labels come from the preset range, across a year boundary too', () => {
+    expect(presetLabel('last-month', TODAY)).toBe('Last month · October 2026')
+    expect(presetLabel('3-months', TODAY)).toBe('Last 3 months · Sep – Nov 2026')
+    expect(presetLabel('3-months', '2026-02-10')).toBe('Last 3 months · Dec 2025 – Feb 2026')
+    expect(presetLabel('custom', TODAY)).toBe('Custom')
   })
 })
