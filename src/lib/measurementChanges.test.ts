@@ -34,6 +34,8 @@ const V1107 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.107.0')!
 const V1107_DATE = V1107.dateEt
 const V1108 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.0')!
 const V1108_DATE = V1108.dateEt
+const V1108_1 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.1')!
+const V1108_1_DATE = V1108_1.dateEt
 // The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
@@ -43,6 +45,7 @@ beforeEach(() => {
   V1105.dateEt = null
   V1107.dateEt = null
   V1108.dateEt = null
+  V1108_1.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
@@ -52,6 +55,7 @@ afterEach(() => {
   V1105.dateEt = V1105_DATE
   V1107.dateEt = V1107_DATE
   V1108.dateEt = V1108_DATE
+  V1108_1.dateEt = V1108_1_DATE
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
   V1993_WEB.dateEt = V1993_WEB_DATE
@@ -342,11 +346,11 @@ describe('1.108.0 review-request rows change (errorRowsOnly entry)', () => {
 })
 
 describe('1.108.1 landing visit rows change (errorRowsOnly entry)', () => {
-  const V1108_1 = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.1')!
   it('is dated 2026-11-21, names the path, and is in no auth, coach or report-line consumer, with no timeline marker of its own', () => {
-    expect(V1108_1.dateEt).toBe('2026-11-21')
+    expect(V1108_1_DATE).toBe('2026-11-21')
     expect(V1108_1.errorRowsOnly).toBe(true)
     expect(V1108_1.note).toContain('/landing/sudoku-no-ads')
+    V1108_1.dateEt = V1108_1_DATE
     expect(markedChanges().some((c) => c.id === 'v1.108.1')).toBe(true)
     expect(authMarkedChanges().some((c) => c.id === 'v1.108.1')).toBe(false)
     expect(measurementReportLines('2099-03-01').join(' ')).not.toContain('v1.108.1')
