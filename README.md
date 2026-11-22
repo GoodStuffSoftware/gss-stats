@@ -378,7 +378,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   Built-in pages are recognised **by id only** ([`src/lib/defaults.ts`](src/lib/defaults.ts)
   `isOverviewPage`, `isCampaignComparePage`, …), so renaming a page never changes how it
   behaves. The page each viewer is on (and the page they last viewed in each group) is
-  remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
+  remembered **in their own browser, keyed to the signed-in login** (`gss-stats-nav:<hash of the lower-cased email>`; [`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts) over the reusable [`src/lib/loginStorage.ts`](src/lib/loginStorage.ts), whose hash matches the Budget panel key; the first login with none of its own adopts the old shared `gss-stats-nav` value; nothing is kept while signed out), not
   in the shared KV config: switching pages never saves anything or moves anyone else, and a
   first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 13
   (`migrateNavV13`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
@@ -407,9 +407,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   - **Drawer** ([`src/components/nav/NavDrawer.vue`](src/components/nav/NavDrawer.vue)) — the
     ☰ button (it carries the current group's badge, ★ on ★ Overview) opens the whole page tree
     as an overlay over the charts, on every screen size: ★ Overview pinned first (unindented),
-    then each group — its header collapsible (remembered per viewer), with its badge, a ⋯ group
+    then each group — its header collapsible (remembered per login), with its badge, a ⋯ group
     menu and its page count — its pages indented under it and each level of drill pages one more
-    step in (a page with drill pages folds them away; remembered per viewer, and the path to the
+    step in (a page with drill pages folds them away; remembered per login, and the path to the
     page on screen always shows). Every page, drill pages included, has the ⋯ page menu; drill
     pages also have × to delete them. Esc, the scrim or picking a page closes it; focus stays
     inside while it's open and returns to ☰.

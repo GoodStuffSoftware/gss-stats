@@ -8,7 +8,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import { loadConfig, saveConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { TEMPLATE_WIDGETS, defaultConfig, defaultRetentionPage } from './lib/defaults'
 import { applyPageDraft, newPageDraft } from './lib/wizards'
 import type { DashboardConfig } from './types'
@@ -34,6 +34,7 @@ const mounted: VueWrapper[] = []
 beforeEach(() => {
   stubAppFetch()
   localStorage.clear()
+  signInForTest()
   vi.mocked(saveConfig).mockClear()
 })
 afterEach(() => {

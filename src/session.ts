@@ -47,7 +47,16 @@ export function reauth(): void {
   location.reload()
 }
 
-export async function loadIdentity(): Promise<void> {
+// The account menu and the app shell both ask on load: they share one in-flight request.
+let identityInFlight: Promise<void> | null = null
+export function loadIdentity(): Promise<void> {
+  identityInFlight ??= fetchIdentity().finally(() => {
+    identityInFlight = null
+  })
+  return identityInFlight
+}
+
+async function fetchIdentity(): Promise<void> {
   try {
     const res = await fetch('/auth/me', { cache: 'no-store' })
     if (res.status === 401) {

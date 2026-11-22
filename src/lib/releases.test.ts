@@ -62,8 +62,8 @@ describe('the flight 3 web releases', () => {
     expect(at('v1.99.0')).toBe(-1)
   })
   it('the release panel picks the newest: v1.99.4 Play (10-18 15:15:55Z, listed after v1.99.4 web 14:57:49Z so it wins the same-day tie) is newest; v1.99.3 Play (10-17 06:09:41Z, listed after v1.99.3 web 05:58:55Z so it wins that same-day tie); v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
-    expect(newest(datedReleases())?.version).toBe('v1.108.0 Play')
-    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.108.0 Play')
+    expect(newest(datedReleases())?.version).toBe('v1.108.1 web')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.108.1 web')
     expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
     expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
     expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 Play')
@@ -147,6 +147,16 @@ describe('the flight 3 web releases', () => {
     const change = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.0')!
     expect(change).toMatchObject({ dateEt: '2026-11-11', errorRowsOnly: true })
     expect(change.note).toContain('/review-prompt/requested')
+  })
+  it('v1.108.1 web (23:32:57Z, a labelled line: landing visits) is one marker on the ET day 2026-11-21 (18:32:57 ET), after v1.108.0 Play; the landing rows are a hidden measurement entry that mints no second marker', () => {
+    const web = datedReleases().find((r) => r.version === 'v1.108.1 web')!
+    expect(web).toMatchObject({ dateEt: '2026-11-21', major: true, label: 'v1.108.1 landing visits' })
+    expect(at('v1.108.1 web')).toBeGreaterThan(at('v1.108.0 Play'))
+    expect(web.note).toContain('23:32:57Z')
+    expect(RELEASES.filter((r) => r.version.startsWith('v1.108.1')).map((r) => r.version)).toEqual(['v1.108.1 web'])
+    const change = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.108.1')!
+    expect(change).toMatchObject({ dateEt: '2026-11-21', errorRowsOnly: true })
+    expect(change.note).toContain('/landing/sudoku-no-ads')
   })
   it('v1.106.0 web (22:59:14Z) and v1.106.0 Play (23:11:46Z, 1106000) are markers on the ET day 2026-11-01 (EST), web listed first so the later-timed Play entry wins the tie; Play changes how Flight 4 d0 counts, so it is a labelled (major) line and web stays a tick', () => {
     const web = datedReleases().find((r) => r.version === 'v1.106.0 web')!

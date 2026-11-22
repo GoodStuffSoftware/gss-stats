@@ -8,7 +8,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import { saveConfig, loadConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { defaultConfig } from './lib/defaults'
 
 vi.mock('./api', async (importOriginal) => {
@@ -32,6 +32,7 @@ const mounted: VueWrapper[] = []
 beforeEach(() => {
   stubAppFetch() // also resets the address bar to "/"
   localStorage.clear()
+  signInForTest()
   vi.mocked(saveConfig).mockClear()
   vi.mocked(loadConfig).mockImplementation(async () => JSON.parse(JSON.stringify(defaultConfig())))
 })

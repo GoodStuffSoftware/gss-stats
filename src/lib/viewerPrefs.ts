@@ -6,9 +6,27 @@
 // localStorage can be missing, blocked or throw (private windows, disabled site data, quota), so
 // every access is wrapped: a failed read is "nothing remembered", a failed write is ignored, and
 // the dashboard works the same either way — it just lands on the config's landing page.
+//
+// Keyed per signed-in login (`gss-stats-nav:<hash of the lower-cased address>`, lib/loginStorage.ts), so two
+// people sharing a browser keep separate state. App calls `setViewerLogin` once /auth/me has answered and
+// before it applies any of this; until then, and while signed out, nothing is read or written.
 import type { DashboardPage } from '../types'
+import { adoptLegacyItem, loginKey, readLoginItem, writeLoginItem } from './loginStorage'
 
+/** The key every viewer shared before state was kept per login; adopted by the first login with none of its own. */
 export const VIEWER_PREFS_KEY = 'gss-stats-nav'
+
+let login: string | null = null
+
+/** localStorage key holding this login's navigation state (null when nobody is signed in). */
+export const viewerPrefsKey = (email: string | null | undefined): string | null => loginKey(VIEWER_PREFS_KEY, email)
+
+/** Name the signed-in login whose state read/writeViewerPrefs use (null: signed out, nothing is kept).
+ * The first login to arrive with no state of its own adopts the legacy shared value, which is then removed. */
+export function setViewerLogin(email: string | null | undefined): void {
+  login = email?.trim() ? email : null
+  if (login) adoptLegacyItem(VIEWER_PREFS_KEY, login, VIEWER_PREFS_KEY)
+}
 
 export interface ViewerPrefs {
   /** The page this viewer was last on. */
@@ -28,7 +46,7 @@ const isId = (x: unknown): x is string => typeof x === 'string' && x.length > 0 
 export function readViewerPrefs(): ViewerPrefs {
   let raw: unknown
   try {
-    const text = globalThis.localStorage?.getItem(VIEWER_PREFS_KEY)
+    const text = readLoginItem(VIEWER_PREFS_KEY, login)
     raw = text ? JSON.parse(text) : null
   } catch {
     return {}
@@ -55,9 +73,9 @@ export function readViewerPrefs(): ViewerPrefs {
 /** Remember `prefs` in this browser. Never throws. */
 export function writeViewerPrefs(prefs: ViewerPrefs): void {
   try {
-    globalThis.localStorage?.setItem(VIEWER_PREFS_KEY, JSON.stringify(prefs))
+    writeLoginItem(VIEWER_PREFS_KEY, login, JSON.stringify(prefs))
   } catch {
-    // storage full, blocked or unavailable: nothing is remembered, nothing breaks
+    // unserializable: nothing is remembered, nothing breaks
   }
 }
 

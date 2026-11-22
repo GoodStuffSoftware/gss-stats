@@ -10,7 +10,7 @@ import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { etDayRangeToISO } from './lib/range'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
 
@@ -37,6 +37,7 @@ beforeEach(() => {
   stubAppFetch()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   localStorage.clear()
+  signInForTest()
   vi.mocked(saveConfig).mockClear()
   const stored: any = JSON.parse(JSON.stringify(PROD_V9))
   stored.version = 12

@@ -6,6 +6,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+
 ### Added
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
@@ -25,6 +26,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Budget shows why a purchase needs review, and lets you confirm it in one tap.** A flagged row now says why under the merchant (and on hover), and a small ✓ "Looks right" button saves it as it stands, so it leaves the review list and the "Needs review" count drops straight away.
 - **Budget pie outside labels keep the whole name.** When a name would be cut, the share is dropped first and the full name shows if it fits; the name is cut only when even it does not.
 - **Budget no longer offers "Use for all" where it would recategorize other merchants.** After an edit or a ✓, the offer shows only when every row under that merchant's key carries one name and the key is not a payment service (PayPal, Venmo, Cash App, Zelle); the server refuses such a rule too.
+
+## [0.79.4] — 2026-11-22
+
+### Fixed
+- **Navigation state follows the login.** Where you were, and which groups you folded, is now saved in this browser per signed-in account, so two people on one computer no longer share it; the state already saved here carries over to the first account that signs in.
+
+## [0.79.3] — 2026-11-21
+
+### Added
+- **1.108.1 on the charts.** The no-ads landing page release (live 2026-11-21 18:32 ET) shows as a labelled line, and a new Traffic card counts its visits per day, split by ad source.
 
 ## [0.79.2] — 2026-11-20
 
