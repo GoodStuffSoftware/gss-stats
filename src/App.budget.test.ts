@@ -96,6 +96,7 @@ async function closeMenu() {
   document.querySelector<HTMLElement>('#nav-drawer .dr-close')?.click()
   await flushPromises()
 }
+const subRow = (page: string) => document.querySelector<HTMLElement>(`#nav-drawer [data-testid="nav-section-budget-${page}"]`)
 const clickLink = async () => {
   link()!.click()
   await flushPromises()
@@ -186,7 +187,8 @@ describe('App: opening and closing', () => {
     expect(params().get('utm_source')).toBe('x')
 
     await openMenu(w)
-    expect(link()!.getAttribute('aria-current')).toBe('page')
+    expect(link()!.getAttribute('aria-current')).toBeNull() // the section has pages: the page row is the current one
+    expect(subRow('overview')!.getAttribute('aria-current')).toBe('page')
     expect(document.querySelectorAll('#nav-drawer .dr-page[aria-current="page"]')).toHaveLength(1) // no page is current while the section is
     const row = Array.from(document.querySelectorAll<HTMLElement>('#nav-drawer .dr-page')).find((r) => r.querySelector('.nm')!.textContent!.trim() === 'Campaigns')!
     row.click()

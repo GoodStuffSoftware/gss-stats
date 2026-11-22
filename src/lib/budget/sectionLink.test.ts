@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetSectionOpen, searchWithSection } from './sectionLink'
+import { budgetPageOf, budgetSectionOpen, parseBudgetPage, searchWithSection } from './sectionLink'
 
 describe('budgetSectionOpen', () => {
   it('is true only for section=budget', () => {
