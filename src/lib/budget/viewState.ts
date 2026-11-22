@@ -4,19 +4,23 @@
 //
 // URL (`?section=budget` plus `b_*` params; every other param is left alone, see sectionLink.ts):
 //   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_group=account (omitted = merchant),
-//   b_review=1, b_tab=debts.
+//   b_review=1, b_tab=debts, b_page=loans (Overview is the default and writes nothing; anything but `loans`
+//   reads as Overview).
 // The drill path (category and store names) is NOT in the URL: the repo is public and URLs reach logs and synced
 // history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
-// still carries a `b_path` has it ignored and removed (searchWithoutPath).
+// still carries a `b_path` has it ignored and removed (searchWithoutPath). Likewise the open loan on the Loans
+// page (an account id names an institution): a one-level step `{level:'loan', key}` in history.state, through its
+// own createDrillHistory instance (own mark key), never in the URL.
 // Everything read back is validated; anything malformed falls back to its default.
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { createDrillHistory, readMark, readSteps, type DrillHistory } from './drillHistory'
-import { BUDGET_PARAM_PREFIX, budgetSectionOpen } from './sectionLink'
+import { BUDGET_PARAM_PREFIX, PAGE_PARAM, budgetPageOf, budgetSectionOpen, type BudgetPage } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
 export type BudgetTab = 'spending' | 'debts'
 export type GroupBy = 'merchant' | 'account'
 export interface DrillStep { level: 'category' | 'merchant'; key: string; label: string }
+export interface LoanStep { level: 'loan'; key: string; label: string }
 export interface BudgetViewState {
   from: IsoDate
   to: IsoDate
@@ -25,6 +29,10 @@ export interface BudgetViewState {
   groupBy: GroupBy
   reviewOnly: boolean
   tab: BudgetTab
+  /** Overview (the default) or Loans (`b_page=loans`). */
+  page: BudgetPage
+  /** The loan open on the Loans page (an account id): history.state only, never the URL. Null on Overview. */
+  loan: string | null
 }
 
 /** The server refuses a range longer than this (functions/api/budget/summary.ts). */
@@ -90,12 +98,26 @@ export function presetOf(from: string, to: string, today: IsoDate): RangePreset 
 // ── State <-> URL ─────────────────────────────────────────────────────────────────────────────────────────
 export function defaultViewState(today: IsoDate = todayIso()): BudgetViewState {
   const r = rangeForPreset('this-month', today)!
-  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab: 'spending' }
+  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab: 'spending', page: 'overview', loan: null }
 }
 
 const P = BUDGET_PARAM_PREFIX
 const PERSON_RE = /^[a-z0-9][\w-]{0,23}$/
 const STEP_TEXT_MAX = 120
+const LOAN_ID_RE = /^[A-Za-z0-9][\w.-]{0,63}$/
+/** history.state key of the loan step's own drillHistory instance (the drill path keeps drillHistory's MARK_KEY). */
+export const LOAN_MARK_KEY = 'gssBudgetLoan'
+
+/** The loan step read back from history.state: none or exactly one `{level:'loan', key}` with a plain id, else null. */
+export function parseLoanSteps(raw: unknown): LoanStep[] | null {
+  if (!Array.isArray(raw) || raw.length > 1) return null
+  if (raw.length === 0) return []
+  const t = raw[0] as unknown
+  if (!t || typeof t !== 'object') return null
+  const { level, key } = t as Record<string, unknown>
+  if (level !== 'loan' || typeof key !== 'string' || !LOAN_ID_RE.test(key)) return null
+  return [{ level: 'loan', key, label: key }]
+}
 
 /** Drill steps read back from history.state (anything can be in there): the steps when they are a valid path
  * (levels in order, at most PATH_LEVELS.length, plain strings), else null. */
@@ -141,6 +163,7 @@ export function stateFromSearch(search: string, today: IsoDate = todayIso()): Bu
   state.groupBy = q.get(`${P}group`) === 'account' ? 'account' : 'merchant'
   state.reviewOnly = q.get(`${P}review`) === '1'
   state.tab = q.get(`${P}tab`) === 'debts' ? 'debts' : 'spending'
+  state.page = budgetPageOf(search)
   return state
 }
 
@@ -155,6 +178,7 @@ export function searchWithState(search: string, state: BudgetViewState): string 
   if (state.groupBy === 'account') q.set(`${P}group`, 'account')
   if (state.reviewOnly) q.set(`${P}review`, '1')
   if (state.tab === 'debts') q.set(`${P}tab`, 'debts')
+  if (state.page === 'loans') q.set(PAGE_PARAM, 'loans')
   const s = q.toString()
   return s ? `?${s}` : ''
 }
@@ -206,6 +230,7 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
       if (clean !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + clean + loc.hash)
       const kept = readSteps(globalThis.history?.state, parseDrillSteps)
       if (kept) state.path = kept
+      if (state.page === 'loans') state.loan = readSteps(globalThis.history?.state, parseLoanSteps, LOAN_MARK_KEY)?.[0]?.key ?? null
     }
   } catch {
     // history unavailable or sandboxed: the section starts at the top
@@ -220,6 +245,11 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     try {
       const loc = globalThis.location
       if (!budgetSectionOpen(loc.search)) return
+      // An entry of an earlier visit (after a reload, its history-step session is stale) was landed on: its path or
+      // loan is being set from the entry's own state, and the browser fires popstate at the other listeners (readUrl
+      // takes the page, range and person from the address) AFTER the reactive flush that would run this. Writing now
+      // would stamp the page still on screen onto that entry's address, so Back would never leave it.
+      if (drill?.settling || loanHist?.settling) return
       const search = searchWithState(loc.search, state)
       if (search !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + search + loc.hash)
     } catch {
@@ -231,6 +261,9 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   // Back/Forward over the drill levels (drillHistory.ts): one history entry per level, in history.state only.
   // Only inside a component; a bare call (tests, tools) touches no history.
   let drill: DrillHistory<DrillStep> | null = null
+  let loanHist: DrillHistory<LoanStep> | null = null
+  let pageSwitching = false // setPage / a popstate is changing page and loan together: the loan step must not push
+  const loanPath = (): LoanStep[] => (state.loan ? [{ level: 'loan', key: state.loan, label: state.loan }] : [])
   if (getCurrentInstance() && globalThis.history && globalThis.window) {
     const copy = () => state.path.map((x) => ({ ...x }))
     const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy, parseSteps: parseDrillSteps, landed: writeUrl })
@@ -239,15 +272,39 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     watch(() => state.path.length, () => d.pathChanged(copy()), { flush: 'sync' })
     // the steps kept for Forward mean nothing under another range, person, grouping or review filter
     watch(() => [state.from, state.to, state.person, state.groupBy, state.reviewOnly], () => d.forgetForward())
-    const onPop = (e: PopStateEvent) => d.popped(e.state, budgetSectionOpen(globalThis.location?.search ?? ''))
+    // the drill path is Overview's: on the Loans page its entries are not acted on (the path stays as it was)
+    const onPop = (e: PopStateEvent) => {
+      const search = globalThis.location?.search ?? ''
+      d.popped(e.state, budgetSectionOpen(search) && budgetPageOf(search) === 'overview')
+    }
+    // The open loan: one level, own mark key, active on the Loans page only.
+    const l = createDrillHistory<LoanStep>({
+      history: globalThis.history,
+      markKey: LOAN_MARK_KEY,
+      drill: (step) => void (state.loan = step.key),
+      popTo: (depth) => void (depth < 1 && (state.loan = null)),
+      path: loanPath,
+      parseSteps: parseLoanSteps,
+      landed: writeUrl,
+    })
+    loanHist = l
+    watch(() => state.loan, () => { if (!pageSwitching) l.pathChanged(loanPath()) }, { flush: 'sync' })
+    const onLoanPop = (e: PopStateEvent) => {
+      const search = globalThis.location?.search ?? ''
+      if (budgetSectionOpen(search) && budgetPageOf(search) === 'loans') l.popped(e.state, true)
+    }
     // registered before BudgetSection's own readUrl listener (its onMounted comes after this call), so a foreign
     // entry is flagged as settling before readUrl changes the path
     onMounted(() => {
       d.start()
+      if (state.page === 'loans') l.start()
       globalThis.addEventListener('popstate', onPop)
+      globalThis.addEventListener('popstate', onLoanPop)
     })
     onBeforeUnmount(() => {
       globalThis.removeEventListener('popstate', onPop)
+      globalThis.removeEventListener('popstate', onLoanPop)
+      l.end()
       d.end() // the entry the user is on (a page the app moved to) keeps no drill state
     })
   }
@@ -256,10 +313,57 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
    * (drillHistory.ts) is left alone: Back/Forward there only moves the drill path, and re-reading the older
    * entry's address would also roll back the range or person chosen since. */
   function readUrl(e?: PopStateEvent) {
+    syncPage(e ? e.state : globalThis.history?.state)
     if (e && drill && readMark(e.state)?.s === drill.session) return
+    // a loan step of this session: Back/Forward only moves the open loan, the person and range stay as chosen
+    if (e && loanHist && readMark(e.state, LOAN_MARK_KEY)?.s === loanHist.session) return
     // the address names no drill path: whatever is on screen stays (drillHistory.ts sets it from the entry)
-    const { path: _path, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
+    const { path: _path, page: _page, loan: _loan, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
     Object.assign(state, fromUrl)
+  }
+  /** Back/Forward onto an entry of another page: take the page from the address and the open loan from the entry's
+   * own state (one entry per page change, so this never pushes). */
+  function syncPage(entryState: unknown) {
+    const page = budgetPageOf(globalThis.location?.search ?? '')
+    if (page === state.page) return
+    pageSwitching = true
+    try {
+      state.page = page
+      state.loan = page === 'loans' ? (readSteps(entryState, parseLoanSteps, LOAN_MARK_KEY)?.[0]?.key ?? null) : null
+    } finally {
+      pageSwitching = false
+    }
+    if (state.page === 'loans') loanHist?.start()
+  }
+  /** Go to a page. A page change pushes ONE history entry (Back returns to the page as it was); `loan` opens that
+   * loan on the Loans page in the same entry. On the Loans page already, a loan opens or closes through its own
+   * history step. Overview never holds a loan. */
+  function setPage(page: BudgetPage, loan: string | null = null) {
+    const open = page === 'loans' ? loan : null
+    if (page === state.page) {
+      if (page === 'loans' && open !== state.loan) state.loan = open
+      return
+    }
+    pageSwitching = true
+    try {
+      const loc = globalThis.location
+      if (loc && budgetSectionOpen(loc.search)) {
+        const search = searchWithState(loc.search, { ...state, page })
+        try {
+          globalThis.history.pushState(null, '', loc.pathname + search + loc.hash)
+        } catch {
+          // history unavailable or sandboxed: the page still changes, the address just isn't kept up to date
+        }
+      }
+      state.page = page
+      state.loan = open
+    } finally {
+      pageSwitching = false
+    }
+    if (state.page === 'loans') loanHist?.start()
+    // the new Overview entry carries no drill mark yet: mark it with the path still on screen, so crumbing to the top
+    // re-marks instead of go(-1) onto the Loans entry, and Back onto it restores the drill
+    if (state.page === 'overview') drill?.start()
   }
   /** False (and nothing changes) for a range the server would refuse. */
   function setRange(from: IsoDate, to: IsoDate): boolean {
@@ -292,5 +396,5 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   function setTab(tab: BudgetTab) {
     state.tab = tab
   }
-  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, today }
+  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, today }
 }

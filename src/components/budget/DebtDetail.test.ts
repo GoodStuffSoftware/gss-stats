@@ -5,6 +5,7 @@ import { defineComponent } from 'vue'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
 import { todayIso } from '../../lib/budget/viewState'
 import DebtDetail from './DebtDetail.vue'
+import LoansList from './LoansList.vue'
 
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 
@@ -12,18 +13,19 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const DETAIL: DebtDetailData = {
   account: { id: 'acct-9', label: 'Card A', kind: 'card', personId: 'p1', last4: '0001', isDebt: true, inSpending: true, creditLimitCents: 500000, aprBp: null },
   history: [
-    { asOf: '2026-09-30', balanceCents: 120000, source: 'statement' },
-    { asOf: '2026-10-31', balanceCents: 90000, source: 'statement' },
+    { asOf: '2026-09-30', balanceCents: 120000, source: 'statement', aprBp: 1999 },
+    { asOf: '2026-10-31', balanceCents: 90000, source: 'statement', aprBp: 1999 },
   ],
   periods: [
     { periodEnd: '2026-09-30', aprBp: 1999, interestCents: 2100, principalPaidCents: 5000, advancesCents: null },
     { periodEnd: '2026-10-31', aprBp: 1999, interestCents: 1800, principalPaidCents: 30000, advancesCents: 0 },
   ],
   payments: [{ id: 'pay-1', postedDate: '2026-10-05', amountCents: 30000, principalCents: 28200, interestCents: 1800 }],
+  terms: null, latest: null, promos: [],
 }
 const EMPTY: DebtDetailData = {
   account: { ...DETAIL.account, id: 'acct-7', label: 'Loan B', kind: 'external_debt', last4: null, creditLimitCents: null, aprBp: 650 },
-  history: [], periods: [], payments: [],
+  history: [], periods: [], payments: [], terms: null, latest: null, promos: [],
 }
 
 const ChartStub = defineComponent({ name: 'BaseChart', props: { config: Object, drillOpen: Boolean }, emits: ['point'], template: '<div class="chart-stub" />' })
@@ -38,7 +40,7 @@ function route(detail: DebtDetailData | 'fail' = DETAIL, put?: (body: unknown) =
   vi.stubGlobal('fetch', fetchMock)
 }
 const mounted: VueWrapper[] = []
-async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean }> = {}) {
+async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean; recentPaymentsCents: number[] }> = {}) {
   const w = mount(DebtDetail, {
     props: { accountId: 'acct-9', canEdit: true, dark: false, ...props },
     global: { stubs: { BaseChart: ChartStub } },
@@ -207,5 +209,114 @@ describe('DebtDetail: manual balance form', () => {
     const w = await mountDetail()
     await fill(w, { date: '2026-11-01', amount: '100' })
     expect(w.get('[data-testid="bal-error"]').text()).toContain('Check your connection')
+  })
+})
+
+// ── Loan detail: statement facts, terms, promos, payoff ─────────────────────────────────────────────────
+const isoDaysFromToday = (n: number) => {
+  const d = new Date(`${todayIso()}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const LOAN: DebtDetailData = {
+  ...DETAIL,
+  account: { ...DETAIL.account, id: 'acct-5', label: 'Home loan', kind: 'loan', creditLimitCents: null, aprBp: 600 },
+  terms: {
+    accountId: 'acct-5', originalCents: 25000000, openedOn: '2020-03-01', maturityOn: '2050-03-01', termMonths: 360,
+    paymentCents: 150000, paymentEvery: 'monthly', cosigned: true, updatedAt: '2026-11-01', updatedBy: 'test',
+  },
+  latest: { periodEnd: '2026-10-31', minDueCents: 150000, dueDate: '2026-11-15', payoffCents: 91000, escrowCents: 40000, interestCents: 1800 },
+  promos: [],
+}
+
+describe('DebtDetail: loan facts', () => {
+  it('shows statement facts, terms and the cosigned badge', async () => {
+    route(LOAN)
+    const w = await mountDetail()
+    const t = (id: string) => w.get(`[data-testid="${id}"]`).text()
+    expect(t('fact-stmt-balance')).toBe('$900.00')
+    expect(t('fact-payoff')).toBe('$910.00')
+    expect(w.text()).toContain('good through Oct 31')
+    expect(t('fact-due')).toContain('Nov 15')
+    expect(t('fact-min-due')).toBe('$1,500.00')
+    expect(t('fact-principal')).toBe('$300.00')
+    expect(t('fact-interest')).toBe('$18.00')
+    expect(t('fact-escrow')).toBe('$400.00')
+    expect(t('fact-original')).toBe('$250,000.00')
+    expect(t('fact-term')).toBe('360 months')
+    expect(t('fact-payment')).toBe('$1,500.00')
+    expect(w.text()).toContain('monthly')
+    expect(w.find('[data-testid="cosigned-badge"]').exists()).toBe(true)
+  })
+
+  it('shows a dash for what is absent and one line when nothing is known', async () => {
+    route(EMPTY)
+    const w = await mountDetail()
+    expect(w.find('[data-testid="no-statement-details"]').text()).toBe('No statement details yet')
+    expect(w.find('[data-testid="statement-facts"]').exists()).toBe(false)
+    route({ ...LOAN, latest: { ...LOAN.latest!, minDueCents: null, escrowCents: null } })
+    const w2 = await mountDetail()
+    expect(w2.get('[data-testid="fact-min-due"]').text()).toBe('—')
+    expect(w2.get('[data-testid="fact-escrow"]').text()).toBe('—')
+  })
+
+  it('estimates the payoff and the monthly interest beside the last actual', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: 30000 } })
+    const w = await mountDetail()
+    expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
+    expect(w.get('[data-testid="payoff-interest"]').text()).toBe('$14.99') // the newest statement's own rate (19.99%), as the Loans list uses
+    expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('last statement: $18.00')
+  })
+
+  it('falls back to the average of the last 3 months of payments when there is no scheduled payment', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: null } })
+    const w = await mountDetail({ recentPaymentsCents: [20000, 30000, 40000] })
+    expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('At the average payment (last 3 months)')
+    expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
+    const none = await mountDetail()
+    expect(none.find('[data-testid="payoff-months"]').exists()).toBe(false)
+  })
+
+  it('says so when the payment does not beat the interest', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: 100 } })
+    const w = await mountDetail()
+    expect(w.get('[data-testid="payoff-months"]').text()).toBe('Not paid off at this payment')
+  })
+
+  it('lists promos soonest first and flags those ending within 60 days', async () => {
+    const promo = (seq: number, endsOn: string | null) => ({
+      accountId: 'acct-5', periodEnd: '2026-10-31', seq, balanceCents: 100000 * seq, aprBp: 0, endsOn, deferredInterestCents: 12345,
+    })
+    route({ ...LOAN, promos: [promo(1, isoDaysFromToday(200)), promo(2, isoDaysFromToday(30))] })
+    const w = await mountDetail()
+    const items = w.findAll('[data-testid="promo"]')
+    expect(items).toHaveLength(2)
+    expect(items[0].text()).toContain('$2,000.00')
+    expect(items[0].text()).toContain('$123.45')
+    expect(items[0].classes()).toContain('dd-promo-soon')
+    expect(items[1].classes()).not.toContain('dd-promo-soon')
+  })
+})
+
+describe('DebtDetail and LoansList agree', () => {
+  it('a biweekly debt with a typed rate and no statements shows the same rate and payoff month in both', async () => {
+    const terms = { accountId: 'acct-5', originalCents: null, openedOn: null, maturityOn: null, termMonths: null, paymentCents: 30000,
+      paymentEvery: 'biweekly' as const, cosigned: false, updatedAt: '', updatedBy: '' }
+    const acct = { id: 'acct-5', label: 'Loan C', kind: 'external_debt' as const, personId: 'p1', last4: null, isDebt: true, inSpending: false, creditLimitCents: null, aprBp: null }
+    const detail: DebtDetailData = {
+      account: acct, history: [{ asOf: '2026-10-31', balanceCents: 1_000_000, source: 'manual', aprBp: 1200 }],
+      periods: [], payments: [], terms, latest: null, promos: [],
+    }
+    route(detail)
+    const w = await mountDetail({ accountId: 'acct-5' })
+    const list = mount(LoansList, { props: { loading: false, failed: false, data: { months: [], debts: [{
+      accountId: 'acct-5', label: 'Loan C', kind: 'external_debt', last4: null, personId: 'p1', balanceCents: 1_000_000, asOf: '2026-10-31',
+      source: 'manual', aprBp: 1200, creditLimitCents: null, terms, latest: null, promos: [], payments: [] }] } } })
+    expect(w.get('[data-testid="debt-rate"]').text()).toBe('12.00% APR')
+    expect(list.get('[data-row-key=acct-5]').text()).toContain('12.00%')
+    const month = /\((\w{3} \d{4})\)/.exec(w.get('[data-testid="payoff-months"]').text())![1]!
+    expect(list.get('[data-row-key=acct-5]').text()).toContain(month)
+    expect(w.get('[data-testid="payoff-months"]').text()).not.toContain('rate unknown')
+    w.unmount()
   })
 })

@@ -23,6 +23,7 @@ vi.mock('./api', async (importOriginal) => {
   }
 })
 vi.mock('./sitesStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('./sitesStore')>()), loadSites: vi.fn(async () => {}) }))
+import { signedInEmail } from './session'
 vi.mock('./session', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./session')>()),
   loadIdentity: vi.fn(async () => {}),
@@ -74,6 +75,7 @@ beforeEach(() => {
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
   vi.unstubAllGlobals()
+  signedInEmail.value = null
 })
 async function mountAt(url: string) {
   history.replaceState(null, '', url)
@@ -96,6 +98,7 @@ async function closeMenu() {
   document.querySelector<HTMLElement>('#nav-drawer .dr-close')?.click()
   await flushPromises()
 }
+const subRow = (page: string) => document.querySelector<HTMLElement>(`#nav-drawer [data-testid="nav-section-budget-${page}"]`)
 const clickLink = async () => {
   link()!.click()
   await flushPromises()
@@ -170,6 +173,52 @@ describe('App: ?section=budget', () => {
   })
 })
 
+describe('App: Budget pages (Overview, Loans)', () => {
+  beforeEach(() => stubBudget(() => json({ ok: true, email: 'a@example.com' })))
+
+  it('the menu lists Overview and Loans under Budget; Loans opens b_page=loans with Budget › Loans in the top bar', async () => {
+    const w = await mountAt('/')
+    await openMenu(w)
+    expect(subRow('overview')).not.toBeNull()
+    subRow('loans')!.click()
+    await flushPromises()
+    await sectionShown(w)
+    expect(params().get('b_page')).toBe('loans')
+    await vi.waitFor(() => expect(w.find('[data-testid="loans-page"]').exists()).toBe(true), { timeout: 4000 })
+    expect(w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')).toBe('Budget›Loans')
+    await openMenu(w)
+    expect(subRow('loans')!.getAttribute('aria-current')).toBe('page')
+    expect(subRow('overview')!.getAttribute('aria-current')).toBeNull()
+  })
+
+  it('the Budget crumb goes back to Overview with one history entry (Back returns to Loans)', async () => {
+    const w = await mountAt('/?section=budget&b_page=loans')
+    await vi.waitFor(() => expect(w.find('[data-testid="loans-page"]').exists()).toBe(true), { timeout: 4000 })
+    const len = history.length
+    await w.get('[data-testid="crumb-0"]').trigger('click')
+    await flushPromises()
+    expect(params().has('b_page')).toBe(false)
+    expect(w.find('[data-testid="loans-page"]').exists()).toBe(false)
+    expect(history.length).toBe(len + 1)
+  })
+
+  it('the Budget row reopens the page this login used last', async () => {
+    signedInEmail.value = 'a@example.com'
+    const w = await mountAt('/?section=budget&b_page=loans')
+    await vi.waitFor(() => expect(w.find('[data-testid="loans-page"]').exists()).toBe(true), { timeout: 4000 })
+    await openMenu(w)
+    await flushPromises()
+    // leave Budget for a dashboard page, then pick the Budget row itself
+    Array.from(document.querySelectorAll<HTMLElement>('#nav-drawer .dr-page')).find((r) => r.querySelector('.nm')?.textContent?.trim() === 'Campaigns')!.click()
+    await flushPromises()
+    expect(w.find('[data-testid="budget-section"]').exists()).toBe(false)
+    await openMenu(w)
+    await clickLink()
+    await sectionShown(w)
+    expect(params().get('b_page')).toBe('loans')
+  })
+})
+
 describe('App: opening and closing', () => {
   beforeEach(() => stubBudget(() => json({ ok: true, email: 'a@example.com' })))
 
@@ -186,7 +235,8 @@ describe('App: opening and closing', () => {
     expect(params().get('utm_source')).toBe('x')
 
     await openMenu(w)
-    expect(link()!.getAttribute('aria-current')).toBe('page')
+    expect(link()!.getAttribute('aria-current')).toBeNull() // the section has pages: the page row is the current one
+    expect(subRow('overview')!.getAttribute('aria-current')).toBe('page')
     expect(document.querySelectorAll('#nav-drawer .dr-page[aria-current="page"]')).toHaveLength(1) // no page is current while the section is
     const row = Array.from(document.querySelectorAll<HTMLElement>('#nav-drawer .dr-page')).find((r) => r.querySelector('.nm')!.textContent!.trim() === 'Campaigns')!
     row.click()

@@ -24,7 +24,7 @@ describe('PUT /api/budget/debts/:id/balance', () => {
     const { debts: list } = await json<DebtsResponse>(await callRoute(debts, db, '/api/budget/debts'))
     expect(list.find((d) => d.accountId === 'mtg')).toMatchObject({ balanceCents: 21_500_000, asOf: '2026-12-02', source: 'manual', aprBp: 450 })
     const d = await json<DebtDetail>(await callRoute(detail, db, '/api/budget/debts/mtg', { params: { id: 'mtg' } }))
-    expect(d.history).toEqual([{ asOf: '2026-12-02', balanceCents: 21_500_000, source: 'manual' }])
+    expect(d.history).toEqual([{ asOf: '2026-12-02', balanceCents: 21_500_000, source: 'manual', aprBp: 450 }])
   })
 
   it('the same day again replaces the earlier entry; zero is a valid balance; aprBp is optional', async () => {

@@ -2722,6 +2722,18 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `PATCH transactions/:id`), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
   `debts/:id`, `debts/:id/balance`). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
+- **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:
+  original amount, opened and maturity dates, term, scheduled payment and cadence, cosigned flag),
+  `statements.escrow_cents` and `payoff_cents` (NULL = not printed or not loaded), and `statement_promos`
+  (promotional or deferred-interest balances on one statement, keyed account, period end, seq). Existing rows
+  and columns do not change and the deployed code ignores the new objects. Only the private load writes them
+  (`GET /api/budget/loans` only reads them). It is applied by hand, once, and never by an agent or CI: Time Travel
+  bookmark first, `npx wrangler d1 migrations list gss-budget --remote` (read-only; it must list 0002_loans.sql),
+  then `npx wrangler d1 migrations apply gss-budget --remote` (wrangler 4 defaults to the local database, so
+  `--remote` is required), then one aggregate check. The database is shared by Preview and Production, so a
+  preview apply changes production's file too. The rollback is the comment block at the end of the file (it
+  cannot be a second `.sql` there, since every file in the directory is applied); the tests run both ways.
+- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
   `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no
@@ -2730,6 +2742,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `u-<slug>` (a numbered suffix on a clash), it sorts after the spending categories, and the next palette
   colour is its colour. The `u-` prefix is reserved: a seed or re-import never deletes, renames or recolours
   such a category, and a manual edit to it is never re-pointed. No schema change; the creator is not recorded.
+- **Pages.** Budget has Overview (the default) and Loans, listed under Budget in the ☰ menu and shown in the top bar as `Budget › Loans`. Loans is `?section=budget&b_page=loans` (Overview writes nothing; any other value reads as Overview), and the Budget row reopens the page this login used last (saved per login in this browser). A page change adds one history entry, so Back returns to the page as it was. The loan open on Loans (an account id, which names an institution) lives in `history.state` only, never in the URL; opening a debt from Overview is one entry (Loans page and loan together). Loans shows the person filter but no range or chart toggles.
 - **Local setup.** `npm run budget:migrate:local` creates the local database. Turn a private seed plus a
   folder of import requests into one SQL file with
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run

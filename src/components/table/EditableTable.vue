@@ -429,7 +429,8 @@ function rowClass(row: R) {
   border-bottom: 1px solid rgb(var(--line));
   vertical-align: middle;
 }
-.et-end {
+.et-end,
+.et-table th.et-end {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

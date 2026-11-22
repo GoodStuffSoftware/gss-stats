@@ -10,6 +10,7 @@ import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
 import DebtPanel from './DebtPanel.vue'
+import LoansPage from './LoansPage.vue'
 import SpendingPanel from './SpendingPanel.vue'
 
 const TODAY = '2026-11-20'
@@ -277,19 +278,53 @@ describe('BudgetSection: data', () => {
     expect(w.findComponent(BudgetTable).props('highlightId')).toBe('txn-9')
   })
 
-  it('a debt pick swaps the panel for the detail; saving refetches debts; close goes back', async () => {
+  it('a debt pick goes to the Loans page with that loan open; saving refetches debts; close shows the Loans shell', async () => {
     route()
     const w = await mountSection()
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
     w.findComponent(DebtPanel).vm.$emit('open', 'acct-1')
     await flushPromises()
     expect(w.findComponent(DebtPanel).exists()).toBe(false)
-    expect(w.findComponent(DebtDetail).props()).toMatchObject({ accountId: 'acct-1', canEdit: true })
+    expect(w.findComponent(LoansPage).props()).toMatchObject({ loanId: 'acct-1', person: null, canEdit: true })
+    expect(w.findComponent(DebtDetail).props()).toMatchObject({ accountId: 'acct-1', canEdit: true, hideBack: true })
+    expect(new URLSearchParams(location.search).get('b_page')).toBe('loans')
+    expect(location.href).not.toContain('acct-1')
+    expect(w.emitted('page')?.at(-1)).toEqual(['loans'])
     w.findComponent(DebtDetail).vm.$emit('saved')
     await flushPromises()
-    expect(callsTo('/api/budget/debts')).toHaveLength(2)
-    w.findComponent(DebtDetail).vm.$emit('close')
+    expect(callsTo('/api/budget/debts')).toHaveLength(1) // Overview's /debts is not read on the Loans page
+    w.findComponent(LoansPage).vm.$emit('close')
     await flushPromises()
-    expect(w.findComponent(DebtPanel).exists()).toBe(true)
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    expect(w.findComponent(DebtDetail).exists()).toBe(false)
+  })
+
+  it('opens on the Loans page from b_page=loans: no range, no chart toggles, no panels or table; person is passed', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_page=loans&b_person=p1')
+    expect(w.findComponent(LoansPage).props('person')).toBe('p1')
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(false)
+    expect(w.find('.bf-show').exists()).toBe(false)
+    expect(w.findComponent(SpendingPanel).exists()).toBe(false)
+    expect(w.findComponent(BudgetTable).exists()).toBe(false)
+    expect(w.emitted('page')?.[0]).toEqual(['loans'])
+  })
+
+  it('goPage switches page both ways and reports it', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.emitted('page')?.[0]).toEqual(['overview'])
+    const vm = w.vm as unknown as { goPage: (p: 'overview' | 'loans') => void }
+    vm.goPage('loans')
+    await flushPromises()
+    expect(w.findComponent(LoansPage).exists()).toBe(true)
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(false)
+    expect(w.emitted('page')?.at(-1)).toEqual(['loans'])
+    vm.goPage('overview')
+    await flushPromises()
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(true)
+    expect(w.emitted('page')?.at(-1)).toEqual(['overview'])
   })
 
   it('edit rights come from the access probe, not the site view-only flag', async () => {

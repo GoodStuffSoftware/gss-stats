@@ -88,14 +88,37 @@ export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_sto
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null
   personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: 'statement' | 'manual' | null
-  aprBp: number | null; creditLimitCents: Cents | null }
+  aprBp: number | null; creditLimitCents: Cents | null
+  /** Cosigned (debt_terms): shown, but kept out of the total owed and the pie. Absent = not cosigned. */
+  cosigned?: boolean }
 export interface DebtsResponse { debts: DebtSlice[] }
 export interface DebtDetail { account: Account
-  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual' }>
+  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual'; aprBp?: number | null }>
   periods: Array<{ periodEnd: IsoDate; aprBp: number | null; interestCents: Cents | null
     principalPaidCents: Cents | null; advancesCents: Cents | null }>
-  payments: Array<{ id: string; postedDate: IsoDate; amountCents: Cents; principalCents: Cents | null; interestCents: Cents | null }> }
+  payments: Array<{ id: string; postedDate: IsoDate; amountCents: Cents; principalCents: Cents | null; interestCents: Cents | null }>
+  /** Paperwork facts (null until the private load writes a row), the newest statement's extras, and its promos. */
+  terms: DebtTerms | null
+  latest: LatestStatement | null
+  promos: StatementPromo[] }
 export interface ManualBalance { asOf: IsoDate; balanceCents: Cents; aprBp?: number | null }
+/** migrations/gss-budget/0002_loans.sql. `debt_terms`: one row per debt, written only by the private load. */
+export type PaymentEvery = 'monthly' | 'semimonthly' | 'biweekly'
+export interface DebtTerms { accountId: string; originalCents: Cents | null; openedOn: IsoDate | null; maturityOn: IsoDate | null
+  termMonths: number | null; paymentCents: Cents | null; paymentEvery: PaymentEvery | null; cosigned: boolean
+  updatedAt: string; updatedBy: string }
+/** The two `statements` columns 0002 adds (NULL = not printed or not loaded yet), keyed by the statement's primary key. `escrowCents` is the escrow part of the period's payment, not the escrow account balance. */
+export interface StatementExtras { accountId: string; periodEnd: IsoDate; escrowCents: Cents | null; payoffCents: Cents | null }
+/** `statement_promos`: a promotional or deferred-interest balance printed on one statement; `seq` orders them (1..50). */
+export interface StatementPromo { accountId: string; periodEnd: IsoDate; seq: number; balanceCents: Cents
+  aprBp: number | null; endsOn: IsoDate | null; deferredInterestCents: Cents | null }
+/** The newest statement of a debt (by period end, whether or not it printed a closing balance) and what it printed. */
+export interface LatestStatement { periodEnd: IsoDate; minDueCents: Cents | null; dueDate: IsoDate | null
+  payoffCents: Cents | null; escrowCents: Cents | null; interestCents: Cents | null }
+/** GET /api/budget/loans: one row per debt in scope; `payments` has one entry per month of `months`, zero months included. */
+export interface LoanRow extends DebtSlice { terms: DebtTerms | null; latest: LatestStatement | null; promos: StatementPromo[]
+  payments: Array<{ month: string; amountCents: Cents }> }
+export interface LoansResponse { debts: LoanRow[]; months: string[] }
 export type BudgetErrorCode = 'budget_denied' | 'bad_request' | 'not_found' | 'conflict' | 'method_not_allowed'
   | 'too_large' | 'budget_db_missing' | 'auth_not_configured'
 export interface ApiError { error: BudgetErrorCode; message?: string; current?: Txn }

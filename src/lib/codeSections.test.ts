@@ -19,7 +19,9 @@ afterEach(() => vi.unstubAllGlobals())
 describe('accessibleSections (the code-defined ☰ menu items)', () => {
   it('lists Budget when GET /api/budget/access says 200, with one request', async () => {
     fetchMock.mockResolvedValue(json({ ok: true, email: 'a@example.com' }))
-    expect(await accessibleSections()).toEqual([{ id: 'budget', label: 'Budget', icon: 'wallet' }])
+    expect(await accessibleSections()).toEqual([
+      { id: 'budget', label: 'Budget', icon: 'wallet', pages: [{ id: 'overview', label: 'Overview' }, { id: 'loans', label: 'Loans' }] },
+    ])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/budget/access')
   })

@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
-  defaultViewState, parseDrillSteps, presetOf, rangeForPreset, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
+  LOAN_MARK_KEY, defaultViewState, parseDrillSteps, parseLoanSteps, presetOf, rangeForPreset, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   useBudgetViewState, type BudgetViewState,
 } from './viewState'
 
@@ -54,6 +54,8 @@ describe('URL round trip', () => {
       groupBy: 'merchant',
       reviewOnly: true,
       tab: 'debts',
+      page: 'loans',
+      loan: null,
     }
     expect(stateFromSearch(searchWithState('', s), TODAY)).toEqual(s)
     const drilled: BudgetViewState = {
@@ -375,7 +377,7 @@ describe('useBudgetViewState: browser Back and Forward over the drill levels', (
     history.replaceState(null, '', '/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
     pop({ [MARK_KEY]: { s: 'an-older-visit', d: 1 } })
     expect(view.state).toMatchObject({ person: 'p2', from: '2026-10-01' })
-    await new Promise((r) => setTimeout(r, 5)) // the entry is adopted afterwards
+    await new Promise((r) => setTimeout(r, 20)) // the popstate, a bounce go() and its landing all settle // the entry is adopted afterwards
     expect(readMark(history.state)).toMatchObject({ s: session(), d: 0 })
     expect(push).not.toHaveBeenCalled()
     w.unmount()
@@ -398,5 +400,364 @@ describe('useBudgetViewState: browser Back and Forward over the drill levels', (
     v.popTo(0)
     expect(push).not.toHaveBeenCalled()
     expect(go).not.toHaveBeenCalled()
+  })
+})
+
+describe('Budget pages: Overview and Loans', () => {
+  type View = ReturnType<typeof useBudgetViewState>
+  function mountSection() {
+    let view!: View
+    const w = mount(
+      defineComponent({
+        setup() {
+          view = useBudgetViewState(TODAY)
+          onMounted(() => window.addEventListener('popstate', view.readUrl))
+          onBeforeUnmount(() => window.removeEventListener('popstate', view.readUrl))
+          return () => null
+        },
+      }),
+    )
+    return { view, w }
+  }
+  const pop = (state: unknown) => window.dispatchEvent(new PopStateEvent('popstate', { state }))
+  beforeEach(() => history.replaceState(null, '', '/?section=budget&page=p1'))
+  afterEach(() => {
+    vi.restoreAllMocks()
+    history.replaceState(null, '', '/')
+  })
+
+  it('reads b_page: only loans is Loans, anything else is Overview, and Overview writes nothing', () => {
+    expect(stateFromSearch('?b_page=loans', TODAY).page).toBe('loans')
+    expect(stateFromSearch('?b_page=bogus', TODAY).page).toBe('overview')
+    expect(stateFromSearch('', TODAY).page).toBe('overview')
+    expect(searchWithState('', defaultViewState(TODAY))).not.toContain('b_page')
+    expect(searchWithState('', { ...defaultViewState(TODAY), page: 'loans' })).toContain('b_page=loans')
+    expect(stateFromSearch('?b_loan=acct-1', TODAY).loan).toBeNull() // the open loan is never in the URL
+    expect(searchWithState('', { ...defaultViewState(TODAY), page: 'loans', loan: 'acct-1' })).not.toContain('acct-1')
+  })
+
+  it('parseLoanSteps accepts one plain-id step and refuses the rest', () => {
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1' }])?.map((s) => s.key)).toEqual(['acct-1'])
+    expect(parseLoanSteps([])).toEqual([])
+    expect(parseLoanSteps([{ level: 'loan', key: 'a' }, { level: 'loan', key: 'b' }])).toBeNull()
+    expect(parseLoanSteps([{ level: 'category', key: 'a' }])).toBeNull()
+    expect(parseLoanSteps([{ level: 'loan', key: 'a b/../x' }])).toBeNull()
+    expect(parseLoanSteps('x')).toBeNull()
+  })
+
+  it('setPage pushes exactly one entry with b_page in the address, and Back returns to Overview', async () => {
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans')
+    await nextTick()
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(view.state.page).toBe('loans')
+    expect(view.state.loan).toBeNull()
+    expect(new URLSearchParams(location.search).get('b_page')).toBe('loans')
+    expect(new URLSearchParams(location.search).get('page')).toBe('p1') // other params kept
+    history.replaceState(null, '', '/?section=budget&page=p1')
+    pop(null)
+    expect(view.state.page).toBe('overview')
+    w.unmount()
+  })
+
+  it('setPage to the page already shown pushes nothing', async () => {
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    view.setPage('overview')
+    expect(push).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('opening a loan from Overview is ONE entry: page and loan together; the loan is in history.state, not the URL', async () => {
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(view.state.loan).toBe('acct-1')
+    expect(location.href).not.toContain('acct-1')
+    expect(readSteps(history.state, parseLoanSteps, LOAN_MARK_KEY)?.map((s) => s.key)).toEqual(['acct-1'])
+    w.unmount()
+  })
+
+  it('on the Loans page, opening a loan pushes one step of its own, again not in the URL', async () => {
+    history.replaceState(null, '', '/?section=budget&b_page=loans')
+    const push = vi.spyOn(history, 'pushState')
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(view.state.loan).toBe('acct-1')
+    expect(location.search).not.toContain('acct-1')
+    w.unmount()
+  })
+
+  it('a reload on the Loans page restores the open loan from history.state', () => {
+    history.replaceState({ [LOAN_MARK_KEY]: { s: 'old', d: 1, p: [{ level: 'loan', key: 'acct-1', label: 'acct-1' }] } }, '', '/?section=budget&b_page=loans')
+    const { view, w } = mountSection()
+    expect(view.state.page).toBe('loans')
+    expect(view.state.loan).toBe('acct-1')
+    w.unmount()
+  })
+
+  it('Back onto an Overview entry from a Loans entry shows Overview and drops the loan', async () => {
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    history.replaceState(null, '', '/?section=budget&page=p1')
+    pop(null)
+    expect(view.state.page).toBe('overview')
+    expect(view.state.loan).toBeNull()
+    w.unmount()
+  })
+  it('Overview drilled -> slice -> Loans -> Overview -> crumb to the top never goes back onto the Loans entry', async () => {
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {})
+    const { view, w } = mountSection()
+    await nextTick()
+    view.pushStep({ level: 'category', key: 'fuel', label: 'Fuel' })
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    view.setPage('overview')
+    await nextTick()
+    // the new Overview entry is marked with the drill path still on screen
+    expect(readMark(history.state)).toMatchObject({ d: 1 })
+    view.popTo(0)
+    await nextTick()
+    expect(go).not.toHaveBeenCalled()
+    expect(view.state.page).toBe('overview')
+    expect(view.state.path).toEqual([])
+    expect(readMark(history.state)).toMatchObject({ d: 0 })
+    w.unmount()
+  })
+
+  it('Back onto the Overview entry restores the drill as it was left', async () => {
+    const { view, w } = mountSection()
+    await nextTick()
+    view.pushStep({ level: 'category', key: 'fuel', label: 'Fuel' })
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    view.setPage('overview')
+    await nextTick()
+    const overviewState = history.state
+    expect(readSteps(overviewState, parseDrillSteps)?.map((x) => x.key)).toEqual(['fuel'])
+    // Back to the Loans entry, then Forward onto the marked Overview entry: the drill is as it was left
+    history.replaceState(null, '', '/?section=budget&b_page=loans&page=p1')
+    pop({ [LOAN_MARK_KEY]: { s: 'x', d: 1, p: [{ level: 'loan', key: 'acct-1', label: 'acct-1' }] } })
+    await nextTick()
+    history.replaceState(overviewState, '', '/?section=budget&page=p1')
+    pop(overviewState)
+    await nextTick()
+    expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+    expect(view.state.page).toBe('overview')
+    w.unmount()
+  })
+
+  it('Back/Forward across loan entries of this session keeps the person chosen since', async () => {
+    history.replaceState(null, '', '/?section=budget&b_page=loans')
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1')
+    await nextTick()
+    const loanState = history.state
+    view.setPerson('p2')
+    // an older entry's address names another person; this session's loan entry must not roll the filter back
+    history.replaceState(loanState, '', '/?section=budget&b_page=loans&b_person=p1')
+    pop(loanState)
+    expect(view.state.person).toBe('p2')
+    w.unmount()
+  })
+
+  describe('a reload between Overview (drilled) and a loan opened from the debt pie', () => {
+    // A tiny session history over happy-dom's history/location: entries with state and address, a cursor, and
+    // Back/Forward that move it the way a browser does (the entry's address and state, then an async popstate).
+    function simBrowser() {
+      const orig = { push: history.pushState.bind(history), replace: history.replaceState.bind(history) }
+      const here = () => ({ state: history.state as unknown, url: location.pathname + location.search })
+      const stack = [here()]
+      let at = 0
+      const popListeners: Array<(e: PopStateEvent) => void> = []
+      const addListener = window.addEventListener.bind(window)
+      const removeListener = window.removeEventListener.bind(window)
+      vi.spyOn(window, 'addEventListener').mockImplementation((type: string, fn: unknown, o?: unknown) => {
+        if (type === 'popstate') popListeners.push(fn as (e: PopStateEvent) => void)
+        else addListener(type, fn as EventListener, o as AddEventListenerOptions)
+      })
+      vi.spyOn(window, 'removeEventListener').mockImplementation((type: string, fn: unknown, o?: unknown) => {
+        if (type === 'popstate') { const i = popListeners.indexOf(fn as (e: PopStateEvent) => void); if (i >= 0) popListeners.splice(i, 1) }
+        else removeListener(type, fn as EventListener, o as EventListenerOptions)
+      })
+      vi.spyOn(history, 'pushState').mockImplementation((s, t, url) => {
+        orig.push(s, t, url)
+        stack.splice(at + 1)
+        stack.push(here())
+        at++
+      })
+      vi.spyOn(history, 'replaceState').mockImplementation((s, t, url) => {
+        orig.replace(s, t, url)
+        stack[at] = here()
+      })
+      vi.spyOn(history, 'go').mockImplementation((n = 0) => {
+        const to = Math.max(0, Math.min(stack.length - 1, at + n))
+        if (to === at) return
+        at = to
+        const e = stack[at]
+        setTimeout(async () => {
+          orig.replace(e.state, '', e.url)
+          // like a browser's own dispatch: the reactive flush (a microtask checkpoint) runs between two listeners
+          for (const fn of [...popListeners]) {
+            fn(new PopStateEvent('popstate', { state: e.state }))
+            await Promise.resolve()
+            await nextTick()
+          }
+        }, 0)
+      })
+      return {
+        go: async (n: number) => {
+          history.go(n)
+          await new Promise((r) => setTimeout(r, 20)) // the popstate, a bounce go() and its landing all settle
+          await nextTick()
+        },
+        /** A reload: the entry the user is on keeps its state and address; the page and this section start over. */
+        reload: (w: { unmount: () => void }) => {
+          const kept = stack[at]
+          w.unmount()
+          orig.replace(kept.state, '', kept.url)
+          stack[at] = kept
+        },
+        get length() {
+          return stack.length
+        },
+        get at() {
+          return at
+        },
+      }
+    }
+    const FUEL = { level: 'category', key: 'fuel', label: 'Fuel' } as const
+    const bPage = () => new URLSearchParams(location.search).get('b_page')
+
+    it('Back after the reload lands on Overview with its drill; Forward reopens the loan', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      first.view.setPage('loans', 'acct-1')
+      await nextTick()
+      expect(b.length).toBe(3) // the section entry, one drill level, one Loans entry holding the loan: no more
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1)
+      expect(bPage()).toBeNull()
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(bPage()).toBe('loans')
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
+
+    it('after the reload, Back twice then Forward twice walks the same entries, and the app never moves on its own', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      first.view.setPage('loans', 'acct-1')
+      await nextTick()
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      await b.go(-1)
+      await b.go(-1)
+      expect(b.at).toBe(0)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path).toEqual([])
+      await b.go(1)
+      expect(b.at).toBe(1) // stays on the entry Forward moved to (no bounce back)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      await b.go(1)
+      expect(b.at).toBe(2)
+      expect(bPage()).toBe('loans')
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1) // and Back again from there
+      expect(b.at).toBe(1)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      w.unmount()
+    })
+
+    it('a reload on a drilled Overview: Back then Forward re-opens the drill', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      await b.go(-1)
+      expect(view.state.path).toEqual([])
+      await b.go(1)
+      expect(b.at).toBe(1)
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      w.unmount()
+    })
+
+    it('a reload on a loan opened from the Loans list: Back closes it, Forward reopens it', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.setPage('loans')
+      await nextTick()
+      first.view.setPage('loans', 'acct-1') // opened from the list: its own history step
+      await nextTick()
+      expect(b.length).toBe(3)
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1)
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(b.at).toBe(2)
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
+
+    it('without a reload, Loans list -> loan -> Back to Overview -> Forward twice reopens the loan', async () => {
+      const b = simBrowser()
+      const { view, w } = mountSection()
+      await nextTick()
+      view.setPage('loans')
+      await nextTick()
+      view.setPage('loans', 'acct-1')
+      await nextTick()
+      await b.go(-1)
+      await b.go(-1)
+      expect(view.state.page).toBe('overview')
+      await b.go(1)
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(b.at).toBe(2)
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
   })
 })

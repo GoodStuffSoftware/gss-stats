@@ -8,8 +8,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 
 ### Added
+- **Loan payoff without a scheduled payment** — a loan with no scheduled payment now gets its payoff estimate from the average of the last 3 full months of payments, labelled as such.
+- **Loans list in Budget** — every loan and card with its balance, rate, monthly payment, interest, payoff month, due date and soonest promo end, under totals for what is owed and paid.
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
+- **Budget has a Loans page.** Overview and Loans sit under Budget in the ☰ menu, Budget reopens on the page you used last, and Back returns to Overview as you left it.
 - **Drill-down pies animate and label themselves.** Opening a slice grows the next level out of it, going back up unfurls the pie around the slice you left, with no blank skeleton in between, and the same short motion plays under a reduced-motion setting. Each slice with room shows its name, and its amount and share when those fit, right on the chart.
 - **Budget pies label small slices outside the ring.** A slice with no room for text inside gets its name and share at the end of a short leader line, cut with an ellipsis to the room there is; labels never overlap each other, the ring or the chart edge, and the smallest are dropped when there is no room. The chart has more room at the sides, and the labels appear once the drill motion ends.
 - **Budget table shows a purchase's purpose.** A transaction with a note shows it as a small grey line under the merchant (one line, cut with an ellipsis when long, the full text on hover).
@@ -21,6 +24,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before. Reloading the page keeps you at the level you were on (remembered in the tab, never in the address, so no category or store name appears in a link).
 
 ### Fixed
+- **Back and Forward after a reload.** After reloading on a loan opened from the Overview debt pie, Back returns to the Overview as you left it and Forward reopens the drill and the loan instead of jumping back on its own.
+- **Cosigned debt is out of the Overview debt total.** The debt pie and its total leave cosigned debt out, as the Loans page does, with a "+ cosigned" line and a badged list so it can still be opened.
+- **Loan tables line up.** The number column headings in a loan's Payments and Interest by statement tables now sit right-aligned over their figures.
+- **The Budget crumb keeps the current page on a narrow phone.** At 320 px the parent crumb is cut short first, so "Loans" stays visible instead of being clipped.
 - **Budget pie labels stay inside their slice.** A label is drawn only when all of its text fits within the slice, and more slices get one: a long name wraps on two lines, a narrow slice can carry its text across the ring instead of along it, and the amount or share is dropped before the name.
 - **Budget legends read better.** Purchases show a short date ("Aug 11") instead of the full ISO date, a long debt name wraps instead of being cut off, the two panel headers line up on desktop, and every category gets its own colour.
 - **Budget shows why a purchase needs review, and lets you confirm it in one tap.** A flagged row now says why under the merchant (and on hover), and a small ✓ "Looks right" button saves it as it stands, so it leaves the review list and the "Needs review" count drops straight away.

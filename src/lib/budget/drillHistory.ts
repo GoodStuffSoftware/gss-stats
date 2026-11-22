@@ -16,7 +16,10 @@
 //     after the jump never re-enters a level just left; the dropped steps wait in `forward` (the entries ahead
 //     are still in the browser's list). Cut below `base`: the entry is re-marked instead (nothing behind to use).
 //   - popstate onto one of our entries: shallower = Back (cut the path), deeper = Forward (drill again with the
-//     remembered steps; if they are gone, step back so the entry cannot show a level that no longer exists).
+//     remembered steps; when this session does not remember them (the entries ahead were adopted from an earlier
+//     visit, or re-marked after a reload) the entry's own `p` is taken; only when the steps were forgotten (the range,
+//     person or grouping changed: `forgetForward`) or `p` does not parse does it step back, so the entry cannot show
+//     a level that no longer exists).
 //   - popstate onto an entry that is NOT of this session (a stale one an earlier visit left behind, or one with
 //     no mark) with the section open: the path is set from that entry's own `p` (the top when it has none or it
 //     does not parse), and the entry is adopted as the new top of this session: re-marked with the current depth,
@@ -44,28 +47,28 @@ export interface HistoryLike {
 }
 
 /** The mark an entry's state carries, or null (no state, another shape, a malformed mark). */
-export function readMark(state: unknown): DrillMark | null {
+export function readMark(state: unknown, key: string = MARK_KEY): DrillMark | null {
   if (!state || typeof state !== 'object') return null
-  const m = (state as Record<string, unknown>)[MARK_KEY]
+  const m = (state as Record<string, unknown>)[key]
   if (!m || typeof m !== 'object') return null
   const { s, d, p } = m as Record<string, unknown>
   if (!(typeof s === 'string' && s && typeof d === 'number' && Number.isInteger(d) && d >= 0)) return null
   return p === undefined ? { s, d } : { s, d, p }
 }
 /** `state` with the mark set; whatever else it held (an object) is kept. */
-export function withMark(state: unknown, mark: DrillMark): Record<string, unknown> {
+export function withMark(state: unknown, mark: DrillMark, key: string = MARK_KEY): Record<string, unknown> {
   const base = state && typeof state === 'object' && !Array.isArray(state) ? (state as Record<string, unknown>) : {}
-  return { ...base, [MARK_KEY]: mark.p === undefined ? { s: mark.s, d: mark.d } : { s: mark.s, d: mark.d, p: mark.p } }
+  return { ...base, [key]: mark.p === undefined ? { s: mark.s, d: mark.d } : { s: mark.s, d: mark.d, p: mark.p } }
 }
 /** `state` without the mark (null when nothing else is left in it). */
-export function withoutMark(state: unknown): Record<string, unknown> | null {
+export function withoutMark(state: unknown, key: string = MARK_KEY): Record<string, unknown> | null {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return null
-  const { [MARK_KEY]: _mark, ...rest } = state as Record<string, unknown>
+  const { [key]: _mark, ...rest } = state as Record<string, unknown>
   return Object.keys(rest).length ? rest : null
 }
 /** The steps an entry's mark holds, when `parse` accepts them and they are as many as the mark's depth; else null. */
-export function readSteps<Step>(state: unknown, parse: (raw: unknown) => Step[] | null): Step[] | null {
-  const m = readMark(state)
+export function readSteps<Step>(state: unknown, parse: (raw: unknown) => Step[] | null, key: string = MARK_KEY): Step[] | null {
+  const m = readMark(state, key)
   if (!m || m.p === undefined) return null
   const steps = parse(m.p)
   return steps && steps.length === m.d ? steps : null
@@ -93,6 +96,10 @@ export interface DrillHistoryOptions<Step> {
    * it was pushed, so the section writes its current state onto it. */
   landed?: () => void
   session?: string
+  /** The history.state key this instance marks entries with (default MARK_KEY). A second instance on the same
+   * page (the Loans page's one-level `loan` step, viewState.ts) uses its own key so the two never read each
+   * other's entries. */
+  markKey?: string
 }
 
 export interface DrillHistory<Step> {
@@ -116,6 +123,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
   const h = opts.history
   const session = opts.session ?? newSessionId()
   const later = opts.later ?? ((fn) => void setTimeout(fn, 0))
+  const key = opts.markKey ?? MARK_KEY
 
   let depth = 0 // the depth of the entry the user is on
   let base = 0
@@ -124,8 +132,11 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
   let expect: { depth: number; rebase: number | null } | null = null // landing of a go() we issued
   let settling = false
   let applying = false // the path is being changed by this module (Back, Forward): pathChanged must not answer it
+  // forgetForward was called since the entries ahead were made: their steps (in `forward` or their own `p`) mean
+  // nothing now. A push drops the entries ahead, so it clears this.
+  let forgotten = false
 
-  const mark = (d: number) => h.replaceState(withMark(h.state, { s: session, d, p: known.slice(0, d) }), '')
+  const mark = (d: number) => h.replaceState(withMark(h.state, { s: session, d, p: known.slice(0, d) }, key), '')
   function apply(fn: () => void) {
     applying = true
     try {
@@ -152,10 +163,13 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
       adopt()
     },
     end() {
-      if (readMark(h.state)?.s === session) h.replaceState(withoutMark(h.state), '')
+      if (readMark(h.state, key)?.s === session) h.replaceState(withoutMark(h.state, key), '')
     },
     forgetForward() {
       forward = []
+      // a range or person taken from the address of an earlier visit's entry being landed on is not a change of
+      // the user's: the entries ahead still stand for what they did
+      if (!settling) forgotten = true
     },
     pathChanged(path) {
       if (settling || applying) return // an outside change (settled later) or this module itself is changing it
@@ -165,8 +179,9 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
         return
       }
       if (n > depth) {
-        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(null, { s: session, d, p: path.slice(0, d) }), '')
+        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(null, { s: session, d, p: path.slice(0, d) }, key), '')
         forward = [] // a push drops the entries ahead
+        forgotten = false
         depth = n
         known = path.slice()
         return
@@ -189,7 +204,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
     },
     popped(state, sectionOpen) {
       if (!sectionOpen) return
-      const m = readMark(state)
+      const m = readMark(state, key)
       if (m && m.s === session) {
         const landed = expect
         expect = null
@@ -222,6 +237,18 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
           apply(() => steps.forEach((s) => opts.drill(s)))
           return
         }
+        // not remembered here (adopted after a reload, or re-marked): the entry's own steps, unless they were forgotten
+        const own = forgotten ? null : readSteps(state, opts.parseSteps, key)
+        if (own) {
+          forward = []
+          depth = m.d
+          known = own.slice()
+          apply(() => {
+            opts.popTo(0)
+            own.forEach((s) => opts.drill(s))
+          })
+          return
+        }
         expect = { depth, rebase: null }
         h.go(depth - m.d) // a level that no longer exists: go back to where the path is
         return
@@ -229,7 +256,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
       // not an entry of this session: take the path it holds (else the top), then adopt it as the new top
       expect = null
       settling = true
-      const steps = readSteps(state, opts.parseSteps) ?? []
+      const steps = readSteps(state, opts.parseSteps, key) ?? []
       apply(() => {
         opts.popTo(0)
         steps.forEach((s) => opts.drill(s))

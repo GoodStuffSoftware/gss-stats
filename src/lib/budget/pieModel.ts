@@ -82,15 +82,18 @@ export function formatApr(aprBp: number): string {
 /**
  * The debt pie: one slice per debt that has a balance above zero, in the colour of its place in `debts` (so a
  * debt keeps its colour when another is paid off). `noBalance` are the debts with no balance known yet
- * (listed under the pie with "Add balance"); `settled` are those at zero.
+ * (listed under the pie with "Add balance"); `settled` are those at zero; `cosigned` (with a balance) are kept out
+ * of the pie and the total and listed apart.
  */
-export function debtSlices(debts: DebtSlice[], max = MAX_SLICES): { slices: PieSlice[]; noBalance: DebtSlice[]; settled: DebtSlice[] } {
+export function debtSlices(debts: DebtSlice[], max = MAX_SLICES): { slices: PieSlice[]; noBalance: DebtSlice[]; settled: DebtSlice[]; cosigned: DebtSlice[] } {
   const slices: PieSlice[] = []
   const noBalance: DebtSlice[] = []
   const settled: DebtSlice[] = []
+  const cosigned: DebtSlice[] = []
   debts.forEach((d, i) => {
     if (d.balanceCents === null) noBalance.push(d)
     else if (d.balanceCents <= 0) settled.push(d)
+    else if (d.cosigned) cosigned.push(d) // listed beside the pie, not in it (the Loans page's rule)
     else {
       const detail = [d.last4 ? `••${d.last4}` : null, d.aprBp !== null ? `${formatApr(d.aprBp)} APR` : null].filter(Boolean).join(' · ')
       slices.push({
@@ -103,5 +106,5 @@ export function debtSlices(debts: DebtSlice[], max = MAX_SLICES): { slices: PieS
     }
   })
   slices.sort((a, b) => b.value - a.value || a.key.localeCompare(b.key))
-  return { slices: foldSlices(slices, max, 'debts'), noBalance, settled }
+  return { slices: foldSlices(slices, max, 'debts'), noBalance, settled, cosigned }
 }

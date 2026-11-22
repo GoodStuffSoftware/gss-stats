@@ -99,6 +99,26 @@ function section(h: FakeHistory, startPath: Step[] = [], open = () => true) {
   }
 }
 
+describe('a second instance with its own markKey', () => {
+  it('marks and reads entries under its own key, independent of the default one', () => {
+    const h = new FakeHistory()
+    const mk = (markKey?: string) => {
+      const path: Step[] = []
+      const dh = createDrillHistory<Step>({
+        history: h, markKey, drill: (s) => void path.push(s), popTo: (d) => void path.splice(d), path: () => path.slice(), parseSteps,
+      })
+      dh.start()
+      return dh
+    }
+    mk()
+    const b = mk('otherKey')
+    b.pathChanged([FUEL])
+    expect(readMark(h.state, 'otherKey')).toMatchObject({ d: 1 })
+    expect(readMark(h.state)).toBeNull() // a step of the second instance never carries the default key
+    expect(readSteps(h.state, parseSteps, 'otherKey')).toEqual([FUEL])
+  })
+})
+
 describe('the mark', () => {
   it('is read back from a state that carries it, and from nothing else', () => {
     expect(readMark(withMark(null, { s: 'a', d: 2 }))).toEqual({ s: 'a', d: 2 })
@@ -404,6 +424,64 @@ describe('stale entries', () => {
     s.runLater()
     expect(readMark(h.state)).toMatchObject({ s: s.dh.session, d: 0 })
     expect(h.entries).toHaveLength(2)
+  })
+
+  it('after a reload, Back over the earlier visit\'s entries then Forward re-drills them, with no navigation of its own', () => {
+    const h = new FakeHistory()
+    const first = section(h, [], () => h.idx < 2)
+    first.drill(FUEL)
+    h.pushState(null) // another page (Loans), one entry; the drill is not acted on there
+    const second = section(h, [], () => h.idx < 2) // the reload, on that entry
+    h.back()
+    second.runLater()
+    expect(second.keys()).toEqual(['fuel'])
+    h.back()
+    second.runLater()
+    expect(second.keys()).toEqual([])
+    h.forward()
+    expect(h.pending).toBeNull() // no go() of its own
+    expect(h.idx).toBe(1)
+    expect(second.keys()).toEqual(['fuel'])
+    h.forward()
+    expect(h.idx).toBe(2)
+    expect(second.keys()).toEqual(['fuel']) // the other page: the path stays as it was
+    h.back()
+    h.back()
+    expect(second.keys()).toEqual([])
+    h.forward()
+    expect(second.keys()).toEqual(['fuel'])
+  })
+
+  it('a reload on a drilled level, Back then Forward: Forward re-drills from the entry\'s own steps', () => {
+    const h = new FakeHistory()
+    const first = section(h)
+    first.drill(FUEL)
+    first.drill(SHOP)
+    const second = section(h, [FUEL, SHOP]) // the reload restored the path
+    h.back()
+    second.runLater()
+    h.back()
+    second.runLater()
+    expect(second.keys()).toEqual([])
+    h.forward()
+    h.forward()
+    expect(h.pending).toBeNull()
+    expect(h.idx).toBe(2)
+    expect(second.keys()).toEqual(['fuel', 'shop-1'])
+  })
+
+  it('after a reload, a forgotten Forward (the range changed) still steps back', () => {
+    const h = new FakeHistory()
+    const first = section(h)
+    first.drill(FUEL)
+    const second = section(h, [FUEL])
+    h.back()
+    second.runLater()
+    second.dh.forgetForward()
+    h.forward()
+    h.flush()
+    expect(h.idx).toBe(0)
+    expect(second.keys()).toEqual([])
   })
 
   it('Back from a drilled level the section left (closed by the app) does not touch the page the app went to', () => {

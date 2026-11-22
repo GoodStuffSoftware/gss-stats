@@ -45,6 +45,20 @@ const emit = defineEmits<{ go: [index: number] }>()
   gap: 2px;
   animation: cr-fade 150ms ease-out;
 }
+/* On a narrow bar the earlier crumbs give way first (ellipsis); the current page keeps its room. */
+.cr-item:not(:last-child) {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.cr-item:last-child {
+  flex: 0 0 auto;
+}
+.cr-item:not(:last-child) .cr-btn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cr-sep {
   color: rgb(var(--ink-3));
   padding: 0 2px;

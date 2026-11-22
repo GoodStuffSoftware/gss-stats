@@ -14,13 +14,24 @@ describe('GET /api/budget/debts/:id', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('private, no-store')
     const d = await json<DebtDetail>(res)
-    expect(Object.keys(d).sort()).toEqual(['account', 'history', 'payments', 'periods'])
+    expect(Object.keys(d).sort()).toEqual(['account', 'history', 'latest', 'payments', 'periods', 'promos', 'terms'])
     expect(d.account).toMatchObject({ id: 'card-a', kind: 'card', isDebt: true, aprBp: 2199, creditLimitCents: 500_000 })
-    expect(d.history).toEqual([{ asOf: '2026-12-04', balanceCents: 18_000, source: 'statement' }])
+    expect(d.history).toEqual([{ asOf: '2026-12-04', balanceCents: 18_000, source: 'statement', aprBp: 2199 }])
     expect(d.periods).toEqual([{ periodEnd: '2026-12-04', aprBp: 2199, interestCents: 1900, principalPaidCents: null, advancesCents: null }])
     expect(d.payments.length).toBe(1)
     expect(d.payments[0]).toMatchObject({ postedDate: '2026-11-12', amountCents: 20_000, principalCents: null, interestCents: null })
     expect(d.payments[0]!.id).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('terms, the newest statement extras and its promos ride along (null / empty when not loaded)', async () => {
+    expect(await json<DebtDetail>(await get('mtg'))).toMatchObject({ terms: null, latest: null, promos: [] })
+    db.exec("INSERT INTO debt_terms (account_id, original_cents, payment_cents, payment_every, cosigned, updated_at, updated_by) VALUES ('card-a', 500000, 4500, 'biweekly', 0, '2026-12-01T00:00:00.000Z', 'x@example.com')")
+    db.exec("UPDATE statements SET min_due_cents = 3500, due_date = '2026-12-28', escrow_cents = 100, payoff_cents = 18100 WHERE account_id = 'card-a'")
+    db.exec("INSERT INTO statement_promos VALUES ('card-a', '2026-12-04', 1, 5000, 0, '2027-02-01', 400)")
+    const d = await json<DebtDetail>(await get('card-a'))
+    expect(d.terms).toMatchObject({ accountId: 'card-a', originalCents: 500_000, paymentCents: 4500, paymentEvery: 'biweekly', cosigned: false })
+    expect(d.latest).toEqual({ periodEnd: '2026-12-04', minDueCents: 3500, dueDate: '2026-12-28', payoffCents: 18_100, escrowCents: 100, interestCents: 1900 })
+    expect(d.promos).toEqual([{ accountId: 'card-a', periodEnd: '2026-12-04', seq: 1, balanceCents: 5000, aprBp: 0, endsOn: '2027-02-01', deferredInterestCents: 400 }])
   })
 
   it('a payments-only debt shows the payments made from other accounts toward it, as positive amounts', async () => {

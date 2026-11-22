@@ -84,6 +84,19 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    growing out of the slice (or around the one you came back from); a fade in its place reads as no
    motion, and the user who sets the preference still needs to see that the level changed. It is a short
    one-shot (about half a second, never a loop) in this one pie; every other chart stays still.
+9. **Loan facts get two tables' worth of schema, added by an additive migration (`0002_loans.sql`).** A
+   Loans page needs what `accounts` and `statements` do not hold. `debt_terms` (one row per debt: original
+   amount, opened and maturity dates, term, scheduled payment with its cadence, cosigned flag) keeps
+   `accounts` and its row mapping untouched; `statements` gains the NULLable `escrow_cents` and
+   `payoff_cents`; `statement_promos` holds the promotional or deferred-interest balances printed on one
+   statement (several per statement, so they cannot be columns), keyed `(account_id, period_end, seq)` with a
+   foreign key to the statement. Nothing existing changes, so the deployed code keeps working against either
+   state. The database is shared by Preview and Production, so applying it for the preview changes
+   production's file too (the section stays 403 there). These tables are written only by the private load
+   (as in point 7); no route writes them. Rollback is the commented block at the end of the migration (drop
+   the two tables, then the two columns), with the pre-migration Time Travel bookmark as the last resort.
+   Layout: an open loan replaces the facts row and the list at every width (the same on phone and desktop;
+   "← Loans" and Back return to the list), instead of keeping them above the open loan on wide screens.
 
 ## Consequences
 

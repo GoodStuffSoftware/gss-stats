@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 import { checkSessionExpired } from '../../session'
 import {
-  BudgetApiError, fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, putManualBalance, resetAccessProbe,
+  BudgetApiError, fetchDebtDetail, fetchDebts, fetchLoans, fetchMeta, fetchSummary, probeAccess, putManualBalance, resetAccessProbe,
 } from './clientRead'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -68,7 +68,9 @@ describe('reads', () => {
     await fetchMeta()
     await fetchDebts('p1')
     await fetchDebtDetail('a/b c')
-    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/budget/meta', '/api/budget/debts?person=p1', '/api/budget/debts/a%2Fb%20c'])
+    await fetchLoans('p1')
+    await fetchLoans(null)
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(['/api/budget/meta', '/api/budget/debts?person=p1', '/api/budget/debts/a%2Fb%20c', '/api/budget/loans?person=p1', '/api/budget/loans?person=all'])
   })
   it('putManualBalance PUTs JSON', async () => {
     fetchMock.mockImplementation(async () => json({ ok: true }))

@@ -14,6 +14,7 @@ import { rootOf, drillTrail, drillParentFor, groupLandingPage, pagesToDelete, mo
 import { applyGroupDraft, applyPageDraft, type GroupDraft, type PageDraft } from './lib/wizards'
 import { SearchIcon, MenuIcon, EllipsisIcon, StarIcon, type IconKey } from './lib/icons'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
+import Crumbs from './components/nav/Crumbs.vue'
 import SearchPalette from './components/nav/SearchPalette.vue'
 import NavDrawer from './components/nav/NavDrawer.vue'
 import PageMenu from './components/nav/PageMenu.vue'
@@ -28,7 +29,8 @@ import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import { accessibleSections, type NavSection } from './lib/codeSections'
-import { BUDGET_SECTION, budgetSectionOpen, searchWithSection } from './lib/budget/sectionLink'
+import { BUDGET_SECTION, budgetPageOf, budgetSectionOpen, searchWithSection, type BudgetPage } from './lib/budget/sectionLink'
+import { readLastPage, writeLastPage } from './lib/budget/lastPage'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
@@ -210,12 +212,29 @@ function syncPageUrl() {
 // query param (`?page=`, utm_*) is kept. It never touches the layout or its save path.
 const BudgetSection = defineAsyncComponent(() => import('./components/budget/BudgetSection.vue'))
 const budgetOpen = ref(budgetSectionOpen(globalThis.location?.search ?? ''))
-function setBudgetOpen(open: boolean) {
+// The section's page (Overview or Loans, `b_page`): BudgetSection owns it and reports changes (`page`); this
+// copy feeds the ☰ menu's current row and the top bar crumbs, and the viewer's last page is remembered per login.
+const budgetPage = ref<BudgetPage>(budgetPageOf(globalThis.location?.search ?? ''))
+const budgetSectionRef = ref<{ goPage: (page: BudgetPage) => void } | null>(null)
+const budgetCrumbs = computed(() =>
+  budgetPage.value === 'loans' ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
+)
+function onBudgetPage(page: BudgetPage) {
+  budgetPage.value = page
+  writeLastPage(signedInEmail.value, page)
+}
+/** Go to a page of the open section (a crumb, the menu), or open the section on it. */
+function goBudgetPage(page: BudgetPage) {
+  if (budgetOpen.value && budgetSectionRef.value) budgetSectionRef.value.goPage(page)
+  else setBudgetOpen(true, page)
+}
+function setBudgetOpen(open: boolean, page: BudgetPage = 'overview') {
   if (budgetOpen.value === open) return
   budgetOpen.value = open
+  budgetPage.value = open ? page : 'overview'
   try {
     const loc = globalThis.location
-    const url = loc.pathname + searchWithSection(loc.search, open) + loc.hash
+    const url = loc.pathname + searchWithSection(loc.search, open, page) + loc.hash
     if (open) globalThis.history.pushState(globalThis.history.state, '', url)
     else globalThis.history.replaceState(globalThis.history.state, '', url)
   } catch {
@@ -228,12 +247,17 @@ const navSections = ref<NavSection[]>([])
 onMounted(async () => {
   navSections.value = await accessibleSections()
 })
-function pickSection(id: string) {
+// A section row opens the page it names; the section's own row opens this login's last page (Overview by default).
+function pickSection(id: string, pageId?: string) {
   drawerOpen.value = false
-  if (id === BUDGET_SECTION) setBudgetOpen(true)
+  if (id !== BUDGET_SECTION) return
+  const page: BudgetPage = pageId ? (pageId === 'loans' ? 'loans' : 'overview') : readLastPage(signedInEmail.value)
+  goBudgetPage(page)
 }
 function onBudgetPopState() {
-  budgetOpen.value = budgetSectionOpen(globalThis.location?.search ?? '')
+  const search = globalThis.location?.search ?? ''
+  budgetOpen.value = budgetSectionOpen(search)
+  budgetPage.value = budgetOpen.value ? budgetPageOf(search) : 'overview'
 }
 onMounted(() => window.addEventListener('popstate', onBudgetPopState))
 onBeforeUnmount(() => window.removeEventListener('popstate', onBudgetPopState))
@@ -1059,7 +1083,7 @@ function toggleDark() {
       <span>Couldn't load your saved layout — showing the default one. Changes made now aren't saved, and are replaced when your layout loads.</span>
       <button class="btn btn-primary" :disabled="retryingLoad" @click="retryLoad">{{ retryingLoad ? 'Loading…' : 'Try again' }}</button>
     </div>
-    <header class="topbar">
+    <header class="topbar" :class="{ 'topbar-budget': budgetOpen }">
       <h1 class="visually-hidden">Stats</h1>
       <!-- ☰: the page drawer (components/nav/NavDrawer.vue), with the current group's badge. -->
       <button
@@ -1094,7 +1118,9 @@ function toggleDark() {
         @rename-group="renameGroupTo"
         @rename-cancel="renaming = null"
       />
-      <span v-else class="topbar-crumbs" data-testid="budget-label">Budget</span>
+      <span v-else class="topbar-crumbs" data-testid="budget-label">
+        <Crumbs :items="budgetCrumbs" label="Budget path" @go="goBudgetPage('overview')" />
+      </span>
       <button
         v-if="!budgetOpen"
         ref="pageMenuBtn"
@@ -1137,7 +1163,7 @@ function toggleDark() {
          breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
          only on the campaign page, whose widgets each cover their own fixed campaign window and
          aren't filter-driven. -->
-    <BudgetSection v-if="budgetOpen" :dark="dark" />
+    <BudgetSection v-if="budgetOpen" ref="budgetSectionRef" :dark="dark" @page="onBudgetPage" />
 
     <div v-if="showFilterBar && !budgetOpen" ref="barSectionEl" class="filterbar-inflow">
       <FilterBar
@@ -1269,6 +1295,7 @@ function toggleDark() {
       @close="drawerOpen = false"
       :sections="navSections"
       :active-section="budgetOpen ? BUDGET_SECTION : null"
+      :active-section-page="budgetOpen ? budgetPage : null"
       @switch="pickFromDrawer"
       @section="pickSection"
       @menu="openPageMenu"
@@ -1712,6 +1739,26 @@ function toggleDark() {
   }
   .top-actions {
     flex-wrap: wrap;
+  }
+  /* Budget: the crumb is short enough to cut with an ellipsis, so the theme button and Sign out stay on the first row. */
+  .topbar-budget .top-actions {
+    order: 0;
+    flex-basis: auto;
+    flex-wrap: nowrap;
+  }
+  .topbar-budget .topbar-crumbs :deep(.crumbs) {
+    overflow: hidden;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-list),
+  .topbar-budget .topbar-crumbs :deep(.cr-item:last-child) {
+    min-width: 0;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-here) {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    line-height: 44px;
+    text-overflow: ellipsis;
   }
 }
 </style>
