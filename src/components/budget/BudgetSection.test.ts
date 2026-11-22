@@ -292,7 +292,7 @@ describe('BudgetSection: data', () => {
     expect(w.emitted('page')?.at(-1)).toEqual(['loans'])
     w.findComponent(DebtDetail).vm.$emit('saved')
     await flushPromises()
-    expect(callsTo('/api/budget/debts')).toHaveLength(2)
+    expect(callsTo('/api/budget/debts')).toHaveLength(1) // Overview's /debts is not read on the Loans page
     w.findComponent(LoansPage).vm.$emit('close')
     await flushPromises()
     expect(w.findComponent(LoansPage).props('loanId')).toBeNull()

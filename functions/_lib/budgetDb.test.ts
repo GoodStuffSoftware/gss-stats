@@ -201,9 +201,8 @@ describe('every query shape is index-backed (EXPLAIN QUERY PLAN)', () => {
   it('the /loans batch terms, latest and promos reads never scan statements, statement_promos or debt_terms', () => {
     for (const sql of [LOAN_TERMS_SQL, LOAN_LATEST_SQL, LOAN_PROMOS_SQL]) {
       const plan = db.explain(sql, ['all'])
-      expect(plan.join('
-'), plan.join('
-')).not.toMatch(/SCAN (s|s2|p|statements|statement_promos|debt_terms)/)
+      const text = plan.join(String.fromCharCode(10))
+      expect(text, text).not.toMatch(/SCAN (s|s2|p|statements|statement_promos|debt_terms)/)
     }
   })
   it('a rule re-apply reads only the keyed merchants rows, through idx_txn_merchant', () => {

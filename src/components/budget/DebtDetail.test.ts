@@ -264,7 +264,7 @@ describe('DebtDetail: loan facts', () => {
     route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: 30000 } })
     const w = await mountDetail()
     expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
-    expect(w.get('[data-testid="payoff-interest"]').text()).toBe('$4.50')
+    expect(w.get('[data-testid="payoff-interest"]').text()).toBe('$14.99') // the newest statement's own rate (19.99%), as the Loans list uses
     expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('last statement: $18.00')
   })
 

@@ -547,9 +547,10 @@ describe('Budget pages: Overview and Loans', () => {
     await nextTick()
     const overviewState = history.state
     expect(readSteps(overviewState, parseDrillSteps)?.map((x) => x.key)).toEqual(['fuel'])
-    view.popTo(0)
+    // Back to the Loans entry, then Forward onto the marked Overview entry: the drill is as it was left
+    history.replaceState(null, '', '/?section=budget&b_page=loans&page=p1')
+    pop({ [LOAN_MARK_KEY]: { s: 'x', d: 1, p: [{ level: 'loan', key: 'acct-1', label: 'acct-1' }] } })
     await nextTick()
-    // Forward/Back onto the marked Overview entry: the path comes from its mark
     history.replaceState(overviewState, '', '/?section=budget&page=p1')
     pop(overviewState)
     await nextTick()
