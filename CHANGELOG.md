@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.79.3] — 2026-11-21
+
 ### Added
 - **1.108.1 on the charts.** The no-ads landing page release (live 2026-11-21 18:32 ET) shows as a labelled line, and a new Traffic card counts its visits per day, split by ad source.
 
