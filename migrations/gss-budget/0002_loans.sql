@@ -1,5 +1,5 @@
 -- Database gss-budget, binding BUDGET_DB. Loans page schema (docs/adr/0007-budget-section.md, Decision 9).
--- Applied manually once per environment (never by an agent or CI); record a Time Travel bookmark first.
+-- Applied manually once (never by an agent or CI); record a Time Travel bookmark first.
 -- Additive only: two new tables and two NULLable columns. No existing row, column, index or constraint
 -- changes, so the code already deployed (which names its columns and never reads statements with *) keeps working.
 -- Private data never lives in this file; schema only.
@@ -25,6 +25,7 @@ CREATE TABLE debt_terms (
 -- statements: what a lender prints beyond 0001's header facts. NULL = not printed or not loaded yet.
 -- (CHECKs on ADD COLUMN are allowed because the default is NULL, which each check accepts for the existing rows.)
 ALTER TABLE statements ADD COLUMN escrow_cents INTEGER CHECK (escrow_cents IS NULL OR escrow_cents >= 0);
+-- escrow_cents is the escrow part of the statement period's payment, not the escrow account balance (a shortage balance can be negative).
 ALTER TABLE statements ADD COLUMN payoff_cents INTEGER CHECK (payoff_cents IS NULL OR payoff_cents >= 0);
 -- statement_promos: promotional / deferred-interest balances printed on one statement (several per statement).
 -- The foreign key names statements' whole primary key, so the parent key is valid. It is NO ACTION on purpose:

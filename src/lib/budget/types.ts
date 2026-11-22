@@ -105,7 +105,7 @@ export type PaymentEvery = 'monthly' | 'semimonthly' | 'biweekly'
 export interface DebtTerms { accountId: string; originalCents: Cents | null; openedOn: IsoDate | null; maturityOn: IsoDate | null
   termMonths: number | null; paymentCents: Cents | null; paymentEvery: PaymentEvery | null; cosigned: boolean
   updatedAt: string; updatedBy: string }
-/** The two `statements` columns 0002 adds (NULL = not printed or not loaded yet), keyed by the statement's primary key. */
+/** The two `statements` columns 0002 adds (NULL = not printed or not loaded yet), keyed by the statement's primary key. `escrowCents` is the escrow part of the period's payment, not the escrow account balance. */
 export interface StatementExtras { accountId: string; periodEnd: IsoDate; escrowCents: Cents | null; payoffCents: Cents | null }
 /** `statement_promos`: a promotional or deferred-interest balance printed on one statement; `seq` orders them (1..50). */
 export interface StatementPromo { accountId: string; periodEnd: IsoDate; seq: number; balanceCents: Cents

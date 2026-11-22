@@ -2727,11 +2727,13 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `statements.escrow_cents` and `payoff_cents` (NULL = not printed or not loaded), and `statement_promos`
   (promotional or deferred-interest balances on one statement, keyed account, period end, seq). Existing rows
   and columns do not change and the deployed code ignores the new objects. Only the private load writes them
-  (no API route yet). It is applied by hand like 0001 (`wrangler d1 migrations apply gss-budget`): Time Travel
-  bookmark first, one apply, one aggregate check. The database is shared by Preview and Production, so a
+  (`GET /api/budget/loans` only reads them). It is applied by hand, once, and never by an agent or CI: Time Travel
+  bookmark first, `npx wrangler d1 migrations list gss-budget --remote` (read-only; it must list 0002_loans.sql),
+  then `npx wrangler d1 migrations apply gss-budget --remote` (wrangler 4 defaults to the local database, so
+  `--remote` is required), then one aggregate check. The database is shared by Preview and Production, so a
   preview apply changes production's file too. The rollback is the comment block at the end of the file (it
   cannot be a second `.sql` there, since every file in the directory is applied); the tests run both ways.
-- **Loans list.** `GET /api/budget/loans?person=` feeds `components/budget/LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry.
+- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
   `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no

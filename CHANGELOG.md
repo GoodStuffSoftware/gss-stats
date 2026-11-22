@@ -8,6 +8,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 
 ### Added
+- **Loan payoff without a scheduled payment** — a loan with no scheduled payment now gets its payoff estimate from the average of the last 3 full months of payments, labelled as such.
 - **Loans list in Budget** — every loan and card with its balance, rate, monthly payment, interest, payoff month, due date and soonest promo end, under totals for what is owed and paid.
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.

@@ -39,7 +39,7 @@ function route(detail: DebtDetailData | 'fail' = DETAIL, put?: (body: unknown) =
   vi.stubGlobal('fetch', fetchMock)
 }
 const mounted: VueWrapper[] = []
-async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean }> = {}) {
+async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean; recentPaymentsCents: number[] }> = {}) {
   const w = mount(DebtDetail, {
     props: { accountId: 'acct-9', canEdit: true, dark: false, ...props },
     global: { stubs: { BaseChart: ChartStub } },
@@ -265,6 +265,15 @@ describe('DebtDetail: loan facts', () => {
     expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
     expect(w.get('[data-testid="payoff-interest"]').text()).toBe('$4.50')
     expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('last statement: $18.00')
+  })
+
+  it('falls back to the average of the last 3 months of payments when there is no scheduled payment', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: null } })
+    const w = await mountDetail({ recentPaymentsCents: [20000, 30000, 40000] })
+    expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('At the average payment (last 3 months)')
+    expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
+    const none = await mountDetail()
+    expect(none.find('[data-testid="payoff-months"]').exists()).toBe(false)
   })
 
   it('says so when the payment does not beat the interest', async () => {

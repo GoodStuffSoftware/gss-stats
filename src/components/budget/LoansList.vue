@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // The Loans page's list: a facts row (owed, monthly payments, interest, last payoff) and one table of every debt,
-// "Loans" first, then "Cards". It loads its own data (clientRead.fetchLoans) and does the arithmetic with
-// lib/budget/loanMath.ts. Built from EditableTable (card labels) and a facts `dl`: no new widget type.
+// "Loans" first, then "Cards". LoansPage loads the data (one /loans call per page view) and passes it in; this
+// does the arithmetic with lib/budget/loanMath.ts. Built from EditableTable (card labels) and a facts `dl`: no new widget type.
 //
 // Props
-//   person: string | null   the person filter (null = everyone).
+//   data: LoansResponse | null   the /api/budget/loans response (null until loaded or after a failure).
+//   loading, failed: boolean     the load state; failed shows a Retry.
 // Emits
+//   retry()    Retry was pressed.
 //   open(id)   a row was clicked or tapped (its debt name is also a button, for the keyboard).
-import { computed, ref, watch } from 'vue'
-import { fetchLoans } from '../../lib/budget/clientRead'
+import { computed } from 'vue'
 import { daysBetween } from '../../lib/budget/dates'
 import {
   monthlyInterestCents, monthlyPaymentCents, monthsToPayoff, payoffMonth, totalOwed,
@@ -19,30 +20,8 @@ import type { LoanRow, LoansResponse } from '../../lib/budget/types'
 import { todayIso } from '../../lib/budget/viewState'
 import EditableTable, { type EditableColumn } from '../table/EditableTable.vue'
 
-const props = defineProps<{ person: string | null }>()
-const emit = defineEmits<{ open: [id: string] }>()
-
-const data = ref<LoansResponse | null>(null)
-const loading = ref(true)
-const failed = ref(false)
-let seq = 0
-async function load() {
-  const mine = ++seq
-  loading.value = true
-  failed.value = false
-  try {
-    const r = await fetchLoans(props.person)
-    if (mine !== seq) return
-    data.value = r
-  } catch {
-    if (mine !== seq) return
-    data.value = null
-    failed.value = true
-  } finally {
-    if (mine === seq) loading.value = false
-  }
-}
-watch(() => props.person, load, { immediate: true })
+const props = defineProps<{ data: LoansResponse | null; loading: boolean; failed: boolean }>()
+const emit = defineEmits<{ open: [id: string]; retry: [] }>()
 
 const dash = '—'
 const money = (c: number | null) => (c === null ? dash : formatAmount(c))
@@ -92,7 +71,7 @@ function calc(row: LoanRow, today: string): Calc {
 
 const calcs = computed<Calc[]>(() => {
   const today = todayIso()
-  return (data.value?.debts ?? []).map((r) => calc(r, today))
+  return (props.data?.debts ?? []).map((r) => calc(r, today))
 })
 
 const facts = computed(() => {
@@ -163,7 +142,7 @@ function onClick(e: MouseEvent) {
   <div class="loans-list" data-testid="loans-list">
     <div v-if="failed" class="ll-note" role="alert">
       <span>Couldn’t load the loans.</span>
-      <button type="button" class="btn" data-testid="loans-retry" @click="load">Retry</button>
+      <button type="button" class="btn" data-testid="loans-retry" @click="emit('retry')">Retry</button>
     </div>
     <div v-else-if="loading && !data" class="ll-skeleton" aria-busy="true" aria-label="Loading loans">
       <div v-for="n in 5" :key="n" class="ll-sk-row" />

@@ -1,14 +1,11 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
 import type { LoanRow, LoansResponse } from '../../lib/budget/types'
 import { addDays } from '../../lib/budget/dates'
 import { todayIso } from '../../lib/budget/viewState'
 import LoansList from './LoansList.vue'
 
-vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
-
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 const base = (o: Partial<LoanRow>): LoanRow => ({
   accountId: 'x', label: 'X', kind: 'loan', last4: null, personId: 'p1', balanceCents: null, asOf: null, source: null,
   aprBp: null, creditLimitCents: null, terms: null, latest: null, promos: [], payments: [], ...o,
@@ -30,30 +27,21 @@ const DATA: LoansResponse = {
       promos: [{ accountId: 'visa', periodEnd: '2026-10-31', seq: 1, balanceCents: 50_000, aprBp: 0, endsOn: soon, deferredInterestCents: null }] }),
   ],
 }
-let fetchMock: ReturnType<typeof vi.fn>
-beforeEach(() => {
-  fetchMock = vi.fn(async () => json(DATA))
-  vi.stubGlobal('fetch', fetchMock)
-})
-afterEach(() => vi.unstubAllGlobals())
-async function mountIt(person: string | null = null) {
-  const w = mount(LoansList, { props: { person } })
-  await flushPromises()
-  return w
+function mountIt(props: { data?: LoansResponse | null; loading?: boolean; failed?: boolean } = {}) {
+  return mount(LoansList, { props: { data: DATA, loading: false, failed: false, ...props } })
 }
 
 describe('LoansList', () => {
-  it('asks for the person and shows facts without cosigned in the total', async () => {
-    const w = await mountIt('p1')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/budget/loans?person=p1')
+  it('shows facts without cosigned in the total', () => {
+    const w = mountIt()
     expect(w.get('[data-testid=fact-owed]').text()).toBe('$16,000.00') // 10,000 + 5,000 + 1,000
     expect(w.get('[data-testid=fact-cosigned]').text()).toBe('+ $3,000.00 cosigned')
     expect(w.get('[data-testid=fact-missing]').text()).toBe('1 debt without a balance')
     expect(w.get('[data-testid=fact-payments]').text()).toBe('$710.00') // 500 + 200 + 10
     expect(w.get('[data-testid=fact-last]').text()).toMatch(/^[A-Z][a-z]{2} \d{4}$/)
   })
-  it('groups Loans then Cards and shows dashes for missing values', async () => {
-    const w = await mountIt()
+  it('groups Loans then Cards and shows dashes for missing values', () => {
+    const w = mountIt()
     const groups = w.findAll('section.ll-group')
     expect(groups.map((g) => g.attributes('data-testid'))).toEqual(['group-loans', 'group-cards'])
     const mystery = w.get('[data-row-key=nobal]').text()
@@ -62,36 +50,32 @@ describe('LoansList', () => {
     expect(w.get('[data-testid=group-cards]').text()).toContain('Visa ••2222')
     expect(w.get('[data-testid=group-loans]').text()).not.toContain('Visa')
   })
-  it('labels the payment source, flags open-end draws and the cosigned badge', async () => {
-    const w = await mountIt()
+  it('labels the payment source, flags open-end draws and the cosigned badge', () => {
+    const w = mountIt()
     expect(w.get('[data-row-key=car]').text()).toContain('(scheduled)')
     expect(w.get('[data-row-key=line]').text()).toContain('(from payments)')
     expect(w.get('[data-row-key=line]').text()).toContain('new draws not counted')
     expect(w.get('[data-row-key=co]').find('[data-testid=cosigned-badge]').exists()).toBe(true)
   })
-  it('says when the payment does not beat the interest', async () => {
-    const w = await mountIt()
+  it('says when the payment does not beat the interest', () => {
+    const w = mountIt()
     expect(w.get('[data-row-key=visa]').text()).toContain('Not paid off at this payment')
   })
-  it('marks a promo ending within 60 days', async () => {
-    const w = await mountIt()
+  it('marks a promo ending within 60 days', () => {
+    const w = mountIt()
     expect(w.get('[data-row-key=visa]').find('[data-testid=promo-soon]').exists()).toBe(true)
     expect(w.get('[data-row-key=car]').find('[data-testid=promo-soon]').exists()).toBe(false)
   })
   it('emits open on a row click and on the name button, once each', async () => {
-    const w = await mountIt()
+    const w = mountIt()
     await w.get('[data-row-key=car]').trigger('click')
     await w.get('[data-row-key=visa] button.ll-open').trigger('click')
     expect(w.emitted('open')).toEqual([['car'], ['visa']])
   })
-  it('refetches when the person changes and offers Retry on failure', async () => {
-    const w = await mountIt()
-    await w.setProps({ person: 'p2' })
-    await flushPromises()
-    expect(fetchMock.mock.calls.at(-1)![0]).toBe('/api/budget/loans?person=p2')
-    fetchMock.mockImplementation(async () => json({ error: 'x' }, 500))
-    await w.setProps({ person: 'p3' })
-    await flushPromises()
-    expect(w.find('[data-testid=loans-retry]').exists()).toBe(true)
+  it('shows a skeleton while loading, and Retry (emitting retry) on failure', async () => {
+    expect(mountIt({ data: null, loading: true }).find('[aria-busy=true]').exists()).toBe(true)
+    const w = mountIt({ data: null, failed: true })
+    await w.get('[data-testid=loans-retry]').trigger('click')
+    expect(w.emitted('retry')).toHaveLength(1)
   })
 })

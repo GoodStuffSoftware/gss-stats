@@ -23,7 +23,9 @@ import { rangeValid, todayIso } from '../../lib/budget/viewState'
 import BaseChart from '../charts/BaseChart.vue'
 import EditableTable, { type EditableColumn } from '../table/EditableTable.vue'
 
-const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean; hideBack?: boolean }>()
+// `recentPaymentsCents`: the totals paid in the last 3 full months (the Loans page passes them), the payoff fallback
+// when the loan has no scheduled payment.
+const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean; hideBack?: boolean; recentPaymentsCents?: number[] }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 
 // ── Loading ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ const payoff = computed(() => {
   const bal = latest.value
   if (!bal) return null
   const t = terms.value
-  const pay = monthlyPaymentCents(t ? { paymentCents: t.paymentCents, every: t.paymentEvery } : null)
+  const pay = monthlyPaymentCents(t ? { paymentCents: t.paymentCents, every: t.paymentEvery } : null, props.recentPaymentsCents)
   const res = pay ? monthsToPayoff(bal.balanceCents, rateBp.value, pay.cents) : null
   let text = ''
   if (res?.kind === 'payoff' || res?.kind === 'rate_unknown') {
@@ -163,7 +165,7 @@ const payoff = computed(() => {
   const est = monthlyInterestCents(bal.balanceCents, rateBp.value)
   if (!text && est === null) return null
   const actual = latestStmt.value?.interestCents ?? null
-  return { text, estInterest: est === null ? null : formatAmount(est), actualInterest: actual === null ? null : formatAmount(actual) }
+  return { text, source: pay?.source ?? null, estInterest: est === null ? null : formatAmount(est), actualInterest: actual === null ? null : formatAmount(actual) }
 })
 
 const SOON_DAYS = 60
@@ -314,7 +316,7 @@ async function submit() {
         <h3 class="dd-h3">Payoff estimate</h3>
         <dl class="dd-grid">
           <div v-if="payoff.text">
-            <dt>At the scheduled payment</dt>
+            <dt>{{ payoff.source === 'from payments' ? 'At the average payment (last 3 months)' : 'At the scheduled payment' }}</dt>
             <dd data-testid="payoff-months">{{ payoff.text }}</dd>
           </div>
           <div v-if="payoff.estInterest">
