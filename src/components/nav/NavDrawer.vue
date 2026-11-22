@@ -41,11 +41,13 @@ const props = defineProps<{
   sections?: NavSection[]
   /** The section on screen, if any; then no page is the current one. */
   activeSection?: string | null
+  /** The page of the section on screen (a sub-row of it), if the section has pages. */
+  activeSectionPage?: string | null
 }>()
 const emit = defineEmits<{
   close: []
   switch: [id: string]
-  section: [id: string]
+  section: [id: string, pageId?: string]
   menu: [id: string, anchor: HTMLElement]
   delete: [id: string]
   'toggle-group': [name: string]
@@ -257,18 +259,31 @@ async function onCreateGroup(d: GroupDraft) {
             </li>
           </ul>
           <ul v-if="sections?.length" class="dr-list dr-sections" aria-label="Sections">
-            <li v-for="sec in sections" :key="sec.id" class="dr-item" :data-section="sec.id">
-              <button
-                type="button"
-                class="nav-row dr-page"
-                :aria-current="activeSection === sec.id ? 'page' : undefined"
-                :data-testid="`nav-section-${sec.id}`"
-                @click="emit('section', sec.id)"
-              >
-                <span class="sec-icon" aria-hidden="true"><component :is="ICONS[sec.icon]" :size="16" :stroke-width="2" /></span>
-                <span class="nm">{{ sec.label }}</span>
-              </button>
-            </li>
+            <template v-for="sec in sections" :key="sec.id">
+              <li class="dr-item" :data-section="sec.id">
+                <button
+                  type="button"
+                  class="nav-row dr-page"
+                  :aria-current="activeSection === sec.id && !sec.pages?.length ? 'page' : undefined"
+                  :data-testid="`nav-section-${sec.id}`"
+                  @click="emit('section', sec.id)"
+                >
+                  <span class="sec-icon" aria-hidden="true"><component :is="ICONS[sec.icon]" :size="16" :stroke-width="2" /></span>
+                  <span class="nm">{{ sec.label }}</span>
+                </button>
+              </li>
+              <li v-for="pg in sec.pages ?? []" :key="`${sec.id}:${pg.id}`" class="dr-item" :style="{ '--depth': 1 }" :data-section-page="pg.id">
+                <button
+                  type="button"
+                  class="nav-row dr-page kid"
+                  :aria-current="activeSection === sec.id && activeSectionPage === pg.id ? 'page' : undefined"
+                  :data-testid="`nav-section-${sec.id}-${pg.id}`"
+                  @click="emit('section', sec.id, pg.id)"
+                >
+                  <span class="nm">{{ pg.label }}</span>
+                </button>
+              </li>
+            </template>
           </ul>
           <section v-for="({ group: g, rows }, gi) in groupRows":key="g.name" class="dr-group" :class="{ flash: flash === g.name }" :data-group="g.name">
             <div class="dr-gh" :class="{ cur: g.name === activeGroup, pressed: groupMenu?.name === g.name }">

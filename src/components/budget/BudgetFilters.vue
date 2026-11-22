@@ -13,7 +13,7 @@ import type { IsoDate, Person, PersonFilter } from '../../lib/budget/types'
 import { canHide, type PanelId } from '../../lib/budget/panelVisibility'
 import { MAX_RANGE_DAYS, RANGE_PRESETS, presetOf, rangeForPreset, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
 
-const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[] }>()
+const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[]; rangeHidden?: boolean }>()
 const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter]; 'toggle-panel': [id: PanelId] }>()
 const SHOW_PANELS: { id: PanelId; label: string }[] = [
   { id: 'spending', label: 'Spending' },
@@ -63,7 +63,7 @@ function onCustom() {
 
 <template>
   <div class="budget-filters" role="group" aria-label="Budget filters">
-    <div class="bf-range">
+    <div v-if="!rangeHidden" class="bf-range">
       <label class="bf-label" for="budget-range">Range</label>
       <select id="budget-range" class="bf-select" :value="selected" data-testid="budget-range" @change="onPreset">
         <option v-for="p in RANGE_PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>

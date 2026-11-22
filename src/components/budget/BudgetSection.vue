@@ -15,16 +15,17 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
 import { readHiddenPanels, togglePanel, writeHiddenPanels, type PanelId } from '../../lib/budget/panelVisibility'
 import type { Category, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import type { BudgetPage } from '../../lib/budget/sectionLink'
 import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
-import DebtDetail from './DebtDetail.vue'
+import LoansPage from './LoansPage.vue'
 import DebtPanel from './DebtPanel.vue'
 import SpendingPanel from './SpendingPanel.vue'
 
 const props = defineProps<{ dark: boolean; today?: IsoDate }>()
 
-const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab } =
+const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage } =
   useBudgetViewState(props.today)
 
 // ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -133,7 +134,6 @@ const debts = ref<DebtSlice[] | null>(null)
 const debtsLoading = ref(false)
 const debtsError = ref(false)
 const debtsRefresh = ref(0)
-const selectedDebtId = ref<string | null>(null)
 let debtsSeq = 0
 async function loadDebts() {
   const seq = ++debtsSeq
@@ -163,7 +163,7 @@ watch(
 const spendingPanelUp = computed(
   () => !summaryError.value && !!summary.value && !(summary.value.level === 'category' && summary.value.slices.length === 0),
 )
-const debtPanelUp = computed(() => !selectedDebtId.value && !debtsError.value && !!debts.value && debts.value.length > 0)
+const debtPanelUp = computed(() => !debtsError.value && !!debts.value && debts.value.length > 0)
 function onDebtSaved() {
   debtsRefresh.value++
 }
@@ -177,6 +177,16 @@ function onCategoryAdded(c: Category) {
   const m = meta.value
   if (m && !m.categories.some((x) => x.id === c.id)) meta.value = { ...m, categories: [...m.categories, c] }
 }
+
+// ── Pages ─────────────────────────────────────────────────────────────────────────────────────────────────
+// Overview or Loans (lib/budget/viewState.ts keeps it in `b_page`). The shell tells App when it changes (the top
+// bar crumbs and the remembered page) and App asks for a page through `goPage` (the ☰ menu, the crumbs).
+const emit = defineEmits<{ page: [page: BudgetPage] }>()
+watch(() => state.page, (p) => emit('page', p), { immediate: true })
+function goPage(page: BudgetPage) {
+  setPage(page)
+}
+defineExpose({ goPage })
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────────────────────────────────
 onMounted(() => {
@@ -214,12 +224,25 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
           :person="state.person"
           :people="meta.people"
           :today="today"
-          :hidden="hiddenPanels"
+          :hidden="state.page === 'overview' ? hiddenPanels : undefined"
+          :range-hidden="state.page === 'loans'"
           @range="(r) => setRange(r.from, r.to)"
           @person="setPerson"
           @toggle-panel="onTogglePanel"
         />
 
+        <LoansPage
+          v-if="state.page === 'loans'"
+          :person="state.person === 'all' ? null : state.person"
+          :loan-id="state.loan"
+          :can-edit="canEdit"
+          :dark="dark"
+          @open="(id) => setPage('loans', id)"
+          @close="setPage('loans')"
+          @saved="onDebtSaved"
+        />
+
+        <template v-else>
         <div class="b-tabs" role="tablist" aria-label="Budget view">
           <button
             type="button"
@@ -280,15 +303,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             :class="{ active: state.tab === 'debts', 'is-hidden': hiddenPanels.includes('debts'), 'has-panel': debtPanelUp }"
             data-pane="debts"
           >
-            <DebtDetail
-              v-if="selectedDebtId"
-              :account-id="selectedDebtId"
-              :can-edit="canEdit"
-              :dark="dark"
-              @close="selectedDebtId = null"
-              @saved="onDebtSaved"
-            />
-            <div v-else-if="debtsError" class="b-note" role="alert">
+            <div v-if="debtsError" class="b-note" role="alert">
               <span>Couldn't load debts.</span>
               <button type="button" class="btn" data-testid="budget-retry-debts" @click="loadDebts">Retry</button>
             </div>
@@ -297,7 +312,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
               <div v-for="n in 6" :key="n" class="sk-row" />
             </div>
             <p v-else-if="debts.length === 0" class="b-note" data-testid="budget-empty-debts">No debts recorded</p>
-            <DebtPanel v-else :debts="debts" :dark="dark" :can-edit="canEdit" @open="(id) => (selectedDebtId = id)" />
+            <DebtPanel v-else :debts="debts" :dark="dark" :can-edit="canEdit" @open="(id) => setPage('loans', id)" />
           </div>
         </div>
 
@@ -314,6 +329,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             @category-added="onCategoryAdded"
           />
         </div>
+        </template>
       </template>
     </template>
   </section>

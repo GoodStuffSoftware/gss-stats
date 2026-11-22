@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetSectionOpen, searchWithSection } from './sectionLink'
+import { budgetPageOf, budgetSectionOpen, parseBudgetPage, searchWithSection } from './sectionLink'
 
 describe('budgetSectionOpen', () => {
   it('is true only for section=budget', () => {
@@ -30,5 +30,20 @@ describe('searchWithSection', () => {
     expect(p.get('page')).toBe('p1')
     expect(p.get('utm_source')).toBe('x')
     expect(searchWithSection('?section=budget', false)).toBe('')
+  })
+})
+
+describe('the Budget page param', () => {
+  it('parseBudgetPage keeps only loans; budgetPageOf reads b_page', () => {
+    expect(parseBudgetPage('loans')).toBe('loans')
+    for (const v of ['overview', 'Loans', '', null, undefined, 3]) expect(parseBudgetPage(v)).toBe('overview')
+    expect(budgetPageOf('?section=budget&b_page=loans')).toBe('loans')
+    expect(budgetPageOf('?b_page=nope')).toBe('overview')
+    expect(budgetPageOf('')).toBe('overview')
+  })
+  it('opening on Loans writes b_page=loans; Overview writes nothing; closing drops it', () => {
+    expect(searchWithSection('?page=p1', true, 'loans')).toBe('?page=p1&section=budget&b_page=loans')
+    expect(searchWithSection('', true)).toBe('?section=budget')
+    expect(searchWithSection('?section=budget&b_page=loans&utm_source=x', false)).toBe('?utm_source=x')
   })
 })

@@ -22,7 +22,7 @@ import { rangeValid, todayIso } from '../../lib/budget/viewState'
 import BaseChart from '../charts/BaseChart.vue'
 import EditableTable, { type EditableColumn } from '../table/EditableTable.vue'
 
-const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean }>()
+const props = defineProps<{ accountId: string; canEdit: boolean; dark: boolean; hideBack?: boolean }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
 
 // ── Loading ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ async function submit() {
 <template>
   <div class="debt-detail" data-testid="debt-detail">
     <div class="dd-head">
-      <button type="button" class="btn dd-back" data-testid="debt-back" @click="emit('close')">← Back to debts</button>
+      <button v-if="!hideBack" type="button" class="btn dd-back" data-testid="debt-back" @click="emit('close')">← Back to debts</button>
       <h2 class="dd-title">{{ title }}</h2>
     </div>
 
