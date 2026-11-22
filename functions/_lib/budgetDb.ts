@@ -245,11 +245,12 @@ export const mapTxn = (r: Row): Txn => ({
   needsReview: Number(r.needs_review) === 1, reviewReason: strOrNull(r.review_reason) as ReviewReason | null, pairId: strOrNull(r.pair_id),
   debtAccountId: strOrNull(r.debt_account_id), principalCents: numOrNull(r.principal_cents), interestCents: numOrNull(r.interest_cents),
   note: strOrNull(r.note), updatedAt: str(r.updated_at), updatedBy: str(r.updated_by),
+  included: Number(r.included ?? 1) === 1,
 })
 
 export const TXN_COLUMNS = 'id, account_id, posted_date, txn_date, amount_cents, description, merchant_key, merchant_name, store_no, kind, kind_source, '
   + 'category_id, category_source, rule_id, confidence, needs_review, review_reason, pair_id, debt_account_id, principal_cents, interest_cents, '
-  + 'note, updated_at, updated_by'
+  + 'note, updated_at, updated_by, included'
 export const RULE_COLUMNS = 'id, merchant_key, store_no, account_id, amount_min_cents, amount_max_cents, set_category_id, set_kind, debt_account_id, '
   + 'display_name, confidence, review, review_reason, source, active'
 export const ACCOUNT_COLUMNS = 'id, label, kind, person_id, last4, is_debt, in_spending, credit_limit_cents, apr_bp'
@@ -320,7 +321,9 @@ export interface SummaryPlan {
 
 /** The statements behind one /summary answer. `idsJson` = JSON.stringify(accountIdsFor(...)). */
 export function buildSummary(q: SummaryQuery, idsJson: string): SummaryPlan {
-  const base = `kind IN (${SPENDING_SQL}) AND posted_date BETWEEN ? AND ? AND ${IN_ACCOUNTS}`
+  // `included = 1`: a purchase a person excluded (transactions.included = 0) is in no spending total, pie or trend. Any new
+  // spending aggregate takes this clause too. The review count and the transactions list do not (rows stay listed).
+  const base = `kind IN (${SPENDING_SQL}) AND included = 1 AND posted_date BETWEEN ? AND ? AND ${IN_ACCOUNTS}`
   const baseParams: Array<string | number> = [q.from, q.to, idsJson]
   // The review count is the SAME set the table lists for `review=1` (buildTxnList): flagged rows of ANY kind
   // in the range and person filter, narrowed by the drill (category, merchant, account) but not by spending kinds.

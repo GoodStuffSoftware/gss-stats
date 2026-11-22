@@ -114,6 +114,37 @@ describe('GET /api/budget/summary', () => {
     expect(db.get<{ n: number }>('SELECT COUNT(*) n FROM transactions')!.n).toBeGreaterThan(20)
   })
 
+  it('excluded purchases leave every total, pie level and drill; parity: total before - total after = the excluded sum', async () => {
+    const patchRoute = (await import('./transactions/[id]')).onRequest
+    const SEED_STAMP = '2026-12-05T10:00:00.000Z'
+    const ids = db.all<{ id: string; amount_cents: number }>(
+      "SELECT id, amount_cents FROM transactions WHERE kind = 'spend' AND category_id = 'groceries' AND posted_date BETWEEN '2026-11-01' AND '2026-12-31' ORDER BY id LIMIT 2")
+    expect(ids.length).toBe(2)
+    const before = await json<SummaryResponse>(await get(RANGE))
+    const cat = (b: SummaryResponse, k: string) => b.slices.find((s) => s.key === k)
+    const drillBefore = await json<SummaryResponse>(await get({ ...RANGE, category: 'groceries' }))
+    for (const r of ids) {
+      const res = await callRoute(patchRoute, db, `/api/budget/transactions/${r.id}`, { method: 'PATCH', params: { id: r.id }, body: { included: false, expectedUpdatedAt: SEED_STAMP } })
+      expect(res.status).toBe(200)
+    }
+    const excluded = ids.reduce((s, r) => s - r.amount_cents, 0)
+    expect(excluded).toBeGreaterThan(0)
+    const after = await json<SummaryResponse>(await get(RANGE))
+    expect(before.totalCents - after.totalCents).toBe(excluded)
+    expect(cat(before, 'groceries')!.netCents - cat(after, 'groceries')!.netCents).toBe(excluded)
+    expect(after.reviewCount).toBe(before.reviewCount)
+    const drillAfter = await json<SummaryResponse>(await get({ ...RANGE, category: 'groceries' }))
+    const sum = (b: SummaryResponse) => b.slices.reduce((s, x) => s + x.netCents, 0)
+    expect(sum(drillBefore) - sum(drillAfter)).toBe(excluded)
+    // the purchase level's true total agrees with its slices, and the excluded rows are not among them
+    const store = drillBefore.slices[0].key
+    const purchases = await json<SummaryResponse>(await get({ ...RANGE, category: 'groceries', merchant: store }))
+    expect(purchases.totalCents).toBe(sum(purchases))
+    for (const r of ids) expect(purchases.slices.some((s) => s.key === r.id)).toBe(false)
+    // the excluded rows stay in the table's list
+    expect(db.get<{ n: number }>('SELECT COUNT(*) AS n FROM transactions WHERE included = 0')!.n).toBe(2)
+  })
+
   it('only GET and HEAD (405 with Allow), 403 without identity', async () => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       const res = await callRoute(onRequest, db, '/api/budget/summary', { method, query: RANGE, body: {} })

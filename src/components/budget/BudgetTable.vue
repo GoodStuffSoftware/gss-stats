@@ -141,6 +141,22 @@ const rowLabel = (t: Txn) => t.merchantName || t.description
           @add="(name: string) => model.addCategoryTo(row.id, name)"
         />
       </template>
+      <template #cell-included="{ row }">
+        <span :class="{ 'bt-excluded': row.included === false }">{{ row.included === false ? 'Excluded' : 'Included' }}</span>
+      </template>
+      <template #editor-included="{ row, disabled }">
+        <label class="bt-included">
+          <input
+            type="checkbox"
+            :checked="row.included !== false"
+            :disabled="disabled"
+            :aria-label="'Included in spending: ' + rowLabel(row)"
+            data-testid="included-toggle"
+            @change="model.setIncluded(row.id, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ row.included === false ? 'Excluded' : 'Included' }}</span>
+        </label>
+      </template>
       <template #empty>No transactions in this view.</template>
       <template #footer>
         <div v-if="loadError && rows.length" class="bt-error" role="alert">

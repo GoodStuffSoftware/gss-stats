@@ -173,6 +173,54 @@ describe('PATCH /api/budget/transactions/:id', () => {
     expect(row(id).category_id).toBe('fuel')
   })
 
+  it('included: false excludes (stamped manual edit, audited), true restores; category, kind and review are untouched', async () => {
+    const id = idOf("store_no = '9999'")
+    const b = row(id)
+    expect(b.included).toBe(1)
+    const off = await json<TxnPatchResponse>(await patch(id, { included: false, expectedUpdatedAt: SEED_STAMP }))
+    expect(off.txn).toMatchObject({ included: false, kind: 'spend', categoryId: b.category_id, needsReview: true, updatedBy: 'user-a@example.com' })
+    expect(row(id)).toMatchObject({ included: 0, kind: b.kind, kind_source: b.kind_source, category_source: b.category_source, needs_review: 1, updated_by: 'user-a@example.com' })
+    const on = await json<TxnPatchResponse>(await patch(id, { included: true, expectedUpdatedAt: off.txn.updatedAt }))
+    expect(on.txn).toMatchObject({ included: true, kind: b.kind, categoryId: b.category_id })
+    expect(db.all('SELECT old_included, new_included, old_kind, new_kind, edited_by FROM category_edits ORDER BY id')).toEqual([
+      { old_included: 1, new_included: 0, old_kind: 'spend', new_kind: 'spend', edited_by: 'user-a@example.com' },
+      { old_included: 0, new_included: 1, old_kind: 'spend', new_kind: 'spend', edited_by: 'user-a@example.com' },
+    ])
+    // a category edit leaves the included flag alone and audits NULLs
+    await patch(id, { categoryId: 'fuel', expectedUpdatedAt: on.txn.updatedAt })
+    expect(db.all('SELECT old_included, new_included FROM category_edits ORDER BY id DESC LIMIT 1')).toEqual([{ old_included: null, new_included: null }])
+  })
+
+  it('included must be a boolean; a stale stamp is a 409 and writes nothing', async () => {
+    const id = idOf("store_no = '1001'")
+    for (const v of ['no', 0, null]) expect((await patch(id, { included: v, expectedUpdatedAt: SEED_STAMP })).status, String(v)).toBe(400)
+    expect((await patch(id, { included: false, expectedUpdatedAt: 'stale' })).status).toBe(409)
+    expect(row(id).included).toBe(1)
+    expect(db.all('SELECT * FROM category_edits')).toEqual([])
+  })
+
+  it('included: 403 without identity changes nothing; 405 with Allow for the other methods', async () => {
+    const id = idOf("store_no = '1001'")
+    expect((await patch(id, { included: false, expectedUpdatedAt: SEED_STAMP }, { email: null })).status).toBe(403)
+    expect(row(id).included).toBe(1)
+    for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
+      const res = await callRoute(onRequest, db, `/api/budget/transactions/${id}`, { method, params: { id }, body: {} })
+      expect(res.status, method).toBe(405)
+      expect(res.headers.get('Allow')).toBe('PATCH')
+    }
+  })
+
+  it('an exclusion survives a rule apply and a re-import of the same load', async () => {
+    const id = idOf("store_no = '2002'")
+    await patch(id, { included: false, expectedUpdatedAt: SEED_STAMP })
+    const { applyRules } = await import('../../../_lib/budgetDb')
+    await applyRules(db.d1, ['chain-x'], 'user-b@example.com')
+    const { syntheticSeedSql } = await import('../../../_lib/testing/budgetDb')
+    db.exec(await syntheticSeedSql())
+    expect(row(id).included).toBe(0)
+    expect(String(row(id).updated_by)).toContain('@')
+  })
+
   it('a manual edit survives a later rule apply and a re-import of the same load', async () => {
     const id = idOf("store_no = '2002'")
     await patch(id, { categoryId: 'gifts', expectedUpdatedAt: SEED_STAMP })

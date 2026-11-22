@@ -7,6 +7,9 @@
 // rule re-apply or re-import changes the field again), and either clears the review flag. The edit lands
 // in category_edits in the same batch (one transaction). A stale expectedUpdatedAt answers 409 with the
 // row as it is now (`current`); nothing is written.
+// `included` (true/false, may combine with the rest): false excludes the purchase from every spending total, pie and trend,
+// true counts it again. It is a manual edit too (updated_by = the address, so no re-import or script resets it) and is
+// audited in category_edits (old_included / new_included); it leaves category, kind and the review flag alone.
 
 import type { TxnPatchResponse } from '../../../../src/lib/budget/types'
 import { UNCATEGORIZED } from '../../../../src/lib/budget/types'
@@ -43,7 +46,9 @@ export const onRequest = defineRoute({
       if (typeof n === 'string' && (n.length > 500 || n.includes('\u0000'))) throw badRequest('note: over 500 characters')
       note = n === '' ? null : n
     }
-    if (!hasCategory && !hasKind && !hasNote) throw badRequest('body: nothing to change (send categoryId, kind or note)')
+    const hasIncluded = 'included' in body
+    if (hasIncluded && typeof body.included !== 'boolean') throw badRequest('included: expected true or false')
+    if (!hasCategory && !hasKind && !hasNote && !hasIncluded) throw badRequest('body: nothing to change (send categoryId, kind, note or included)')
     await assertCategory(db, categoryId, 'categoryId', true)
 
     if (!isTxnId(id)) throw notFound()
@@ -58,14 +63,15 @@ export const onRequest = defineRoute({
     if (hasCategory) { sets.push('category_id = ?', "category_source = 'manual'", 'rule_id = NULL'); params.push(categoryId) }
     if (hasKind) { sets.push('kind = ?', "kind_source = 'manual'"); params.push(body.kind as string) }
     if (hasCategory || hasKind) sets.push('needs_review = 0', 'review_reason = NULL', 'confidence = 100')
+    if (hasIncluded) { sets.push('included = ?'); params.push(body.included ? 1 : 0) }
     if (hasNote) { sets.push('note = ?'); params.push(note) }
 
     const stmts = [db.prepare(`UPDATE transactions SET ${sets.join(', ')} WHERE id = ? AND updated_at = ?`).bind(...params, id, before.updatedAt)]
-    if (hasCategory || hasKind) {
+    if (hasCategory || hasKind || hasIncluded) {
       stmts.push(db.prepare(
-        `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
-         SELECT id, ?, category_id, ?, kind, NULL, updated_at, updated_by FROM transactions WHERE id = ? AND updated_at = ?`,
-      ).bind(before.categoryId, before.kind, id, stamp))
+        `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, old_included, new_included, edited_at, edited_by)
+         SELECT id, ?, category_id, ?, kind, NULL, ?, ?, updated_at, updated_by FROM transactions WHERE id = ? AND updated_at = ?`,
+      ).bind(before.categoryId, before.kind, hasIncluded ? (before.included === false ? 0 : 1) : null, hasIncluded ? (body.included ? 1 : 0) : null, id, stamp))
     }
     stmts.push(db.prepare(`SELECT ${TXN_COLUMNS} FROM transactions WHERE id = ?`).bind(id))
     const results = await db.batch(stmts)

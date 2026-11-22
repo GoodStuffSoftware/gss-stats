@@ -114,10 +114,10 @@ export function pairUpdateSql(id: string, partnerId: string, updatedAt: string, 
     `review_reason = CASE WHEN ${re} AND review_reason IN ${REKIND_REVIEW} THEN NULL ELSE review_reason END, ` +
     `kind = CASE WHEN ${re} THEN 'transfer' ELSE kind END, ` +
     `updated_at = ${sqlStr(updatedAt)}, updated_by = ${sqlStr(updatedBy)} ` +
-    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual' ` +
+    `WHERE id = ${sqlStr(id)} AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual' AND instr(updated_by, '@') = 0 ` +
     // The partner must be free to pair as well (or already point here), so either both sides pair or neither.
     `AND EXISTS (SELECT 1 FROM transactions p WHERE p.id = ${sqlStr(partnerId)} AND (p.pair_id IS NULL OR p.pair_id = ${sqlStr(id)}) ` +
-    `AND p.kind_source NOT IN ('manual','rule') AND p.category_source <> 'manual');`
+    `AND p.kind_source NOT IN ('manual','rule') AND p.category_source <> 'manual' AND instr(p.updated_by, '@') = 0);`
 }
 
 /** The statements of a plan, in an order that satisfies the foreign keys. */

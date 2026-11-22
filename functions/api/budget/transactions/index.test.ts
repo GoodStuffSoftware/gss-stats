@@ -23,8 +23,8 @@ describe('GET /api/budget/transactions', () => {
     expect(page.rows.every((r) => ['spend', 'refund', 'fee'].includes(r.kind))).toBe(true)
     expect(page.rows[0]).toMatchObject({ postedDate: '2026-12-01', merchantKey: 'bramblewood-market', needsReview: true, reviewReason: 'low_confidence' })
     const fuel = page.rows.find((r) => r.storeNo === '1001')!
-    expect(fuel).toMatchObject({ amountCents: -6200, categoryId: 'fuel', categorySource: 'rule', kind: 'spend', kindSource: 'auto', accountId: 'chk-a', note: null })
-    expect(Object.keys(fuel).sort()).toEqual(['accountId', 'amountCents', 'categoryId', 'categorySource', 'confidence', 'debtAccountId', 'description', 'id', 'interestCents',
+    expect(fuel).toMatchObject({ amountCents: -6200, categoryId: 'fuel', categorySource: 'rule', kind: 'spend', kindSource: 'auto', accountId: 'chk-a', note: null, included: true })
+    expect(Object.keys(fuel).sort()).toEqual(['accountId', 'amountCents', 'categoryId', 'categorySource', 'confidence', 'debtAccountId', 'description', 'id', 'included', 'interestCents',
       'kind', 'kindSource', 'merchantKey', 'merchantName', 'needsReview', 'note', 'pairId', 'postedDate', 'principalCents', 'reviewReason', 'ruleId', 'ruleSafe', 'storeNo', 'txnDate', 'updatedAt', 'updatedBy'])
   })
 

@@ -43,6 +43,8 @@ export interface Txn { id: string; accountId: string; postedDate: IsoDate; txnDa
   confidence: number; needsReview: boolean; reviewReason: ReviewReason | null; pairId: string | null
   debtAccountId: string | null; principalCents: Cents | null; interestCents: Cents | null; note: string | null
   updatedAt: string; updatedBy: string
+  /** false = a person excluded this purchase from every spending total, pie and trend. Absent = included (the default). */
+  included?: boolean
   /** Set by the transactions API: a rule on this row's merchant key would affect only the merchant the row names (one display
    *  name under the key, not a payment-service key). Absent or false: no "Use for all" offer. */
   ruleSafe?: boolean }
@@ -79,7 +81,7 @@ export interface TxnQuery { from: IsoDate; to: IsoDate; person: PersonFilter; ca
   /** Account id; second drill level when the pie is grouped by account. */
   account?: string }
 export interface TxnPage { rows: Txn[]; nextCursor: string | null }
-export interface TxnPatch { categoryId?: string | null; kind?: TxnKind; note?: string | null; expectedUpdatedAt: string }
+export interface TxnPatch { categoryId?: string | null; kind?: TxnKind; note?: string | null; included?: boolean; expectedUpdatedAt: string }
 export interface TxnPatchResponse { txn: Txn }
 /** POST /api/budget/categories. `created` is false when a category of that name (any letter case) already existed: it comes back as is. */
 export interface CategoryCreateRequest { name: string }

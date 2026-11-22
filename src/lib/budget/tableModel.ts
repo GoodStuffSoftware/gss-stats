@@ -114,6 +114,8 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
     { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
     { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
+    // On (the default) = the purchase counts in every spending total, pie and trend; off = excluded. The checkbox is the editor slot in BudgetTable.vue.
+    { key: 'included', label: 'Included', editor: 'select', value: (t) => (t.included === false ? 'Excluded' : 'Included'), options: () => [], cardLine: 2 },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
   ]
 }
@@ -273,6 +275,39 @@ export function createTxnTable(
     }
   }
 
+  /** The Included switch of a row: flip it now, save (PATCH `included`, a manual edit), revert if the save fails. Excluding a
+   *  purchase takes it out of every spending total, pie and trend; the pie refetches through `onEdited`. */
+  async function setIncluded(id: string, on: boolean) {
+    const i = indexOf(id)
+    if (i < 0 || rowState[id]?.pending) return
+    const before = rows.value[i]
+    if ((before.included !== false) === on) return
+    rows.value[i] = { ...before, included: on }
+    setState(id, { pending: true })
+    const name = before.merchantName || before.description || 'Row'
+    try {
+      const res = await deps.patch(id, { included: on, expectedUpdatedAt: before.updatedAt })
+      const j = indexOf(id)
+      if (j >= 0) rows.value[j] = res.txn
+      setState(id, null)
+      status.value = on ? `Saved. ${name} counts in spending again.` : `Saved. ${name} is excluded from spending.`
+      onEdited({ txnId: id, ruleApplied: false, reapplied: 0 })
+    } catch (e) {
+      const j = indexOf(id)
+      if (e instanceof BudgetApiError && e.status === 409) {
+        if (j >= 0) rows.value[j] = e.current ?? before
+        const msg = 'Changed by someone else. Check it and try again.'
+        setState(id, { error: msg })
+        status.value = msg
+      } else {
+        if (j >= 0) rows.value[j] = before
+        const msg = e instanceof BudgetApiError ? `Couldn’t save (${e.status}). The row is back as it was.` : NETWORK_MESSAGE
+        setState(id, { error: msg })
+        status.value = msg
+      }
+    }
+  }
+
   /** `Add category "<name>"` on a row: make the category, show it in every list, then give it to the row as any other
    *  category edit (same PATCH, manual source, audit row). If making it fails the row is left as it was, with the reason. */
   async function addCategoryTo(id: string, name: string) {
@@ -333,5 +368,5 @@ export function createTxnTable(
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, addCategoryTo, confirmReview, useForAll }
+  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, setIncluded, addCategoryTo, confirmReview, useForAll }
 }
