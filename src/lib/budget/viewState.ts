@@ -245,6 +245,11 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     try {
       const loc = globalThis.location
       if (!budgetSectionOpen(loc.search)) return
+      // An entry of an earlier visit (after a reload, its history-step session is stale) was landed on: its path or
+      // loan is being set from the entry's own state, and the browser fires popstate at the other listeners (readUrl
+      // takes the page, range and person from the address) AFTER the reactive flush that would run this. Writing now
+      // would stamp the page still on screen onto that entry's address, so Back would never leave it.
+      if (drill?.settling || loanHist?.settling) return
       const search = searchWithState(loc.search, state)
       if (search !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + search + loc.hash)
     } catch {

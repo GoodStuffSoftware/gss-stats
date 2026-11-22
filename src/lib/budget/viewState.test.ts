@@ -573,4 +573,96 @@ describe('Budget pages: Overview and Loans', () => {
     expect(view.state.person).toBe('p2')
     w.unmount()
   })
+
+  describe('a reload between Overview (drilled) and a loan opened from the debt pie', () => {
+    // A tiny session history over happy-dom's history/location: entries with state and address, a cursor, and
+    // Back/Forward that move it the way a browser does (the entry's address and state, then an async popstate).
+    function simBrowser() {
+      const orig = { push: history.pushState.bind(history), replace: history.replaceState.bind(history) }
+      const here = () => ({ state: history.state as unknown, url: location.pathname + location.search })
+      const stack = [here()]
+      let at = 0
+      const popListeners: Array<(e: PopStateEvent) => void> = []
+      const addListener = window.addEventListener.bind(window)
+      const removeListener = window.removeEventListener.bind(window)
+      vi.spyOn(window, 'addEventListener').mockImplementation((type: string, fn: unknown, o?: unknown) => {
+        if (type === 'popstate') popListeners.push(fn as (e: PopStateEvent) => void)
+        else addListener(type, fn as EventListener, o as AddEventListenerOptions)
+      })
+      vi.spyOn(window, 'removeEventListener').mockImplementation((type: string, fn: unknown, o?: unknown) => {
+        if (type === 'popstate') { const i = popListeners.indexOf(fn as (e: PopStateEvent) => void); if (i >= 0) popListeners.splice(i, 1) }
+        else removeListener(type, fn as EventListener, o as EventListenerOptions)
+      })
+      vi.spyOn(history, 'pushState').mockImplementation((s, t, url) => {
+        orig.push(s, t, url)
+        stack.splice(at + 1)
+        stack.push(here())
+        at++
+      })
+      vi.spyOn(history, 'replaceState').mockImplementation((s, t, url) => {
+        orig.replace(s, t, url)
+        stack[at] = here()
+      })
+      vi.spyOn(history, 'go').mockImplementation((n = 0) => {
+        const to = Math.max(0, Math.min(stack.length - 1, at + n))
+        if (to === at) return
+        at = to
+        const e = stack[at]
+        setTimeout(async () => {
+          orig.replace(e.state, '', e.url)
+          // like a browser's own dispatch: the reactive flush (a microtask checkpoint) runs between two listeners
+          for (const fn of [...popListeners]) {
+            fn(new PopStateEvent('popstate', { state: e.state }))
+            await Promise.resolve()
+            await nextTick()
+          }
+        }, 0)
+      })
+      return {
+        go: async (n: number) => {
+          history.go(n)
+          await new Promise((r) => setTimeout(r, 5))
+          await nextTick()
+        },
+        /** A reload: the entry the user is on keeps its state and address; the page and this section start over. */
+        reload: (w: { unmount: () => void }) => {
+          const kept = stack[at]
+          w.unmount()
+          orig.replace(kept.state, '', kept.url)
+          stack[at] = kept
+        },
+        get length() {
+          return stack.length
+        },
+      }
+    }
+    const FUEL = { level: 'category', key: 'fuel', label: 'Fuel' } as const
+    const bPage = () => new URLSearchParams(location.search).get('b_page')
+
+    it('Back after the reload lands on Overview with its drill; Forward reopens the loan', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      first.view.setPage('loans', 'acct-1')
+      await nextTick()
+      expect(b.length).toBe(3) // the section entry, one drill level, one Loans entry holding the loan: no more
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1)
+      expect(bPage()).toBeNull()
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(bPage()).toBe('loans')
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
+  })
 })
