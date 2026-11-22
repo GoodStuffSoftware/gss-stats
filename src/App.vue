@@ -7,8 +7,8 @@ import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
-import { sessionExpired, reauth, checkSessionExpired } from './session'
-import { readViewerPrefs, writeViewerPrefs, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
+import { sessionExpired, reauth, checkSessionExpired, loadIdentity, signedInEmail } from './session'
+import { readViewerPrefs, writeViewerPrefs, setViewerLogin, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
 import { linkedPageId, searchWithPage } from './lib/pageLink'
 import { rootOf, drillTrail, drillParentFor, groupLandingPage, pagesToDelete, movePageToGroup, landingAfterDelete, orderedGroups, pathLabel, renameGroup, deleteGroup, type GroupResult, type RenameTarget } from './lib/nav'
 import { applyGroupDraft, applyPageDraft, type GroupDraft, type PageDraft } from './lib/wizards'
@@ -90,7 +90,14 @@ onMounted(async () => {
 
   // Load the durable config and the auto-built site tree in parallel; the tree must
   // be ready before charts fetch so the real-host allow-list applies from the start.
-  const [stored] = await Promise.all([readStoredLayout(), loadSites()])
+  // Who is signed in is read in the same round trip: this viewer's saved navigation state is keyed to the
+  // login, so it is applied only once the login is known (below, before the first page is chosen), and no
+  // one ever sees another login's state, or defaults, flash first.
+  const [stored] = await Promise.all([readStoredLayout(), loadSites(), loadIdentity()])
+  setViewerLogin(signedInEmail.value)
+  const saved = readViewerPrefs()
+  collapsedGroups.value = saved.collapsed ?? []
+  collapsedPages.value = saved.collapsedPages ?? []
   // A failed load still shows the built-in defaults (the charts work), but saving stays off
   // until "Try again" reads the stored layout.
   loadFailed.value = stored === LOAD_FAILED
@@ -540,9 +547,10 @@ function pickIcon(key: IconKey | null) {
 
 const drawerOpen = ref(false)
 const drawerBtn = ref<HTMLElement | null>(null)
-const collapsedGroups = ref<string[]>(readViewerPrefs().collapsed ?? [])
+// Both are filled from this login's saved state in onMounted, once /auth/me has named the login (nothing is saved while signed out).
+const collapsedGroups = ref<string[]>([])
 // Pages whose drill pages this viewer folded away in the drawer (remembered in this browser).
-const collapsedPages = ref<string[]>(readViewerPrefs().collapsedPages ?? [])
+const collapsedPages = ref<string[]>([])
 function togglePageFold(id: string) {
   const next = collapsedPages.value.includes(id) ? collapsedPages.value.filter((x) => x !== id) : [...collapsedPages.value, id]
   collapsedPages.value = next

@@ -10,7 +10,7 @@ import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { CONFIG_VERSION } from './lib/defaults'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
 
@@ -74,6 +74,7 @@ const remembered = () => JSON.parse(localStorage.getItem(VIEWER_PREFS_KEY) ?? 'n
 describe('App — the active page is per viewer (layout version 13)', () => {
   beforeEach(() => {
     localStorage.clear()
+    signInForTest()
     vi.mocked(saveConfig).mockClear()
     vi.mocked(loadConfig).mockImplementation(async () => storedV12())
   })
@@ -148,5 +149,61 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     // the breadcrumb shows the whole path
     expect(w.findAll('nav.crumbs .seg').map((x) => x.text())).toEqual(['BSBest Sudoku', 'Traffic', 'mobile', 'California'])
     w.unmount()
+  })
+})
+
+describe('App — saved navigation is keyed to the signed-in login', () => {
+  const ANN = 'ann@example.com'
+  const BOB = 'bob@example.com'
+  const LEGACY = 'gss-stats-nav'
+  const keys = () => Object.keys(localStorage).filter((k) => k.startsWith(LEGACY))
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(saveConfig).mockClear()
+    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
+  })
+
+  it('two logins on one browser keep separate pages; each lands where it left off', async () => {
+    signInForTest(ANN)
+    const a = await mountApp()
+    await goTo(a, 'Traffic')
+    a.unmount()
+    globalThis.window.history.replaceState(null, '', '/') // a fresh visit: the address bar named Ann's page
+    signInForTest(BOB)
+    const b = await mountApp()
+    expect(shownPage(b)).not.toBe('Traffic') // Bob's own first-time landing, not Ann's page
+    b.unmount()
+    globalThis.window.history.replaceState(null, '', '/')
+    signInForTest(ANN)
+    const again = await mountApp()
+    expect(shownPage(again)).toBe('Traffic')
+    again.unmount()
+    expect(keys().every((k) => /^gss-stats-nav:[0-9a-f]{14}$/.test(k))).toBe(true)
+  })
+
+  it('the first login adopts the legacy shared state, once', async () => {
+    localStorage.setItem(LEGACY, JSON.stringify({ active: 'bsk-launch' }))
+    globalThis.window.history.replaceState(null, '', '/')
+    signInForTest(ANN)
+    const a = await mountApp()
+    expect(shownPage(a)).toBe('Traffic')
+    a.unmount()
+    expect(localStorage.getItem(LEGACY)).toBeNull()
+    globalThis.window.history.replaceState(null, '', '/')
+    signInForTest(BOB)
+    const b = await mountApp()
+    expect(shownPage(b)).not.toBe('Traffic')
+    b.unmount()
+  })
+
+  it('signed out: nothing is read or written', async () => {
+    localStorage.setItem(LEGACY, JSON.stringify({ active: 'bsk-launch' }))
+    signInForTest(null)
+    const w = await mountApp()
+    expect(shownPage(w)).not.toBe('Traffic')
+    await goTo(w, 'Traffic')
+    w.unmount()
+    expect(keys()).toEqual([LEGACY])
+    expect(JSON.parse(localStorage.getItem(LEGACY)!)).toEqual({ active: 'bsk-launch' })
   })
 })

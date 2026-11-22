@@ -8,7 +8,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import { saveConfig, loadConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { clonePage, normalizeConfig } from './lib/defaults'
 import type { DashboardConfig } from './types'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
@@ -50,6 +50,7 @@ beforeEach(() => {
 })
 beforeEach(() => {
   localStorage.clear()
+  signInForTest()
   vi.mocked(saveConfig).mockClear()
   vi.mocked(loadConfig).mockImplementation(async () => stored())
   vi.stubGlobal('confirm', vi.fn(() => true))

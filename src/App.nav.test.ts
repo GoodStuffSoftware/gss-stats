@@ -9,7 +9,7 @@ import App from './App.vue'
 import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
-import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { PREFS_KEY as VIEWER_PREFS_KEY, signInForTest } from './testing/signedIn'
 import { clonePage, normalizeConfig } from './lib/defaults'
 import type { DashboardConfig } from './types'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
@@ -80,6 +80,7 @@ async function typeInto(input: HTMLInputElement, text: string) {
 describe('App — breadcrumb (Group / Page / Drill)', () => {
   beforeEach(() => {
     localStorage.clear()
+    signInForTest()
     vi.mocked(saveConfig).mockClear()
     vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
@@ -169,6 +170,7 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
 describe('App — / search', () => {
   beforeEach(() => {
     localStorage.clear()
+    signInForTest()
     vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
   const dialog = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Search pages"]')
@@ -225,6 +227,7 @@ describe('App — / search', () => {
 describe('App — page drawer, page menu, icon picker', () => {
   beforeEach(() => {
     localStorage.clear()
+    signInForTest()
     vi.mocked(saveConfig).mockClear()
     vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
