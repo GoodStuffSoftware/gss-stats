@@ -24,6 +24,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The browser's Back button climbs the Budget drill-down.** Each level you open adds one history entry, so Back (toolbar, mouse back button, Alt+Left, a trackpad swipe, Android back) goes up one level and Forward opens it again; jumping with the breadcrumb keeps Back and Forward consistent, and at the top Back works as before. Reloading the page keeps you at the level you were on (remembered in the tab, never in the address, so no category or store name appears in a link).
 
 ### Fixed
+- **Back after a reload leaves a loan.** After reloading on a loan opened from the Overview debt pie, Back now returns to the Overview as you left it instead of staying on Loans.
+- **Cosigned debt is out of the Overview debt total.** The debt pie and its total leave cosigned debt out, as the Loans page does, with a "+ cosigned" line and a badged list so it can still be opened.
+- **Loan tables line up.** The number column headings in a loan's Payments and Interest by statement tables now sit right-aligned over their figures.
+- **The Budget crumb keeps the current page on a narrow phone.** At 320 px the parent crumb is cut short first, so "Loans" stays visible instead of being clipped.
 - **Budget pie labels stay inside their slice.** A label is drawn only when all of its text fits within the slice, and more slices get one: a long name wraps on two lines, a narrow slice can carry its text across the ring instead of along it, and the amount or share is dropped before the name.
 - **Budget legends read better.** Purchases show a short date ("Aug 11") instead of the full ISO date, a long debt name wraps instead of being cut off, the two panel headers line up on desktop, and every category gets its own colour.
 - **Budget shows why a purchase needs review, and lets you confirm it in one tap.** A flagged row now says why under the merchant (and on hover), and a small ✓ "Looks right" button saves it as it stands, so it leaves the review list and the "Needs review" count drops straight away.

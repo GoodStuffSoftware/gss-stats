@@ -64,4 +64,14 @@ describe('DebtPanel', () => {
     expect(w.get('[data-testid="debt-none"]').text()).toBe('No balances yet.')
     expect(w.get('[data-testid="debt-total"]').text()).toContain('$0.00')
   })
+
+  it('a cosigned debt stays out of the pie and the total, shows its own line, and still lists with a badge', async () => {
+    const w = mountPanel({ debts: [debt('a', 90000), debt('b', 400000, { cosigned: true })] })
+    expect(w.findComponent(DrillPie).props('slices').map((s: { key: string }) => s.key)).toEqual(['a'])
+    expect(w.get('[data-testid="debt-total"]').text()).toContain('$900.00')
+    expect(w.get('[data-testid="debt-cosigned"]').text()).toBe('+ $4,000.00 cosigned')
+    expect(w.get('[data-testid="cosigned-badge"]').text()).toBe('Cosigned')
+    await w.get('[data-testid="debt-open-b"]').trigger('click')
+    expect(w.emitted('open')).toEqual([['b']])
+  })
 })

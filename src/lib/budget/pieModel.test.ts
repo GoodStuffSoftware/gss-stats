@@ -90,6 +90,11 @@ describe('debtSlices', () => {
     expect(r.noBalance.map((d) => d.accountId)).toEqual(['b'])
     expect(r.settled.map((d) => d.accountId)).toEqual(['c'])
   })
+  it('a cosigned debt with a balance stays out of the pie and is listed apart', () => {
+    const r = debtSlices([debt('a', 100000), debt('b', 400000, { cosigned: true })])
+    expect(r.slices.map((s) => s.key)).toEqual(['a'])
+    expect(r.cosigned.map((d) => d.accountId)).toEqual(['b'])
+  })
   it('a debt keeps its colour by its place in the list', () => {
     const all = debtSlices([debt('a', 100), debt('b', 200)]).slices
     expect(all.find((s) => s.key === 'b')!.color).toBe(CATEGORY_PALETTE[1])
