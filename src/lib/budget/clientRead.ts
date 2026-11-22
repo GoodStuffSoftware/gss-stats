@@ -10,7 +10,7 @@
 //     section editable (a listed viewer has full Budget rights; the server still checks every write).
 import { checkSessionExpired } from '../../session'
 import type {
-  AccessResponse, ApiError, BudgetErrorCode, DebtDetail, DebtsResponse, ManualBalance, MetaResponse, PersonFilter,
+  AccessResponse, ApiError, BudgetErrorCode, DebtDetail, DebtsResponse, LoansResponse, ManualBalance, MetaResponse, PersonFilter,
   SummaryQuery, SummaryResponse,
 } from './types'
 
@@ -92,6 +92,11 @@ export function fetchSummary(q: SummaryQuery): Promise<SummaryResponse> {
 
 export function fetchDebts(person: PersonFilter): Promise<DebtsResponse> {
   return request<DebtsResponse>(`/api/budget/debts${qs({ person })}`)
+}
+
+/** GET /api/budget/loans: every debt with its terms, newest statement extras, promos and recent monthly payments. */
+export function fetchLoans(person: string | null): Promise<LoansResponse> {
+  return request<LoansResponse>(`/api/budget/loans${qs({ person: person ?? 'all' })}`)
 }
 
 export function fetchDebtDetail(accountId: string): Promise<DebtDetail> {

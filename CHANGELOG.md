@@ -8,6 +8,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 
 ### Added
+- **Loans list in Budget** — every loan and card with its balance, rate, monthly payment, interest, payoff month, due date and soonest promo end, under totals for what is owed and paid.
 - **Budget section** — a private section for two allowed accounts, with a drill-down spending pie, a separate debt pie and a transaction table whose category edits update the chart.
 - **Budget is in the ☰ menu.** Accounts that may open Budget see it under Overview, marked as current while it is open; it replaces the top-bar button, and other accounts see nothing new.
 - **Budget has a Loans page.** The ☰ menu lists Overview and Loans under Budget, the top bar shows Budget › Loans, and Budget reopens on the page you used last. Opening a debt from Overview now lands on the Loans page, and Back returns to Overview as you left it.
