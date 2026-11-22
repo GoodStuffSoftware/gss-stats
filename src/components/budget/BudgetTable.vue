@@ -9,9 +9,12 @@
 // - The category list is searchable and offers `Add category "<text>"` (POST /categories, then the same edit); the new
 //   category is reported up (`category-added`) so every list and the pie know it without a reload.
 // - After a category change the row offers "Use for all <merchant>" (POST /rules).
+// - Tapping (or clicking, or focusing by keyboard) the merchant opens a small tip with the full merchant text and the raw
+//   statement description (what desktop hover shows through `title`). One tip at a time; a tap outside, a second tap on the
+//   merchant, Escape, a scroll or a resize closes it. A tap on the merchant does nothing else (the row has no click gesture).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
@@ -72,6 +75,68 @@ function onEdit(rowKey: string, field: string, value: string) {
 function onAction(rowKey: string, id: string) {
   if (id === 'rule') void model.useForAll(rowKey)
 }
+
+// The merchant tip (a toggletip: opens on tap, so touch has what hover gives a mouse).
+const TIP_WIDTH = 320
+const TIP_MARGIN = 8
+interface MerchantTip { id: string; name: string; description: string; style: Record<string, string> }
+const tip = ref<MerchantTip | null>(null)
+function closeTip() {
+  tip.value = null
+}
+function openTip(row: Txn, el: HTMLElement) {
+  const r = el.getBoundingClientRect()
+  const vw = document.documentElement.clientWidth || window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.max(120, Math.min(TIP_WIDTH, vw - TIP_MARGIN * 2))
+  const left = Math.max(TIP_MARGIN, Math.min(r.left, vw - TIP_MARGIN - width))
+  const style: Record<string, string> = { left: `${left}px`, width: `${width}px` }
+  // Below the merchant, unless it sits in the lower part of the screen.
+  if (r.bottom > vh * 0.6) style.bottom = `${Math.max(TIP_MARGIN, vh - r.top + 6)}px`
+  else style.top = `${r.bottom + 6}px`
+  tip.value = { id: row.id, name: row.merchantName || row.description, description: row.description, style }
+}
+function toggleTip(row: Txn, e: Event) {
+  if (tip.value?.id === row.id) closeTip()
+  else openTip(row, e.currentTarget as HTMLElement)
+}
+function focusTip(row: Txn, e: FocusEvent) {
+  // Keyboard focus only: a tap focuses the button too, and its click must not find the tip already open and close it.
+  const el = e.currentTarget as HTMLElement
+  let keyboard = false
+  try {
+    keyboard = el.matches(':focus-visible')
+  } catch {
+    keyboard = false
+  }
+  if (keyboard && tip.value?.id !== row.id) openTip(row, el)
+}
+function onDocPointer(e: Event) {
+  const t = e.target as Element | null
+  if (t?.closest?.('.bt-merchant, .bt-tip')) return
+  closeTip()
+}
+function onDocKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeTip()
+}
+function addTipListeners() {
+  document.addEventListener('pointerdown', onDocPointer, true)
+  document.addEventListener('keydown', onDocKey)
+  window.addEventListener('scroll', closeTip, true)
+  window.addEventListener('resize', closeTip)
+}
+function removeTipListeners() {
+  document.removeEventListener('pointerdown', onDocPointer, true)
+  document.removeEventListener('keydown', onDocKey)
+  window.removeEventListener('scroll', closeTip, true)
+  window.removeEventListener('resize', closeTip)
+}
+watch(
+  () => tip.value !== null,
+  (open) => (open ? addTipListeners() : removeTipListeners()),
+)
+onBeforeUnmount(removeTipListeners)
+
 const rowLabel = (t: Txn) => t.merchantName || t.description
 const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included === false
 </script>
@@ -102,7 +167,16 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       @action="onAction"
     >
       <template #cell-merchant="{ row }">
-        <span class="bt-merchant" :title="row.description">{{ row.merchantName || row.description }}</span>
+        <button
+          type="button"
+          class="bt-merchant"
+          :title="row.description"
+          :aria-expanded="tip?.id === row.id"
+          :aria-describedby="tip?.id === row.id ? 'bt-tip' : undefined"
+          data-testid="merchant-tip-toggle"
+          @click="toggleTip(row, $event)"
+          @focus="focusTip(row, $event)"
+        >{{ row.merchantName || row.description }}</button>
         <span v-if="row.needsReview" class="bt-flags">
           <span class="bt-badge" :title="reviewReasonText(row.reviewReason) ?? 'Needs a look'">Review</span>
           <button
@@ -178,6 +252,10 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         </div>
       </template>
     </EditableTable>
+    <div v-if="tip" id="bt-tip" class="bt-tip" role="tooltip" :style="tip.style" data-testid="merchant-tip">
+      <span class="bt-tip-name">{{ tip.name }}</span>
+      <span v-if="tip.description && tip.description !== tip.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.description }}</span>
+    </div>
   </section>
 </template>
 
@@ -186,9 +264,42 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
   min-width: 0;
 }
 .bt-merchant {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bt-merchant:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: 2px;
+}
+.bt-tip {
+  position: fixed;
+  z-index: 50;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.bt-tip-desc {
+  font-size: 12px;
+  color: rgb(var(--ink-2));
 }
 .bt-note {
   display: block;

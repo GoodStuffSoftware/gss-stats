@@ -11,6 +11,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **No more Exclude in the category picker** — the picker no longer offers Exclude, since taking a purchase out of the totals is the Count in totals switch; purchases excluded the old way are switched off there instead.
 
 ### Added
+- **Tap the merchant for its full name** — tapping a merchant in the Budget transactions list (or focusing it with the keyboard) opens a small tip with the full merchant text and the statement description, the same detail desktop hover shows; tap elsewhere or tap it again to close.
 - **Count in totals switch for each purchase** — each purchase, refund and fee now has a switch right of its amount, on by default; turning it off takes it out of every spending total, pie and trend, and turning it back on restores it. Transfers, card and loan payments and income have no switch, since they never count as spending.
 - **Months shown with the Budget range** — the range picker and a line under it now name the months covered (for example "Last 3 months · Sep – Nov 2026", and the line under it reads "Covers Sep – Nov 2026 (to date)" when it runs to today), and the loan payoff average names its months.
 - **Loan payoff without a scheduled payment** — a loan with no scheduled payment now gets its payoff estimate from the average of the last 3 full months of payments, labelled as such.
