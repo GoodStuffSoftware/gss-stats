@@ -209,7 +209,7 @@ describe('BudgetTable editing', () => {
     const w = await mountTable()
     await comboOf(w, 't1').trigger('click')
     const options = optionsShown(w).filter((o) => o.element.closest('[role="group"][aria-label="Not spending"]')).map((o) => o.text())
-    expect(options).toEqual(['Transfer', 'Income', 'Exclude'])
+    expect(options).toEqual(['Transfer', 'Income'])
     await comboOf(w, 't1').trigger('keydown', { key: 'Escape' })
     await pick(w, 't1', 'Transfer')
     await flushPromises()

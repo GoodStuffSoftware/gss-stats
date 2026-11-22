@@ -106,7 +106,8 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    false) writes it, and a value equal to the current one writes nothing. The switch is shown on spend, refund and fee rows
    only (the kinds that are spending; a row already excluded keeps it so it can be turned back on). No partial index: no
    code reads `included = 0`. The database is shared by Preview and Production, so applying the migration for the preview
-   changes production's file too; it is additive, and the code now on production names its columns, so it is unaffected.
+   changes production's file too; the category picker no longer offers "Exclude" (kind `other`): the flag replaced it, and
+   rows a person had excluded that way were converted once by a private script (`included = 0`, kind restored). It is additive, and the code now on production names its columns, so it is unaffected.
    Rollback is the commented block at the end of the migration (drop the three columns, then delete its `d1_migrations`
    row so a later apply re-adds them), with the pre-migration Time Travel bookmark as the last resort.
    **Trade-off kept on purpose:** the load's pairing update (`pairUpdateSql`) skips any row whose `updated_by` holds an

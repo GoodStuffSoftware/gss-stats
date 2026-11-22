@@ -49,8 +49,8 @@ describe('helpers', () => {
   })
   it('category choices: categories by sort, Uncategorized, then the Not spending group', () => {
     const o = categoryOptions(CATS)
-    expect(o.map((x) => x.label)).toEqual(['Groceries', 'Fuel', 'Other', 'Uncategorized', 'Transfer', 'Income', 'Exclude'])
-    expect(o.filter((x) => x.group).map((x) => x.group)).toEqual(['Not spending', 'Not spending', 'Not spending'])
+    expect(o.map((x) => x.label)).toEqual(['Groceries', 'Fuel', 'Other', 'Uncategorized', 'Transfer', 'Income'])
+    expect(o.filter((x) => x.group).map((x) => x.group)).toEqual(['Not spending', 'Not spending'])
   })
   it('a row of another non-spending kind keeps a (disabled) choice of its own', () => {
     const row = txn('t1', { kind: 'card_payment' })
@@ -61,11 +61,11 @@ describe('helpers', () => {
     expect(selectValueFor(txn('t1'))).toBe('groceries')
     expect(selectValueFor(txn('t1', { categoryId: null }))).toBe('')
     expect(selectValueFor(txn('t1', { kind: 'transfer' }))).toBe('kind:transfer')
-    expect(selectValueFor(txn('t1', { kind: 'other' }))).toBe('kind:exclude')
+    expect(selectValueFor(txn('t1', { kind: 'other' }))).toBe('kind:other')
     expect(parseSelection('fuel')).toEqual({ categoryId: 'fuel' })
     expect(parseSelection('')).toEqual({ categoryId: null })
     expect(parseSelection('kind:income')).toEqual({ kind: 'income' })
-    expect(parseSelection('kind:exclude')).toEqual({ kind: 'other' })
+    expect(parseSelection('kind:exclude')).toEqual({})
     expect(parseSelection('kind:card_payment')).toEqual({})
   })
   it('columns: the category is the only editor; the account shows on the card (line 2, above the category)', () => {

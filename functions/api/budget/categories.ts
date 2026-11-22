@@ -2,7 +2,7 @@
 //
 // POST /api/budget/categories: make a category (the picker's `Add category "<text>"`).
 // Body (CategoryCreateRequest): `name`. The name is trimmed, 1-40 characters, no control characters, and not one
-// of the picker's own choices (Uncategorized, Transfer, Income, Exclude, Not spending); else 400.
+// of the picker's own choices (Uncategorized, Transfer, Income, Not spending; Exclude stays reserved); else 400.
 // A name that matches a visible category, ignoring case, is NOT an error: the answer is 200 with that category and
 // `created: false` (the caller applies it the same way; two adds of one name at the very same moment can still make
 // two categories with the same label, which is harmless). A new category answers 201 with `created: true`.

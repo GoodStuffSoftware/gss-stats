@@ -35,13 +35,12 @@ export function formatAmount(cents: number): string {
 export const NOT_SPENDING: ReadonlyArray<{ value: string; label: string; kind: TxnKind }> = [
   { value: 'kind:transfer', label: 'Transfer', kind: 'transfer' },
   { value: 'kind:income', label: 'Income', kind: 'income' },
-  { value: 'kind:exclude', label: 'Exclude', kind: 'other' },
 ]
 export const NOT_SPENDING_GROUP = 'Not spending'
 const UNCATEGORIZED_VALUE = ''
 
 const KIND_CHOICE: Partial<Record<TxnKind, string>> = {
-  income: 'kind:income', interest_earned: 'kind:income', other: 'kind:exclude',
+  income: 'kind:income', interest_earned: 'kind:income',
 }
 const kindWords = (k: string) => k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 
