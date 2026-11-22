@@ -40,7 +40,7 @@ function route(detail: DebtDetailData | 'fail' = DETAIL, put?: (body: unknown) =
   vi.stubGlobal('fetch', fetchMock)
 }
 const mounted: VueWrapper[] = []
-async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean; recentPaymentsCents: number[] }> = {}) {
+async function mountDetail(props: Partial<{ accountId: string; canEdit: boolean; recentPaymentsCents: number[]; recentMonths: string[] }> = {}) {
   const w = mount(DebtDetail, {
     props: { accountId: 'acct-9', canEdit: true, dark: false, ...props },
     global: { stubs: { BaseChart: ChartStub } },
