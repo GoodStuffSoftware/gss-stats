@@ -210,3 +210,80 @@ describe('DebtDetail: manual balance form', () => {
     expect(w.get('[data-testid="bal-error"]').text()).toContain('Check your connection')
   })
 })
+
+// ── Loan detail: statement facts, terms, promos, payoff ─────────────────────────────────────────────────
+const isoDaysFromToday = (n: number) => {
+  const d = new Date(`${todayIso()}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const LOAN: DebtDetailData = {
+  ...DETAIL,
+  account: { ...DETAIL.account, id: 'acct-5', label: 'Home loan', kind: 'loan', creditLimitCents: null, aprBp: 600 },
+  terms: {
+    accountId: 'acct-5', originalCents: 25000000, openedOn: '2020-03-01', maturityOn: '2050-03-01', termMonths: 360,
+    paymentCents: 150000, paymentEvery: 'monthly', cosigned: true, updatedAt: '2026-11-01', updatedBy: 'test',
+  },
+  latest: { periodEnd: '2026-10-31', minDueCents: 150000, dueDate: '2026-11-15', payoffCents: 91000, escrowCents: 40000, interestCents: 1800 },
+  promos: [],
+}
+
+describe('DebtDetail: loan facts', () => {
+  it('shows statement facts, terms and the cosigned badge', async () => {
+    route(LOAN)
+    const w = await mountDetail()
+    const t = (id: string) => w.get(`[data-testid="${id}"]`).text()
+    expect(t('fact-stmt-balance')).toBe('$900.00')
+    expect(t('fact-payoff')).toBe('$910.00')
+    expect(w.text()).toContain('good through Oct 31')
+    expect(t('fact-due')).toContain('Nov 15')
+    expect(t('fact-min-due')).toBe('$1,500.00')
+    expect(t('fact-principal')).toBe('$300.00')
+    expect(t('fact-interest')).toBe('$18.00')
+    expect(t('fact-escrow')).toBe('$400.00')
+    expect(t('fact-original')).toBe('$250,000.00')
+    expect(t('fact-term')).toBe('360 months')
+    expect(t('fact-payment')).toBe('$1,500.00')
+    expect(w.text()).toContain('monthly')
+    expect(w.find('[data-testid="cosigned-badge"]').exists()).toBe(true)
+  })
+
+  it('shows a dash for what is absent and one line when nothing is known', async () => {
+    route(EMPTY)
+    const w = await mountDetail()
+    expect(w.find('[data-testid="no-statement-details"]').text()).toBe('No statement details yet')
+    expect(w.find('[data-testid="statement-facts"]').exists()).toBe(false)
+    route({ ...LOAN, latest: { ...LOAN.latest!, minDueCents: null, escrowCents: null } })
+    const w2 = await mountDetail()
+    expect(w2.get('[data-testid="fact-min-due"]').text()).toBe('—')
+    expect(w2.get('[data-testid="fact-escrow"]').text()).toBe('—')
+  })
+
+  it('estimates the payoff and the monthly interest beside the last actual', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: 30000 } })
+    const w = await mountDetail()
+    expect(w.get('[data-testid="payoff-months"]').text()).toMatch(/^\d+ months \(\w{3} \d{4}\)$/)
+    expect(w.get('[data-testid="payoff-interest"]').text()).toBe('$4.50')
+    expect(w.get('[data-testid="payoff-estimate"]').text()).toContain('last statement: $18.00')
+  })
+
+  it('says so when the payment does not beat the interest', async () => {
+    route({ ...LOAN, terms: { ...LOAN.terms!, paymentCents: 100 } })
+    const w = await mountDetail()
+    expect(w.get('[data-testid="payoff-months"]').text()).toBe('Not paid off at this payment')
+  })
+
+  it('lists promos soonest first and flags those ending within 60 days', async () => {
+    const promo = (seq: number, endsOn: string | null) => ({
+      accountId: 'acct-5', periodEnd: '2026-10-31', seq, balanceCents: 100000 * seq, aprBp: 0, endsOn, deferredInterestCents: 12345,
+    })
+    route({ ...LOAN, promos: [promo(1, isoDaysFromToday(200)), promo(2, isoDaysFromToday(30))] })
+    const w = await mountDetail()
+    const items = w.findAll('[data-testid="promo"]')
+    expect(items).toHaveLength(2)
+    expect(items[0].text()).toContain('$2,000.00')
+    expect(items[0].text()).toContain('$123.45')
+    expect(items[0].classes()).toContain('dd-promo-soon')
+    expect(items[1].classes()).not.toContain('dd-promo-soon')
+  })
+})
