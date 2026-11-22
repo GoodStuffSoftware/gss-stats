@@ -20,10 +20,11 @@ const DETAIL: DebtDetailData = {
     { periodEnd: '2026-10-31', aprBp: 1999, interestCents: 1800, principalPaidCents: 30000, advancesCents: 0 },
   ],
   payments: [{ id: 'pay-1', postedDate: '2026-10-05', amountCents: 30000, principalCents: 28200, interestCents: 1800 }],
+  terms: null, latest: null, promos: [],
 }
 const EMPTY: DebtDetailData = {
   account: { ...DETAIL.account, id: 'acct-7', label: 'Loan B', kind: 'external_debt', last4: null, creditLimitCents: null, aprBp: 650 },
-  history: [], periods: [], payments: [],
+  history: [], periods: [], payments: [], terms: null, latest: null, promos: [],
 }
 
 const ChartStub = defineComponent({ name: 'BaseChart', props: { config: Object, drillOpen: Boolean }, emits: ['point'], template: '<div class="chart-stub" />' })

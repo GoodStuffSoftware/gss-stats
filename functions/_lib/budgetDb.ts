@@ -13,8 +13,8 @@
 //  - every response is `private, no-store` (budgetJson); nothing here touches the shared edge cache.
 
 import type {
-  Account, AccountKind, Category, Cents, DebtDetail, DebtSlice, IsoDate, MerchantRule, Person, ReviewReason, SummaryQuery,
-  SummaryResponse, SummarySlice, Txn, TxnKind, TxnQuery,
+  Account, AccountKind, Category, Cents, DebtDetail, DebtSlice, DebtTerms, IsoDate, LatestStatement, LoanRow, LoansResponse, MerchantRule,
+  Person, ReviewReason, StatementPromo, SummaryQuery, SummaryResponse, SummarySlice, Txn, TxnKind, TxnQuery,
 } from '../../src/lib/budget/types'
 import { SPENDING_KINDS, TXN_KINDS, UNCATEGORIZED } from '../../src/lib/budget/types'
 import { categorize, ruleIdFor } from '../../src/lib/budget/rules'
@@ -678,6 +678,94 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
   })
 }
 
+// ---------- loan reads (migrations/gss-budget/0002_loans.sql) -------------------------------------
+
+const TERMS_COLUMNS = 'account_id, original_cents, opened_on, maturity_on, term_months, payment_cents, payment_every, cosigned, updated_at, updated_by'
+const LATEST_COLUMNS = 'account_id, period_end, min_due_cents, due_date, payoff_cents, escrow_cents, interest_cents'
+const PROMO_COLUMNS = 'account_id, period_end, seq, balance_cents, apr_bp, ends_on, deferred_interest_cents'
+export const TERMS_SQL = `SELECT ${TERMS_COLUMNS} FROM debt_terms WHERE account_id = ?`
+export const LATEST_ONE_SQL = `SELECT ${LATEST_COLUMNS} FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 1`
+/** The promos of the newest statement, in printed order (PK prefix walk). */
+export const PROMOS_ONE_SQL = `SELECT ${PROMO_COLUMNS} FROM statement_promos WHERE account_id = ?1
+  AND period_end = (SELECT MAX(period_end) FROM statements WHERE account_id = ?1) ORDER BY seq`
+
+const mapTerms = (r: Row): DebtTerms => ({
+  accountId: str(r.account_id), originalCents: numOrNull(r.original_cents), openedOn: strOrNull(r.opened_on) as IsoDate | null,
+  maturityOn: strOrNull(r.maturity_on) as IsoDate | null, termMonths: numOrNull(r.term_months), paymentCents: numOrNull(r.payment_cents),
+  paymentEvery: strOrNull(r.payment_every) as DebtTerms['paymentEvery'], cosigned: Number(r.cosigned) === 1,
+  updatedAt: str(r.updated_at), updatedBy: str(r.updated_by),
+})
+const mapLatest = (r: Row): LatestStatement => ({
+  periodEnd: str(r.period_end) as IsoDate, minDueCents: numOrNull(r.min_due_cents), dueDate: strOrNull(r.due_date) as IsoDate | null,
+  payoffCents: numOrNull(r.payoff_cents), escrowCents: numOrNull(r.escrow_cents), interestCents: numOrNull(r.interest_cents),
+})
+const mapPromo = (r: Row): StatementPromo => ({
+  accountId: str(r.account_id), periodEnd: str(r.period_end) as IsoDate, seq: Number(r.seq), balanceCents: Number(r.balance_cents),
+  aprBp: numOrNull(r.apr_bp), endsOn: strOrNull(r.ends_on) as IsoDate | null, deferredInterestCents: numOrNull(r.deferred_interest_cents),
+})
+
+const LOAN_SCOPE = `SELECT id FROM accounts WHERE is_debt = 1 AND archived = 0 AND (?1 = 'all' OR person_id = ?1 OR person_id IS NULL)`
+/**
+ * Payments per calendar month, bounded by posted_date ([?2, ?3)): an external debt's rows are linked by
+ * debt_account_id (idx_txn_debt), every other debt's by its own account (partial idx_txn_pay), as in
+ * DEBT_PAYMENTS_SQL. Amounts are what was paid toward the debt, so positive. The test asserts both plans.
+ */
+export const LOAN_PAYMENTS_SQL = {
+  external: `SELECT debt_account_id AS account_id, substr(posted_date, 1, 7) AS month, SUM(ABS(amount_cents)) AS cents FROM transactions
+    WHERE debt_account_id IN (SELECT id FROM (${LOAN_SCOPE}) WHERE id IN (SELECT id FROM accounts WHERE kind = 'external_debt'))
+      AND posted_date >= ?2 AND posted_date < ?3 GROUP BY debt_account_id, month`,
+  account: `SELECT account_id, substr(posted_date, 1, 7) AS month, SUM(ABS(amount_cents)) AS cents FROM transactions INDEXED BY idx_txn_pay
+    WHERE account_id IN (SELECT id FROM (${LOAN_SCOPE}) WHERE id IN (SELECT id FROM accounts WHERE kind <> 'external_debt'))
+      AND kind IN ('card_payment','loan_payment') AND posted_date >= ?2 AND posted_date < ?3 GROUP BY account_id, month`,
+} as const
+
+/** The last `count` FULL calendar months before `now` (UTC), oldest first, and the [from, to) date bounds. */
+export function lastFullMonths(now: Date, count = 3): { months: string[]; from: IsoDate; to: IsoDate } {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const months: string[] = []
+  for (let i = count; i >= 1; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+    months.push(`${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`)
+  }
+  return { months, from: `${months[0]}-01` as IsoDate, to: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-01` as IsoDate }
+}
+
+/** Everything the Loans page needs; the debt rows are exactly loadDebts' (same scope, same newer-wins rule). */
+export async function loadLoans(db: D1Database, person: string, now: Date = new Date()): Promise<LoansResponse> {
+  const debts = await loadDebts(db, person)
+  const { months, from, to } = lastFullMonths(now)
+  const [terms, latest, promos, ext, own] = await db.batch<Row>([
+    db.prepare(`SELECT ${TERMS_COLUMNS} FROM debt_terms WHERE account_id IN (${LOAN_SCOPE})`).bind(person),
+    db.prepare(
+      `SELECT ${LATEST_COLUMNS} FROM statements s WHERE s.account_id IN (${LOAN_SCOPE})
+         AND s.period_end = (SELECT MAX(s2.period_end) FROM statements s2 WHERE s2.account_id = s.account_id)`,
+    ).bind(person),
+    db.prepare(
+      `SELECT ${PROMO_COLUMNS} FROM statement_promos p WHERE p.account_id IN (${LOAN_SCOPE})
+         AND p.period_end = (SELECT MAX(s.period_end) FROM statements s WHERE s.account_id = p.account_id) ORDER BY p.account_id, p.seq`,
+    ).bind(person),
+    db.prepare(LOAN_PAYMENTS_SQL.external).bind(person, from, to),
+    db.prepare(LOAN_PAYMENTS_SQL.account).bind(person, from, to),
+  ])
+  const termsBy = new Map(terms.results.map((r) => [str(r.account_id), mapTerms(r)]))
+  const latestBy = new Map(latest.results.map((r) => [str(r.account_id), mapLatest(r)]))
+  const promosBy = new Map<string, StatementPromo[]>()
+  for (const r of promos.results) {
+    const p = mapPromo(r)
+    promosBy.set(p.accountId, [...(promosBy.get(p.accountId) ?? []), p])
+  }
+  const paidBy = new Map<string, number>()
+  for (const r of [...ext.results, ...own.results]) paidBy.set(`${str(r.account_id)}|${str(r.month)}`, Number(r.cents))
+  const rows: LoanRow[] = debts.map((d) => ({
+    ...d,
+    terms: termsBy.get(d.accountId) ?? null,
+    latest: latestBy.get(d.accountId) ?? null,
+    promos: promosBy.get(d.accountId) ?? [],
+    payments: months.map((month) => ({ month, amountCents: paidBy.get(`${d.accountId}|${month}`) ?? 0 })),
+  }))
+  return { debts: rows, months }
+}
+
 /**
  * The debt detail's payment list, newest 60. Each reads only the newest 60 index entries: idx_txn_debt
  * (debt_account_id, posted_date, id) and the partial idx_txn_pay (account_id, posted_date, id) walk in the
@@ -693,12 +781,15 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
   if (!acct) return null
   const account = mapAccount(acct)
   const paymentSql = account.kind === 'external_debt' ? DEBT_PAYMENTS_SQL.external : DEBT_PAYMENTS_SQL.account
-  const [statements, manual, payments] = await db.batch<Row>([
+  const [statements, manual, payments, terms, latest, promos] = await db.batch<Row>([
     db.prepare(
       `SELECT period_end, closing_balance_cents, apr_bp, interest_cents, principal_paid_cents, advances_cents FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 24`,
     ).bind(id),
     db.prepare(`SELECT as_of, balance_cents FROM debt_balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 24`).bind(id),
     db.prepare(paymentSql).bind(id),
+    db.prepare(TERMS_SQL).bind(id),
+    db.prepare(LATEST_ONE_SQL).bind(id),
+    db.prepare(PROMOS_ONE_SQL).bind(id),
   ])
   const history: DebtDetail['history'] = [
     ...statements.results.filter((r) => r.closing_balance_cents !== null).map((r) => ({ asOf: str(r.period_end), balanceCents: Number(r.closing_balance_cents), source: 'statement' as const })),
@@ -710,6 +801,9 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
   })).reverse()
   return {
     account, history, periods,
+    terms: terms.results[0] ? mapTerms(terms.results[0]) : null,
+    latest: latest.results[0] ? mapLatest(latest.results[0]) : null,
+    promos: promos.results.map(mapPromo),
     // Amounts are what was paid toward the debt: positive, whichever side of the move the row sits on.
     payments: payments.results.map((r) => ({
       id: str(r.id), postedDate: str(r.posted_date), amountCents: Math.abs(Number(r.amount_cents)),
