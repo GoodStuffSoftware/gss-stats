@@ -2722,6 +2722,15 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `PATCH transactions/:id`), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
   `debts/:id`, `debts/:id/balance`). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
+- **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:
+  original amount, opened and maturity dates, term, scheduled payment and cadence, cosigned flag),
+  `statements.escrow_cents` and `payoff_cents` (NULL = not printed or not loaded), and `statement_promos`
+  (promotional or deferred-interest balances on one statement, keyed account, period end, seq). Existing rows
+  and columns do not change and the deployed code ignores the new objects. Only the private load writes them
+  (no API route yet). It is applied by hand like 0001 (`wrangler d1 migrations apply gss-budget`): Time Travel
+  bookmark first, one apply, one aggregate check. The database is shared by Preview and Production, so a
+  preview apply changes production's file too. The rollback is the comment block at the end of the file (it
+  cannot be a second `.sql` there, since every file in the directory is applied); the tests run both ways.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
   `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no
