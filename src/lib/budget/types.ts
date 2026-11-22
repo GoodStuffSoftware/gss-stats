@@ -96,6 +96,16 @@ export interface DebtDetail { account: Account
     principalPaidCents: Cents | null; advancesCents: Cents | null }>
   payments: Array<{ id: string; postedDate: IsoDate; amountCents: Cents; principalCents: Cents | null; interestCents: Cents | null }> }
 export interface ManualBalance { asOf: IsoDate; balanceCents: Cents; aprBp?: number | null }
+/** migrations/gss-budget/0002_loans.sql. `debt_terms`: one row per debt, written only by the private load. */
+export type PaymentEvery = 'monthly' | 'semimonthly' | 'biweekly'
+export interface DebtTerms { accountId: string; originalCents: Cents | null; openedOn: IsoDate | null; maturityOn: IsoDate | null
+  termMonths: number | null; paymentCents: Cents | null; paymentEvery: PaymentEvery | null; cosigned: boolean
+  updatedAt: string; updatedBy: string }
+/** The two `statements` columns 0002 adds (NULL = not printed or not loaded yet), keyed by the statement's primary key. */
+export interface StatementExtras { accountId: string; periodEnd: IsoDate; escrowCents: Cents | null; payoffCents: Cents | null }
+/** `statement_promos`: a promotional or deferred-interest balance printed on one statement; `seq` orders them (1..50). */
+export interface StatementPromo { accountId: string; periodEnd: IsoDate; seq: number; balanceCents: Cents
+  aprBp: number | null; endsOn: IsoDate | null; deferredInterestCents: Cents | null }
 export type BudgetErrorCode = 'budget_denied' | 'bad_request' | 'not_found' | 'conflict' | 'method_not_allowed'
   | 'too_large' | 'budget_db_missing' | 'auth_not_configured'
 export interface ApiError { error: BudgetErrorCode; message?: string; current?: Txn }
