@@ -377,7 +377,7 @@ describe('useBudgetViewState: browser Back and Forward over the drill levels', (
     history.replaceState(null, '', '/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
     pop({ [MARK_KEY]: { s: 'an-older-visit', d: 1 } })
     expect(view.state).toMatchObject({ person: 'p2', from: '2026-10-01' })
-    await new Promise((r) => setTimeout(r, 5)) // the entry is adopted afterwards
+    await new Promise((r) => setTimeout(r, 20)) // the popstate, a bounce go() and its landing all settle // the entry is adopted afterwards
     expect(readMark(history.state)).toMatchObject({ s: session(), d: 0 })
     expect(push).not.toHaveBeenCalled()
     w.unmount()
@@ -621,7 +621,7 @@ describe('Budget pages: Overview and Loans', () => {
       return {
         go: async (n: number) => {
           history.go(n)
-          await new Promise((r) => setTimeout(r, 5))
+          await new Promise((r) => setTimeout(r, 20)) // the popstate, a bounce go() and its landing all settle
           await nextTick()
         },
         /** A reload: the entry the user is on keeps its state and address; the page and this section start over. */
@@ -633,6 +633,9 @@ describe('Budget pages: Overview and Loans', () => {
         },
         get length() {
           return stack.length
+        },
+        get at() {
+          return at
         },
       }
     }
@@ -661,6 +664,98 @@ describe('Budget pages: Overview and Loans', () => {
       await b.go(1)
       expect(bPage()).toBe('loans')
       expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
+
+    it('after the reload, Back twice then Forward twice walks the same entries, and the app never moves on its own', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      first.view.setPage('loans', 'acct-1')
+      await nextTick()
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      await b.go(-1)
+      await b.go(-1)
+      expect(b.at).toBe(0)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path).toEqual([])
+      await b.go(1)
+      expect(b.at).toBe(1) // stays on the entry Forward moved to (no bounce back)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      await b.go(1)
+      expect(b.at).toBe(2)
+      expect(bPage()).toBe('loans')
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1) // and Back again from there
+      expect(b.at).toBe(1)
+      expect(view.state.page).toBe('overview')
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      w.unmount()
+    })
+
+    it('a reload on a drilled Overview: Back then Forward re-opens the drill', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.pushStep(FUEL)
+      await nextTick()
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      await b.go(-1)
+      expect(view.state.path).toEqual([])
+      await b.go(1)
+      expect(b.at).toBe(1)
+      expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+      w.unmount()
+    })
+
+    it('a reload on a loan opened from the Loans list: Back closes it, Forward reopens it', async () => {
+      const b = simBrowser()
+      const first = mountSection()
+      await nextTick()
+      first.view.setPage('loans')
+      await nextTick()
+      first.view.setPage('loans', 'acct-1') // opened from the list: its own history step
+      await nextTick()
+      expect(b.length).toBe(3)
+      b.reload(first.w)
+      const { view, w } = mountSection()
+      await nextTick()
+      expect(view.state.loan).toBe('acct-1')
+      await b.go(-1)
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(b.at).toBe(2)
+      expect(view.state.loan).toBe('acct-1')
+      w.unmount()
+    })
+
+    it('without a reload, Loans list -> loan -> Back to Overview -> Forward twice reopens the loan', async () => {
+      const b = simBrowser()
+      const { view, w } = mountSection()
+      await nextTick()
+      view.setPage('loans')
+      await nextTick()
+      view.setPage('loans', 'acct-1')
+      await nextTick()
+      await b.go(-1)
+      await b.go(-1)
+      expect(view.state.page).toBe('overview')
+      await b.go(1)
+      expect(view.state.page).toBe('loans')
+      expect(view.state.loan).toBeNull()
+      await b.go(1)
+      expect(b.at).toBe(2)
       expect(view.state.loan).toBe('acct-1')
       w.unmount()
     })
