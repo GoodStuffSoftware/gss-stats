@@ -19,7 +19,7 @@ describe('GET /api/budget/loans', () => {
     expect(body.months).toEqual(lastFullMonths(new Date()).months)
     expect(body.debts.map((d) => d.accountId).sort()).toEqual(['card-a', 'loan-a', 'loc-a', 'mtg', 'store-card'])
     expect(Object.keys(row(body, 'card-a')).sort()).toEqual([
-      'accountId', 'aprBp', 'asOf', 'balanceCents', 'creditLimitCents', 'kind', 'label', 'last4', 'latest', 'payments', 'personId', 'promos', 'source', 'terms',
+      'accountId', 'aprBp', 'asOf', 'balanceCents', 'cosigned', 'creditLimitCents', 'kind', 'label', 'last4', 'latest', 'payments', 'personId', 'promos', 'source', 'terms',
     ])
     expect(row(body, 'card-a')).toMatchObject({ balanceCents: 18_000, asOf: '2026-12-04', source: 'statement', aprBp: 2199 })
     expect(row(body, 'card-a').latest).toMatchObject({ periodEnd: '2026-12-04', payoffCents: null, escrowCents: null, interestCents: 1900 })
