@@ -5,8 +5,9 @@ import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
   DEBT_MARK_KEY, LOAN_MARK_KEY, defaultViewState, parseDebtSteps, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
-  useBudgetViewState, type BudgetViewState,
+  hasExplicitViewState, restorePatch, savedViewOfState, useBudgetViewState, type BudgetViewState,
 } from './viewState'
+import { parseSavedView, type SavedView } from './savedView'
 
 const TODAY = '2026-11-20'
 
@@ -875,6 +876,116 @@ describe('Budget pages: Overview and Loans', () => {
         w.unmount()
       })
     })
+  })
+})
+
+// The saved view: what it is built from, what a restore does and never does. All values are made up.
+describe('saved view: build and restore patch', () => {
+  const saved: SavedView = {
+    hidden: 'debts',
+    tab: 'debts',
+    page: 'overview',
+    path: [
+      { level: 'category', key: 'fun', label: 'Fun' },
+      { level: 'merchant', key: 'acme', label: 'Acme' },
+    ],
+    groupBy: 'account',
+    review: true,
+    debt: 'acct-1',
+    range: { preset: 'last-month' },
+    person: 'pat',
+  }
+  const ctx = { today: TODAY, categoryIds: ['fun', '__none__'], personIds: ['pat', 'sam'] }
+
+  it('savedViewOfState carries the state and the Show choice; a preset range stays a preset', () => {
+    const state: BudgetViewState = { ...defaultViewState(TODAY), tab: 'debts', person: 'pat', debt: 'acct-1', path: [{ level: 'category', key: 'fun', label: 'Fun' }], reviewOnly: true }
+    expect(savedViewOfState(state, 'spending', TODAY)).toEqual({
+      hidden: 'spending', tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: true, debt: 'acct-1', range: { preset: 'this-month' }, person: 'pat',
+    })
+  })
+  it('savedViewOfState keeps a custom range with its dates, trims long labels and drops a path it cannot save', () => {
+    const r = { ...defaultViewState(TODAY), from: '2026-01-05', to: '2026-02-09', path: [{ level: 'category' as const, key: 'fun', label: 'L'.repeat(100) }] }
+    const v = savedViewOfState(r, null, TODAY)
+    expect(v.range).toEqual({ preset: 'custom', from: '2026-01-05', to: '2026-02-09' })
+    expect(v.path[0].label).toHaveLength(60)
+    const long = { ...defaultViewState(TODAY), path: [{ level: 'category' as const, key: 'k'.repeat(121), label: 'x' }] }
+    expect(savedViewOfState(long, null, TODAY).path).toEqual([])
+    expect(parseSavedView(savedViewOfState(r, null, TODAY), true)).not.toBeNull()
+  })
+  it('restorePatch: preset recomputed on today, the first step now and the second held back', () => {
+    expect(restorePatch(saved, ctx)).toEqual({
+      from: '2026-10-01', to: '2026-10-31', person: 'pat', groupBy: 'account', reviewOnly: true, tab: 'debts', page: 'overview',
+      path: [{ level: 'category', key: 'fun', label: 'Fun' }], pendingStep: { level: 'merchant', key: 'acme', label: 'Acme' }, debt: 'acct-1',
+    })
+  })
+  it('restorePatch: a category that is gone drops the whole drill; a person that is gone is all; a bad custom range is the default', () => {
+    const p = restorePatch({ ...saved, person: 'gone', range: { preset: 'custom', from: '2026-05-01', to: '2025-01-01' } }, { ...ctx, categoryIds: ['other'] })
+    expect(p.path).toEqual([])
+    expect(p.pendingStep).toBeNull()
+    expect(p.person).toBe('all')
+    expect({ from: p.from, to: p.to }).toEqual(rangeForPreset('this-month', TODAY))
+  })
+  it('restorePatch: the uncategorised bucket is a valid first step; a custom range that is valid is kept; Loans keeps no debt', () => {
+    const p = restorePatch({ ...saved, page: 'loans', path: [{ level: 'category', key: '__none__', label: 'Uncategorised' }], range: { preset: 'custom', from: '2026-09-01', to: '2026-09-30' } }, ctx)
+    expect(p.path).toHaveLength(1)
+    expect({ from: p.from, to: p.to }).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+    expect(p.debt).toBeNull()
+  })
+})
+
+describe('saved view: precedence (a link or Back/Forward always wins)', () => {
+  const saved: SavedView = {
+    hidden: null, tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: false, debt: null, range: { preset: '3-months' }, person: 'pat',
+  }
+  const ctx = { categoryIds: ['fun'], personIds: ['pat'] }
+  afterEach(() => history.replaceState(null, '', '/'))
+
+  it('hasExplicitViewState: any b_ param but b_page, or a drill, loan or debt mark', () => {
+    expect(hasExplicitViewState('?section=budget', null)).toBe(false)
+    expect(hasExplicitViewState('?section=budget&b_page=loans', null)).toBe(false)
+    expect(hasExplicitViewState('?section=budget&b_from=2026-01-01&b_to=2026-02-01', null)).toBe(true)
+    expect(hasExplicitViewState('?section=budget&b_tab=debts', null)).toBe(true)
+    expect(hasExplicitViewState('?section=budget', { [MARK_KEY]: { s: 'x', d: 0 } })).toBe(true)
+    expect(hasExplicitViewState('?section=budget', { [LOAN_MARK_KEY]: { s: 'x', d: 0 } })).toBe(true)
+    expect(hasExplicitViewState('?section=budget', { [DEBT_MARK_KEY]: { s: 'x', d: 1 } })).toBe(true)
+    expect(hasExplicitViewState('?section=budget', { unrelated: 1 })).toBe(false)
+  })
+  it('a bare open applies the saved view, once, and holds the second step', async () => {
+    history.replaceState(null, '', '/?section=budget')
+    const v = useBudgetViewState(TODAY)
+    const withStep: SavedView = { ...saved, path: [...saved.path, { level: 'merchant', key: 'acme', label: 'Acme' }], debt: 'acct-1' }
+    const r = v.restoreView(withStep, ctx)
+    expect(r).toEqual({ applied: true, pendingStep: { level: 'merchant', key: 'acme', label: 'Acme' } })
+    expect(v.state).toMatchObject({ tab: 'debts', person: 'pat', from: '2026-09-01', to: '2026-11-20', debt: 'acct-1' })
+    expect(v.state.path.map((s) => s.key)).toEqual(['fun'])
+    expect(v.restoreView({ ...saved, tab: 'spending' }, ctx).applied).toBe(false) // only once
+    expect(v.state.tab).toBe('debts')
+    await nextTick()
+  })
+  it('a link with b_ params wins: nothing is applied', () => {
+    history.replaceState(null, '', '/?section=budget&b_from=2026-01-01&b_to=2026-02-01&b_person=sam')
+    const v = useBudgetViewState(TODAY)
+    expect(v.restoreView(saved, ctx)).toEqual({ applied: false, pendingStep: null })
+    expect(v.state).toMatchObject({ from: '2026-01-01', to: '2026-02-01', person: 'sam', tab: 'spending', path: [] })
+  })
+  it('a history entry that carries a drill mark wins (reload, Back and Forward)', () => {
+    history.replaceState({ [MARK_KEY]: { s: 'old', d: 0 } }, '', '/?section=budget')
+    const v = useBudgetViewState(TODAY)
+    expect(v.restoreView(saved, ctx).applied).toBe(false)
+    expect(v.state.tab).toBe('spending')
+  })
+  it('b_page alone keeps the linked page and still restores the rest', () => {
+    history.replaceState(null, '', '/?section=budget&b_page=loans')
+    const v = useBudgetViewState(TODAY)
+    expect(v.restoreView(saved, ctx).applied).toBe(true)
+    expect(v.state).toMatchObject({ page: 'loans', tab: 'debts', person: 'pat' })
+    expect(v.state.path).toEqual([]) // the drill is Overview's
+  })
+  it('a saved Loans page is restored and the debt is not', () => {
+    history.replaceState(null, '', '/?section=budget')
+    const v = useBudgetViewState(TODAY)
+    v.restoreView({ ...saved, page: 'loans', debt: 'acct-1' }, ctx)
+    expect(v.state).toMatchObject({ page: 'loans', debt: null })
   })
 })
 

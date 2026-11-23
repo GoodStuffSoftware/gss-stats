@@ -16,6 +16,7 @@
 // Everything read back is validated; anything malformed falls back to its default.
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { createDrillHistory, readMark, readSteps, type DrillHistory, type HistoryLike } from './drillHistory'
+import { fitSavedView, VIEW_STEP_KEY_MAX, VIEW_STEP_LABEL_MAX, type SavedView } from './savedView'
 import { BUDGET_PARAM_PREFIX, PAGE_PARAM, budgetPageOf, budgetSectionOpen, type BudgetPage } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
@@ -230,6 +231,76 @@ export function searchWithState(search: string, state: BudgetViewState): string 
   return s ? `?${s}` : ''
 }
 
+// ── The saved view (where the person left off, per login: lib/budget/savedView.ts) ───────────────────────────
+/** True when the address or the history entry already says what to show: any `b_*` param other than the page (a link, a
+ * reload: writeUrl always stamps b_from/b_to) or a drill, loan or debt mark in history.state (Back/Forward, a reload).
+ * Then the saved view must not be applied: a link or Back/Forward always wins. */
+export function hasExplicitViewState(search: string, historyState: unknown): boolean {
+  try {
+    for (const k of new URLSearchParams(search).keys()) if (k.startsWith(P) && k !== PAGE_PARAM) return true
+  } catch {
+    // an unreadable query string names nothing
+  }
+  return !!(readMark(historyState) || readMark(historyState, LOAN_MARK_KEY) || readMark(historyState, DEBT_MARK_KEY))
+}
+
+/** The state as a saved view. `hidden` is the Show choice (the one hidden chart, kept outside the view state). A path that
+ * cannot be saved (a key over the cap) is dropped; the whole block is kept under the byte cap. */
+export function savedViewOfState(state: BudgetViewState, hidden: SavedView['hidden'], today: IsoDate): SavedView {
+  const steps = state.path.slice(0, PATH_LEVELS.length)
+  const pathOk = steps.every((s) => s.key.length > 0 && s.key.length <= VIEW_STEP_KEY_MAX)
+  const preset = presetOf(state.from, state.to, today)
+  return fitSavedView({
+    hidden,
+    tab: state.tab,
+    page: state.page,
+    path: pathOk ? steps.map((s) => ({ level: s.level, key: s.key, label: s.label.slice(0, VIEW_STEP_LABEL_MAX) })) : [],
+    groupBy: state.groupBy,
+    review: state.reviewOnly,
+    debt: state.debt,
+    range: preset === 'custom' ? { preset, from: state.from, to: state.to } : { preset },
+    person: state.person,
+  })
+}
+
+/** What a saved view becomes on `today` against what exists now. Stale parts fall back, never error: a category that is gone
+ * drops the whole drill (back to the top); a person that is gone is 'all'; a custom range the server would refuse, the
+ * default; a preset is recomputed so "This month" is this month. The second drill step cannot be checked until the first
+ * level's slices load: it is returned as `pendingStep`. A debt that is gone is checked by the section against the debts. */
+export interface RestorePatch {
+  from: IsoDate
+  to: IsoDate
+  person: PersonFilter
+  groupBy: GroupBy
+  reviewOnly: boolean
+  tab: BudgetTab
+  page: BudgetPage
+  path: DrillStep[]
+  pendingStep: DrillStep | null
+  debt: string | null
+}
+export function restorePatch(view: SavedView, ctx: { today: IsoDate; categoryIds: ReadonlyArray<string>; personIds: ReadonlyArray<string> }): RestorePatch {
+  const def = defaultViewState(ctx.today)
+  const r = view.range.preset === 'custom'
+    ? (view.range.from && view.range.to && rangeValid(view.range.from, view.range.to) ? { from: view.range.from, to: view.range.to } : null)
+    : rangeForPreset(view.range.preset, ctx.today)
+  const first = view.path[0]
+  const categoryOk = !!first && first.level === 'category' && ctx.categoryIds.includes(first.key)
+  const second = categoryOk ? view.path[1] : undefined
+  return {
+    from: r?.from ?? def.from,
+    to: r?.to ?? def.to,
+    person: view.person === 'all' || ctx.personIds.includes(view.person) ? view.person : 'all',
+    groupBy: view.groupBy,
+    reviewOnly: view.review,
+    tab: view.tab,
+    page: view.page,
+    path: categoryOk ? [{ level: 'category', key: first.key, label: first.label || first.key }] : [],
+    pendingStep: second && second.level === 'merchant' ? { level: 'merchant', key: second.key, label: second.label || second.key } : null,
+    debt: view.page === 'overview' ? view.debt : null,
+  }
+}
+
 // ── Queries derived from the state ────────────────────────────────────────────────────────────────────────
 // The second drill step's key is a merchant when slices are grouped by merchant and an account id when they
 // are grouped by account. Each goes in its own field (`merchant` / `account`) of BOTH queries, so the pie
@@ -267,6 +338,17 @@ export function txnQueryOf(state: BudgetViewState): TxnQuery {
 // ── The live state ────────────────────────────────────────────────────────────────────────────────────────
 export function useBudgetViewState(today: IsoDate = todayIso()) {
   const state = reactive<BudgetViewState>(stateFromSearch(globalThis.location?.search ?? '', today))
+  // Read before anything below (or writeUrl) stamps the address or history: does it already say what to show? Then the
+  // saved view is never applied (restoreView).
+  let explicit = true
+  let keepPage = false
+  try {
+    explicit = hasExplicitViewState(globalThis.location?.search ?? '', globalThis.history?.state)
+    keepPage = new URLSearchParams(globalThis.location?.search ?? '').has(PAGE_PARAM)
+  } catch {
+    // no location or history (tests, tools): nothing explicit, apply the saved view
+    explicit = false
+  }
   // The drill path is not in the URL. An old link may still carry one: drop it from the address bar. A reload (or
   // a Back onto an entry of an earlier visit) puts the path back from the entry's own history.state, when that
   // still parses; otherwise the section starts at the top.
@@ -505,5 +587,24 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   function setTab(tab: BudgetTab) {
     state.tab = tab
   }
-  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, today }
+  /** Put the saved view on screen, once and only when the address and history said nothing (a link or Back/Forward
+   * always wins; `b_page` alone does not count, it just keeps the page the link names). Returns the second drill step to
+   * check once the first level's slices have loaded, or null; `applied` is false when the view was not used. The drill
+   * and the open debt are set through the same state the clicks use, so their history entries are pushed as usual. */
+  let restored = false
+  function restoreView(view: SavedView, ctx: { categoryIds: ReadonlyArray<string>; personIds: ReadonlyArray<string> }): { applied: boolean; pendingStep: DrillStep | null } {
+    if (explicit || restored) return { applied: false, pendingStep: null }
+    restored = true
+    const p = restorePatch(view, { today, ...ctx })
+    Object.assign(state, { from: p.from, to: p.to, person: p.person, groupBy: p.groupBy, reviewOnly: p.reviewOnly, tab: p.tab })
+    const page = keepPage ? state.page : p.page
+    if (page !== state.page) {
+      state.page = page
+      if (page === 'loans') loanHist?.start()
+    }
+    state.debt = state.page === 'overview' ? p.debt : null
+    if (state.page === 'overview') state.path = p.path
+    return { applied: true, pendingStep: state.page === 'overview' ? p.pendingStep : null }
+  }
+  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, today }
 }
