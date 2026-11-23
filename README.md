@@ -2790,7 +2790,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
   once per debt and cached.
 - **Donut size.** When one chart has the whole width (Tabs, or the other chart hidden) and its box is at least
-  640 px, its donut is bigger and sits beside a legend in as many 240 px-plus columns as fit. Every Budget donut has
+  640 px, its donut is bigger and sits beside a legend in as many 300 px-plus columns as fit. Every Budget donut has
   a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); the size is kept
   per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:<solo|split>` and is clamped to the
   room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);

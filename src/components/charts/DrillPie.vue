@@ -740,7 +740,7 @@ onBeforeUnmount(() => {
   grid-column: 2;
   grid-row: 1 / span 2;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   column-gap: 24px;
   align-items: start;
   min-width: 0;
