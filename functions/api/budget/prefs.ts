@@ -1,20 +1,27 @@
 /// <reference types="@cloudflare/workers-types" />
 //
-// GET and PUT /api/budget/prefs: the signed-in login's Transactions-toolbar choices (search, filters, sort), one small JSON
-// blob per login so they follow the person across devices (docs/adr/0007-budget-section.md). The scoped middleware has
-// already refused anyone off the budget list (403) and anyone signed out (401).
+// GET and PUT /api/budget/prefs: the signed-in login's Budget choices, small JSON blocks per login so they follow the person
+// across devices (docs/adr/0007-budget-section.md). The scoped middleware has already refused anyone off the budget list
+// (403) and anyone signed out (401).
 //
-//   - Stored in the STATS_CONFIG KV under `budget:prefs:<sha-256 hex of the lower-cased login>`. The address is never in
-//     the key and nothing the client sends picks the key. The dashboard layout key is never read or written.
-//   - PUT validates strictly (known fields only, `parseTxnViewPrefs(raw, true)`) and caps the body at 4 KB: 400 on anything
-//     else, 413 on an oversize body. GET answers `{ txnView }` or `{}` when nothing is saved.
+//   - `txnView`: the Transactions toolbar (search, filters, sort), stored in the STATS_CONFIG KV under
+//     `budget:prefs:<sha-256 hex of the lower-cased login>`.
+//   - `view`: where the person left the section (the hidden chart, tab, drill path, range, person, page; lib/budget/savedView.ts),
+//     under `budget:prefs-view:<same hash>`. A key of its own, so the two blocks are written independently (no read-modify-write
+//     race when both save as the page closes) and neither can squeeze the other under the cap.
+//     The address is never in a key and nothing the client sends picks the key. The dashboard layout key is never read or written.
+//   - PUT carries `txnView`, `view` or both, validates strictly (known fields only, `parseTxnViewPrefs(raw, true)`,
+//     `parseSavedView(raw, true)`) and caps the body at 4 KB: 400 on anything else, 413 on an oversize body.
+//     GET answers `{ txnView?, view? }` (`{}` when nothing is saved).
 //   - No database access: the budget database is not touched.
 
+import { parseSavedView } from '../../../src/lib/budget/savedView'
 import { parseTxnViewPrefs, TXN_PREFS_MAX_BYTES } from '../../../src/lib/budget/txnView'
 import { BUDGET_DENIED } from '../../_lib/auth'
 import { budgetJson, type BudgetData, type BudgetEnv } from '../../_lib/budgetAccess'
 
 export const PREFS_KEY_PREFIX = 'budget:prefs:'
+export const VIEW_KEY_PREFIX = 'budget:prefs-view:'
 export const PREFS_MAX_BYTES = TXN_PREFS_MAX_BYTES
 
 async function sha256Hex(text: string): Promise<string> {
@@ -22,9 +29,24 @@ async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** The KV key for one login. */
+/** The KV key for one login's toolbar block. */
 export async function prefsKey(email: string): Promise<string> {
   return PREFS_KEY_PREFIX + (await sha256Hex(email.trim().toLowerCase()))
+}
+
+/** The KV key for one login's saved view block. */
+export async function viewKey(email: string): Promise<string> {
+  return VIEW_KEY_PREFIX + (await sha256Hex(email.trim().toLowerCase()))
+}
+
+function readSaved(text: string | null, field: 'txnView' | 'view'): unknown {
+  if (!text) return null
+  try {
+    const raw = (JSON.parse(text) as Record<string, unknown> | null)?.[field]
+    return field === 'view' ? parseSavedView(raw) : parseTxnViewPrefs(raw)
+  } catch {
+    return null
+  }
 }
 
 export const onRequest: PagesFunction<BudgetEnv, any, BudgetData> = async (ctx) => {
@@ -36,7 +58,6 @@ export const onRequest: PagesFunction<BudgetEnv, any, BudgetData> = async (ctx) 
   }
   const kv = ctx.env.STATS_CONFIG as KVNamespace | undefined
   if (!kv || typeof (kv as { put?: unknown }).put !== 'function') return budgetJson(503, { error: 'prefs_store_missing' })
-  const key = await prefsKey(email)
 
   if (method === 'PUT') {
     const declared = Number(ctx.request.headers.get('Content-Length') ?? 0)
@@ -49,21 +70,20 @@ export const onRequest: PagesFunction<BudgetEnv, any, BudgetData> = async (ctx) 
     } catch {
       return budgetJson(400, { error: 'bad_request' })
     }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some((k) => k !== 'txnView')) {
-      return budgetJson(400, { error: 'bad_request' })
-    }
-    const txnView = parseTxnViewPrefs((raw as { txnView?: unknown }).txnView, true)
-    if (!txnView) return budgetJson(400, { error: 'bad_request' })
-    await kv.put(key, JSON.stringify({ txnView }))
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return budgetJson(400, { error: 'bad_request' })
+    const body = raw as { txnView?: unknown; view?: unknown }
+    const keys = Object.keys(body)
+    if (keys.length === 0 || keys.some((k) => k !== 'txnView' && k !== 'view')) return budgetJson(400, { error: 'bad_request' })
+    const txnView = 'txnView' in body ? parseTxnViewPrefs(body.txnView, true) : undefined
+    const view = 'view' in body ? parseSavedView(body.view, true) : undefined
+    if (txnView === null || view === null) return budgetJson(400, { error: 'bad_request' })
+    if (txnView) await kv.put(await prefsKey(email), JSON.stringify({ txnView }))
+    if (view) await kv.put(await viewKey(email), JSON.stringify({ view }))
     return budgetJson(200, { ok: true })
   }
 
-  const saved = await kv.get(key)
-  if (!saved) return budgetJson(200, {})
-  try {
-    const txnView = parseTxnViewPrefs((JSON.parse(saved) as { txnView?: unknown })?.txnView)
-    return budgetJson(200, txnView ? { txnView } : {})
-  } catch {
-    return budgetJson(200, {})
-  }
+  const [savedTxn, savedView] = await Promise.all([kv.get(await prefsKey(email)), kv.get(await viewKey(email))])
+  const txnView = readSaved(savedTxn, 'txnView')
+  const view = readSaved(savedView, 'view')
+  return budgetJson(200, { ...(txnView ? { txnView } : {}), ...(view ? { view } : {}) })
 }
