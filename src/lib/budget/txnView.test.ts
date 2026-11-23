@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Category, Txn } from './types'
 import {
-  anythingActive, applyTxnView, categoryChoices, defaultTxnViewPrefs, filterTxns, merchantChoices, parseTxnViewPrefs, sortTxns, withSameAmount, type TxnViewPrefs,
+  anythingActive, applyTxnView, categoryChoices, defaultTxnViewPrefs, filterTxns, merchantChoices, parseTxnViewPrefs, sortTxns, withSameAmount, fitPrefs, txnPrefsBytes, TXN_PREFS_MAX_BYTES, type TxnViewPrefs,
 } from './txnView'
 
 const acct = (id: string, label: string, personId: string | null): Account =>
@@ -137,5 +137,25 @@ describe('sameAmount choices', () => {
     p = withSameAmount(p, 'm5', false)
     expect(p.sameAmount.m5).toBe(false)
     expect(Object.keys(p.sameAmount).at(-1)).toBe('m5')
+  })
+})
+
+describe('the 4 KB prefs budget', () => {
+  const list = (t: string, n: number) => Array.from({ length: n }, (_, i) => `${t}${i}`.padEnd(100, 'x'))
+  it('the strict parse refuses a blob that serialises over the cap, whatever the per-field caps allow', () => {
+    const big = { ...defaultTxnViewPrefs(), merchants: list('m', 25), categories: list('c', 25), accounts: list('a', 25) }
+    expect(txnPrefsBytes(big as TxnViewPrefs)).toBeGreaterThan(TXN_PREFS_MAX_BYTES)
+    expect(parseTxnViewPrefs(big, true)).toBeNull()
+    expect(parseTxnViewPrefs(big)).not.toBeNull() // the cache still reads it
+  })
+  it('fitPrefs drops the oldest same-amount choices first, and gives up (null) when the filters alone are too big', () => {
+    const same = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`.padEnd(80, 'y'), true]))
+    const p = { ...defaultTxnViewPrefs(), merchants: list('m', 28), sameAmount: same }
+    const fit = fitPrefs(p)!
+    expect(txnPrefsBytes(fit)).toBeLessThanOrEqual(TXN_PREFS_MAX_BYTES)
+    expect(Object.keys(fit.sameAmount).length).toBeLessThan(30)
+    expect(Object.keys(fit.sameAmount)).toEqual(Object.keys(same).slice(30 - Object.keys(fit.sameAmount).length))
+    expect(fitPrefs({ ...defaultTxnViewPrefs(), merchants: list('m', 100) })).toBeNull()
+    expect(fitPrefs(defaultTxnViewPrefs())).toEqual(defaultTxnViewPrefs())
   })
 })

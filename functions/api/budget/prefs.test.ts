@@ -116,7 +116,7 @@ describe('/api/budget/prefs storage', () => {
     for (const b of bad) expect((await call(e, LISTED, 'PUT', b)).status, b).toBe(400)
     expect(m.size).toBe(0)
   })
-  it('caps the body at 4 KB: 413 above, accepted at the schema limits below', async () => {
+  it('caps the body at 4 KB: 413 above; the schema limits alone cannot produce a stored blob over it', async () => {
     const { store, m } = kv()
     const e = env(store)
     const big = JSON.stringify({ txnView: { ...good.txnView, merchants: Array.from({ length: 100 }, (_, i) => `m${i}`.padEnd(120, 'x')) } })
@@ -124,6 +124,21 @@ describe('/api/budget/prefs storage', () => {
     expect((await call(e, LISTED, 'PUT', big)).status).toBe(413)
     expect(m.size).toBe(0)
     expect((await call(e, LISTED, 'PUT', JSON.stringify(good))).status).toBe(200)
+  })
+  it('per-field caps filled in every list are refused (413) and never stored; trimmed to fit they are kept', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    // 4 lists x 20 items x 50 chars is within every per-field cap but ~4.4 KB serialised
+    const list = (t: string) => Array.from({ length: 20 }, (_, i) => `${t}${i}`.padEnd(50, 'x'))
+    const over = { ...good.txnView, merchants: list('m'), categories: list('c'), accounts: list('a'), people: list('p') }
+    const body = JSON.stringify({ txnView: over })
+    expect(body.length).toBeGreaterThan(PREFS_MAX_BYTES)
+    expect((await call(e, LISTED, 'PUT', body)).status).toBe(413)
+    // the same lists trimmed to fit are accepted
+    const fits = { ...over, people: [], accounts: list('a').slice(0, 10) }
+    expect(JSON.stringify({ txnView: fits }).length).toBeLessThan(PREFS_MAX_BYTES)
+    expect((await call(e, LISTED, 'PUT', JSON.stringify({ txnView: fits }))).status).toBe(200)
+    expect(m.size).toBe(1)
   })
   it('405 for other methods; 503 when the KV binding is missing; never touches the layout key', async () => {
     const { store, m } = kv()

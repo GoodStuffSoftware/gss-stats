@@ -10,12 +10,12 @@
 //     else, 413 on an oversize body. GET answers `{ txnView }` or `{}` when nothing is saved.
 //   - No database access: the budget database is not touched.
 
-import { parseTxnViewPrefs } from '../../../src/lib/budget/txnView'
+import { parseTxnViewPrefs, TXN_PREFS_MAX_BYTES } from '../../../src/lib/budget/txnView'
 import { BUDGET_DENIED } from '../../_lib/auth'
 import { budgetJson, type BudgetData, type BudgetEnv } from '../../_lib/budgetAccess'
 
 export const PREFS_KEY_PREFIX = 'budget:prefs:'
-export const PREFS_MAX_BYTES = 4096
+export const PREFS_MAX_BYTES = TXN_PREFS_MAX_BYTES
 
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))

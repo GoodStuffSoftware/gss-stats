@@ -24,7 +24,7 @@ import TxnToolbar from './TxnToolbar.vue'
 import { applySimilar, createCategory, createRule, fetchSimilar, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
 import { loadRemainingPages } from '../../lib/budget/txnFill'
-import { applyTxnView, anythingActive, defaultTxnViewPrefs, samePrefs, withSameAmount, type TxnViewPrefs } from '../../lib/budget/txnView'
+import { applyTxnView, anythingActive, defaultTxnViewPrefs, fitPrefs, samePrefs, withSameAmount, type TxnViewPrefs } from '../../lib/budget/txnView'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
@@ -66,9 +66,19 @@ const columns = computed(() => budgetColumns(props.categories, props.accounts))
 // remembered per login: a localStorage copy for the first paint, the server copy (GET/PUT /api/budget/prefs) once loaded.
 const viewPrefs = ref<TxnViewPrefs>(readCachedPrefs(props.accountEmail) ?? defaultTxnViewPrefs())
 const viewRows = computed(() => applyTxnView(rows.value, viewPrefs.value, { categories: props.categories, accounts: props.accounts }))
-const saver = createPrefsSaver(putServerPrefs)
+const SAVE_FAILED = 'Your filters could not be saved to your account. They stay on this device and will be saved again on your next change.'
+const TOO_MANY = 'That is too many filter choices to remember. Remove some first.'
+const saver = createPrefsSaver(putServerPrefs, undefined, undefined, (ok) => {
+  if (!ok) status.value = SAVE_FAILED
+  else if (status.value === SAVE_FAILED) status.value = ''
+})
 let userEdited = false
-function onPrefs(p: TxnViewPrefs) {
+function onPrefs(raw: TxnViewPrefs) {
+  const p = fitPrefs(raw)
+  if (!p) {
+    status.value = TOO_MANY
+    return
+  }
   userEdited = true
   viewPrefs.value = p
   writeCachedPrefs(props.accountEmail, p)

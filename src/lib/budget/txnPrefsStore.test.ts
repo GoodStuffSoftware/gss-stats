@@ -91,6 +91,31 @@ describe('debounced saver', () => {
   })
 })
 
+describe('failed saves', () => {
+  it('reports each result, keeps the baseline on a failure and sends again on the next change', async () => {
+    const t = fakeTimers()
+    const results: boolean[] = []
+    let ok = false
+    const send = vi.fn(async () => ok)
+    const s = createPrefsSaver(send, 1500, t, (r) => results.push(r))
+    s.setBaseline(defaultTxnViewPrefs())
+    s.schedule(a)
+    t.run()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(results).toEqual([false])
+    ok = true
+    s.schedule(a) // same value as the failed one: still sent, because the server never took it
+    expect(t.pending()).toBe(true)
+    t.run()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(results).toEqual([false, true])
+    s.schedule(a)
+    expect(t.pending()).toBe(false)
+  })
+})
+
 describe('server calls', () => {
   it('GET reads txnView; failures read as nothing saved', async () => {
     const ok = vi.fn(async () => new Response(JSON.stringify({ txnView: b }), { status: 200 })) as unknown as typeof fetch

@@ -34,6 +34,25 @@ export const ITEM_MAX = 120
 /** The most merchants whose "same amount only" choice is kept, and the longest key: 30 x ~90 bytes keeps the blob well under the 4 KB cap. */
 export const SAME_AMOUNT_MAX = 30
 export const SAME_AMOUNT_KEY_MAX = 80
+/** The server keeps one blob per login and refuses a body over this (functions/api/budget/prefs.ts). The per-field caps alone
+ *  allow more, so a valid blob must also serialise within it: the strict parse enforces it, and the toolbar uses `fitPrefs`. */
+export const TXN_PREFS_MAX_BYTES = 4096
+
+/** Bytes of the PUT body for these prefs. */
+export function txnPrefsBytes(p: TxnViewPrefs): number {
+  return new TextEncoder().encode(JSON.stringify({ txnView: p })).length
+}
+
+/** The prefs trimmed to fit the cap (the oldest "same amount" choices go first), or null when the filters alone do not fit. */
+export function fitPrefs(p: TxnViewPrefs): TxnViewPrefs | null {
+  let cur = p
+  while (txnPrefsBytes(cur) > TXN_PREFS_MAX_BYTES) {
+    const keys = Object.keys(cur.sameAmount ?? {})
+    if (!keys.length) return null
+    cur = { ...cur, sameAmount: Object.fromEntries(Object.entries(cur.sameAmount).slice(1)) }
+  }
+  return cur
+}
 
 export function defaultTxnViewPrefs(): TxnViewPrefs {
   return { search: '', merchants: [], categories: [], accounts: [], people: [], from: '', to: '', sortKey: 'date', sortDir: 'desc', sameAmount: {} }
@@ -116,7 +135,7 @@ export function parseTxnViewPrefs(raw: unknown, strict = false): TxnViewPrefs | 
   const keyOk = typeof o.sortKey === 'string' && (TXN_SORT_KEYS as readonly string[]).includes(o.sortKey)
   const dirOk = o.sortDir === 'asc' || o.sortDir === 'desc'
   if (strict && !(searchOk && fromOk && toOk && keyOk && dirOk)) return null
-  return {
+  const out: TxnViewPrefs = {
     search: searchOk ? (o.search as string) : d.search,
     merchants: lists[0] ?? [],
     categories: lists[1] ?? [],
@@ -128,6 +147,8 @@ export function parseTxnViewPrefs(raw: unknown, strict = false): TxnViewPrefs | 
     sortDir: dirOk ? (o.sortDir as TxnSortDir) : d.sortDir,
     sameAmount: sameAmount ?? {},
   }
+  if (strict && txnPrefsBytes(out) > TXN_PREFS_MAX_BYTES) return null
+  return out
 }
 
 export function samePrefs(a: TxnViewPrefs, b: TxnViewPrefs): boolean {

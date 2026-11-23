@@ -67,6 +67,8 @@ export function createPrefsSaver(
     set: (fn, ms) => setTimeout(fn, ms),
     clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   },
+  /** Called after every send with whether the server kept it. A failed save leaves the baseline alone, so the next change sends again. */
+  onResult: (ok: boolean) => void = () => {},
 ): PrefsSaver {
   let baseline: TxnViewPrefs | null = null
   let pending: TxnViewPrefs | null = null
@@ -82,6 +84,7 @@ export function createPrefsSaver(
     if (!p || (baseline && samePrefs(baseline, p))) return
     void send(p).then((ok) => {
       if (ok) baseline = p
+      onResult(ok)
     })
   }
   return {
