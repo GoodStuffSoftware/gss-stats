@@ -15,6 +15,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Changed
 - **Two-column legend** — the category legend under the pie lays out in two columns when it stacks under the pie with room (tablet widths), and stays one column on a phone.
 - **Note: click to read, hold to edit** — a click or tap on a note shows the whole note in a tip like the merchant's; press and hold (or Enter or F2) edits it.
+- **Change similar purchases (server).** After a category change the app can now fetch the same merchant's other purchases from every month, ticked where safe, and change the chosen ones in one audited step.
 
 ## [0.80.0] — 2026-11-22
 

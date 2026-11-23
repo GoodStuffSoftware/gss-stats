@@ -37,6 +37,7 @@ const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
 const PATHS = [
   '/api/budget/access',
   '/api/budget/transactions/x',
+  '/api/budget/transactions/similar',
   '/api/Budget/meta',
   '/api//budget/meta',
   '/api/%62udget/meta',

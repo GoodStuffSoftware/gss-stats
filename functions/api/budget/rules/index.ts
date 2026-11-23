@@ -11,7 +11,7 @@
 import type { RuleResponse } from '../../../../src/lib/budget/types'
 import { budgetJson } from '../../../_lib/budgetAccess'
 import {
-  BudgetHttpError, MAX_BODY, RULE_COLUMNS, applyRules, assertCategory, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject,
+  BudgetHttpError, MAX_BODY, RULE_COLUMNS, applyRules, editRuleStmt, assertCategory, badRequest, defineRoute, getTxn, isTxnId, mapRule, notFound, readJsonObject,
   ruleFromTxn, ruleUnsafeReasons,
 } from '../../../_lib/budgetDb'
 
@@ -37,13 +37,7 @@ export const onRequest = defineRoute({
     if (unsafe) throw new BudgetHttpError(409, 'rule_unsafe', `A rule on this row's merchant key would reach other merchants (${unsafe}). Edit the rows one at a time instead.`)
     const who = ctx.data.budgetEmail!
     const now = new Date().toISOString()
-    await db.prepare(
-      `INSERT INTO merchant_rules (id, merchant_key, store_no, account_id, amount_min_cents, amount_max_cents, set_category_id, set_kind,
-         debt_account_id, display_name, confidence, review, review_reason, source, active, created_at, created_by)
-       VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, NULL, 90, 0, NULL, 'edit', 1, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET set_category_id = COALESCE(excluded.set_category_id, merchant_rules.set_category_id),
-         set_kind = COALESCE(excluded.set_kind, merchant_rules.set_kind), review = 0, review_reason = NULL, active = 1, source = 'edit'`,
-    ).bind(learned.id, txn.merchantKey, learned.storeNo, learned.setCategoryId, learned.setKind, now, who).run()
+    await editRuleStmt(db, { id: learned.id, merchantKey: txn.merchantKey, storeNo: learned.storeNo, setCategoryId: learned.setCategoryId, setKind: learned.setKind }, who, now).run()
 
     const reapplied = await applyRules(db, [txn.merchantKey], who)
     const stored = await db.prepare(`SELECT ${RULE_COLUMNS} FROM merchant_rules WHERE id = ?`).bind(learned.id).first<Record<string, unknown>>()
