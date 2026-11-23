@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 import { resetAccessProbe } from '../../lib/budget/clientRead'
-import { panelsKey } from '../../lib/budget/panelVisibility'
+import { LAYOUT_KEY, panelsKey } from '../../lib/budget/panelVisibility'
 import type { DebtSlice, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
@@ -39,6 +39,7 @@ interface Routes {
   summary?: (u: URL) => Response
   debts?: (u: URL) => Response
   transactions?: (u: URL) => Response
+  debtDetail?: (id: string) => Response
 }
 let fetchMock: ReturnType<typeof vi.fn>
 function route(r: Routes = {}) {
@@ -50,7 +51,9 @@ function route(r: Routes = {}) {
       case '/api/budget/summary': return r.summary ? r.summary(u) : json(SUMMARY)
       case '/api/budget/debts': return r.debts ? r.debts(u) : json({ debts: DEBTS })
       case '/api/budget/transactions': return r.transactions ? r.transactions(u) : json(EMPTY_PAGE)
-      default: throw new Error(`unmocked ${input}`)
+      default:
+        if (r.debtDetail && u.pathname.startsWith('/api/budget/debts/')) return r.debtDetail(decodeURIComponent(u.pathname.slice('/api/budget/debts/'.length)))
+        throw new Error(`unmocked ${input}`)
     }
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -533,5 +536,155 @@ describe('BudgetSection: hide a chart', () => {
       set.mockRestore()
       get.mockRestore()
     }
+  })
+})
+
+describe('BudgetSection: desktop layout (side by side or tabs), saved per device', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('side by side is the default: the toggles show, the picker marks it', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-section"]').classes()).toContain('sbs')
+    expect(w.get('[data-testid="budget-layout-side"]').attributes('aria-checked')).toBe('true')
+    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(true)
+  })
+
+  it('choosing Tabs saves per device, switches to one pane at a time and drops the hide toggles', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe('tabs')
+    const root = w.get('[data-testid="budget-section"]')
+    expect(root.classes()).toContain('tabs-mode')
+    expect(root.classes()).not.toContain('sbs')
+    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(false)
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
+  })
+
+  it('opens in the saved layout, and a hidden chart saved for side by side does not hide anything in Tabs', async () => {
+    localStorage.setItem(LAYOUT_KEY, 'tabs')
+    localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['debts'] }))
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
+    await w.get('[data-testid="budget-layout-side"]').trigger('click')
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe('side')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden') // the side-by-side choice is still there
+  })
+
+  it('works when localStorage throws: the choice holds for the visit', async () => {
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota')
+    })
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    try {
+      route()
+      const w = await mountSection()
+      await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
+      expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
+    } finally {
+      set.mockRestore()
+      get.mockRestore()
+    }
+  })
+})
+
+describe('BudgetSection: debt drill in place', () => {
+  const DETAIL = {
+    account: META.accounts[0],
+    history: [
+      { asOf: '2026-09-30', balanceCents: 120000, source: 'statement', aprBp: 1999 },
+      { asOf: '2026-10-31', balanceCents: 90000, source: 'statement', aprBp: 1999 },
+    ],
+    periods: [], payments: [], terms: null, latest: null, promos: [],
+  }
+  const detailCalls = () => callsTo('/api/budget/debts/acct-1')
+
+  it('a slice opens its balance line in place: one detail fetch, the crumb, no jump to Loans', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(detailCalls()).toHaveLength(1)
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    expect(w.findComponent(DebtPanel).props('history')).toHaveLength(2)
+    expect(w.get('[data-testid="debt-drilled"]').exists()).toBe(true)
+    expect(w.get('[data-testid="debt-drilled-balance"]').text()).toContain('900')
+    expect(location.href).not.toContain('acct-1') // the id lives in history.state only
+    expect(new URLSearchParams(location.search).get('b_page')).toBeNull()
+  })
+
+  it('the crumb returns to the pie; opening the same debt again uses the cache', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="crumb-0"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    expect(w.find('[data-testid="debt-total"]').exists()).toBe(true)
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    expect(detailCalls()).toHaveLength(1)
+  })
+
+  it('popstate with no drill mark in history.state returns to the pie', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    history.replaceState(null, '', location.href)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    expect(w.find('[data-testid="debt-total"]').exists()).toBe(true)
+  })
+
+  it('a failed history load shows Retry, and Retry asks again', async () => {
+    let fail = true
+    route({ debtDetail: () => (fail ? json({ error: 'boom' }, 500) : json(DETAIL)) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(detailCalls()).toHaveLength(1)
+    fail = false
+    await w.get('[data-testid="debt-drilled-retry"]').trigger('click')
+    await flushPromises()
+    expect(detailCalls()).toHaveLength(2)
+    expect(w.find('[data-testid="debt-drilled-retry"]').exists()).toBe(false)
+  })
+
+  it('"Loan details" goes to the Loans page with that loan open', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="debt-drilled-open"]').trigger('click')
+    await flushPromises()
+    expect(w.findComponent(LoansPage).props()).toMatchObject({ loanId: 'acct-1' })
+    expect(new URLSearchParams(location.search).get('b_page')).toBe('loans')
+  })
+
+  it('works in Tabs mode too, on the Debts tab', async () => {
+    localStorage.setItem(LAYOUT_KEY, 'tabs')
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    localStorage.clear()
   })
 })

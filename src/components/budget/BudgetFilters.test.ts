@@ -84,4 +84,15 @@ describe('BudgetFilters', () => {
     expect(one.get('[data-testid="budget-show-debts"]').attributes('disabled')).toBeUndefined() // the way back
     expect(one.get('[data-testid="budget-show-spending"]').attributes('disabled')).toBeDefined() // the last one shown
   })
+
+  it('layout picker: only when `layout` is given; marks the current choice; clicking emits it', async () => {
+    expect(mountFilters().find('[data-testid="budget-layout-side"]').exists()).toBe(false)
+    const w = mountFilters({ layout: 'side' })
+    expect(w.get('[data-testid="budget-layout-side"]').attributes('aria-checked')).toBe('true')
+    expect(w.get('[data-testid="budget-layout-tabs"]').attributes('aria-checked')).toBe('false')
+    await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
+    expect(w.emitted('layout')).toEqual([['tabs']])
+    const tabs = mountFilters({ layout: 'tabs' })
+    expect(tabs.get('[data-testid="budget-layout-tabs"]').attributes('aria-checked')).toBe('true')
+  })
 })
