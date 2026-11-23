@@ -16,7 +16,9 @@ import { fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, rese
 import { readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type DesktopLayout, type PanelId } from '../../lib/budget/panelVisibility'
 import type { Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import type { BudgetPage } from '../../lib/budget/sectionLink'
-import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
+import { savedViewOfState, useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
+import { sameSavedView, type SavedView } from '../../lib/budget/savedView'
+import { createPrefsSaver, fetchServerView, putServerView, VIEW_SAVE_DELAY_MS } from '../../lib/budget/txnPrefsStore'
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
 import LoansPage from './LoansPage.vue'
@@ -25,7 +27,7 @@ import SpendingPanel from './SpendingPanel.vue'
 
 const props = defineProps<{ dark: boolean; today?: IsoDate }>()
 
-const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt } =
+const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, today: viewToday } =
   useBudgetViewState(props.today)
 
 // ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -63,12 +65,58 @@ const metaError = ref(false)
 const hasData = computed(() => !!meta.value && (meta.value.range.min !== null || meta.value.range.max !== null))
 const ready = ref(false) // meta is in and the database has rows: data fetches may start
 
+// ── Saved view (where the viewer left off) ────────────────────────────────────────────────────────────────
+// The Show choice and the drill location are saved per login on the server (lib/budget/savedView.ts, its own KV
+// key) and put back on a plain open. A link or Back/Forward state always wins (restoreView refuses), and a part
+// that no longer exists falls back quietly. The GET is raced against a short timeout so a slow server never holds
+// the page; the first data fetches wait for the restore so there is no double fetch.
+const VIEW_GET_TIMEOUT_MS = 3000
+type ServerView = { ok: boolean; view: SavedView | null }
+async function loadServerView(): Promise<ServerView> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<ServerView>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, view: null }), VIEW_GET_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([fetchServerView(), timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+let viewLoaded: Promise<ServerView> = Promise.resolve({ ok: false, view: null })
+let pendingStep: DrillStep | null = null // the saved second drill step, checked when the first level's slices load
+const viewSaver = createPrefsSaver<SavedView>(putServerView, VIEW_SAVE_DELAY_MS, undefined, undefined, sameSavedView)
+let viewSaverArmed = false
+const currentView = computed(() => savedViewOfState(state, hiddenPanels.value[0] ?? null, viewToday))
+watch(currentView, (v) => {
+  if (viewSaverArmed) viewSaver.schedule(v)
+})
+/** Applies what the server holds (once) and arms the saver; called with the meta in, before `ready`. */
+async function settleView(m: MetaResponse) {
+  const sv = await viewLoaded
+  if (viewSaverArmed) return
+  if (sv.ok && sv.view) {
+    // The Show choice is the account's, not part of a link: it applies even when a link names the rest.
+    const hidden: PanelId[] = sv.view.hidden ? [sv.view.hidden] : []
+    hiddenPanels.value = hidden
+    writeHiddenPanels(accountEmail.value, hidden) // the first-paint cache follows the server
+    const r = restoreView(sv.view, { categoryIds: [...m.categories.map((c) => c.id), '__none__'], personIds: m.people.map((p) => p.id) })
+    pendingStep = r.pendingStep
+  }
+  // Baseline = what the server holds. With nothing saved it is the current view minus the local Show choice, so a
+  // local choice (the old localStorage one) is sent once, and an untouched view sends nothing.
+  viewSaver.setBaseline(sv.ok ? (sv.view ?? { ...currentView.value, hidden: null }) : null)
+  viewSaverArmed = true
+  if (sv.ok) viewSaver.schedule(currentView.value)
+}
+
 async function loadMeta() {
   metaError.value = false
   try {
     const m = await fetchMeta()
     if (state.person !== 'all' && !m.people.some((p) => p.id === state.person)) setPerson('all')
     meta.value = m
+    await settleView(m)
     ready.value = m.range.min !== null || m.range.max !== null
   } catch {
     metaError.value = true
@@ -81,6 +129,7 @@ async function init() {
   if (probed.state === 'ok') {
     accountEmail.value = probed.email
     hiddenPanels.value = readHiddenPanels(probed.email)
+    viewLoaded = loadServerView()
     await loadMeta()
   }
 }
@@ -119,7 +168,14 @@ async function loadSummary() {
     if (seq !== summarySeq) return
     summary.value = r
     shown.value = asked
+    // The restored second drill step is kept only while this answer is the first level's and still has it.
+    const step = pendingStep
+    pendingStep = null
+    if (step && asked.path.length === 1 && shapeKey(asked.path, asked.groupBy) === shapeKey(state.path, state.groupBy) && r.slices.some((s) => s.key === step.key)) {
+      pushStep(step)
+    }
   } catch {
+    pendingStep = null
     if (seq !== summarySeq) return
     summary.value = null
     shown.value = null
@@ -259,7 +315,14 @@ onMounted(() => {
   window.addEventListener('popstate', readUrl)
   void init()
 })
-onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
+// Leaving (closing the tab, another page, the section unmounting) sends a queued view change now.
+const flushView = () => viewSaver.flush()
+onMounted(() => window.addEventListener('pagehide', flushView))
+onBeforeUnmount(() => {
+  window.removeEventListener('popstate', readUrl)
+  window.removeEventListener('pagehide', flushView)
+  viewSaver.flush()
+})
 </script>
 
 <template>

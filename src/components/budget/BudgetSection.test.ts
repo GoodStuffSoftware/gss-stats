@@ -5,6 +5,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 vi.mock('../../session', () => ({ checkSessionExpired: vi.fn(async () => {}) }))
 import { resetAccessProbe } from '../../lib/budget/clientRead'
 import { LAYOUT_KEY, panelsKey } from '../../lib/budget/panelVisibility'
+import { defaultSavedView, type SavedView } from '../../lib/budget/savedView'
 import type { DebtSlice, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
@@ -40,12 +41,16 @@ interface Routes {
   debts?: (u: URL) => Response
   transactions?: (u: URL) => Response
   debtDetail?: (id: string) => Response
+  prefs?: (init: RequestInit | undefined) => Response | Promise<Response>
 }
 let fetchMock: ReturnType<typeof vi.fn>
 function route(r: Routes = {}) {
-  fetchMock = vi.fn(async (input: string) => {
+  fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     const u = new URL(input, 'http://x')
     switch (u.pathname) {
+      case '/api/budget/prefs':
+        if (r.prefs) return r.prefs(init)
+        throw new Error(`unmocked ${input}`) // the saved view is simply not there
       case '/api/budget/access': return r.access ? r.access() : json({ ok: true, email: 'a@example.com' })
       case '/api/budget/meta': return r.meta ? r.meta() : json(META)
       case '/api/budget/summary': return r.summary ? r.summary(u) : json(SUMMARY)
@@ -686,5 +691,171 @@ describe('BudgetSection: debt drill in place', () => {
     expect(w.get('[data-pane="debts"]').classes()).toContain('active')
     expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
     localStorage.clear()
+  })
+})
+
+describe('BudgetSection: remembers where you left off (saved view per login)', () => {
+  let stored: SavedView | null
+  let puts: Array<{ view: SavedView; keepalive: boolean | undefined }>
+  const prefs = (init: RequestInit | undefined) => {
+    if (init?.method === 'PUT') {
+      const view = (JSON.parse(String(init.body)) as { view: SavedView }).view
+      stored = view
+      puts.push({ view, keepalive: init.keepalive })
+      return json({ ok: true })
+    }
+    return json({ view: stored })
+  }
+  const saved = (over: Partial<SavedView>): SavedView => ({ ...defaultSavedView(), ...over })
+  const summaryParams = (i: number) => new URL(callsTo('/api/budget/summary')[i][0], 'http://x').searchParams
+  const MERCHANTS: SummaryResponse = { level: 'merchant', slices: [{ key: 'store-one', label: 'Store One', netCents: 9000, count: 2 }], totalCents: 9000, reviewCount: 0 }
+  const byLevel = (u: URL) => json(u.searchParams.has('category') ? MERCHANTS : SUMMARY)
+
+  beforeEach(() => {
+    localStorage.clear()
+    stored = null
+    puts = []
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+  afterEach(() => {
+    while (mounted.length) mounted.pop()!.unmount()
+    vi.useRealTimers()
+    localStorage.clear()
+  })
+
+  it('a plain open puts the saved view back: Show choice, range, person and drill, with one summary fetch', async () => {
+    stored = saved({ hidden: 'debts', person: 'p1', range: { preset: 'last-month' }, path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+    route({ prefs, summary: byLevel })
+    const w = await mountSection()
+    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(JSON.parse(localStorage.getItem(panelsKey('a@example.com'))!)).toEqual({ hidden: ['debts'] })
+    expect(callsTo('/api/budget/summary')).toHaveLength(1)
+    const q = summaryParams(0)
+    expect([q.get('category'), q.get('person'), q.get('from'), q.get('to')]).toEqual(['groceries', 'p1', '2026-10-01', '2026-10-31'])
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(puts).toHaveLength(0) // nothing changed: nothing to save
+  })
+
+  it('restores the second drill step and an open debt once their data is there', async () => {
+    stored = saved({
+      path: [{ level: 'category', key: 'groceries', label: 'Groceries' }, { level: 'merchant', key: 'store-one', label: 'Store One' }],
+      debt: 'acct-1',
+    })
+    route({ prefs, summary: byLevel, debtDetail: () => json({ account: META.accounts[0], history: [], periods: [], payments: [], terms: null, latest: null, promos: [] }) })
+    const w = await mountSection()
+    const last = summaryParams(callsTo('/api/budget/summary').length - 1)
+    expect([last.get('category'), last.get('merchant')]).toEqual(['groceries', 'store-one'])
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+  })
+
+  it('a link wins over the saved view (the Show choice is not part of a link and still applies)', async () => {
+    stored = saved({ hidden: 'debts', person: 'p1', path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+    route({ prefs, summary: byLevel })
+    const w = await mountSection('/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
+    const q = summaryParams(0)
+    expect([q.get('person'), q.get('category'), q.get('from')]).toEqual(['p2', null, '2026-10-01'])
+    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(puts.at(-1)!.view).toMatchObject({ person: 'p2', path: [], range: { preset: 'last-month' } })
+  })
+
+  it('Back/Forward state wins over the saved view', async () => {
+    stored = saved({ path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+    route({ prefs, summary: byLevel })
+    await mountSection('/?section=budget', { gssBudgetDrill: { s: 'earlier-visit', d: 0 } })
+    expect(summaryParams(0).has('category')).toBe(false)
+  })
+
+  it('stale parts fall back quietly: a deleted category goes to the top, an unknown debt to the pie, an unknown second step is dropped', async () => {
+    stored = saved({ person: 'gone', path: [{ level: 'category', key: 'deleted', label: 'Deleted' }], debt: 'no-such-debt' })
+    route({ prefs, summary: byLevel })
+    const w = await mountSection()
+    const q = summaryParams(0)
+    expect([q.get('category'), q.get('person')]).toEqual([null, 'all'])
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    expect(w.find('[data-testid="debt-total"]').exists()).toBe(true)
+    expect(w.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('a second step that is not among the first level\'s slices is dropped, the first stays', async () => {
+    stored = saved({ path: [{ level: 'category', key: 'groceries', label: 'Groceries' }, { level: 'merchant', key: 'gone-store', label: 'Gone' }] })
+    route({ prefs, summary: byLevel })
+    await mountSection()
+    const last = summaryParams(callsTo('/api/budget/summary').length - 1)
+    expect([last.get('category'), last.get('merchant')]).toEqual(['groceries', null])
+  })
+
+  it('migrates the old per-device Show choice once: nothing saved on the server, so one write; then no more', async () => {
+    localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
+    route({ prefs })
+    const w = await mountSection()
+    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
+    expect(puts).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(puts).toHaveLength(1)
+    expect(puts[0].view).toMatchObject({ hidden: 'spending', person: 'all', path: [] })
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(puts).toHaveLength(1)
+  })
+
+  it('nothing hidden and nothing changed: no write at all', async () => {
+    route({ prefs })
+    await mountSection()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(puts).toHaveLength(0)
+  })
+
+  it('a change is saved after a quiet two seconds, as one write', async () => {
+    stored = saved({})
+    route({ prefs })
+    const w = await mountSection()
+    await w.get('[data-testid="budget-person-p2"]').trigger('click')
+    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    await vi.advanceTimersByTimeAsync(1900)
+    expect(puts).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(puts).toHaveLength(1)
+    expect(puts[0].view).toMatchObject({ person: 'p2', hidden: 'debts' })
+  })
+
+  it('leaving the page (pagehide) sends a queued change now, kept alive', async () => {
+    stored = saved({})
+    route({ prefs })
+    const w = await mountSection()
+    await w.get('[data-testid="budget-person-p2"]').trigger('click')
+    expect(puts).toHaveLength(0)
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(puts).toHaveLength(1)
+    expect(puts[0].keepalive).toBe(true)
+    expect(puts[0].view.person).toBe('p2')
+    w.unmount()
+    mounted.pop()
+    expect(puts).toHaveLength(1) // nothing left queued
+  })
+
+  it('unmounting flushes a queued change', async () => {
+    stored = saved({})
+    route({ prefs })
+    const w = await mountSection()
+    await w.get('[data-testid="budget-person-p2"]').trigger('click')
+    w.unmount()
+    mounted.pop()
+    await flushPromises()
+    expect(puts).toHaveLength(1)
+    expect(puts[0].view.person).toBe('p2')
+  })
+
+  it('a server that never answers does not hold the page: data loads after three seconds, nothing is overwritten', async () => {
+    route({ prefs: () => new Promise<Response>(() => {}) })
+    const w = mount(BudgetSection, { props: { dark: false, today: TODAY }, attachTo: document.body })
+    mounted.push(w)
+    await flushPromises()
+    expect(callsTo('/api/budget/summary')).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    expect(callsTo('/api/budget/summary')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(0)
   })
 })
