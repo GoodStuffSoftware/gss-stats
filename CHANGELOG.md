@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.80.0] — 2026-11-22
+
 
 ### Changed
 - **No more Exclude in the category picker** — the picker no longer offers Exclude, since taking a purchase out of the totals is the Count in totals switch; purchases excluded the old way are switched off there instead.
