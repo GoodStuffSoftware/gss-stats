@@ -12,6 +12,7 @@
 // - Tapping (or clicking, or focusing by keyboard) the merchant opens a small tip with the full merchant text and the raw
 //   statement description (what desktop hover shows through `title`). One tip at a time; a tap outside, a second tap on the
 //   merchant, Escape, a scroll or a resize closes it. A tap on the merchant does nothing else (the row has no click gesture).
+// - The Note column shows each row's note (clamped; the full text is in the merchant tip) and edits it in place (PATCH `note`).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -71,6 +72,7 @@ watch(
 
 function onEdit(rowKey: string, field: string, value: string) {
   if (field === 'category') void model.setSelection(rowKey, value)
+  else if (field === 'note') void model.setNote(rowKey, value)
 }
 function onAction(rowKey: string, id: string) {
   if (id === 'rule') void model.useForAll(rowKey)
@@ -79,7 +81,7 @@ function onAction(rowKey: string, id: string) {
 // The merchant tip (a toggletip: opens on tap, so touch has what hover gives a mouse).
 const TIP_WIDTH = 320
 const TIP_MARGIN = 8
-interface MerchantTip { id: string; name: string; description: string; style: Record<string, string> }
+interface MerchantTip { id: string; name: string; description: string; note: string; style: Record<string, string> }
 const tip = ref<MerchantTip | null>(null)
 function closeTip() {
   tip.value = null
@@ -94,7 +96,7 @@ function openTip(row: Txn, el: HTMLElement) {
   // Below the merchant, unless it sits in the lower part of the screen.
   if (r.bottom > vh * 0.6) style.bottom = `${Math.max(TIP_MARGIN, vh - r.top + 6)}px`
   else style.top = `${r.bottom + 6}px`
-  tip.value = { id: row.id, name: row.merchantName || row.description, description: row.description, style }
+  tip.value = { id: row.id, name: row.merchantName || row.description, description: row.description, note: row.note ?? '', style }
 }
 function toggleTip(row: Txn, e: Event) {
   if (tip.value?.id === row.id) closeTip()
@@ -190,13 +192,18 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
             @click="model.confirmReview(row.id)"
           >✓</button>
         </span>
-        <span v-if="row.note" class="bt-note" :title="row.note">{{ row.note }}</span>
         <span
           v-if="row.needsReview && reviewReasonText(row.reviewReason)"
           class="bt-reason"
           :title="reviewReasonText(row.reviewReason) ?? ''"
           data-testid="review-reason"
         >{{ reviewReasonText(row.reviewReason) }}</span>
+      </template>
+      <template #cell-note="{ row, cardLayout }">
+        <!-- Clamped to a few lines; the full text is in the merchant tip. A row without a note shows nothing (desktop: a faint
+             "Add note" on hover or focus; phone: nothing, since an empty field would add a blank line to every card). -->
+        <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note">{{ row.note }}</span>
+        <span v-else class="bt-note-empty">Add note</span>
       </template>
       <template #cell-category="{ row }">
         <span class="bt-cat">
@@ -255,6 +262,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
     <div v-if="tip" id="bt-tip" class="bt-tip" role="tooltip" :style="tip.style" data-testid="merchant-tip">
       <span class="bt-tip-name">{{ tip.name }}</span>
       <span v-if="tip.description && tip.description !== tip.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.description }}</span>
+      <span v-if="tip.note" class="bt-tip-note" data-testid="merchant-tip-note">{{ tip.note }}</span>
     </div>
   </section>
 </template>
@@ -301,15 +309,41 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
   font-size: 12px;
   color: rgb(var(--ink-2));
 }
+.bt-tip-note {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgb(var(--line-2));
+  white-space: pre-wrap;
+}
+/* Long notes wrap and stop at three lines (two on the wide table); the merchant tip has the whole text. */
 .bt-note {
-  display: block;
-  max-width: 36ch;
-  margin-top: 1px;
+  display: -webkit-box;
+  max-width: 60ch;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.35;
   color: rgb(var(--ink-2));
+}
+.bt-note-card {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  font-size: 13px;
+}
+.bt-note-empty {
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+  opacity: 0;
+}
+tr:hover .bt-note-empty,
+.et-text-btn:focus-visible .bt-note-empty {
+  opacity: 1;
+}
+.budget-table :deep(.et-cards .et-field:has(.bt-note-empty)) {
+  display: none;
 }
 .bt-reason {
   display: block;

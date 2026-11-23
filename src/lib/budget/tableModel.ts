@@ -111,6 +111,8 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
   return [
     { key: 'postedDate', label: 'Date', editor: null, value: (t) => formatDate(t.postedDate) },
     { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
+    // The note (short item descriptions, or what a person typed): text-editable; BudgetTable.vue draws it, clamped.
+    { key: 'note', label: 'Note', editor: 'text', value: (t) => t.note ?? '', cardLine: 2 },
     { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
@@ -138,6 +140,8 @@ export function leavesSlice(q: TxnQuery, t: Txn, categories: Category[]): string
   return null
 }
 
+/** The server's limit on a note (functions/api/budget/transactions/[id].ts). */
+export const NOTE_MAX = 500
 const NETWORK_MESSAGE = 'Couldn’t save. Check your connection and try again.'
 
 /** `onCategoryAdded` hears of every category the table made (or found by name), so the owner can put it in the lists. */
@@ -308,6 +312,44 @@ export function createTxnTable(
     }
   }
 
+  /** The Note cell of a row: save the text now (PATCH `note`, a manual edit stamp; empty text clears it), revert if the save fails. */
+  async function setNote(id: string, text: string) {
+    const i = indexOf(id)
+    if (i < 0 || rowState[id]?.pending) return
+    const before = rows.value[i]
+    const next = text.trim()
+    if (next === (before.note ?? '')) return
+    if (next.length > NOTE_MAX) {
+      const msg = `The note is over ${NOTE_MAX} characters. It was not saved.`
+      setState(id, { error: msg })
+      status.value = msg
+      return
+    }
+    const note = next === '' ? null : next
+    rows.value[i] = { ...before, note }
+    setState(id, { pending: true })
+    try {
+      const res = await deps.patch(id, { note, expectedUpdatedAt: before.updatedAt })
+      const j = indexOf(id)
+      if (j >= 0) rows.value[j] = res.txn
+      setState(id, null)
+      status.value = `Saved. The note on ${before.merchantName || before.description || 'the row'} is ${note === null ? 'cleared' : 'updated'}.`
+    } catch (e) {
+      const j = indexOf(id)
+      if (e instanceof BudgetApiError && e.status === 409) {
+        if (j >= 0) rows.value[j] = e.current ?? before
+        const msg = 'Changed by someone else. Check it and try again.'
+        setState(id, { error: msg })
+        status.value = msg
+      } else {
+        if (j >= 0) rows.value[j] = before
+        const msg = e instanceof BudgetApiError ? `Couldn’t save (${e.status}). The row is back as it was.` : NETWORK_MESSAGE
+        setState(id, { error: msg })
+        status.value = msg
+      }
+    }
+  }
+
   /** `Add category "<name>"` on a row: make the category, show it in every list, then give it to the row as any other
    *  category edit (same PATCH, manual source, audit row). If making it fails the row is left as it was, with the reason. */
   async function addCategoryTo(id: string, name: string) {
@@ -368,5 +410,5 @@ export function createTxnTable(
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, setIncluded, addCategoryTo, confirmReview, useForAll }
+  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, setIncluded, setNote, addCategoryTo, confirmReview, useForAll }
 }

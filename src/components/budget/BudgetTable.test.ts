@@ -319,23 +319,89 @@ describe('BudgetTable and its parent', () => {
   })
 })
 
-describe('BudgetTable purpose note', () => {
-  const rows = () => [txn('t1', { note: 'Birthday gift for a friend (made-up)' }), txn('t2', { merchantName: 'Shop Y' }), txn('t3', { merchantName: 'Shop Z', note: '' })]
-  it('shows a non-empty note under the merchant with the full text in the title, and nothing for rows without one', async () => {
+describe('BudgetTable note', () => {
+  const NOTE = 'Amazon: birthday gift for a friend (made-up)'
+  const rows = () => [txn('t1', { note: NOTE }), txn('t2', { merchantName: 'Shop Y' }), txn('t3', { merchantName: 'Shop Z', note: '' })]
+  const noteBtn = (w: VueWrapper, id: string) => rowEl(w, id).get('button.et-text-btn')
+  async function editNote(w: VueWrapper, id: string, text: string) {
+    await noteBtn(w, id).trigger('click')
+    const input = rowEl(w, id).get('input.et-input')
+    await input.setValue(text)
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+  }
+
+  it('shows a non-empty note in its own cell, and nothing for rows without one', async () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
     const w = await mountTable()
-    const note = rowEl(w, 't1').get('.bt-note')
-    expect(note.text()).toBe('Birthday gift for a friend (made-up)')
-    expect(note.attributes('title')).toBe('Birthday gift for a friend (made-up)')
-    expect(rowEl(w, 't2').find('.bt-note').exists()).toBe(false)
-    expect(rowEl(w, 't3').find('.bt-note').exists()).toBe(false)
+    expect(rowEl(w, 't1').get('[data-testid="row-note"]').text()).toBe(NOTE)
+    expect(rowEl(w, 't2').find('[data-testid="row-note"]').exists()).toBe(false)
+    expect(rowEl(w, 't3').find('[data-testid="row-note"]').exists()).toBe(false)
+    expect(w.findAll('thead th').map((t) => t.text())).toContain('Note')
   })
-  it('shows it in the card layout too', async () => {
+  it('shows it in the card layout too (a row without one has only the hidden "Add note" field)', async () => {
     width = 400
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
     const w = await mountTable()
-    expect(w.get('li[data-row-key="t1"] .bt-note').text()).toBe('Birthday gift for a friend (made-up)')
-    expect(w.find('li[data-row-key="t2"] .bt-note').exists()).toBe(false)
+    const note = w.get('li[data-row-key="t1"] [data-testid="row-note"]')
+    expect(note.text()).toBe(NOTE)
+    expect(note.classes()).toContain('bt-note-card')
+    expect(w.find('li[data-row-key="t2"] [data-testid="row-note"]').exists()).toBe(false)
+  })
+  it('the merchant tip also shows the note, and no note line without one', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await rowEl(w, 't1').get('[data-testid="merchant-tip-toggle"]').trigger('click')
+    expect(w.get('[data-testid="merchant-tip-note"]').text()).toBe(NOTE)
+    await rowEl(w, 't2').get('[data-testid="merchant-tip-toggle"]').trigger('click')
+    expect(w.find('[data-testid="merchant-tip-note"]').exists()).toBe(false)
+  })
+  it('editing sends only { note, expectedUpdatedAt }, shows the saved row, and does not touch the pie', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH'
+      ? json({ txn: txn('t2', { merchantName: 'Shop Y', note: 'Made-up reason', updatedAt: '2026-10-07T00:00:00Z' }) })
+      : json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await editNote(w, 't2', '  Made-up reason ')
+    const patch = calls.find((c) => c.method === 'PATCH')!
+    expect(patch.url.pathname).toBe('/api/budget/transactions/t2')
+    expect(patch.body).toEqual({ note: 'Made-up reason', expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    expect(rowEl(w, 't2').get('[data-testid="row-note"]').text()).toBe('Made-up reason')
+    expect(w.emitted('edited')).toBeUndefined()
+  })
+  it('clearing the text sends note null', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH'
+      ? json({ txn: txn('t1', { note: null, updatedAt: '2026-10-07T00:00:00Z' }) })
+      : json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await editNote(w, 't1', '')
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ note: null, expectedUpdatedAt: '2026-10-06T00:00:00Z' })
+    expect(rowEl(w, 't1').find('[data-testid="row-note"]').exists()).toBe(false)
+  })
+  it('an unchanged note sends nothing', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await editNote(w, 't1', NOTE)
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+  })
+  it('a failed save puts the old note back and says so', async () => {
+    mockFetch((url, init) => init?.method === 'PATCH' ? json({ error: 'x' }, 500) : json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await editNote(w, 't1', 'Something else (made-up)')
+    expect(rowEl(w, 't1').get('[data-testid="row-note"]').text()).toBe(NOTE)
+    expect(w.text()).toContain('Couldn’t save (500)')
+  })
+  it('a note over 500 characters is not sent', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await editNote(w, 't2', 'x'.repeat(501))
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    expect(w.text()).toContain('over 500 characters')
+  })
+  it('read-only: the note shows but cannot be edited', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable({ canEdit: false })
+    expect(rowEl(w, 't1').get('[data-testid="row-note"]').text()).toBe(NOTE)
+    expect(rowEl(w, 't1').find('button.et-text-btn').exists()).toBe(false)
   })
 })
 
@@ -349,7 +415,7 @@ describe('BudgetTable review reason and "Looks right"', () => {
     const w = await mountTable()
     const r = rowEl(w, 't1')
     expect(r.get('.bt-reason').text()).toBe(REASON)
-    expect(r.get('.bt-note').text()).toBe('Laptop bag (made-up)')
+    expect(r.get('[data-testid="row-note"]').text()).toBe('Laptop bag (made-up)')
     expect(r.get('.bt-badge').attributes('title')).toBe(REASON)
     expect(rowEl(w, 't2').find('.bt-reason').exists()).toBe(false)
     expect(rowEl(w, 't2').find('.bt-confirm').exists()).toBe(false)

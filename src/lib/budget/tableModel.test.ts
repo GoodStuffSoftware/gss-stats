@@ -68,9 +68,9 @@ describe('helpers', () => {
     expect(parseSelection('kind:exclude')).toEqual({})
     expect(parseSelection('kind:card_payment')).toEqual({})
   })
-  it('columns: the category is the only editor; the account shows on the card (line 2, above the category)', () => {
+  it('columns: the category (select) and the note (text) are the editors; the account shows on the card (line 2, above the category)', () => {
     const cols = budgetColumns(CATS, ACCOUNTS)
-    expect(cols.filter((c) => c.editor).map((c) => c.key)).toEqual(['category'])
+    expect(cols.filter((c) => c.editor).map((c) => c.key)).toEqual(['note', 'category'])
     expect(cols.find((c) => c.key === 'account')?.cardLine).toBe(2)
     expect(cols.map((c) => c.key).indexOf('account')).toBeLessThan(cols.map((c) => c.key).indexOf('category'))
     expect(cols.find((c) => c.key === 'account')?.value?.(txn('t1'))).toBe('Checking A')
