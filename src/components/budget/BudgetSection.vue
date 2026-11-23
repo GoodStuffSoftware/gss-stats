@@ -325,6 +325,9 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
             :can-edit="canEdit"
             :refresh-key="refreshKey"
             :highlight-id="highlightId"
+            :people="meta.people"
+            :account-email="accountEmail"
+            :bounds="{ from: state.from, to: state.to }"
             @edited="onEdited"
             @category-added="onCategoryAdded"
           />
