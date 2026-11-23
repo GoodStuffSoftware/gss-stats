@@ -2791,11 +2791,14 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
   once per debt and cached.
 - **Donut size.** When one chart has the whole width (the Spending or Debts tab, or Both stacked on a narrow screen) and its box is at least
-  640 px, its donut is bigger and sits beside a legend in as many 240 px-plus columns as fit. Every Budget donut has
+  640 px, its donut is bigger and sits beside a legend in as many 300 px-plus columns as fit. Every Budget donut has
   a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); the size is kept
   per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:solo` (one key, `gss-stats-budget-donut:both`, for the Both tab) and is clamped to the
   room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);
   without them it renders as before.
+  The wide layout also takes `legendSide` (left, right or below the donut) and `legendPicker` (a Left | Right |
+  Below group at the top of the legend, wide only; Budget shows it on the Spending and Debts tabs and hides it on Both, where the two donuts share one size and a drag resizes both); the choice is kept per device and chart under
+  `gss-stats-budget-legend:<spending|debts>`.
 - **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
   are ever committed. The seed and the import requests live in a private folder outside the repo, and the
   SQL file the tool writes goes there too. Tests use only the made-up data in

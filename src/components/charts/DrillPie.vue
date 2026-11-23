@@ -1,4 +1,5 @@
 <script lang="ts">
+import { ref, type Ref } from 'vue'
 // Types of the generic drill-down pie (a normal script block so other files can import them).
 export interface PieSlice {
   /** Reported by `select`. Unique among the slices. */
@@ -47,15 +48,40 @@ export function clampDonutSize(n: number, max = Infinity): number {
   return Math.round(Math.min(hi, Math.max(DONUT_MIN, n)))
 }
 
+/** Where the legend sits in the wide layout (opt-in `legendSide`): beside the donut (right is the default), or under it. */
+export type LegendSide = 'left' | 'right' | 'bottom'
+export const LEGEND_SIDES: readonly LegendSide[] = ['left', 'right', 'bottom']
+/** A legend side, or null for anything else (a saved value that is missing or unknown). */
+export function parseLegendSide(v: unknown): LegendSide | null {
+  return LEGEND_SIDES.includes(v as LegendSide) ? (v as LegendSide) : null
+}
+
 /** What the room (`box`, the width the pie has, 0 = not measured) allows: whether the wide layout applies (the donut
- * beside the legend), the largest donut (the whole width; with the wide layout one legend column is left), and the
- * donut's automatic size there (null without the wide layout: the stylesheet decides). */
-export function donutLayout(box: number, wide: boolean): { wideOn: boolean; max: number; auto: number | null } {
+ * beside the legend, or over it when `side` is bottom), the largest donut (the whole width; with the legend beside it
+ * one legend column is left), and the donut's automatic size there (null without the wide layout: the stylesheet
+ * decides). */
+export function donutLayout(box: number, wide: boolean, side: LegendSide = 'right'): { wideOn: boolean; max: number; auto: number | null } {
   if (!(box > 0)) return { wideOn: false, max: Infinity, auto: null }
   const wideOn = wide && box >= WIDE_MIN_PX
-  const max = Math.max(DONUT_MIN, wideOn ? box - LEGEND_COL_PX - WIDE_GAP_PX : box)
-  const auto = wideOn ? Math.min(max, Math.max(320, Math.min(680, Math.round(box * 0.4)))) : null
+  const beside = side !== 'bottom'
+  const max = Math.max(DONUT_MIN, wideOn && beside ? box - LEGEND_COL_PX - WIDE_GAP_PX : box)
+  const pick = beside ? Math.max(320, Math.min(680, Math.round(box * 0.4))) : Math.max(320, Math.min(560, Math.round(box * 0.6)))
+  const auto = wideOn ? Math.min(max, pick) : null
   return { wideOn, max, auto }
+}
+
+// One saved size per `sizeKey`, shared by every pie that names the key: they resize together while one is dragged.
+const sizeRefs = new Map<string, Ref<number | null>>()
+/** The live size under `key` (null = automatic). `fresh` re-reads this device's saved value first (a pie that appears). */
+export function sharedSize(key: string, fresh = false): Ref<number | null> {
+  let r = sizeRefs.get(key)
+  if (!r) {
+    r = ref<number | null>(null)
+    sizeRefs.set(key, r)
+    fresh = true
+  }
+  if (fresh) r.value = readDonutSize(key)
+  return r
 }
 
 /** A saved size, or null when there is none or it cannot be read. Never throws. */
@@ -120,11 +146,17 @@ export function writeDonutSize(key: string | undefined, size: number | null): vo
 //                                          and its share stay together in a row)
 //   sizeKey: string                        where the chosen size is kept on this device (localStorage); the caller names
 //                                          it, so one size can belong to one chart in one layout. No key: not kept.
-// With all three off the pie is laid out and sized exactly as before.
+//   legendSide: 'left' | 'right' | 'bottom'  (wide layout only) which side of the donut the legend takes; the default
+//                                          is right. The parent keeps the choice.
+//   legendPicker: boolean (false)          a small button group at the top of the legend (wide layout only) that
+//                                          emits `update:legendSide`; with no picker the side is whatever the parent says
+// With all of them off the pie is laid out and sized exactly as before. Pies that name the same `sizeKey` share one
+// size: dragging one moves the others live, and a reset resets all of them.
 // Emits
+//   update:legendSide(side)                a picker button was pressed
 //   select(key: string)                    a slice or its list row was picked (never for an `inert` slice, nor for a
 //                                          slice with `members`: that one opens its list; its members are reported)
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { Chart, type ChartConfiguration } from 'chart.js'
 import { arcLabelsPlugin } from '../../lib/charts'
 import { createPieGesture, type PieGesture } from '../../lib/pieGesture'
@@ -143,10 +175,27 @@ const props = withDefaults(
     resizable?: boolean
     wide?: boolean
     sizeKey?: string
+    legendSide?: LegendSide
+    legendPicker?: boolean
   }>(),
-  { animate: true, deliberate: false, format: (v: number) => String(v), label: 'Pie chart', resizable: false, wide: false, sizeKey: undefined },
+  {
+    animate: true,
+    deliberate: false,
+    format: (v: number) => String(v),
+    label: 'Pie chart',
+    resizable: false,
+    wide: false,
+    sizeKey: undefined,
+    legendSide: undefined,
+    legendPicker: false,
+  },
 )
-const emit = defineEmits<{ select: [key: string] }>()
+const SIDE_OPTIONS: { value: LegendSide; text: string; title: string }[] = [
+  { value: 'left', text: 'Left', title: 'Legend to the left of the chart' },
+  { value: 'right', text: 'Right', title: 'Legend to the right of the chart' },
+  { value: 'bottom', text: 'Below', title: 'Legend under the chart' },
+]
+const emit = defineEmits<{ select: [key: string]; 'update:legendSide': [side: LegendSide] }>()
 
 // ── Slices and chart config ──────────────────────────────────────────────────────────────────────────────
 const drawn = computed(() => props.slices.filter((s) => s.value > 0))
@@ -405,15 +454,27 @@ watch(
 // ── Size of the donut ────────────────────────────────────────────────────────────────────────────────────
 const rootEl = ref<HTMLElement | null>(null)
 const room = ref(0) // the width the pie has, in px (0 = not measured)
-const saved = ref<number | null>(readDonutSize(props.sizeKey)) // null = the automatic size
-const layout = computed(() => donutLayout(room.value, props.wide))
+const contents = ref(false) // the pie's own box has no size of its own (side by side in a parent grid): never the wide layout
+const side = computed<LegendSide>(() => parseLegendSide(props.legendSide) ?? 'right')
+// null = the automatic size. With a key the value is shared with every pie of that key (see sharedSize).
+const localSaved = ref<number | null>(null)
+const slot = computed(() => (props.sizeKey ? sharedSize(props.sizeKey) : localSaved))
+const saved = computed<number | null>({
+  get: () => slot.value.value,
+  set: (v) => {
+    slot.value.value = v
+  },
+})
+if (props.sizeKey) sharedSize(props.sizeKey, true)
+const layout = computed(() => donutLayout(room.value, props.wide && !contents.value, side.value))
+const showPicker = computed(() => props.legendPicker && layout.value.wideOn)
 /** The size the donut has now: the saved one within the room there is, else the automatic one (null = stylesheet). */
 const size = computed<number | null>(() => (saved.value === null ? layout.value.auto : clampDonutSize(saved.value, layout.value.max)))
 const sizeMax = computed(() => (Number.isFinite(layout.value.max) ? layout.value.max : undefined))
 watch(
   () => props.sizeKey,
   (key) => {
-    saved.value = readDonutSize(key)
+    if (key) sharedSize(key, true)
   },
 )
 const canvasStyle = computed(() => (size.value === null ? undefined : { width: `${size.value}px`, height: `${size.value}px`, maxWidth: 'none', maxHeight: 'none' }))
@@ -426,7 +487,9 @@ function roomElement(): HTMLElement | null {
   return el
 }
 function measure() {
-  room.value = roomElement()?.clientWidth ?? 0
+  const el = roomElement()
+  room.value = el?.clientWidth ?? 0
+  contents.value = !!el && el !== rootEl.value
 }
 // Measured only while the pie has a size to manage (resizable or wide): every other pie holds no listener or observer.
 let resizeObserver: ResizeObserver | undefined
@@ -449,6 +512,7 @@ function stopMeasuring() {
   resizeObserver?.disconnect()
   resizeObserver = undefined
   room.value = 0
+  contents.value = false
 }
 onMounted(() => {
   if (props.resizable || props.wide) startMeasuring()
@@ -468,6 +532,30 @@ const renderedSize = () => Math.round(canvasBox.value?.getBoundingClientRect().w
 function setSaved(n: number | null) {
   saved.value = n === null ? null : clampDonutSize(n, layout.value.max)
 }
+// While the handle is held no page text may be selected (a drag across the page would select it, mouse or touch).
+const noSelect = (e: Event) => e.preventDefault()
+let selectBefore: { user: string; webkit: string } | null = null
+function lockSelection() {
+  if (selectBefore || typeof document === 'undefined') return
+  const st = document.body.style
+  selectBefore = { user: st.userSelect, webkit: st.getPropertyValue('-webkit-user-select') }
+  st.userSelect = 'none'
+  st.setProperty('-webkit-user-select', 'none')
+  document.addEventListener('selectstart', noSelect)
+  try {
+    document.getSelection()?.removeAllRanges()
+  } catch {
+    // nothing to clear
+  }
+}
+function unlockSelection() {
+  if (!selectBefore) return
+  const st = document.body.style
+  st.userSelect = selectBefore.user
+  st.setProperty('-webkit-user-select', selectBefore.webkit)
+  selectBefore = null
+  document.removeEventListener('selectstart', noSelect)
+}
 function dragStart(e: PointerEvent) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   e.preventDefault()
@@ -478,6 +566,7 @@ function dragStart(e: PointerEvent) {
     // no capture: the drag still follows the pointer while it is over the handle
   }
   drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: renderedSize() }
+  lockSelection()
 }
 function dragMove(e: PointerEvent) {
   if (!drag || e.pointerId !== drag.id) return
@@ -490,6 +579,7 @@ function dragEnd(e: PointerEvent) {
   if (!drag || e.pointerId !== drag.id) return
   const done = drag
   drag = null
+  unlockSelection()
   try {
     ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
   } catch {
@@ -514,6 +604,7 @@ function onHandleKey(e: KeyboardEvent) {
 }
 
 onBeforeUnmount(() => {
+  unlockSelection()
   stopMeasuring()
   detach?.()
   gesture?.destroy()
@@ -523,7 +614,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootEl" class="drill-pie" :class="{ 'dp-wide': layout.wideOn }" :style="rootStyle" data-testid="drill-pie">
+  <div ref="rootEl" class="drill-pie" :class="layout.wideOn ? ['dp-wide', `dp-side-${side}`] : undefined" :style="rootStyle" data-testid="drill-pie">
     <div ref="canvasBox" class="dp-canvas" :style="canvasStyle" v-bind="resizable ? {} : { role: 'img', 'aria-label': label }">
       <BaseChart v-if="resizable" :config="config" :drill-open="false" role="img" :aria-label="label" @point="onPoint" />
       <BaseChart v-else :config="config" :drill-open="false" @point="onPoint" />
@@ -548,6 +639,22 @@ onBeforeUnmount(() => {
     </div>
     <p v-if="deliberate" class="dp-hint" data-testid="pie-hint">{{ finePointer ? 'Click a slice to open it' : 'Press and hold a slice to open it' }}</p>
     <ul class="dp-list" :aria-label="`${label}: slices`">
+      <li v-if="showPicker" class="dp-legend-bar" data-testid="legend-picker">
+        <span class="dp-legend-name">Legend</span>
+        <span class="dp-sides" role="group" aria-label="Legend position">
+          <button
+            v-for="o in SIDE_OPTIONS"
+            :key="o.value"
+            type="button"
+            class="dp-side"
+            :class="{ on: side === o.value }"
+            :aria-pressed="side === o.value"
+            :title="o.title"
+            :data-testid="`legend-side-${o.value}`"
+            @click="emit('update:legendSide', o.value)"
+          >{{ o.text }}</button>
+        </span>
+      </li>
       <li v-for="s in drawn" :key="s.key" class="dp-item">
         <component
           :is="s.inert ? 'div' : 'button'"
@@ -609,7 +716,8 @@ onBeforeUnmount(() => {
   -webkit-touch-callout: none;
   touch-action: pan-y;
 }
-/* Opt-in: the donut beside the legend, the legend in as many columns as fit. */
+/* Opt-in: the donut beside the legend (right is the default; left mirrors it) or over it (bottom), the legend in as many
+ * columns as fit. The donut is centred in its own column, and the legend's names wrap instead of being cut. */
 .drill-pie.dp-wide {
   display: grid;
   grid-template-columns: var(--dp-size, 320px) minmax(0, 1fr);
@@ -620,20 +728,97 @@ onBeforeUnmount(() => {
   grid-column: 1;
   grid-row: 1;
   align-self: start;
-  justify-self: start;
+  justify-self: center;
 }
 .dp-wide .dp-hint {
   grid-column: 1;
   grid-row: 2;
   max-width: var(--dp-size, 320px);
+  justify-self: center;
 }
 .drill-pie.dp-wide .dp-list {
   grid-column: 2;
   grid-row: 1 / span 2;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   column-gap: 24px;
   align-items: start;
+  min-width: 0;
+}
+.drill-pie.dp-wide.dp-side-left {
+  grid-template-columns: minmax(0, 1fr) var(--dp-size, 320px);
+}
+.dp-side-left .dp-canvas,
+.dp-side-left .dp-hint {
+  grid-column: 2;
+}
+.drill-pie.dp-wide.dp-side-left .dp-list {
+  grid-column: 1;
+}
+.drill-pie.dp-wide.dp-side-bottom {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 12px;
+}
+.dp-side-bottom .dp-canvas,
+.dp-side-bottom .dp-hint {
+  grid-column: 1;
+}
+.dp-side-bottom .dp-hint {
+  max-width: none;
+}
+.drill-pie.dp-wide.dp-side-bottom .dp-list {
+  grid-column: 1;
+  grid-row: 3;
+}
+.dp-wide .dp-row {
+  min-width: 0;
+}
+.dp-wide .dp-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dp-legend-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 6px 4px;
+  font-size: 12px;
+  color: rgb(var(--ink-3));
+}
+.dp-sides {
+  display: inline-flex;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.dp-side {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--ink-2));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dp-side + .dp-side {
+  border-left: 1px solid rgb(var(--line));
+}
+.dp-side.on {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
+  font-weight: 600;
+}
+.dp-side:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: -2px;
+}
+@media (pointer: coarse) {
+  .dp-side {
+    min-height: 44px;
+  }
 }
 .dp-resize {
   position: absolute;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DONUT_KEY_PREFIX, LAYOUT_KEY, donutSizeKey, migrateLegacyTab, panelsKey, type PanelStorage } from './panelVisibility'
+import { DONUT_KEY_PREFIX, LAYOUT_KEY, LEGEND_KEY_PREFIX, donutSizeKey, legendSideKey, migrateLegacyTab, panelsKey, readLegendSide, writeLegendSide, type PanelStorage } from './panelVisibility'
 
 function memory(): PanelStorage & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -104,5 +104,31 @@ describe('migrateLegacyTab', () => {
   it('never throws when storage is missing or blocked', () => {
     expect(migrateLegacyTab(EMAIL, null)).toEqual({ tab: null, side: false })
     expect(migrateLegacyTab(EMAIL, throwing)).toEqual({ tab: null, side: false })
+  })
+})
+
+describe('legend side', () => {
+  it('has a key per chart that holds no personal data, apart from the donut and layout keys', () => {
+    expect(legendSideKey('spending')).toBe(`${LEGEND_KEY_PREFIX}:spending`)
+    expect(legendSideKey('debts')).not.toBe(legendSideKey('spending'))
+    for (const k of [legendSideKey('spending'), legendSideKey('debts')]) expect(k).not.toMatch(/@/)
+    expect([LAYOUT_KEY, donutSizeKey('spending', true), donutSizeKey('spending', false)]).not.toContain(legendSideKey('spending'))
+  })
+  it('reads right when nothing is saved or the saved value is invalid, and each chart on its own', () => {
+    const s = memory()
+    expect(readLegendSide('spending', s)).toBe('right')
+    expect(readLegendSide('spending', null)).toBe('right')
+    s.setItem(legendSideKey('spending'), 'sideways')
+    expect(readLegendSide('spending', s)).toBe('right')
+    writeLegendSide('spending', 'left', s)
+    writeLegendSide('debts', 'bottom', s)
+    expect(readLegendSide('spending', s)).toBe('left')
+    expect(readLegendSide('debts', s)).toBe('bottom')
+    writeLegendSide('spending', 'right', s)
+    expect(readLegendSide('spending', s)).toBe('right')
+  })
+  it('never throws when storage is blocked', () => {
+    expect(readLegendSide('debts', throwing)).toBe('right')
+    expect(() => writeLegendSide('debts', 'left', throwing)).not.toThrow()
   })
 })
