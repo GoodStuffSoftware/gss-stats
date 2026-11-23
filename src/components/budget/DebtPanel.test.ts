@@ -14,7 +14,8 @@ const DEBTS = [debt('a', 90000, { last4: '0001', aprBp: 1999 }), debt('b', 25000
 
 const ChartStub = defineComponent({ name: 'BaseChart', props: { config: Object, drillOpen: Boolean }, emits: ['point'], template: '<div />' })
 const mounted: VueWrapper[] = []
-function mountPanel(props: Partial<{ debts: DebtSlice[]; canEdit: boolean }> = {}) {
+type Hist = ReadonlyArray<{ asOf: string; balanceCents: number }>
+function mountPanel(props: Partial<{ debts: DebtSlice[]; canEdit: boolean; selected: DebtSlice | null; history: Hist | null; historyFailed: boolean }> = {}) {
   const w = mount(DebtPanel, { props: { debts: DEBTS, dark: false, canEdit: true, ...props }, global: { stubs: { BaseChart: ChartStub } }, attachTo: document.body })
   mounted.push(w)
   return w
@@ -30,11 +31,53 @@ describe('DebtPanel', () => {
     expect(w.get('[data-testid="debt-total"]').text()).toContain('$3,400.00')
   })
 
-  it('a slice (or its list row) opens that debt', async () => {
+  it('a slice (or its list row) drills into that debt, in place', async () => {
     const w = mountPanel()
     await w.get('[data-testid="pie-row-a"]').trigger('click')
     w.findComponent(ChartStub).vm.$emit('point', { index: 0, datasetIndex: 0, x: 0, y: 0 })
-    expect(w.emitted('open')).toEqual([['a'], ['b']])
+    expect(w.emitted('drill')).toEqual([['a'], ['b']])
+    expect(w.emitted('open')).toBeUndefined()
+  })
+
+  describe('drilled', () => {
+    const HIST: Hist = [{ asOf: '2026-08-31', balanceCents: 100000 }, { asOf: '2026-09-30', balanceCents: 95000 }]
+
+    it('shows the crumb "All debts" then the debt, its balance and its line chart; no pie', () => {
+      const w = mountPanel({ selected: DEBTS[0], history: HIST })
+      expect(w.findComponent(DrillPie).exists()).toBe(false)
+      expect(w.get('[data-testid="debt-drilled"]').exists()).toBe(true)
+      const crumbs = w.get('nav').text()
+      expect(crumbs).toContain('All debts')
+      expect(crumbs).toContain('Debt a ••0001')
+      expect(w.get('[data-testid="debt-drilled-balance"]').text()).toBe('$900.00')
+      expect(w.find('[data-testid="debt-chart"]').exists()).toBe(true)
+    })
+
+    it('the "All debts" crumb goes back to the pie', async () => {
+      const w = mountPanel({ selected: DEBTS[0], history: HIST })
+      await w.findAll('nav button').find((b) => b.text() === 'All debts')!.trigger('click')
+      expect(w.emitted('back')).toHaveLength(1)
+    })
+
+    it('"Loan details" opens the Loans page for that debt', async () => {
+      const w = mountPanel({ selected: DEBTS[0], history: HIST })
+      await w.get('[data-testid="debt-drilled-open"]').trigger('click')
+      expect(w.emitted('open')).toEqual([['a']])
+    })
+
+    it('while the history loads there is a skeleton, and a failure offers Retry', async () => {
+      const w = mountPanel({ selected: DEBTS[0], history: null })
+      expect(w.find('[data-testid="debt-chart"]').exists()).toBe(false)
+      expect(w.find('.dp-line-sk').exists()).toBe(true)
+      await w.setProps({ historyFailed: true })
+      await w.get('[data-testid="debt-drilled-retry"]').trigger('click')
+      expect(w.emitted('retry')).toHaveLength(1)
+    })
+
+    it('a debt with no history says so', () => {
+      const w = mountPanel({ selected: DEBTS[1], history: [] })
+      expect(w.get('[data-testid="debt-chart-none"]').text()).toBe('No balance history yet.')
+    })
   })
 
   it('a debt with no balance is listed under the pie with "Add balance" when editing is allowed', async () => {

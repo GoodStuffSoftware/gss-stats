@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
-  LOAN_MARK_KEY, defaultViewState, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
+  DEBT_MARK_KEY, LOAN_MARK_KEY, defaultViewState, parseDebtSteps, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   useBudgetViewState, type BudgetViewState,
 } from './viewState'
 
@@ -759,6 +759,121 @@ describe('Budget pages: Overview and Loans', () => {
       expect(b.at).toBe(2)
       expect(view.state.loan).toBe('acct-1')
       w.unmount()
+    })
+
+    describe('the debt drill (a debt opened in place from the debt pie)', () => {
+      const debtOf = () => readSteps(history.state, parseDebtSteps, DEBT_MARK_KEY)?.map((x) => x.key)
+
+      it('parseDebtSteps accepts one plain-id step and refuses the rest', () => {
+        expect(parseDebtSteps([{ level: 'debt', key: 'acct-1' }])?.map((x) => x.key)).toEqual(['acct-1'])
+        expect(parseDebtSteps([])).toEqual([])
+        expect(parseDebtSteps([{ level: 'debt', key: 'a' }, { level: 'debt', key: 'b' }])).toBeNull()
+        expect(parseDebtSteps([{ level: 'loan', key: 'a' }])).toBeNull()
+        expect(parseDebtSteps([{ level: 'debt', key: 'a b/../x' }])).toBeNull()
+        expect(parseDebtSteps('x')).toBeNull()
+      })
+
+      it('opens as ONE entry with the id in history.state and never in the address; a bad id opens nothing', async () => {
+        const b = simBrowser()
+        const { view, w } = mountSection()
+        await nextTick()
+        view.setDebt('a b/../x')
+        await nextTick()
+        expect(view.state.debt).toBeNull()
+        expect(b.length).toBe(1)
+        view.setDebt('acct-1')
+        await nextTick()
+        expect(view.state.debt).toBe('acct-1')
+        expect(b.length).toBe(2)
+        expect(debtOf()).toEqual(['acct-1'])
+        expect(location.href).not.toContain('acct-1')
+        expect(searchWithState('', view.state)).not.toContain('acct-1')
+        w.unmount()
+      })
+
+      it('Back returns to the pie, Forward reopens the debt', async () => {
+        const b = simBrowser()
+        const { view, w } = mountSection()
+        await nextTick()
+        view.setDebt('acct-1')
+        await nextTick()
+        await b.go(-1)
+        expect(view.state.debt).toBeNull()
+        expect(view.state.page).toBe('overview')
+        await b.go(1)
+        expect(view.state.debt).toBe('acct-1')
+        expect(b.at).toBe(1)
+        w.unmount()
+      })
+
+      it('the crumb (setDebt null) steps back through history instead of stacking a new entry', async () => {
+        const b = simBrowser()
+        const { view, w } = mountSection()
+        await nextTick()
+        view.setDebt('acct-1')
+        await nextTick()
+        view.setDebt(null)
+        await new Promise((r) => setTimeout(r, 20))
+        await nextTick()
+        expect(view.state.debt).toBeNull()
+        expect(b.at).toBe(0)
+        expect(b.length).toBe(2) // Forward still reopens it
+        w.unmount()
+      })
+
+      it('a spending drill and a debt drill coexist: Back closes the debt first, then the spending step', async () => {
+        const b = simBrowser()
+        const { view, w } = mountSection()
+        await nextTick()
+        view.pushStep(FUEL)
+        await nextTick()
+        view.setDebt('acct-1')
+        await nextTick()
+        expect(b.length).toBe(3)
+        await b.go(-1)
+        expect(view.state.debt).toBeNull()
+        expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+        await b.go(-1)
+        expect(view.state.path).toEqual([])
+        expect(view.state.debt).toBeNull()
+        await b.go(1)
+        expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+        expect(view.state.debt).toBeNull()
+        await b.go(1)
+        expect(view.state.debt).toBe('acct-1')
+        expect(view.state.path.map((x) => x.key)).toEqual(['fuel'])
+        w.unmount()
+      })
+
+      it('a reload on a drilled debt restores it from history.state; Back then closes it', async () => {
+        const b = simBrowser()
+        const first = mountSection()
+        await nextTick()
+        first.view.setDebt('acct-1')
+        await nextTick()
+        b.reload(first.w)
+        const { view, w } = mountSection()
+        await nextTick()
+        expect(view.state.debt).toBe('acct-1')
+        await b.go(-1)
+        expect(view.state.debt).toBeNull()
+        w.unmount()
+      })
+
+      it('opening the debt in Loans keeps the drill underneath: Back from Loans shows the drilled debt again', async () => {
+        const b = simBrowser()
+        const { view, w } = mountSection()
+        await nextTick()
+        view.setDebt('acct-1')
+        await nextTick()
+        view.setPage('loans', 'acct-1')
+        await nextTick()
+        expect(view.state.page).toBe('loans')
+        await b.go(-1)
+        expect(view.state.page).toBe('overview')
+        expect(view.state.debt).toBe('acct-1')
+        w.unmount()
+      })
     })
   })
 })
