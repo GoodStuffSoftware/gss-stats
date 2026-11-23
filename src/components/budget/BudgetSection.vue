@@ -36,7 +36,7 @@ const onNarrow = () => {
   narrow.value = !!narrowQuery?.matches
 }
 
-const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today: viewToday } =
+const { state, loanFrom, backToOverview, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today: viewToday } =
   useBudgetViewState(props.today, () => defaultTabFor(!narrowQuery?.matches))
 
 // ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -373,10 +373,12 @@ onBeforeUnmount(() => {
           v-if="state.page === 'loans'"
           :person="state.person === 'all' ? null : state.person"
           :loan-id="state.loan"
+          :from="loanFrom"
           :can-edit="canEdit"
           :dark="dark"
           @open="(id) => setPage('loans', id)"
           @close="setPage('loans')"
+          @leave="backToOverview"
           @saved="onDebtSaved"
         />
 

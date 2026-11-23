@@ -10,7 +10,7 @@ describe('Crumbs', () => {
   it('every item but the last is a button; the last marks where you are', () => {
     const w = mount(Crumbs, { props: { items: ITEMS } })
     expect(w.findAll('button').map((b) => b.text())).toEqual(['Top', 'Alpha'])
-    const here = w.get('[aria-current="location"]')
+    const here = w.get('[aria-current="page"]')
     expect(here.text()).toBe('Beta')
     expect(here.element.tagName).toBe('SPAN')
   })
@@ -43,6 +43,13 @@ describe('Crumbs', () => {
     expect(rule![1]).toContain('.cr-item:not(:last-child)')
     expect(rule![1]).toContain('.cr-sep')
     expect(rule![1]).toMatch(/display:\s*none/)
+  })
+
+  it('wrap is opt-in: off keeps one line, on lets the trail wrap with every item whole', () => {
+    expect(mount(Crumbs, { props: { items: ITEMS } }).get('nav').classes()).not.toContain('cr-wrap')
+    const w = mount(Crumbs, { props: { items: ITEMS, wrap: true } })
+    expect(w.get('nav').classes()).toContain('cr-wrap')
+    expect(source).toMatch(/\.cr-wrap \.cr-list \{[^}]*flex-wrap:\s*wrap/)
   })
 
   it('is generic (ADR 0005: no one-off widgets)', () => {

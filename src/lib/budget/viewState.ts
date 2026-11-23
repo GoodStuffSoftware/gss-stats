@@ -14,7 +14,7 @@
 // click on a slice of the debt pie shows that debt's balance line): `{level:'debt', key}`, own mark key, one more
 // instance whose entries interleave with the spending drill's (both carry each other's marks).
 // Everything read back is validated; anything malformed falls back to its default.
-import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { createDrillHistory, readMark, readSteps, type DrillHistory, type HistoryLike } from './drillHistory'
 import { fitSavedView, VIEW_STEP_KEY_MAX, VIEW_STEP_LABEL_MAX, type SavedView } from './savedView'
 import { BUDGET_PARAM_PREFIX, PAGE_PARAM, budgetPageOf, budgetSectionOpen, type BudgetPage } from './sectionLink'
@@ -29,7 +29,10 @@ export function defaultTabFor(wide: boolean): BudgetTab {
 }
 export type GroupBy = 'merchant' | 'account'
 export interface DrillStep { level: 'category' | 'merchant'; key: string; label: string }
-export interface LoanStep { level: 'loan'; key: string; label: string }
+/** Where the open loan was opened from: `drill` = the Overview debt drill's "Loan details" (that debt was open in place),
+ * `debts` = a Details button of the Overview debt list; absent = the Loans page's own list. */
+export type LoanFrom = 'drill' | 'debts'
+export interface LoanStep { level: 'loan'; key: string; label: string; from?: LoanFrom }
 export interface DebtStep { level: 'debt'; key: string; label: string }
 export interface BudgetViewState {
   from: IsoDate
@@ -168,9 +171,10 @@ export function parseLoanSteps(raw: unknown): LoanStep[] | null {
   if (raw.length === 0) return []
   const t = raw[0] as unknown
   if (!t || typeof t !== 'object') return null
-  const { level, key } = t as Record<string, unknown>
+  const { level, key, from } = t as Record<string, unknown>
   if (level !== 'loan' || typeof key !== 'string' || !LOAN_ID_RE.test(key)) return null
-  return [{ level: 'loan', key, label: key }]
+  if (from !== undefined && from !== 'drill' && from !== 'debts') return null
+  return [from === undefined ? { level: 'loan', key, label: key } : { level: 'loan', key, label: key, from }]
 }
 
 /** Drill steps read back from history.state (anything can be in there): the steps when they are a valid path
@@ -345,6 +349,9 @@ export function txnQueryOf(state: BudgetViewState): TxnQuery {
 /** `defaultTab` names the tab for a link or entry that does not carry one (the width decides: `defaultTabFor`). */
 export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () => BudgetTab = () => 'spending') {
   const state = reactive<BudgetViewState>(stateFromSearch(globalThis.location?.search ?? '', today, defaultTab()))
+  // Where the open loan was opened from (LoanFrom): travels with the loan step in history.state, so Back, Forward and a
+  // reload keep the trail the page shows (components/budget/LoansPage.vue). Null on the Loans list's own detail.
+  const loanFrom = ref<LoanFrom | null>(null)
   // Read before anything below (or writeUrl) stamps the address or history: does it already say what to show? Then the
   // saved view is never applied (restoreView).
   let explicit = true
@@ -366,8 +373,11 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
       if (clean !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + clean + loc.hash)
       const kept = readSteps(globalThis.history?.state, parseDrillSteps)
       if (kept) state.path = kept
-      if (state.page === 'loans') state.loan = readSteps(globalThis.history?.state, parseLoanSteps, LOAN_MARK_KEY)?.[0]?.key ?? null
-      else state.debt = readSteps(globalThis.history?.state, parseDebtSteps, DEBT_MARK_KEY)?.[0]?.key ?? null
+      if (state.page === 'loans') {
+        const kept = readSteps(globalThis.history?.state, parseLoanSteps, LOAN_MARK_KEY)?.[0]
+        state.loan = kept?.key ?? null
+        loanFrom.value = kept?.from ?? null
+      } else state.debt = readSteps(globalThis.history?.state, parseDebtSteps, DEBT_MARK_KEY)?.[0]?.key ?? null
     }
   } catch {
     // history unavailable or sandboxed: the section starts at the top
@@ -401,7 +411,7 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
   let loanHist: DrillHistory<LoanStep> | null = null
   let debtHist: DrillHistory<DebtStep> | null = null
   let pageSwitching = false // setPage / a popstate is changing page and loan together: the loan step must not push
-  const loanPath = (): LoanStep[] => (state.loan ? [{ level: 'loan', key: state.loan, label: state.loan }] : [])
+  const loanPath = (): LoanStep[] => (state.loan ? [loanFrom.value ? { level: 'loan', key: state.loan, label: state.loan, from: loanFrom.value } : { level: 'loan', key: state.loan, label: state.loan }] : [])
   const debtPath = (): DebtStep[] => (state.debt ? [{ level: 'debt', key: state.debt, label: state.debt }] : [])
   // The spending drill and the in-place debt drill push entries into the same history list, so a path cut of one that
   // goes back through history (go(-n)) must not run over entries the other pushed since. Each instance keeps the depth
@@ -446,14 +456,25 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
     const l = createDrillHistory<LoanStep>({
       history: globalThis.history,
       markKey: LOAN_MARK_KEY,
-      drill: (step) => void (state.loan = step.key),
-      popTo: (depth) => void (depth < 1 && (state.loan = null)),
+      drill: (step) => {
+        loanFrom.value = step.from ?? null
+        state.loan = step.key
+      },
+      popTo: (depth) => {
+        if (depth < 1) {
+          state.loan = null
+          loanFrom.value = null
+        }
+      },
       path: loanPath,
       parseSteps: parseLoanSteps,
       landed: writeUrl,
     })
     loanHist = l
-    watch(() => state.loan, () => { if (!pageSwitching) l.pathChanged(loanPath()) }, { flush: 'sync' })
+    watch(() => state.loan, () => {
+      if (!state.loan) loanFrom.value = null
+      if (!pageSwitching) l.pathChanged(loanPath())
+    }, { flush: 'sync' })
     const onLoanPop = (e: PopStateEvent) => {
       const search = globalThis.location?.search ?? ''
       if (budgetSectionOpen(search) && budgetPageOf(search) === 'loans') l.popped(e.state, true)
@@ -502,6 +523,13 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
    * (drillHistory.ts) is left alone: Back/Forward there only moves the drill path, and re-reading the older
    * entry's address would also roll back the range or person chosen since. */
   function readUrl(e?: PopStateEvent) {
+    readAddress(e)
+    if (clearDebtOnLanding && state.page === 'overview') {
+      clearDebtOnLanding = false
+      setTimeout(() => setDebt(null), 0)
+    }
+  }
+  function readAddress(e?: PopStateEvent) {
     syncPage(e ? e.state : globalThis.history?.state)
     if (e && drill && readMark(e.state)?.s === drill.session) return
     // a loan step of this session: Back/Forward only moves the open loan, the person and range stay as chosen
@@ -520,7 +548,9 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
     pageSwitching = true
     try {
       state.page = page
-      state.loan = page === 'loans' ? (readSteps(entryState, parseLoanSteps, LOAN_MARK_KEY)?.[0]?.key ?? null) : null
+      const kept = page === 'loans' ? readSteps(entryState, parseLoanSteps, LOAN_MARK_KEY)?.[0] : undefined
+      loanFrom.value = kept?.from ?? null
+      state.loan = kept?.key ?? null
     } finally {
       pageSwitching = false
     }
@@ -537,6 +567,8 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
     }
     pageSwitching = true
     try {
+      // a loan opened from Overview remembers which debt view it came from, for the page's trail
+      loanFrom.value = open && state.page === 'overview' ? (state.debt === open ? 'drill' : 'debts') : null
       const loc = globalThis.location
       if (loc && budgetSectionOpen(loc.search)) {
         const search = searchWithState(loc.search, { ...state, page })
@@ -558,6 +590,21 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
       drill?.start()
       debtHist?.start()
     }
+  }
+  /** The trail of a loan opened from Overview (`loanFrom`): one step back to the Overview entry the loan came from (that
+   * is browser Back), and with `clearDebt` also out of the open debt to the debt list. The open debt is closed after the
+   * landing has been settled (drillHistory.ts adopts an entry of an earlier visit a tick later), through its own history
+   * step, so Back afterwards goes where the crumb said. Without history to go back through, a new Overview entry. */
+  let clearDebtOnLanding = false
+  function backToOverview(clearDebt: boolean) {
+    const h = globalThis.history
+    if (!h || !globalThis.window) {
+      setPage('overview')
+      if (clearDebt) setDebt(null)
+      return
+    }
+    clearDebtOnLanding = clearDebt
+    h.back()
   }
   /** False (and nothing changes) for a range the server would refuse. */
   function setRange(from: IsoDate, to: IsoDate): boolean {
@@ -621,5 +668,5 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
     state.tab = tab
     return true
   }
-  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today }
+  return { state, loanFrom, backToOverview, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today }
 }

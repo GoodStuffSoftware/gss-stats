@@ -5,18 +5,19 @@
 // Props
 //   items: { key: string; label: string }[]   first = the top; last = the current place
 //   label: string ('Breadcrumb')              accessible name of the <nav>
+//   wrap: boolean (false)                      let a long trail wrap onto more lines (a page trail); off, it stays one line and the earlier items shorten
 // Emits
 //   go(index: number)                          an earlier item was picked (its index in `items`)
-withDefaults(defineProps<{ items: Array<{ key: string; label: string }>; label?: string }>(), { label: 'Breadcrumb' })
+withDefaults(defineProps<{ items: Array<{ key: string; label: string }>; label?: string; wrap?: boolean }>(), { label: 'Breadcrumb', wrap: false })
 const emit = defineEmits<{ go: [index: number] }>()
 </script>
 
 <template>
-  <nav class="crumbs" :aria-label="label" data-testid="crumbs">
+  <nav class="crumbs" :class="{ 'cr-wrap': wrap }" :aria-label="label" data-testid="crumbs">
     <ol class="cr-list">
       <li v-for="(it, i) in items" :key="`${i}:${it.key}`" class="cr-item">
         <span v-if="i > 0" class="cr-sep" aria-hidden="true">›</span>
-        <span v-if="i === items.length - 1" class="cr-here" aria-current="location">{{ it.label }}</span>
+        <span v-if="i === items.length - 1" class="cr-here" aria-current="page">{{ it.label }}</span>
         <button v-else type="button" class="cr-btn" :data-testid="`crumb-${i}`" @click="emit('go', i)">{{ it.label }}</button>
       </li>
     </ol>
@@ -97,6 +98,35 @@ const emit = defineEmits<{ go: [index: number] }>()
 .cr-here {
   font-weight: 600;
   color: rgb(var(--ink));
+}
+/* Opt-in: wrap onto a second line instead of shortening or scrolling (every item stays whole and tappable). */
+.cr-wrap {
+  overflow-x: visible;
+}
+.cr-wrap .cr-list {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.cr-wrap .cr-item:not(:last-child),
+.cr-wrap .cr-item:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.cr-wrap .cr-here {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.cr-wrap .cr-item:not(:last-child) .cr-btn {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  text-align: left;
+}
+@media (max-width: 359px) {
+  .cr-wrap .cr-item:not(:last-child),
+  .cr-wrap .cr-sep {
+    display: flex;
+  }
 }
 @keyframes cr-fade {
   from {
