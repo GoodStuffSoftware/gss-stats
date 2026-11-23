@@ -19,11 +19,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
+import SimilarDialog from './SimilarDialog.vue'
 import TxnToolbar from './TxnToolbar.vue'
-import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
+import { applySimilar, createCategory, createRule, fetchSimilar, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
 import { loadRemainingPages } from '../../lib/budget/txnFill'
-import { applyTxnView, anythingActive, defaultTxnViewPrefs, samePrefs, type TxnViewPrefs } from '../../lib/budget/txnView'
+import { applyTxnView, anythingActive, defaultTxnViewPrefs, samePrefs, withSameAmount, type TxnViewPrefs } from '../../lib/budget/txnView'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
@@ -31,7 +32,7 @@ const props = defineProps<BudgetTableProps>()
 const emit = defineEmits<{ edited: [e: BudgetEditedEvent]; 'category-added': [c: Category] }>()
 
 const MAX_HIGHLIGHT_PAGES = 5
-const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule, createCategory }
+const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule, createCategory, fetchSimilar, applySimilar }
 
 let ownEdit = false
 function onEdited(e: BudgetEditedEvent) {
@@ -44,7 +45,7 @@ function onEdited(e: BudgetEditedEvent) {
 }
 
 const model = createTxnTable(deps, () => props.categories, onEdited, (c) => emit('category-added', c))
-const { rows, rowState, status, loading, loadingMore, loadError, nextCursor } = model
+const { rows, rowState, status, loading, loadingMore, loadError, nextCursor, similar } = model
 
 // Phone: Cards (the default) or Table (the real table, scrolled sideways). Shown only while the table is narrower than the
 // table layout needs; the choice is kept per device.
@@ -72,6 +73,20 @@ function onPrefs(p: TxnViewPrefs) {
   viewPrefs.value = p
   writeCachedPrefs(props.accountEmail, p)
   saver.schedule(p)
+}
+const applying = ref(false)
+async function onApplySimilar(items: Array<{ id: string; expectedUpdatedAt: string }>, makeRule: boolean) {
+  applying.value = true
+  try {
+    await model.applySimilar(items, makeRule)
+  } catch {
+    status.value = 'Could not change the similar purchases. Nothing was changed.'
+  } finally {
+    applying.value = false
+  }
+}
+function onFlipSameAmount(key: string, on: boolean) {
+  onPrefs(withSameAmount(viewPrefs.value, key, on))
 }
 async function loadServerPrefs() {
   const email = props.accountEmail
@@ -326,6 +341,15 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         </div>
       </template>
     </EditableTable>
+    <SimilarDialog
+      :offer="similar"
+      :categories="categories"
+      :prefs="viewPrefs"
+      :busy="applying"
+      @close="model.closeSimilar()"
+      @apply="onApplySimilar"
+      @flip="onFlipSameAmount"
+    />
     <div v-if="tip" id="bt-tip" class="bt-tip" role="tooltip" :style="tip.style" data-testid="merchant-tip">
       <template v-if="tip.data.kind === 'merchant'">
         <span class="bt-tip-name">{{ tip.data.name }}</span>
