@@ -113,6 +113,14 @@ export function writeDonutSize(key: string | undefined, size: number | null): vo
 //                                          double-tap / hold (touch, pen)
 //   format:  (value: number) => string     text for a value (default: String)
 //   label:   string                        accessible name of the chart and its list
+//   resizable: boolean (false)             a handle in the donut's corner: drag it, or press the arrow keys (16 px a
+//                                          step), to make the donut bigger or smaller; double-click or Delete resets
+//   wide:    boolean (false)               when the pie has 640 px or more of width, the donut sits beside the legend,
+//                                          the donut bigger and the legend in as many columns as fit (a name, its value
+//                                          and its share stay together in a row)
+//   sizeKey: string                        where the chosen size is kept on this device (localStorage); the caller names
+//                                          it, so one size can belong to one chart in one layout. No key: not kept.
+// With all three off the pie is laid out and sized exactly as before.
 // Emits
 //   select(key: string)                    a slice or its list row was picked (never for an `inert` slice, nor for a
 //                                          slice with `members`: that one opens its list; its members are reported)
@@ -132,8 +140,11 @@ const props = withDefaults(
     deliberate?: boolean
     format?: (value: number) => string
     label?: string
+    resizable?: boolean
+    wide?: boolean
+    sizeKey?: string
   }>(),
-  { animate: true, deliberate: false, format: (v: number) => String(v), label: 'Pie chart' },
+  { animate: true, deliberate: false, format: (v: number) => String(v), label: 'Pie chart', resizable: false, wide: false, sizeKey: undefined },
 )
 const emit = defineEmits<{ select: [key: string] }>()
 
@@ -357,6 +368,7 @@ onMounted(() => {
   }
   const on = (type: string, fn: (e: never) => void) => {
     const handler = (e: Event) => {
+      if ((e.target as Element | null)?.closest?.('.dp-resize')) return // the resize handle is not a slice
       if (props.deliberate) fn(e as never)
     }
     box.addEventListener(type, handler, true)
@@ -389,7 +401,99 @@ watch(
     if (!on && canvasBox.value) canvasBox.value.style.cursor = ''
   },
 )
+
+// ── Size of the donut ────────────────────────────────────────────────────────────────────────────────────
+const rootEl = ref<HTMLElement | null>(null)
+const room = ref(0) // the width the pie has, in px (0 = not measured)
+const saved = ref<number | null>(readDonutSize(props.sizeKey)) // null = the automatic size
+const layout = computed(() => donutLayout(room.value, props.wide))
+/** The size the donut has now: the saved one within the room there is, else the automatic one (null = stylesheet). */
+const size = computed<number | null>(() => (saved.value === null ? layout.value.auto : clampDonutSize(saved.value, layout.value.max)))
+const sizeMax = computed(() => (Number.isFinite(layout.value.max) ? layout.value.max : undefined))
+watch(
+  () => props.sizeKey,
+  (key) => {
+    saved.value = readDonutSize(key)
+  },
+)
+const canvasStyle = computed(() => (size.value === null ? undefined : { width: `${size.value}px`, height: `${size.value}px`, maxWidth: 'none', maxHeight: 'none' }))
+const rootStyle = computed(() => (layout.value.wideOn && size.value !== null ? { '--dp-size': `${size.value}px` } : undefined))
+
+// The pie's own box can be display: contents (side by side), which has no width: use the nearest ancestor that has one.
+function roomElement(): HTMLElement | null {
+  let el: HTMLElement | null = rootEl.value
+  while (el && !(el.clientWidth > 0)) el = el.parentElement
+  return el
+}
+function measure() {
+  room.value = roomElement()?.clientWidth ?? 0
+}
+let resizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  measure()
+  window.addEventListener('resize', measure)
+  if (typeof ResizeObserver === 'function') {
+    resizeObserver = new ResizeObserver(measure)
+    const el = roomElement()
+    if (el) resizeObserver.observe(el)
+  }
+})
+
+// The handle. A drag grows the donut by the larger of the two movements; centred (not wide) the corner moves half as
+// far as the size changes, so the movement counts twice.
+let drag: { id: number; x: number; y: number; start: number } | null = null
+const renderedSize = () => Math.round(canvasBox.value?.getBoundingClientRect().width || size.value || DONUT_MIN)
+function setSaved(n: number | null) {
+  saved.value = n === null ? null : clampDonutSize(n, layout.value.max)
+}
+function dragStart(e: PointerEvent) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  try {
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  } catch {
+    // no capture: the drag still follows the pointer while it is over the handle
+  }
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: renderedSize() }
+}
+function dragMove(e: PointerEvent) {
+  if (!drag || e.pointerId !== drag.id) return
+  const dx = e.clientX - drag.x
+  const dy = e.clientY - drag.y
+  const d = Math.abs(dx) >= Math.abs(dy) ? dx : dy
+  setSaved(drag.start + d * (layout.value.wideOn ? 1 : 2))
+}
+function dragEnd(e: PointerEvent) {
+  if (!drag || e.pointerId !== drag.id) return
+  const done = drag
+  drag = null
+  try {
+    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+  } catch {
+    // already released
+  }
+  if (saved.value !== null && saved.value !== done.start) writeDonutSize(props.sizeKey, saved.value)
+}
+function resetSize() {
+  saved.value = null
+  writeDonutSize(props.sizeKey, null)
+}
+function onHandleKey(e: KeyboardEvent) {
+  const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? DONUT_STEP : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -DONUT_STEP : 0
+  if (step) {
+    e.preventDefault()
+    setSaved((size.value ?? renderedSize()) + step)
+    writeDonutSize(props.sizeKey, saved.value)
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    resetSize()
+  }
+}
+
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', measure)
+  resizeObserver?.disconnect()
   detach?.()
   gesture?.destroy()
   clearTimeout(waitTimer)
@@ -398,9 +502,28 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="drill-pie" data-testid="drill-pie">
-    <div ref="canvasBox" class="dp-canvas" role="img" :aria-label="label">
-      <BaseChart :config="config" :drill-open="false" @point="onPoint" />
+  <div ref="rootEl" class="drill-pie" :class="{ 'dp-wide': layout.wideOn }" :style="rootStyle" data-testid="drill-pie">
+    <div ref="canvasBox" class="dp-canvas" :style="canvasStyle" v-bind="resizable ? {} : { role: 'img', 'aria-label': label }">
+      <BaseChart v-if="resizable" :config="config" :drill-open="false" role="img" :aria-label="label" @point="onPoint" />
+      <BaseChart v-else :config="config" :drill-open="false" @point="onPoint" />
+      <span
+        v-if="resizable"
+        class="dp-resize"
+        role="slider"
+        tabindex="0"
+        aria-label="Resize chart"
+        :aria-valuemin="DONUT_MIN"
+        :aria-valuemax="sizeMax"
+        :aria-valuenow="size ?? undefined"
+        data-testid="pie-resize"
+        title="Drag to resize; double-click to reset"
+        @pointerdown="dragStart"
+        @pointermove="dragMove"
+        @pointerup="dragEnd"
+        @pointercancel="dragEnd"
+        @dblclick.stop="resetSize"
+        @keydown="onHandleKey"
+      />
     </div>
     <p v-if="deliberate" class="dp-hint" data-testid="pie-hint">{{ finePointer ? 'Click a slice to open it' : 'Press and hold a slice to open it' }}</p>
     <ul class="dp-list" :aria-label="`${label}: slices`">
@@ -464,6 +587,65 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-touch-callout: none;
   touch-action: pan-y;
+}
+/* Opt-in: the donut beside the legend, the legend in as many columns as fit. */
+.drill-pie.dp-wide {
+  display: grid;
+  grid-template-columns: var(--dp-size, 320px) minmax(0, 1fr);
+  column-gap: 24px;
+  align-items: start;
+}
+.dp-wide .dp-canvas {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  justify-self: start;
+}
+.dp-wide .dp-hint {
+  grid-column: 1;
+  grid-row: 2;
+  max-width: var(--dp-size, 320px);
+}
+.drill-pie.dp-wide .dp-list {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  column-gap: 24px;
+  align-items: start;
+}
+.dp-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  cursor: nwse-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  opacity: 0.6;
+}
+.dp-resize::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  background: linear-gradient(135deg, transparent 0 45%, rgb(var(--ink-3)) 45% 55%, transparent 55% 70%, rgb(var(--ink-3)) 70% 80%, transparent 80%);
+}
+.dp-resize:hover,
+.dp-resize:focus-visible {
+  opacity: 1;
+}
+.dp-resize:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .dp-resize {
+    width: 24px;
+    height: 24px;
+  }
 }
 .dp-hint {
   margin: 0;
