@@ -3,9 +3,10 @@
 import { describe, expect, it } from 'vitest'
 import { authGate, createSessionCookie, readAuthConfig, type ViewerStore } from '../../_lib/auth'
 import type { BudgetData, BudgetEnv } from '../../_lib/budgetAccess'
+import { savedViewBytes, type SavedView } from '../../../src/lib/budget/savedView'
 import { defaultTxnViewPrefs } from '../../../src/lib/budget/txnView'
 import { onRequest as middleware } from './_middleware'
-import { onRequest as prefs, prefsKey, PREFS_MAX_BYTES } from './prefs'
+import { onRequest as prefs, prefsKey, PREFS_MAX_BYTES, viewKey } from './prefs'
 
 const ORIGIN = 'https://stats.goodstuff.software'
 const LISTED = 'listed@example.com'
@@ -149,5 +150,126 @@ describe('/api/budget/prefs storage', () => {
     expect(noKv.status).toBe(503)
     await call(env(store), LISTED, 'PUT', JSON.stringify(good))
     expect([...m.keys()].every((k) => k.startsWith('budget:prefs:'))).toBe(true)
+  })
+})
+
+// The saved view block (lib/budget/savedView.ts): its own hashed key beside the toolbar block.
+const view: SavedView = {
+  hidden: 'debts',
+  tab: 'spending',
+  page: 'overview',
+  path: [
+    { level: 'category', key: 'groceries', label: 'Groceries' },
+    { level: 'merchant', key: 'acme-market', label: 'Acme Market' },
+  ],
+  groupBy: 'merchant',
+  review: true,
+  debt: 'acct-1',
+  range: { preset: 'custom', from: '2026-01-01', to: '2026-02-15' },
+  person: 'pat',
+}
+
+describe('/api/budget/prefs view block', () => {
+  it('round trips under its own hashed key beside the toolbar block, and logins do not mix', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    expect((await call(e, LISTED, 'PUT', JSON.stringify({ view }))).status).toBe(200)
+    expect((await call(e, LISTED, 'PUT', JSON.stringify(good))).status).toBe(200)
+    expect(await (await call(e, LISTED, 'GET')).json()).toEqual({ ...good, view })
+    expect(await (await call(e, OTHER, 'GET')).json()).toEqual({})
+    const keys = [...m.keys()].sort()
+    expect(keys).toEqual([await prefsKey(LISTED), await viewKey(LISTED)].sort())
+    expect(await viewKey(LISTED)).toMatch(/^budget:prefs-view:[0-9a-f]{64}$/)
+    expect(await viewKey(LISTED)).not.toContain('example')
+    expect(await viewKey(' LISTED@example.com ')).toBe(await viewKey(LISTED))
+  })
+  it('a view-only PUT leaves the toolbar block alone, and the reverse; a PUT with both writes both', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    await call(e, LISTED, 'PUT', JSON.stringify(good))
+    const before = m.get(await prefsKey(LISTED))
+    await call(e, LISTED, 'PUT', JSON.stringify({ view }))
+    expect(m.get(await prefsKey(LISTED))).toBe(before)
+    const viewBefore = m.get(await viewKey(LISTED))
+    const next = { ...good.txnView, search: 'bread' }
+    await call(e, LISTED, 'PUT', JSON.stringify({ txnView: next }))
+    expect(m.get(await viewKey(LISTED))).toBe(viewBefore)
+    const both = await call(e, OTHER, 'PUT', JSON.stringify({ txnView: next, view: { ...view, tab: 'debts' } }))
+    expect(both.status).toBe(200)
+    expect(await (await call(e, OTHER, 'GET')).json()).toEqual({ txnView: next, view: { ...view, tab: 'debts' } })
+  })
+  it('rejects bad views with 400 and writes nothing, even when the toolbar block beside it is fine', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    const step = view.path[0]
+    const { page: _page, ...noPage } = view
+    const bad: unknown[] = [
+      { ...view, extra: 1 },
+      { ...view, hidden: 'both' },
+      { ...view, tab: 'x' },
+      { ...view, page: 'x' },
+      { ...view, groupBy: 'x' },
+      { ...view, review: 'yes' },
+      { ...view, debt: '../etc' },
+      { ...view, debt: 5 },
+      { ...view, person: 'Bad Person' },
+      { ...view, person: 7 },
+      { ...view, range: { preset: 'forever' } },
+      { ...view, range: { preset: 'custom' } },
+      { ...view, range: { preset: 'custom', from: '2026-01-01', to: 'tomorrow' } },
+      { ...view, range: { preset: 'ytd', from: '2026-01-01', to: '2026-02-01' } },
+      { ...view, range: { preset: 'ytd', extra: 1 } },
+      { ...view, path: [{ level: 'merchant', key: 'm', label: 'M' }] },
+      { ...view, path: [step, view.path[1], { level: 'merchant', key: 'z', label: 'Z' }] },
+      { ...view, path: [{ ...step, key: 'k'.repeat(121) }] },
+      { ...view, path: [{ ...step, label: 'l'.repeat(61) }] },
+      { ...view, path: [{ ...step, extra: 1 }] },
+      { ...view, path: [{ ...step, key: '' }] },
+      { ...view, path: 'groceries' },
+      noPage,
+      null,
+      [],
+      'text',
+    ]
+    for (const v of bad) {
+      expect((await call(e, LISTED, 'PUT', JSON.stringify({ view: v }))).status, JSON.stringify(v)).toBe(400)
+      expect((await call(e, LISTED, 'PUT', JSON.stringify({ txnView: good.txnView, view: v }))).status, JSON.stringify(v)).toBe(400)
+    }
+    expect((await call(e, LISTED, 'PUT', '{}')).status).toBe(400)
+    expect(m.size).toBe(0)
+  })
+  it('the worst-case view stays far under the cap and is accepted; an oversize body is 413', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    const worst: SavedView = {
+      ...view,
+      person: 'p'.repeat(24),
+      debt: 'd'.repeat(64),
+      path: [
+        { level: 'category', key: '"'.repeat(120), label: '"'.repeat(60) },
+        { level: 'merchant', key: '\\'.repeat(120), label: '\\'.repeat(60) },
+      ],
+    }
+    expect(savedViewBytes(worst)).toBeLessThan(PREFS_MAX_BYTES / 2)
+    expect((await call(e, LISTED, 'PUT', JSON.stringify({ view: worst }))).status).toBe(200)
+    const huge = JSON.stringify({ view: { ...view, path: [{ ...view.path[0], key: 'k'.repeat(5000) }] } })
+    expect(huge.length).toBeGreaterThan(PREFS_MAX_BYTES)
+    expect((await call(e, LISTED, 'PUT', huge)).status).toBe(413)
+    expect(m.size).toBe(1)
+  })
+  it('GET reads a stored view leniently, drops one it cannot parse, and 403 or 401 write nothing', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    m.set(await viewKey(LISTED), JSON.stringify({ view: { ...view, tab: 'x', extra: 1 } }))
+    const got = (await (await call(e, LISTED, 'GET')).json()) as { view?: SavedView }
+    expect(got.view?.tab).toBe('spending')
+    m.set(await viewKey(LISTED), 'not json')
+    expect(await (await call(e, LISTED, 'GET')).json()).toEqual({})
+    m.clear()
+    for (const body of [JSON.stringify({ view }), JSON.stringify({ txnView: good.txnView, view })]) {
+      expect((await call(e, UNLISTED, 'PUT', body)).status).toBe(403)
+      expect((await call(e, null, 'PUT', body)).status).toBe(401)
+    }
+    expect(m.size).toBe(0)
   })
 })
