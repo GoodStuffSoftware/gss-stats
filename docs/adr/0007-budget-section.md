@@ -172,6 +172,26 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
   props that default off (other callers render exactly as before), and the caller builds the storage key
   (`donutSizeKey` in `lib/budget/panelVisibility.ts`). A saved size is clamped to the room it has now.
 
+## Remembered view (amendment, 2026-11-23)
+
+- **Saved per login, in its own KV key.** The Show choice and the drill location (tab, page, range, person, review
+  filter, the spending path of at most two steps, the open debt) are saved as `{ view }` under
+  `budget:prefs-view:<sha256 hex of the lowercased login>`, through the same `GET`/`PUT /api/budget/prefs` route. It is
+  a key of its own, not a field of the toolbar's `budget:prefs:*` blob: the two save independently when both flush as
+  the page closes (no read-modify-write that could lose one), and each has its own 4 KB cap. Strict on write, lenient on
+  read (a bad or old block is treated as nothing saved).
+- **Precedence.** A link (`b_*` parameters) or Back/Forward state (`history.state` drill, loan or debt mark) always
+  wins; the saved view is applied once, on a plain open, before the first data fetch (so there is no double fetch). The
+  Show choice is not part of a link, so it applies either way.
+- **Stale parts fall back quietly, never an error.** A category that is gone drops the drill to the top; a person that
+  is gone is "All"; a custom range the server would refuse is the default; a preset is recomputed from today; the
+  second drill step is checked against the first level's slices when they load; an unknown debt returns to the pie.
+- **Migration.** `localStorage` keeps the Show choice as the first-paint cache. With nothing saved on the server, the
+  device's old choice is sent once; an untouched view writes nothing. The GET is raced against a 3 s timeout; when the
+  server does not answer nothing is restored, and nothing is written until the person changes something.
+- **Stays per device.** The layout picker and donut sizes (above): they describe this screen.
+- To reverse: stop restoring (remove the call in `BudgetSection.vue`) and delete the `budget:prefs-view:*` KV keys.
+
 ## Transactions table interaction (amendment)
 
 The table's note is read with a click or tap (a tip, as for the merchant) and edited with a press-and-hold, Enter or F2; an empty note

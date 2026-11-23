@@ -2721,7 +2721,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   used only by `functions/api/budget/**`. Routes: `meta`, `summary`, `transactions` (list, and
   `PATCH transactions/:id`, and `transactions/similar`: `GET ?id=` lists the same merchant's other purchases
   from every month, `POST` changes the ticked ones in one batch, each audited; the "Change similar purchases?" dialog after a category change uses them, and the rule it can add applies to new purchases after the next `rules/apply` run, e.g. after a load), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
-  `debts/:id`, `debts/:id/balance`), `prefs` (`GET`/`PUT`, the Transactions toolbar's saved state, below). Every response is `Cache-Control: private, no-store`; none of them
+  `debts/:id`, `debts/:id/balance`), `prefs` (`GET`/`PUT`, two per-login blocks in two KV keys: `txnView`, the Transactions toolbar's saved state, below, and `view`, where the person left the section, see "Remembered view"). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
 - **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:
   original amount, opened and maturity dates, term, scheduled payment and cadence, cosigned flag),
@@ -2776,6 +2776,15 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   hash of the address, not the address). A "Layout: Side by side | Tabs" picker (from 1024 px) swaps the two
   side-by-side panels for the phone's one-tab-at-a-time layout; it is kept per device (`gss-stats-budget-layout`),
   not per account.
+- **Remembered view.** The Show choice, tab, page, date range (a preset moves with the calendar; "custom" keeps its
+  dates), person, review filter, the spending drill (category, then merchant or account) and the open debt are saved
+  per login in KV under `budget:prefs-view:<hash>` (`PUT /api/budget/prefs`, body `{ view }`, written two seconds after
+  the last change and on page hide or leaving the section; at most 4 KB) and put back on a plain open of Budget, on
+  any device. The `GET` is raced against a 3 s timeout, so a slow server never holds the page. A link with `b_*`
+  parameters, or Back/Forward, always wins over the saved view (the Show choice is not in a link, so it still applies);
+  a part that no longer exists (a deleted category, person or debt, a merchant that left the list) falls back
+  quietly to the top, "All" or the pie. A device's old `localStorage` Show choice is sent once when the server holds
+  nothing yet; `localStorage` stays the first-paint cache. Layout and donut sizes stay per device.
 - **Debt drill.** A debt picked in the Debts pie opens in place: the crumb reads "All debts › name", the panel
   shows the balance and its history line, and Back, the crumb or the browser Back return to the pie. "Loan details"
   opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
