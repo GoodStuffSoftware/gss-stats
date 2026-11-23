@@ -6,7 +6,7 @@ import {
   type TableDeps,
 } from './tableModel'
 import { BudgetApiError } from './clientEdit'
-import type { Account, BudgetEditedEvent, Category, Txn, TxnQuery } from './types'
+import type { Account, BudgetEditedEvent, Category, SimilarApply, SimilarResponse, SimilarRow, Txn, TxnQuery } from './types'
 
 const CATS: Category[] = [
   { id: 'groceries', label: 'Groceries', color: null, sort: 10 },
@@ -262,5 +262,58 @@ describe('use for all', () => {
     expect(model.rowState.t1.error).toContain('400')
     expect(model.rowState.t1.action?.busy).toBe(false)
     expect(edited).toHaveLength(1) // only the edit
+  })
+})
+
+describe('similar purchases offer', () => {
+  const srow = (id: string, over: Partial<SimilarRow> = {}): SimilarRow => ({
+    id, postedDate: '2026-09-05', amountCents: -1234, merchantName: 'Chain X', description: 'CHAIN X 0001', accountId: 'a1', kind: 'spend',
+    categoryId: 'groceries', categorySource: 'auto', updatedAt: '2026-09-06T00:00:00Z', note: null, personSet: false, scriptSet: false,
+    sameAmount: true, suggestTick: true, ...over,
+  })
+  const resp = (rows: SimilarRow[]): SimilarResponse => ({
+    source: { id: 't1', merchantKey: 'chain-x', amountCents: -1234, categoryId: 'fuel' }, mixed: false, mixedReasons: [], rows, truncated: false,
+    ruleOffer: { allowed: true },
+  })
+
+  it('a category change asks for similar rows with only the opaque id, then opens the dialog', async () => {
+    const fetchSimilar = vi.fn(async (_id: string) => resp([srow('t2')]))
+    const { model } = setup([txn('t1'), txn('t2')], { fetchSimilar })
+    await model.load(Q)
+    await model.setSelection('t1', 'fuel')
+    await vi.waitFor(() => expect(model.similar.value).not.toBeNull())
+    expect(fetchSimilar).toHaveBeenCalledTimes(1)
+    expect(fetchSimilar.mock.calls[0]).toEqual(['t1'])
+    expect(model.similar.value).toMatchObject({ sourceId: 't1', categoryId: 'fuel' })
+  })
+
+  it('an empty result opens nothing', async () => {
+    const fetchSimilar = vi.fn(async (_id: string) => resp([]))
+    const { model } = setup([txn('t1')], { fetchSimilar })
+    await model.load(Q)
+    await model.setSelection('t1', 'fuel')
+    await vi.waitFor(() => expect(fetchSimilar).toHaveBeenCalled())
+    await Promise.resolve()
+    expect(model.similar.value).toBeNull()
+  })
+
+  it('applySimilar merges changed rows and conflicting rows onto the page, then closes', async () => {
+    const applySimilar = vi.fn(async (_r: SimilarApply) => ({
+      changed: [{ id: 't2', updatedAt: 'T2NEW' }],
+      conflicts: [{ id: 't3', current: txn('t3', { categoryId: 'other', updatedAt: 'T3NOW' }) }],
+    }))
+    const fetchSimilar = vi.fn(async (_id: string) => resp([srow('t2'), srow('t3')]))
+    const { model, edited } = setup([txn('t1'), txn('t2'), txn('t3')], { fetchSimilar, applySimilar })
+    await model.load(Q)
+    await model.setSelection('t1', 'fuel')
+    await vi.waitFor(() => expect(model.similar.value).not.toBeNull())
+    await model.applySimilar([{ id: 't2', expectedUpdatedAt: 'x' }, { id: 't3', expectedUpdatedAt: 'y' }], false)
+    expect(applySimilar).toHaveBeenCalledWith({ sourceId: 't1', categoryId: 'fuel', items: [{ id: 't2', expectedUpdatedAt: 'x' }, { id: 't3', expectedUpdatedAt: 'y' }] })
+    const byId = Object.fromEntries(model.rows.value.map((r) => [r.id, r]))
+    expect(byId.t2).toMatchObject({ categoryId: 'fuel', categorySource: 'manual', updatedAt: 'T2NEW' })
+    expect(byId.t3).toMatchObject({ categoryId: 'other', updatedAt: 'T3NOW' })
+    expect(model.similar.value).toBeNull()
+    expect(model.status.value).toBe('Changed 1; 1 changed elsewhere; not updated.')
+    expect(edited.at(-1)).toEqual({ txnId: 't1', ruleApplied: false, reapplied: 1 })
   })
 })
