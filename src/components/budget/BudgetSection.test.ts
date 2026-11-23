@@ -15,6 +15,7 @@ import DebtPanel from './DebtPanel.vue'
 import LoansList from './LoansList.vue'
 import LoansPage from './LoansPage.vue'
 import SpendingPanel from './SpendingPanel.vue'
+import { installHistoryStub, type HistoryStub } from '../../testing/historyStub'
 
 const TODAY = '2026-11-20'
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -1004,16 +1005,13 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
     await w.get('[data-testid="debt-drilled-open"]').trigger('click')
     await flushPromises()
   }
-  // happy-dom drops a pushState called without an address (the drill steps do that: the URL stays the same), so
-  // give those the current one: the entries are then a real list that Back and Forward walk.
-  const realPush = history.pushState.bind(history)
+  // Back and Forward walk a real entry list (happy-dom's history does not: see the helper).
+  let stub: HistoryStub
   beforeEach(() => {
     route({ debtDetail: () => json(DETAIL), loans: () => json(LOANS) })
-    history.pushState = (st: unknown, t: string, u?: string | URL | null) => realPush(st, t, u ?? location.href)
+    stub = installHistoryStub()
   })
-  afterEach(() => {
-    history.pushState = realPush
-  })
+  afterEach(() => stub.restore())
 
   it('pie > drill > the All debts crumb back; Back and Forward match', async () => {
     const w = await mountSection()

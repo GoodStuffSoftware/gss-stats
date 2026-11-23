@@ -466,6 +466,25 @@ describe('Budget pages: Overview and Loans', () => {
     expect(parseLoanSteps('x')).toBeNull()
   })
 
+  it('parseLoanSteps keeps a valid `from` and refuses any other', () => {
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'drill' }])).toEqual([{ level: 'loan', key: 'acct-1', label: 'acct-1', from: 'drill' }])
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'debts' }])?.[0].from).toBe('debts')
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1' }])?.[0].from).toBeUndefined() // an older entry still parses
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'elsewhere' }])).toBeNull()
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 7 }])).toBeNull()
+  })
+
+  it('opening a loan from the Overview records where it came from, in history.state only', async () => {
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1') // no debt drill open: the debt list's Details
+    await nextTick()
+    expect(view.loanFrom.value).toBe('debts')
+    expect(readSteps(history.state, parseLoanSteps, LOAN_MARK_KEY)?.[0].from).toBe('debts')
+    expect(location.href).not.toMatch(/acct-1|debts/)
+    w.unmount()
+  })
+
   it('setPage pushes exactly one entry with b_page in the address, and Back returns to Overview', async () => {
     const push = vi.spyOn(history, 'pushState')
     const { view, w } = mountSection()

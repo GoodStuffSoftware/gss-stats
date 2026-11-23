@@ -96,7 +96,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    (as in point 7); no route writes them. Rollback is the commented block at the end of the migration (drop
    the two tables, then the two columns), with the pre-migration Time Travel bookmark as the last resort.
    Layout: an open loan replaces the facts row and the list at every width (the same on phone and desktop;
-   "← Loans" and Back return to the list), instead of keeping them above the open loan on wide screens.
+   a breadcrumb trail and Back return to the list), instead of keeping them above the open loan on wide screens.
+   The trail is the shared `nav/Crumbs.vue` with its opt-in `wrap` prop (long names wrap, nothing clips); the
+   origin (`from`: the debt drill or the debt list) rides in `history.state` beside the loan id, never in the URL.
 10. **A purchase is excluded with a flag, not a category (`0003_included.sql`).** `transactions.included` (1 = counts,
    the default; 0 = a person took it out) is an additive column; `category_edits` gains the NULLable `old_included` and
    `new_included`, so the one audit log also records an include change. A category would have lost the purchase's real
