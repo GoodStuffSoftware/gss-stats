@@ -45,7 +45,7 @@ describe('DebtPanel', () => {
     it('shows the crumb "All debts" then the debt, its balance and its line chart; no pie', () => {
       const w = mountPanel({ selected: DEBTS[0], history: HIST })
       expect(w.findComponent(DrillPie).exists()).toBe(false)
-      expect(w.get('[data-testid="debt-drilled"]').exists()).toBe(true)
+      expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
       const crumbs = w.get('nav').text()
       expect(crumbs).toContain('All debts')
       expect(crumbs).toContain('Debt a ••0001')

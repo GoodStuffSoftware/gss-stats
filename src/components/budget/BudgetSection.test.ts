@@ -617,7 +617,7 @@ describe('BudgetSection: debt drill in place', () => {
     expect(w.findComponent(LoansPage).exists()).toBe(false)
     expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
     expect(w.findComponent(DebtPanel).props('history')).toHaveLength(2)
-    expect(w.get('[data-testid="debt-drilled"]').exists()).toBe(true)
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
     expect(w.get('[data-testid="debt-drilled-balance"]').text()).toContain('900')
     expect(location.href).not.toContain('acct-1') // the id lives in history.state only
     expect(new URLSearchParams(location.search).get('b_page')).toBeNull()
