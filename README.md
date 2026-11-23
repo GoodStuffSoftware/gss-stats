@@ -2723,7 +2723,6 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   from every month, `POST` changes the ticked ones in one batch, each audited), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
   `debts/:id`, `debts/:id/balance`), `prefs` (`GET`/`PUT`, the Transactions toolbar's saved state, below). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
-  touches the edge cache.
 - **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:
   original amount, opened and maturity dates, term, scheduled payment and cadence, cosigned flag),
   `statements.escrow_cents` and `payoff_cents` (NULL = not printed or not loaded), and `statement_promos`
