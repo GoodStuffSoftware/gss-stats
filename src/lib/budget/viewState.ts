@@ -613,10 +613,11 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
     if (state.page === 'overview') state.path = p.path
     return { applied: true, pendingStep: state.page === 'overview' ? p.pendingStep : null }
   }
-  /** The tab a pre-0.83.0 browser left behind (lib/budget/panelVisibility.ts `migrateLegacyTab`), used only when the server
-   * holds no view and the address and history said nothing: same precedence as the saved view. */
-  function applyLegacyTab(tab: BudgetTab): boolean {
-    if (explicit || restored) return false
+  /** The tab a pre-0.83.0 browser left behind (lib/budget/panelVisibility.ts `migrateLegacyTab`), used when the address and
+   * history said nothing, and (unless `overSaved`) only when the server holds no view: same precedence as the saved view.
+   * `overSaved` is for a 0.82.0 saved view that hid nothing, whose tab was only the phone tab. */
+  function applyLegacyTab(tab: BudgetTab, overSaved = false): boolean {
+    if (explicit || (restored && !overSaved)) return false
     state.tab = tab
     return true
   }

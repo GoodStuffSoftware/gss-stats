@@ -103,6 +103,12 @@ function tabFolded(tab: SavedView['tab'], hidden: unknown): SavedView['tab'] {
   return hidden === 'spending' ? 'debts' : hidden === 'debts' ? 'spending' : tab
 }
 
+/** True for a 0.82.0 block that hid nothing (`hidden: null`): the one legacy shape whose tab is only the phone tab, so a
+ *  browser that chose "Side by side" there lands on Both (BudgetSection `settleView`). A new block never carries `hidden`. */
+export function isLegacyOpenView(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as Record<string, unknown>).hidden === null
+}
+
 /** Reads a saved or posted view. `strict` (the server): every field present and exactly right, no unknown field, else null.
  *  Lenient (the browser): a wrong field takes its default; null only when it is not an object. */
 export function parseSavedView(raw: unknown, strict = false): SavedView | null {

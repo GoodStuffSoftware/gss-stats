@@ -13,7 +13,7 @@
 // Props: `dark` (site theme), `today` (YYYY-MM-DD, tests only).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
-import { migrateLegacyTab } from '../../lib/budget/panelVisibility'
+import { migrateLegacyTab, type LegacyChoice } from '../../lib/budget/panelVisibility'
 import type { Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import type { BudgetPage } from '../../lib/budget/sectionLink'
 import { defaultTabFor, savedViewOfState, useBudgetViewState, type BudgetTab, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
@@ -70,11 +70,11 @@ const ready = ref(false) // meta is in and the database has rows: data fetches m
 // that no longer exists falls back quietly. The GET is raced against a short timeout so a slow server never holds
 // the page; the first data fetches wait for the restore so there is no double fetch.
 const VIEW_GET_TIMEOUT_MS = 3000
-type ServerView = { ok: boolean; view: SavedView | null }
+type ServerView = { ok: boolean; view: SavedView | null; legacyOpen: boolean }
 async function loadServerView(): Promise<ServerView> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<ServerView>((resolve) => {
-    timer = setTimeout(() => resolve({ ok: false, view: null }), VIEW_GET_TIMEOUT_MS)
+    timer = setTimeout(() => resolve({ ok: false, view: null, legacyOpen: false }), VIEW_GET_TIMEOUT_MS)
   })
   try {
     return await Promise.race([fetchServerView(), timeout])
@@ -82,11 +82,11 @@ async function loadServerView(): Promise<ServerView> {
     clearTimeout(timer)
   }
 }
-let viewLoaded: Promise<ServerView> = Promise.resolve({ ok: false, view: null })
+let viewLoaded: Promise<ServerView> = Promise.resolve({ ok: false, view: null, legacyOpen: false })
 let pendingStep: DrillStep | null = null // the saved second drill step, checked when the first level's slices load
 const viewSaver = createPrefsSaver<SavedView>(putServerView, VIEW_SAVE_DELAY_MS, undefined, undefined, sameSavedView)
 let viewSaverArmed = false
-let legacyTab: BudgetTab | null = null // the pre-0.83.0 Side by side / Show choice of this browser, as a tab
+let legacy: LegacyChoice = { tab: null, side: false } // the pre-0.83.0 Side by side / Show choice of this browser
 const currentView = computed(() => savedViewOfState(state, viewToday))
 watch(currentView, (v) => {
   if (viewSaverArmed) viewSaver.schedule(v)
@@ -101,8 +101,11 @@ async function settleView(m: MetaResponse) {
   }
   // Baseline = what the server holds. With nothing saved it is the view as it stands before the pre-0.83.0 browser
   // choice is applied, so that choice (mapped to a tab) is sent once, and an untouched view sends nothing.
+  // A saved 0.82.0 view that hid nothing carries only the phone tab: a browser that was on Side by side lands on Both
+  // over it. A legacy view that hid a chart already folded into its single tab; a new view keeps its saved tab.
   const baseline = sv.view ?? currentView.value
-  if (!sv.view && legacyTab) applyLegacyTab(legacyTab)
+  if (!sv.view && legacy.tab) applyLegacyTab(legacy.tab)
+  else if (sv.view && sv.legacyOpen && legacy.side) applyLegacyTab('both', true)
   viewSaver.setBaseline(sv.ok ? baseline : null)
   viewSaverArmed = true
   if (sv.ok) viewSaver.schedule(currentView.value)
@@ -128,7 +131,8 @@ async function init() {
   access.value = probed.state
   if (probed.state === 'ok') {
     accountEmail.value = probed.email
-    legacyTab = migrateLegacyTab(probed.email) ?? legacyTab // read once, then the old keys are gone
+    const found = migrateLegacyTab(probed.email) // read once, then the old keys are gone
+    legacy = { tab: found.tab ?? legacy.tab, side: found.side || legacy.side }
     viewLoaded = loadServerView()
     await loadMeta()
   }

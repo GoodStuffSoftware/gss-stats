@@ -62,15 +62,24 @@ export function donutSizeKey(chart: PanelId, both: boolean): string {
 // ── Migration (once, 0.83.0) ──────────────────────────────────────────────────────────────────────────────────
 const legacyDonutKey = (chart: PanelId) => `${DONUT_KEY_PREFIX}:${chart}:split`
 
+export interface LegacyChoice {
+  /** The tab those choices map to, or null for no opinion (the saved or default tab applies). */
+  tab: BudgetTab | null
+  /** The layout "Side by side" was chosen on this device. */
+  side: boolean
+}
+
 /**
  * Reads the pre-0.83.0 choices of this browser, maps them and removes them (so it runs once):
  *  - a hidden chart is the other chart's tab (hide Spending = Debts, hide Debts = Spending);
  *  - else the layout "Side by side" chosen on purpose is Both;
  *  - else (Tabs, or nothing was ever chosen) no opinion: null, and the saved or default tab applies.
+ * `side` also reports the layout choice alone: a 0.82.0 saved view that hid nothing is the phone tab only, so a person
+ * who was on Side by side lands on Both over it (BudgetSection `settleView`).
  * The side-by-side donut size becomes the Both size (if there is none yet). Never throws.
  */
-export function migrateLegacyTab(email: string | null | undefined, storage: PanelStorage | null = defaultStorage()): BudgetTab | null {
-  if (!storage) return null
+export function migrateLegacyTab(email: string | null | undefined, storage: PanelStorage | null = defaultStorage()): LegacyChoice {
+  if (!storage) return { tab: null, side: false }
   const get = (key: string): string | null => {
     try {
       return storage.getItem(key)
@@ -96,9 +105,10 @@ export function migrateLegacyTab(email: string | null | undefined, storage: Pane
     hidden = []
   }
   const layout = get(LAYOUT_KEY)
+  const side = layout === 'side'
   let tab: BudgetTab | null = null
   if (hidden.length === 1) tab = hidden[0] === 'spending' ? 'debts' : 'spending'
-  else if (layout === 'side') tab = 'both'
+  else if (side) tab = 'both'
 
   const bothKey = donutSizeKey('spending', true)
   if (get(bothKey) === null) {
@@ -112,5 +122,5 @@ export function migrateLegacyTab(email: string | null | undefined, storage: Pane
     }
   }
   for (const key of [showKey, LAYOUT_KEY, legacyDonutKey('spending'), legacyDonutKey('debts')]) remove(key)
-  return tab
+  return { tab, side }
 }

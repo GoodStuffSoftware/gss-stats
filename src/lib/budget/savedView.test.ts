@@ -1,10 +1,9 @@
 // The saved view schema: strict (the server) and lenient (the browser) reads, the size bound and the fit fallback.
 // All values are made up.
 import { describe, expect, it } from 'vitest'
-import { defaultSavedView, fitSavedView, parseSavedView, sameSavedView, savedViewBytes, VIEW_BYTES_MAX, type SavedView } from './savedView'
+import { defaultSavedView, fitSavedView, isLegacyOpenView, parseSavedView, sameSavedView, savedViewBytes, VIEW_BYTES_MAX, type SavedView } from './savedView'
 
 const full: SavedView = {
-  hidden: 'spending',
   tab: 'debts',
   page: 'loans',
   path: [
@@ -29,9 +28,35 @@ describe('parseSavedView strict', () => {
     expect(parseSavedView(missing, true)).toBeNull()
     for (const raw of [null, undefined, [], 'x', 3]) expect(parseSavedView(raw, true)).toBeNull()
     expect(parseSavedView({ ...full, hidden: 'both' }, true)).toBeNull()
+    expect(parseSavedView({ ...full, tab: 'side' }, true)).toBeNull()
     expect(parseSavedView({ ...full, debt: 'a b' }, true)).toBeNull()
     expect(parseSavedView({ ...full, range: { preset: 'custom', from: '2026-03-01' } }, true)).toBeNull()
     expect(parseSavedView({ ...full, path: [{ level: 'merchant', key: 'a', label: 'A' }] }, true)).toBeNull()
+  })
+  it('accepts every tab, including Both', () => {
+    for (const tab of ['spending', 'debts', 'both'] as const) expect(parseSavedView({ ...full, tab }, true)?.tab).toBe(tab)
+  })
+})
+
+describe('legacy hidden (0.82.0 blocks)', () => {
+  it('a hidden chart becomes the other chart\'s tab, and the block never carries hidden again', () => {
+    const a = parseSavedView({ ...full, tab: 'spending', hidden: 'spending' }, true)
+    expect(a?.tab).toBe('debts')
+    expect(a).not.toHaveProperty('hidden')
+    expect(parseSavedView({ ...full, tab: 'debts', hidden: 'debts' }, true)?.tab).toBe('spending')
+    expect(parseSavedView({ ...full, tab: 'spending', hidden: 'spending' })?.tab).toBe('debts')
+  })
+  it('hidden null keeps the saved tab', () => {
+    expect(parseSavedView({ ...full, tab: 'debts', hidden: null }, true)?.tab).toBe('debts')
+  })
+  it('a view with no hidden at all is a new one and keeps its tab', () => {
+    expect(parseSavedView({ ...full, tab: 'both' }, true)?.tab).toBe('both')
+  })
+  it('isLegacyOpenView is true only for hidden: null', () => {
+    expect(isLegacyOpenView({ ...full, hidden: null })).toBe(true)
+    expect(isLegacyOpenView({ ...full, hidden: 'debts' })).toBe(false)
+    expect(isLegacyOpenView(full)).toBe(false)
+    for (const raw of [null, undefined, [], 'x']) expect(isLegacyOpenView(raw)).toBe(false)
   })
 })
 
