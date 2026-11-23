@@ -15,7 +15,7 @@
 // - The Note column shows each row's note (clamped; the full text is in the merchant tip) and edits it in place (PATCH `note`).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
