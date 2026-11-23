@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.81.0] — 2026-11-23
+
 ### Added
 - **Cards or Table on a phone** — a Cards | Table switch above the Budget transactions on a phone shows either the card list or the full table, scrolled sideways; the choice stays on the device.
 - **Resizable transaction columns** — drag the edge of a header to resize a column, double-click the edge to reset it; widths stay on the device.
