@@ -231,7 +231,7 @@ describe('BudgetTable editing', () => {
   it('read-only when canEdit is false: no category field, no buttons, the category as text', async () => {
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable({ canEdit: false })
-    expect(w.find('input:not([data-testid="included-toggle"])').exists()).toBe(false)
+    expect(w.find('tbody input:not([data-testid="included-toggle"])').exists()).toBe(false)
     expect(w.find('tbody button:not([data-testid="merchant-tip-toggle"])').exists()).toBe(false)
     expect(rowEl(w, 't1').text()).toContain('Groceries')
   })

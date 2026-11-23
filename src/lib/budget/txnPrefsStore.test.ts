@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 // The toolbar's per-login cache and debounced saver (fake timers via an injected scheduler).
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, TXN_PREFS_PREFIX, writeCachedPrefs } from './txnPrefsStore'

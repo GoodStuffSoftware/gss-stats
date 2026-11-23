@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Search, filter and sort the Budget transactions.** A toolbar above the table searches, filters by merchant, category, account, person and dates, and sorts; it counts "N of M" over the whole period, and your choices are remembered per login across devices.
+
 ## [0.80.0] — 2026-11-22
 
 

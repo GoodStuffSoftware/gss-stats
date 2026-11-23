@@ -21,6 +21,8 @@ const props = defineProps<{
   accounts: Account[]
   people: Person[]
   shown: number
+  /** More pages of the period are still to come (loading, or stopped on an error). */
+  partial?: boolean
   bounds?: { from: string; to: string }
 }>()
 const emit = defineEmits<{ 'update:modelValue': [p: TxnViewPrefs] }>()
@@ -174,7 +176,7 @@ onBeforeUnmount(() => {
     <p class="tt-count" aria-live="polite" data-testid="txn-count">
       <span>{{ shown }} of {{ total }} transaction{{ total === 1 ? '' : 's' }}</span>
       <button v-if="active" type="button" class="tt-clear" data-testid="txn-clear" @click="clearAll">Clear</button>
-      <span v-if="filtersActive(modelValue)" class="tt-note">(of those loaded)</span>
+      <span v-if="partial && active" class="tt-note">(loading the rest of the period…)</span>
     </p>
   </div>
 </template>

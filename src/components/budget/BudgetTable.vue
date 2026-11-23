@@ -21,7 +21,8 @@ import CategorySelect from './CategorySelect.vue'
 import TxnToolbar from './TxnToolbar.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { budgetColumns, categoryOptions, createTxnTable, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
-import { applyTxnView, anythingActive, defaultTxnViewPrefs, samePrefs, type TxnViewPrefs } from '../../lib/budget/txnView'
+import { loadRemainingPages } from '../../lib/budget/txnFill'
+import { applyTxnView,anythingActive, defaultTxnViewPrefs, samePrefs, type TxnViewPrefs } from '../../lib/budget/txnView'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
@@ -99,6 +100,17 @@ watch(
   },
 )
 onMounted(reload)
+
+// With a search, filter or sort active, fetch every remaining page of the period (one request per page, no per-row calls),
+// so the toolbar covers the whole period and "N of M" counts against all of it. The query never carries the filters.
+watch(
+  [() => anythingActive(viewPrefs.value), nextCursor, loading, loadingMore],
+  () => {
+    if (!anythingActive(viewPrefs.value) || loading.value || loadingMore.value) return
+    void loadRemainingPages(model, () => anythingActive(viewPrefs.value))
+  },
+  { flush: 'post' },
+)
 
 // Find the highlighted purchase: it may be past the first page.
 watch(
@@ -189,6 +201,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
 
 <template>
   <section class="budget-table" aria-label="Transactions">
+    <!-- Toolbar mount point (feat/budget-txn-filters): one contiguous block; any header/toggle from other branches goes above it. -->
     <TxnToolbar
       v-if="!(loadError && !rows.length) && (rows.length || anythingActive(viewPrefs))"
       :model-value="viewPrefs"
@@ -197,6 +210,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       :accounts="accounts"
       :people="people ?? []"
       :shown="viewRows.length"
+      :partial="!!nextCursor"
       :bounds="bounds"
       @update:model-value="onPrefs"
     />
