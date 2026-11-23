@@ -27,6 +27,8 @@ export interface EditableColumn<R> {
    * and focusing it by keyboard emits `peek` too; a click on an EMPTY cell opens the editor, since there is nothing to peek at.
    */
   editGesture?: 'click' | 'hold'
+  /** Table layout: the narrowest this column is drawn (px); also the width a reset column returns to in a resized table. */
+  minWidth?: number
 }
 
 /** What a row shows besides its cells. All parts are optional; a row with none shows nothing extra. */
@@ -107,7 +109,7 @@ export function clampColumnWidth(w: number): number {
 //
 // Accessibility: `status` is announced through a polite live region; each editor has an aria-label of the column
 // and the row; a row with an error shows it with role="alert".
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, type FunctionalComponent } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -133,6 +135,8 @@ const props = withDefaults(
     resizable?: boolean
     /** localStorage key of the saved widths (no personal data in it). Without one, widths last until the page closes. */
     storageKey?: string
+    /** Table layout: the table is never narrower than this (px); the page scrolls sideways instead (needs `resizable`). */
+    tableMinWidth?: number
   }>(),
   {
     editable: false,
@@ -145,6 +149,7 @@ const props = withDefaults(
     cardLabels: false,
     resizable: false,
     storageKey: '',
+    tableMinWidth: 0,
   },
 )
 
@@ -155,11 +160,16 @@ const emit = defineEmits<{
   peek: [rowKey: string, field: string, el: HTMLElement, source: 'click' | 'focus']
   /** A text editor opened. */
   'edit-start': [rowKey: string, field: string]
+  /** The component is narrower than TABLE_MIN_WIDTH (the card list is what `auto` would draw). Fires on every change. */
+  narrow: [narrow: boolean]
 }>()
 
 const rootEl = ref<HTMLElement | null>(null)
 const width = ref(typeof window !== 'undefined' ? window.innerWidth : TABLE_MIN_WIDTH)
 const cards = computed(() => props.layout === 'cards' || (props.layout === 'auto' && width.value < TABLE_MIN_WIDTH))
+
+const narrow = computed(() => width.value < TABLE_MIN_WIDTH)
+watch(narrow, (n) => emit('narrow', n), { immediate: true })
 
 function measure() {
   const w = rootEl.value?.clientWidth
@@ -340,6 +350,12 @@ onBeforeUnmount(holdCancel)
 // Column resizing (only when `resizable`, table layout).
 const widths = ref<Record<string, number>>(props.resizable && props.storageKey ? loadColumnWidths(props.storageKey) : {})
 const sized = computed(() => props.resizable && Object.keys(widths.value).length > 0)
+const DEFAULT_COL_WIDTH = 120
+// The table's scroll box: drawn only when `resizable` (other tables keep the bare <table>). Inline styles, since a
+// functional component's elements do not carry this file's scoped-style id.
+const ScrollBox: FunctionalComponent<{ on: boolean }> = (p, { slots }) =>
+  p.on ? h('div', { class: 'et-scroll et-resizable', style: { overflowX: 'auto' } }, slots.default?.()) : slots.default?.()
+ScrollBox.props = ['on']
 function persistWidths() {
   if (props.storageKey) saveColumnWidths(props.storageKey, widths.value)
 }
@@ -393,7 +409,11 @@ function resizeKey(col: EditableColumn<R>, e: KeyboardEvent) {
     resizeReset(col)
   }
 }
-const colStyle = (col: EditableColumn<R>) => (widths.value[col.key] != null ? { width: `${widths.value[col.key]}px` } : undefined)
+// A column without a saved width (reset, or never dragged) gets its default, so it is never left to share what is
+// left over (which can be nothing once the others are wide).
+const colStyle = (col: EditableColumn<R>) => ({ width: `${widths.value[col.key] ?? col.minWidth ?? DEFAULT_COL_WIDTH}px` })
+const thStyle = (col: EditableColumn<R>) => (col.minWidth ? { minWidth: `${col.minWidth}px` } : undefined)
+const tableStyle = computed(() => (props.resizable && props.tableMinWidth ? { minWidth: `${props.tableMinWidth}px` } : undefined))
 
 // Scroll to and mark the highlighted row, once per key, as soon as that row is in `rows`.
 let scrolledFor: string | null = null
@@ -423,14 +443,14 @@ function rowClass(row: R) {
     <div class="et-sr" role="status" aria-live="polite">{{ status }}</div>
 
     <!-- Table layout -->
-    <div v-if="!cards" class="et-scroll" :class="{ 'et-resizable': resizable }">
-    <table class="et-table" :class="{ 'et-fixed': sized }" :aria-label="label || undefined">
+    <ScrollBox v-if="!cards" :on="resizable">
+    <table class="et-table" :class="{ 'et-fixed': sized }" :style="tableStyle" :aria-label="label || undefined">
       <colgroup v-if="sized">
         <col v-for="col in columns" :key="col.key" :style="colStyle(col)" />
       </colgroup>
       <thead>
         <tr>
-          <th v-for="col in columns" :key="col.key" scope="col" :class="{ 'et-end': col.align === 'end' }">
+          <th v-for="col in columns" :key="col.key" scope="col" :class="{ 'et-end': col.align === 'end' }" :style="thStyle(col)">
             {{ col.label }}
             <span
               v-if="resizable"
@@ -522,7 +542,7 @@ function rowClass(row: R) {
         </template>
       </tbody>
     </table>
-    </div>
+    </ScrollBox>
 
     <!-- Card layout -->
     <ul v-else class="et-list" :aria-label="label || undefined">
@@ -644,9 +664,6 @@ function rowClass(row: R) {
   border-bottom: 1px solid rgb(var(--line));
   vertical-align: middle;
 }
-.et-resizable {
-  overflow-x: auto;
-}
 .et-fixed {
   table-layout: fixed;
 }
@@ -668,6 +685,16 @@ function rowClass(row: R) {
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+}
+/* A finger needs a wider target than a mouse. */
+@media (pointer: coarse) {
+  .et-resizer {
+    right: -12px;
+    width: 24px;
+  }
+  .et-resizer::after {
+    left: 11px;
+  }
 }
 .et-resizer::after {
   content: '';

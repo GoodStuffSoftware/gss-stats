@@ -412,7 +412,34 @@ describe('EditableTable resizable columns', () => {
     window.localStorage.setItem(KEY, JSON.stringify({ name: 222, size: 5, note: 'wide', other: 100 }))
     const w = await mountTable({ resizable: true, storageKey: KEY })
     expect(w.findAll('col')[0].attributes('style')).toContain('222px')
-    expect(w.findAll('col')[1].attributes('style') ?? '').not.toContain('px')
+    // An unsized column gets the default width, never "whatever is left".
+    expect(w.findAll('col')[1].attributes('style')).toContain('120px')
+  })
+  it('a reset column goes back to its minWidth, or the default; the others keep theirs', async () => {
+    stubHeaderWidths(150)
+    const columns = COLUMNS.map((c) => (c.key === 'name' ? { ...c, minWidth: 140 } : c))
+    const w = await mountTable({ resizable: true, storageKey: KEY, columns })
+    await drag(w, 0, 200)
+    await drag(w, 1, 10)
+    await handles(w)[0].trigger('dblclick')
+    expect(w.findAll('col')[0].attributes('style')).toContain('140px')
+    expect(w.findAll('col')[1].attributes('style')).toContain('160px')
+  })
+  it('the scroll box and tableMinWidth exist only when resizable', async () => {
+    const off = await mountTable({ tableMinWidth: 880 })
+    expect(off.find('.et-scroll').exists()).toBe(false)
+    expect(off.get('table').element.parentElement?.classList.contains('et')).toBe(true)
+    const on = await mountTable({ resizable: true, storageKey: KEY, tableMinWidth: 880 })
+    expect(on.get('.et-scroll').attributes('style')).toContain('overflow-x: auto')
+    expect(on.get('table').attributes('style')).toContain('min-width: 880px')
+  })
+  it('emits narrow when the width is under the table minimum', async () => {
+    const wide = await mountTable()
+    expect(wide.emitted('narrow')?.at(-1) ?? [false]).toEqual([false])
+    width = 400
+    const phone = await mountTable({ layout: 'table' })
+    expect(phone.emitted('narrow')?.at(-1)).toEqual([true])
+    expect(phone.find('table').exists()).toBe(true)
   })
   it('arrow keys on a handle nudge the column', async () => {
     stubHeaderWidths(150)

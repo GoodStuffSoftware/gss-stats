@@ -2746,6 +2746,12 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   before deploying the code that names the column (that code answers 500 until it exists). The rollback is the comment
   block at the end of the file. The load's pairing update never changes a row whose `updated_by` holds an address, so a
   row whose only edit was a note is paired by hand ([ADR 0007](docs/adr/0007-budget-section.md) point 10).
+- **Transactions table.** `BudgetTable.vue` over `EditableTable` (opt-in `resizable`, `tableMinWidth`, per-column `minWidth`; a table without
+  `resizable` keeps the bare `<table>`). Click or tap a note to read it in a tip (shared `useToggletip`, also the merchant tip); hold
+  500 ms (or Enter, F2) to edit it; a row with no note shows "Add note". Column widths are dragged on the header edge (double-click
+  resets one column to its minimum) and kept per device in localStorage `gss-stats-budget-txn-cols`. Under 600 px the card list is the default;
+  a Cards | Table switch above the list (kept per device in `gss-stats-budget-txn-view`) shows the real table at 880 px, scrolled sideways.
+  The category legend under the pie is two columns when its own width is 560 px or more.
 - **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`

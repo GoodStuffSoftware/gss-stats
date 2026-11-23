@@ -15,12 +15,12 @@
 // - The Note column shows each row's note (clamped; the full text is in the merchant tip) and edits it in place (PATCH `note`).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
-import { computed, nextTick, onMounted, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
-import { budgetColumns, categoryOptions, createTxnTable, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
+import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
 const props = defineProps<BudgetTableProps>()
@@ -41,6 +41,19 @@ function onEdited(e: BudgetEditedEvent) {
 
 const model = createTxnTable(deps, () => props.categories, onEdited, (c) => emit('category-added', c))
 const { rows, rowState, status, loading, loadingMore, loadError, nextCursor } = model
+
+// Phone: Cards (the default) or Table (the real table, scrolled sideways). Shown only while the table is narrower than the
+// table layout needs; the choice is kept per device.
+const view = ref<TxnView>(loadTxnView())
+const narrow = ref(false)
+function setView(v: TxnView) {
+  view.value = v
+  saveTxnView(v)
+}
+const VIEWS: Array<{ id: TxnView; label: string }> = [
+  { id: 'cards', label: 'Cards' },
+  { id: 'table', label: 'Table' },
+]
 
 const columns = computed(() => budgetColumns(props.categories, props.accounts))
 
@@ -109,6 +122,20 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
 
 <template>
   <section class="budget-table" aria-label="Transactions">
+    <div v-if="narrow" class="bt-viewbar">
+      <div class="sp-seg" role="radiogroup" aria-label="Transactions view" data-testid="txn-view">
+        <button
+          v-for="v in VIEWS"
+          :key="v.id"
+          type="button"
+          class="sp-seg-btn"
+          role="radio"
+          :aria-checked="view === v.id"
+          :data-testid="'txn-view-' + v.id"
+          @click="setView(v.id)"
+        >{{ v.label }}</button>
+      </div>
+    </div>
     <div v-if="loadError && !rows.length" class="bt-error" role="alert">
       <span>Couldn’t load transactions.</span>
       <button type="button" class="bt-btn" @click="reload">Retry</button>
@@ -122,7 +149,8 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       :rows="rows"
       row-key="id"
       :editable="canEdit"
-      layout="auto"
+      :layout="narrow && view === 'table' ? 'table' : 'auto'"
+      :table-min-width="narrow && view === 'table' ? PHONE_TABLE_MIN_WIDTH : 0"
       :row-status="rowState"
       :highlight-key="highlightId ?? null"
       :status="status"
@@ -135,6 +163,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       @action="onAction"
       @peek="onPeek"
       @edit-start="closeTip"
+      @narrow="narrow = $event"
     >
       <template #cell-merchant="{ row }">
         <button
@@ -443,5 +472,36 @@ tr:hover .bt-note-empty,
   margin-bottom: 6px;
   border-radius: 6px;
   background: rgb(var(--sunken));
+}
+/* Cards | Table switch (phone). The same look as the segmented control in SpendingPanel (that one's styles are scoped to it). */
+.bt-viewbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.sp-seg {
+  display: inline-flex;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sp-seg-btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--ink-2));
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sp-seg-btn[aria-checked='true'] {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
+  font-weight: 600;
+}
+.sp-seg-btn:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: -2px;
 }
 </style>

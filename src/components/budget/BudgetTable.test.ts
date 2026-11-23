@@ -876,3 +876,62 @@ describe('BudgetTable merchant tip', () => {
     delete (document.documentElement as unknown as Record<string, unknown>).clientWidth
   })
 })
+
+describe('BudgetTable phone Cards | Table switch', () => {
+  beforeEach(() => window.localStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+  const radio = (w: VueWrapper, id: string) => w.get(`[data-testid="txn-view-${id}"]`)
+
+  it('is hidden on a wide screen', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(w.find('[data-testid="txn-view"]').exists()).toBe(false)
+  })
+  it('on a phone shows Cards (selected) and Table; Table swaps the card list for a sideways-scrolling table', async () => {
+    width = 390
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(radio(w, 'cards').attributes('aria-checked')).toBe('true')
+    expect(w.find('li[data-row-key="t1"]').exists()).toBe(true)
+    await radio(w, 'table').trigger('click')
+    expect(radio(w, 'table').attributes('aria-checked')).toBe('true')
+    expect(w.find('li[data-row-key="t1"]').exists()).toBe(false)
+    expect(w.get('tr[data-row-key="t1"]').exists()).toBe(true)
+    expect(w.get('.et-scroll').attributes('style')).toContain('overflow-x: auto')
+    expect(w.get('table').attributes('style')).toContain('min-width: 880px')
+    expect(window.localStorage.getItem('gss-stats-budget-txn-view')).toBe('table')
+  })
+  it('the choice comes back after a reload', async () => {
+    width = 390
+    window.localStorage.setItem('gss-stats-budget-txn-view', 'table')
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(radio(w, 'table').attributes('aria-checked')).toBe('true')
+    expect(w.find('tr[data-row-key="t1"]').exists()).toBe(true)
+  })
+  it('an unknown saved value means Cards', async () => {
+    width = 390
+    window.localStorage.setItem('gss-stats-budget-txn-view', 'grid')
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(radio(w, 'cards').attributes('aria-checked')).toBe('true')
+  })
+  it('works when localStorage throws (Cards, and the switch still switches)', async () => {
+    width = 390
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(radio(w, 'cards').attributes('aria-checked')).toBe('true')
+    await radio(w, 'table').trigger('click')
+    expect(w.find('tr[data-row-key="t1"]').exists()).toBe(true)
+  })
+  it('in Table mode on a phone the merchant tip opens', async () => {
+    width = 390
+    window.localStorage.setItem('gss-stats-budget-txn-view', 'table')
+    mockFetch(() => json({ rows: [txn('t1', { note: 'two bags of rice' })], nextCursor: null }))
+    const w = await mountTable()
+    await w.get('tr[data-row-key="t1"] [data-testid="merchant-tip-toggle"]').trigger('click')
+    expect(w.find('[data-testid="merchant-tip"]').exists()).toBe(true)
+  })
+})
