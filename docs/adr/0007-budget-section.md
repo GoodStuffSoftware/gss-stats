@@ -130,6 +130,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
     mixed merchants get no rule offer. A row a person set (manual and an `@` edit) is never suggested for ticking; a
     script-set manual row is not suggested on a mixed merchant. No Undo: `category_edits` does not record the old
     `category_source`, so an exact undo needs an additive column.
+    The dialog (`SimilarDialog`) sits on the shared `ModalPanel` (a bottom sheet under 600 px) and lists rows with
+    `EditableTable`'s opt-in `selectable` column; its "Same amount only" choice is kept per merchant in the prefs
+    blob (`sameAmount`, at most 30 merchant keys), and the "from now on" rule locks the rows it will move anyway.
 
 ## Consequences
 

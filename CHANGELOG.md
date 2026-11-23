@@ -11,6 +11,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Resizable transaction columns** — drag the edge of a header to resize a column, double-click the edge to reset it; widths stay on the device.
 - **Add a note from a phone card** — a row with no note shows a small "Add note" line on the phone cards (and on touch screens), and tapping it opens the editor.
 - **Search, filter and sort transactions** — a toolbar above the Budget table searches, filters by merchant, category, account, person and dates, and sorts; it counts "N of M" over the whole period, and your choices are remembered per login across devices.
+- **Change similar purchases?** — after you change a category, a dialog lists the same merchant's other purchases with the likely ones ticked; a "Same amount only" switch (remembered per merchant), an optional "Use for this merchant from now on" rule, then "Change N". Purchases you set by hand are never ticked for you.
 
 ### Changed
 - **Two-column legend** — the category legend under the pie lays out in two columns when it stacks under the pie with room (tablet widths), and stays one column on a phone.
