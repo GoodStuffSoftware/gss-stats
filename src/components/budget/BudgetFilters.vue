@@ -4,17 +4,25 @@
 // Props: from, to (YYYY-MM-DD), person ('all' or a person id), people (from /meta), today (tests only).
 // Emits: `range` ({from, to}; only ever a range the server accepts) and `person` (id or 'all').
 // Phone: the range select takes the full first row, the person control the second.
+// Also, when `layout` is given, a "Layout: Side by side | Tabs" picker (desktop only, like the group below):
+// how the Spending and Debts panels are arranged from 1024 px up (lib/budget/panelVisibility.ts keeps the choice
+// per device). Emits `layout`. In Tabs the hide-a-chart toggles below are not shown (`hidden` is not given).
 // Also, when `hidden` is given, a "Show: Spending | Debts" group (desktop only: below 1024 px the Spending /
 // Debts tabs pick the one panel). Each button is a pressed-state toggle for one chart; `hidden` lists the
 // charts that are hidden, and the last chart shown cannot be hidden (its button is disabled), so hiding both is
 // not possible (lib/budget/panelVisibility.ts). Emits `toggle-panel` (the chart id); the parent keeps the state.
 import { computed, ref, watch } from 'vue'
 import type { IsoDate, Person, PersonFilter } from '../../lib/budget/types'
-import { canHide, type PanelId } from '../../lib/budget/panelVisibility'
+import { canHide, type DesktopLayout, type PanelId } from '../../lib/budget/panelVisibility'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { MAX_RANGE_DAYS, RANGE_PRESETS, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
 
-const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[]; rangeHidden?: boolean }>()
-const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter]; 'toggle-panel': [id: PanelId] }>()
+const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; hidden?: readonly PanelId[]; rangeHidden?: boolean; layout?: DesktopLayout }>()
+const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter]; 'toggle-panel': [id: PanelId]; layout: [l: DesktopLayout] }>()
+const LAYOUT_OPTIONS = [
+  { value: 'side', label: 'Side by side', testid: 'budget-layout-side' },
+  { value: 'tabs', label: 'Tabs', testid: 'budget-layout-tabs' },
+]
 const SHOW_PANELS: { id: PanelId; label: string }[] = [
   { id: 'spending', label: 'Spending' },
   { id: 'debts', label: 'Debts' },
@@ -114,6 +122,10 @@ function onCustom() {
         @click="emit('toggle-panel', p.id)"
       >{{ p.label }}</button>
     </div>
+    <div v-if="layout" class="bf-layout">
+      <span class="bf-label" aria-hidden="true">Layout</span>
+      <SegmentedControl :options="LAYOUT_OPTIONS" :model-value="layout" label="Layout" @update:model-value="(v) => emit('layout', v as DesktopLayout)" />
+    </div>
     <p v-if="rangeError" class="bf-error" role="alert">{{ rangeError }}</p>
   </div>
 </template>
@@ -177,8 +189,14 @@ function onCustom() {
   opacity: 0.85;
 }
 /* Below 1024 px BudgetSection shows one panel at a time (its tabs), so there is nothing to hide. */
+.bf-layout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 @media (max-width: 1023.98px) {
-  .bf-show {
+  .bf-show,
+  .bf-layout {
     display: none;
   }
 }

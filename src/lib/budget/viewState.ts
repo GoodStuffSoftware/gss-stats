@@ -10,10 +10,12 @@
 // history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
 // still carries a `b_path` has it ignored and removed (searchWithoutPath). Likewise the open loan on the Loans
 // page (an account id names an institution): a one-level step `{level:'loan', key}` in history.state, through its
-// own createDrillHistory instance (own mark key), never in the URL.
+// own createDrillHistory instance (own mark key), never in the URL. Likewise the debt open in place on Overview (a
+// click on a slice of the debt pie shows that debt's balance line): `{level:'debt', key}`, own mark key, one more
+// instance whose entries interleave with the spending drill's (both carry each other's marks).
 // Everything read back is validated; anything malformed falls back to its default.
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
-import { createDrillHistory, readMark, readSteps, type DrillHistory } from './drillHistory'
+import { createDrillHistory, readMark, readSteps, type DrillHistory, type HistoryLike } from './drillHistory'
 import { BUDGET_PARAM_PREFIX, PAGE_PARAM, budgetPageOf, budgetSectionOpen, type BudgetPage } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
@@ -21,6 +23,7 @@ export type BudgetTab = 'spending' | 'debts'
 export type GroupBy = 'merchant' | 'account'
 export interface DrillStep { level: 'category' | 'merchant'; key: string; label: string }
 export interface LoanStep { level: 'loan'; key: string; label: string }
+export interface DebtStep { level: 'debt'; key: string; label: string }
 export interface BudgetViewState {
   from: IsoDate
   to: IsoDate
@@ -33,6 +36,8 @@ export interface BudgetViewState {
   page: BudgetPage
   /** The loan open on the Loans page (an account id): history.state only, never the URL. Null on Overview. */
   loan: string | null
+  /** The debt open in place on Overview (an account id): history.state only, never the URL. Null = the debt pie. */
+  debt: string | null
 }
 
 /** The server refuses a range longer than this (functions/api/budget/summary.ts). */
@@ -127,7 +132,7 @@ export function presetOf(from: string, to: string, today: IsoDate): RangePreset 
 // ── State <-> URL ─────────────────────────────────────────────────────────────────────────────────────────
 export function defaultViewState(today: IsoDate = todayIso()): BudgetViewState {
   const r = rangeForPreset('this-month', today)!
-  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab: 'spending', page: 'overview', loan: null }
+  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab: 'spending', page: 'overview', loan: null, debt: null }
 }
 
 const P = BUDGET_PARAM_PREFIX
@@ -136,6 +141,19 @@ const STEP_TEXT_MAX = 120
 const LOAN_ID_RE = /^[A-Za-z0-9][\w.-]{0,63}$/
 /** history.state key of the loan step's own drillHistory instance (the drill path keeps drillHistory's MARK_KEY). */
 export const LOAN_MARK_KEY = 'gssBudgetLoan'
+/** history.state key of the in-place debt step's own drillHistory instance. */
+export const DEBT_MARK_KEY = 'gssBudgetDebt'
+
+/** The in-place debt step read back from history.state: none or exactly one `{level:'debt', key}` with a plain id, else null. */
+export function parseDebtSteps(raw: unknown): DebtStep[] | null {
+  if (!Array.isArray(raw) || raw.length > 1) return null
+  if (raw.length === 0) return []
+  const t = raw[0] as unknown
+  if (!t || typeof t !== 'object') return null
+  const { level, key } = t as Record<string, unknown>
+  if (level !== 'debt' || typeof key !== 'string' || !LOAN_ID_RE.test(key)) return null
+  return [{ level: 'debt', key, label: key }]
+}
 
 /** The loan step read back from history.state: none or exactly one `{level:'loan', key}` with a plain id, else null. */
 export function parseLoanSteps(raw: unknown): LoanStep[] | null {
@@ -260,6 +278,7 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
       const kept = readSteps(globalThis.history?.state, parseDrillSteps)
       if (kept) state.path = kept
       if (state.page === 'loans') state.loan = readSteps(globalThis.history?.state, parseLoanSteps, LOAN_MARK_KEY)?.[0]?.key ?? null
+      else state.debt = readSteps(globalThis.history?.state, parseDebtSteps, DEBT_MARK_KEY)?.[0]?.key ?? null
     }
   } catch {
     // history unavailable or sandboxed: the section starts at the top
@@ -278,7 +297,7 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
       // loan is being set from the entry's own state, and the browser fires popstate at the other listeners (readUrl
       // takes the page, range and person from the address) AFTER the reactive flush that would run this. Writing now
       // would stamp the page still on screen onto that entry's address, so Back would never leave it.
-      if (drill?.settling || loanHist?.settling) return
+      if (drill?.settling || loanHist?.settling || debtHist?.settling) return
       const search = searchWithState(loc.search, state)
       if (search !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + search + loc.hash)
     } catch {
@@ -291,11 +310,39 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   // Only inside a component; a bare call (tests, tools) touches no history.
   let drill: DrillHistory<DrillStep> | null = null
   let loanHist: DrillHistory<LoanStep> | null = null
+  let debtHist: DrillHistory<DebtStep> | null = null
   let pageSwitching = false // setPage / a popstate is changing page and loan together: the loan step must not push
   const loanPath = (): LoanStep[] => (state.loan ? [{ level: 'loan', key: state.loan, label: state.loan }] : [])
+  const debtPath = (): DebtStep[] => (state.debt ? [{ level: 'debt', key: state.debt, label: state.debt }] : [])
+  // The spending drill and the in-place debt drill push entries into the same history list, so a path cut of one that
+  // goes back through history (go(-n)) must not run over entries the other pushed since. Each instance keeps the depth
+  // the OTHER one stood at when it last pushed (-1: nothing in the way): a cut that stays at or above that depth only
+  // crosses its own entries; a deeper one re-marks the entry the user is on instead (drillHistory.ts `canGoBack`).
+  let drillBlock = -1 // the spending depth when the debt step last pushed
+  let debtBlock = -1 // the debt depth (0 or 1) when a spending level last pushed
+  const tracked = (onPush: () => void): HistoryLike => ({
+    get state() {
+      return globalThis.history.state
+    },
+    pushState: (st, t) => {
+      globalThis.history.pushState(st, t)
+      onPush()
+    },
+    replaceState: (st, t) => globalThis.history.replaceState(st, t),
+    go: (n) => globalThis.history.go(n),
+  })
   if (getCurrentInstance() && globalThis.history && globalThis.window) {
     const copy = () => state.path.map((x) => ({ ...x }))
-    const d = createDrillHistory<DrillStep>({ history: globalThis.history, drill: pushStep, popTo, path: copy, parseSteps: parseDrillSteps, landed: writeUrl })
+    const d = createDrillHistory<DrillStep>({
+      history: tracked(() => void (debtBlock = state.debt ? 1 : 0)),
+      drill: pushStep,
+      popTo,
+      path: copy,
+      parseSteps: parseDrillSteps,
+      landed: writeUrl,
+      carry: true,
+      canGoBack: (floor) => floor >= drillBlock,
+    })
     drill = d
     // sync: the entry is pushed before writeUrl (later in the flush) stamps the new level on the address bar
     watch(() => state.path.length, () => d.pathChanged(copy()), { flush: 'sync' })
@@ -322,18 +369,42 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
       const search = globalThis.location?.search ?? ''
       if (budgetSectionOpen(search) && budgetPageOf(search) === 'loans') l.popped(e.state, true)
     }
+    // The debt open in place on Overview: one level, own mark key, active on Overview only.
+    const b = createDrillHistory<DebtStep>({
+      history: tracked(() => void (drillBlock = state.path.length)),
+      markKey: DEBT_MARK_KEY,
+      drill: (step) => void (state.debt = step.key),
+      popTo: (depth) => void (depth < 1 && (state.debt = null)),
+      path: debtPath,
+      parseSteps: parseDebtSteps,
+      landed: writeUrl,
+      carry: true,
+      canGoBack: (floor) => floor >= debtBlock,
+    })
+    debtHist = b
+    watch(() => state.debt, () => b.pathChanged(debtPath()), { flush: 'sync' })
+    // the steps kept for Forward mean nothing for another person's debts
+    watch(() => state.person, () => b.forgetForward())
+    const onDebtPop = (e: PopStateEvent) => {
+      const search = globalThis.location?.search ?? ''
+      if (budgetSectionOpen(search) && budgetPageOf(search) === 'overview') b.popped(e.state, true)
+    }
     // registered before BudgetSection's own readUrl listener (its onMounted comes after this call), so a foreign
     // entry is flagged as settling before readUrl changes the path
     onMounted(() => {
       d.start()
       if (state.page === 'loans') l.start()
+      else b.start()
       globalThis.addEventListener('popstate', onPop)
       globalThis.addEventListener('popstate', onLoanPop)
+      globalThis.addEventListener('popstate', onDebtPop)
     })
     onBeforeUnmount(() => {
       globalThis.removeEventListener('popstate', onPop)
       globalThis.removeEventListener('popstate', onLoanPop)
+      globalThis.removeEventListener('popstate', onDebtPop)
       l.end()
+      b.end()
       d.end() // the entry the user is on (a page the app moved to) keeps no drill state
     })
   }
@@ -346,8 +417,10 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     if (e && drill && readMark(e.state)?.s === drill.session) return
     // a loan step of this session: Back/Forward only moves the open loan, the person and range stay as chosen
     if (e && loanHist && readMark(e.state, LOAN_MARK_KEY)?.s === loanHist.session) return
+    // a debt step of this session: Back/Forward only moves the open debt
+    if (e && debtHist && readMark(e.state, DEBT_MARK_KEY)?.s === debtHist.session) return
     // the address names no drill path: whatever is on screen stays (drillHistory.ts sets it from the entry)
-    const { path: _path, page: _page, loan: _loan, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
+    const { path: _path, page: _page, loan: _loan, debt: _debt, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
     Object.assign(state, fromUrl)
   }
   /** Back/Forward onto an entry of another page: take the page from the address and the open loan from the entry's
@@ -392,7 +465,10 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     if (state.page === 'loans') loanHist?.start()
     // the new Overview entry carries no drill mark yet: mark it with the path still on screen, so crumbing to the top
     // re-marks instead of go(-1) onto the Loans entry, and Back onto it restores the drill
-    if (state.page === 'overview') drill?.start()
+    if (state.page === 'overview') {
+      drill?.start()
+      debtHist?.start()
+    }
   }
   /** False (and nothing changes) for a range the server would refuse. */
   function setRange(from: IsoDate, to: IsoDate): boolean {
@@ -413,6 +489,10 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   function popTo(depth: number) {
     if (depth < state.path.length) state.path.splice(Math.max(0, depth))
   }
+  /** Open a debt in place on Overview (an account id) or close it (null). Its own history step: Back closes it. */
+  function setDebt(id: string | null) {
+    state.debt = id !== null && LOAN_ID_RE.test(id) ? id : null
+  }
   /** Changing what the second level groups by makes a chosen second step meaningless, so it is dropped. */
   function setGroupBy(g: GroupBy) {
     if (state.groupBy === g) return
@@ -425,5 +505,5 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
   function setTab(tab: BudgetTab) {
     state.tab = tab
   }
-  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, today }
+  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, today }
 }

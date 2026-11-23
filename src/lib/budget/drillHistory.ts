@@ -100,6 +100,14 @@ export interface DrillHistoryOptions<Step> {
    * page (the Loans page's one-level `loan` step, viewState.ts) uses its own key so the two never read each
    * other's entries. */
   markKey?: string
+  /** Pushed entries keep what the entry pushed from already holds in history.state (another instance's mark) instead
+   * of starting empty. Needed when two instances share the same entries (the spending drill and the debt drill on
+   * Overview): otherwise an entry one of them pushed looks foreign to the other, which would adopt it and reset. */
+  carry?: boolean
+  /** Asked before a path cut goes back through history (`go(-n)` over our own entries, down to depth `floor`). False
+   * when something else pushed entries in between (the other instance), so going back would land on them: the entry
+   * the user is on is re-marked instead, like a cut below the adopted base. Default: always true. */
+  canGoBack?: (floor: number) => boolean
 }
 
 export interface DrillHistory<Step> {
@@ -124,6 +132,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
   const session = opts.session ?? newSessionId()
   const later = opts.later ?? ((fn) => void setTimeout(fn, 0))
   const key = opts.markKey ?? MARK_KEY
+  const carry = opts.carry === true
 
   let depth = 0 // the depth of the entry the user is on
   let base = 0
@@ -179,7 +188,7 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
         return
       }
       if (n > depth) {
-        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(null, { s: session, d, p: path.slice(0, d) }, key), '')
+        for (let d = depth + 1; d <= n; d++) h.pushState(withMark(carry ? h.state : null, { s: session, d, p: path.slice(0, d) }, key), '')
         forward = [] // a push drops the entries ahead
         forgotten = false
         depth = n
@@ -192,11 +201,11 @@ export function createDrillHistory<Step>(opts: DrillHistoryOptions<Step>): Drill
       forward = known.slice(floor, depth).concat(forward)
       depth = n
       known = path.slice()
-      if (cut > 0) {
+      if (cut > 0 && (opts.canGoBack?.(floor) ?? true)) {
         expect = { depth: floor, rebase: n < base ? n : null }
         h.go(-cut)
       } else {
-        // nothing of ours behind this entry (cut below the adopted base): re-mark it instead
+        // nothing of ours behind this entry (cut below the adopted base, or foreign entries in between): re-mark it instead
         forward = []
         base = n
         mark(n)

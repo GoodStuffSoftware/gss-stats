@@ -13,7 +13,6 @@
 //   close()   "Back to debts".
 //   saved()   a manual balance was PUT: BudgetSection refetches /debts so the pie and list update.
 import { computed, ref, watch } from 'vue'
-import { balanceLineConfig } from '../../lib/budget/balanceChart'
 import { fetchDebtDetail, putManualBalance } from '../../lib/budget/clientRead'
 import { daysBetween } from '../../lib/budget/dates'
 import { debtAprBp, loanMonthlyPayment, monthlyInterestCents, monthsToPayoff, payoffMonth } from '../../lib/budget/loanMath'
@@ -21,7 +20,7 @@ import { formatApr } from '../../lib/budget/pieModel'
 import { formatAmount, formatDate } from '../../lib/budget/tableModel'
 import type { DebtDetail as DebtDetailData } from '../../lib/budget/types'
 import { monthsLabel, rangeValid, todayIso } from '../../lib/budget/viewState'
-import BaseChart from '../charts/BaseChart.vue'
+import BalanceChart from './BalanceChart.vue'
 import EditableTable, { type EditableColumn } from '../table/EditableTable.vue'
 
 // `recentPaymentsCents`: the totals paid in the last 3 full months (the Loans page passes them), the payoff fallback
@@ -185,9 +184,6 @@ const promoRows = computed(() =>
     })),
 )
 
-// ── Balance line ─────────────────────────────────────────────────────────────────────────────────────────
-const chartConfig = computed(() => balanceLineConfig(history.value, props.dark))
-
 // ── The balance form ─────────────────────────────────────────────────────────────────────────────────────
 const MAX_CENTS = 99_999_999_999 // $999,999,999.99
 /** "$1,234.56", "1234.5", "0" -> cents; anything else (negative, letters, 3 decimals, bad commas) -> null. */
@@ -260,9 +256,7 @@ async function submit() {
       <div class="dd-top" :class="{ 'dd-top-solo': !history.length }">
       <section v-if="history.length" class="dd-section dd-chart-col" aria-label="Balance history">
         <h3 class="dd-h3">Balance over time</h3>
-        <div class="dd-chart" role="img" :aria-label="`Balance history of ${title}`" data-testid="debt-chart">
-          <BaseChart :config="chartConfig" :drill-open="false" />
-        </div>
+        <BalanceChart :history="history" :dark="dark" :label="title" />
       </section>
 
       <div class="dd-side">
@@ -528,10 +522,6 @@ async function submit() {
   margin: 0 0 6px;
   font-size: 14px;
   font-weight: 600;
-}
-.dd-chart {
-  position: relative;
-  height: 220px;
 }
 .dd-form {
   display: flex;
