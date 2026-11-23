@@ -497,3 +497,10 @@ describe('DrillPie through the real BaseChart', () => {
     expect(arcs.map((a) => a.circumference)).toEqual(final) // put back after the frame
   })
 })
+
+describe('DrillPie legend columns', () => {
+  it('goes to two columns by a container query on the pie box, so it applies only where the legend stacks under the pie', () => {
+    expect(source).toMatch(/container-type:\s*inline-size/)
+    expect(source).toMatch(/@container \(min-width: 560px\)\s*\{\s*\.dp-list\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
+  })
+})

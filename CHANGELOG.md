@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Resizable transaction columns** — drag the edge of a header to resize a column, double-click the edge to reset it; widths stay on the device.
+- **Add a note from a phone card** — a row with no note shows a small "Add note" line on the phone cards (and on touch screens), and tapping it opens the editor.
+
+### Changed
+- **Two-column legend** — the category legend under the pie lays out in two columns when it stacks under the pie with room (tablet widths), and stays one column on a phone.
+- **Note: click to read, hold to edit** — a click or tap on a note shows the whole note in a tip like the merchant's; press and hold (or Enter or F2) edits it.
+
 ## [0.80.0] — 2026-11-22
 
 

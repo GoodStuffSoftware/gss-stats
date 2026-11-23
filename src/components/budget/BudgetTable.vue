@@ -15,7 +15,8 @@
 // - The Note column shows each row's note (clamped; the full text is in the merchant tip) and edits it in place (PATCH `note`).
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, watch } from 'vue'
+import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
@@ -78,66 +79,29 @@ function onAction(rowKey: string, id: string) {
   if (id === 'rule') void model.useForAll(rowKey)
 }
 
-// The merchant tip (a toggletip: opens on tap, so touch has what hover gives a mouse).
-const TIP_WIDTH = 320
-const TIP_MARGIN = 8
-interface MerchantTip { id: string; name: string; description: string; note: string; style: Record<string, string> }
-const tip = ref<MerchantTip | null>(null)
-function closeTip() {
-  tip.value = null
-}
-function openTip(row: Txn, el: HTMLElement) {
-  const r = el.getBoundingClientRect()
-  const vw = document.documentElement.clientWidth || window.innerWidth
-  const vh = window.innerHeight
-  const width = Math.max(120, Math.min(TIP_WIDTH, vw - TIP_MARGIN * 2))
-  const left = Math.max(TIP_MARGIN, Math.min(r.left, vw - TIP_MARGIN - width))
-  const style: Record<string, string> = { left: `${left}px`, width: `${width}px` }
-  // Below the merchant, unless it sits in the lower part of the screen.
-  if (r.bottom > vh * 0.6) style.bottom = `${Math.max(TIP_MARGIN, vh - r.top + 6)}px`
-  else style.top = `${r.bottom + 6}px`
-  tip.value = { id: row.id, name: row.merchantName || row.description, description: row.description, note: row.note ?? '', style }
-}
+// The merchant tip and the note tip (toggletips: they open on tap or click, so touch has what hover gives a mouse). One
+// implementation (useToggletip); each trigger names its own key.
+type TipData = { kind: 'merchant'; name: string; description: string; note: string } | { kind: 'note'; note: string }
+const { tip, close: closeTip, toggle, openOnKeyboardFocus } = useToggletip<TipData>('.bt-merchant, .et-hold, .bt-tip')
+const merchantTip = (row: Txn): TipData => ({ kind: 'merchant', name: row.merchantName || row.description, description: row.description, note: row.note ?? '' })
+const merchantKey = (row: Txn) => `merchant:${row.id}`
 function toggleTip(row: Txn, e: Event) {
-  if (tip.value?.id === row.id) closeTip()
-  else openTip(row, e.currentTarget as HTMLElement)
+  toggle(merchantKey(row), merchantTip(row), e.currentTarget as HTMLElement)
 }
 function focusTip(row: Txn, e: FocusEvent) {
-  // Keyboard focus only: a tap focuses the button too, and its click must not find the tip already open and close it.
-  const el = e.currentTarget as HTMLElement
-  let keyboard = false
-  try {
-    keyboard = el.matches(':focus-visible')
-  } catch {
-    keyboard = false
-  }
-  if (keyboard && tip.value?.id !== row.id) openTip(row, el)
+  openOnKeyboardFocus(merchantKey(row), merchantTip(row), e.currentTarget as HTMLElement)
 }
-function onDocPointer(e: Event) {
-  const t = e.target as Element | null
-  if (t?.closest?.('.bt-merchant, .bt-tip')) return
-  closeTip()
+// The note: a click or tap shows it in full (a row without one has nothing to show, so the table opens the editor), a hold
+// edits it (EditableTable, `editGesture: 'hold'`). Editing starting closes the tip.
+function onPeek(rowKey: string, field: string, el: HTMLElement, source: 'click' | 'focus') {
+  if (field !== 'note') return
+  const row = rows.value.find((r) => r.id === rowKey)
+  if (!row?.note) return
+  const key = `note:${rowKey}`
+  const data: TipData = { kind: 'note', note: row.note }
+  if (source === 'focus') openOnKeyboardFocus(key, data, el)
+  else toggle(key, data, el)
 }
-function onDocKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') closeTip()
-}
-function addTipListeners() {
-  document.addEventListener('pointerdown', onDocPointer, true)
-  document.addEventListener('keydown', onDocKey)
-  window.addEventListener('scroll', closeTip, true)
-  window.addEventListener('resize', closeTip)
-}
-function removeTipListeners() {
-  document.removeEventListener('pointerdown', onDocPointer, true)
-  document.removeEventListener('keydown', onDocKey)
-  window.removeEventListener('scroll', closeTip, true)
-  window.removeEventListener('resize', closeTip)
-}
-watch(
-  () => tip.value !== null,
-  (open) => (open ? addTipListeners() : removeTipListeners()),
-)
-onBeforeUnmount(removeTipListeners)
 
 const rowLabel = (t: Txn) => t.merchantName || t.description
 const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included === false
@@ -165,16 +129,20 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       :row-label="rowLabel"
       :loading="loading"
       label="Transactions"
+      resizable
+      storage-key="gss-stats-budget-txn-cols"
       @edit="onEdit"
       @action="onAction"
+      @peek="onPeek"
+      @edit-start="closeTip"
     >
       <template #cell-merchant="{ row }">
         <button
           type="button"
           class="bt-merchant"
           :title="row.description"
-          :aria-expanded="tip?.id === row.id"
-          :aria-describedby="tip?.id === row.id ? 'bt-tip' : undefined"
+          :aria-expanded="tip?.key === merchantKey(row)"
+          :aria-describedby="tip?.key === merchantKey(row) ? 'bt-tip' : undefined"
           data-testid="merchant-tip-toggle"
           @click="toggleTip(row, $event)"
           @focus="focusTip(row, $event)"
@@ -200,8 +168,9 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         >{{ reviewReasonText(row.reviewReason) }}</span>
       </template>
       <template #cell-note="{ row, cardLayout }">
-        <!-- Clamped to a few lines; the full text is in the merchant tip. A row without a note shows nothing (desktop: a faint
-             "Add note" on hover or focus; phone: nothing, since an empty field would add a blank line to every card). -->
+        <!-- Clamped to a few lines; a click or tap shows the full text in a tip, a hold edits. A row without a note shows a
+             faint "Add note" (desktop: on hover or focus; touch and phone cards: always, one small muted line); a click on it
+             opens the editor. -->
         <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note">{{ row.note }}</span>
         <span v-else class="bt-note-empty">Add note</span>
       </template>
@@ -260,9 +229,12 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       </template>
     </EditableTable>
     <div v-if="tip" id="bt-tip" class="bt-tip" role="tooltip" :style="tip.style" data-testid="merchant-tip">
-      <span class="bt-tip-name">{{ tip.name }}</span>
-      <span v-if="tip.description && tip.description !== tip.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.description }}</span>
-      <span v-if="tip.note" class="bt-tip-note" data-testid="merchant-tip-note">{{ tip.note }}</span>
+      <template v-if="tip.data.kind === 'merchant'">
+        <span class="bt-tip-name">{{ tip.data.name }}</span>
+        <span v-if="tip.data.description && tip.data.description !== tip.data.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.data.description }}</span>
+        <span v-if="tip.data.note" class="bt-tip-note" data-testid="merchant-tip-note">{{ tip.data.note }}</span>
+      </template>
+      <span v-else class="bt-tip-fullnote" data-testid="note-tip">{{ tip.data.note }}</span>
     </div>
   </section>
 </template>
@@ -342,8 +314,23 @@ tr:hover .bt-note-empty,
 .et-text-btn:focus-visible .bt-note-empty {
   opacity: 1;
 }
-.budget-table :deep(.et-cards .et-field:has(.bt-note-empty)) {
-  display: none;
+/* No hover on touch: the prompt stays visible, and on the phone cards it is one compact line, not a 44px field. */
+@media (hover: none) {
+  .bt-note-empty {
+    opacity: 1;
+  }
+}
+.budget-table :deep(.et-cards .et-text-btn:has(.bt-note-empty)) {
+  width: auto;
+  min-height: 32px;
+  padding: 0 4px;
+}
+.budget-table :deep(.et-cards .bt-note-empty) {
+  opacity: 1;
+  font-size: 13px;
+}
+.bt-tip-fullnote {
+  white-space: pre-wrap;
 }
 .bt-reason {
   display: block;

@@ -324,7 +324,7 @@ describe('BudgetTable note', () => {
   const rows = () => [txn('t1', { note: NOTE }), txn('t2', { merchantName: 'Shop Y' }), txn('t3', { merchantName: 'Shop Z', note: '' })]
   const noteBtn = (w: VueWrapper, id: string) => rowEl(w, id).get('button.et-text-btn')
   async function editNote(w: VueWrapper, id: string, text: string) {
-    await noteBtn(w, id).trigger('click')
+    await noteBtn(w, id).trigger('keydown', { key: 'Enter' }) // a plain click shows the tip; Enter (or a hold) edits
     const input = rowEl(w, id).get('input.et-input')
     await input.setValue(text)
     await input.trigger('keydown', { key: 'Enter' })
@@ -339,7 +339,7 @@ describe('BudgetTable note', () => {
     expect(rowEl(w, 't3').find('[data-testid="row-note"]').exists()).toBe(false)
     expect(w.findAll('thead th').map((t) => t.text())).toContain('Note')
   })
-  it('shows it in the card layout too (a row without one has only the hidden "Add note" field)', async () => {
+  it('shows it in the card layout too (a row without one shows the compact "Add note" prompt)', async () => {
     width = 400
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
     const w = await mountTable()
@@ -347,6 +347,57 @@ describe('BudgetTable note', () => {
     expect(note.text()).toBe(NOTE)
     expect(note.classes()).toContain('bt-note-card')
     expect(w.find('li[data-row-key="t2"] [data-testid="row-note"]').exists()).toBe(false)
+    expect(w.get('li[data-row-key="t2"] .bt-note-empty').text()).toBe('Add note')
+  })
+  it('a click or tap shows the full note in a tip and does not start editing; a second click closes it', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await noteBtn(w, 't1').trigger('click')
+    expect(w.get('[data-testid="note-tip"]').text()).toBe(NOTE)
+    expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(false)
+    await noteBtn(w, 't1').trigger('click')
+    expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
+  })
+  it('the note tip and the merchant tip are one tip: opening one replaces the other, and Escape closes it', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await noteBtn(w, 't1').trigger('click')
+    await rowEl(w, 't1').get('[data-testid="merchant-tip-toggle"]').trigger('click')
+    expect(w.findAll('[data-testid="merchant-tip"]')).toHaveLength(1)
+    expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
+    await noteBtn(w, 't1').trigger('click')
+    expect(w.find('[data-testid="note-tip"]').exists()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(w.find('[data-testid="merchant-tip"]').exists()).toBe(false)
+  })
+  it('a hold of 500 ms opens the editor and closes the tip; the release after it does not click', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetch(() => json({ rows: rows(), nextCursor: null }))
+      const w = await mountTable()
+      await noteBtn(w, 't1').trigger('click')
+      await noteBtn(w, 't1').trigger('pointerdown', { button: 0, clientX: 10, clientY: 10, pointerType: 'mouse' })
+      vi.advanceTimersByTime(500)
+      await flushPromises()
+      expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(true)
+      expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('a note row with no note: a click opens the editor to add one', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await noteBtn(w, 't2').trigger('click')
+    expect(rowEl(w, 't2').find('input.et-input').exists()).toBe(true)
+    expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
+  })
+  it('F2 edits too', async () => {
+    mockFetch(() => json({ rows: rows(), nextCursor: null }))
+    const w = await mountTable()
+    await noteBtn(w, 't1').trigger('keydown', { key: 'F2' })
+    expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(true)
   })
   it('the merchant tip also shows the note, and no note line without one', async () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))

@@ -396,6 +396,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  /* The legend asks how wide the pie's own box is (below). Where the section puts the pie beside another panel it
+   * sets this box to display: contents, which has no size, so the query does not apply there and the legend stays
+   * one column. */
+  container-type: inline-size;
 }
 /* Wider than tall on a wide screen, so the outside labels have room at the sides without shrinking the ring. */
 .dp-canvas {
@@ -423,6 +427,16 @@ onBeforeUnmount(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
+}
+/* Stacked under the pie with room (a tablet or a narrow desktop window): two columns, each with its name, amount and
+ * share close together. A phone stays one column. */
+@container (min-width: 560px) {
+  .dp-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 24px;
+    align-items: start;
+  }
 }
 .dp-row {
   display: flex;

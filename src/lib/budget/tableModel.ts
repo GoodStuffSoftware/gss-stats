@@ -112,7 +112,7 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
     { key: 'postedDate', label: 'Date', editor: null, value: (t) => formatDate(t.postedDate) },
     { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
     // The note (short item descriptions, or what a person typed): text-editable; BudgetTable.vue draws it, clamped.
-    { key: 'note', label: 'Note', editor: 'text', value: (t) => t.note ?? '', cardLine: 2 },
+    { key: 'note', label: 'Note', editor: 'text', editGesture: 'hold', value: (t) => t.note ?? '', cardLine: 2 },
     { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
