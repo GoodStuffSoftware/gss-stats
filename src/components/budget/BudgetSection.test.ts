@@ -12,6 +12,7 @@ import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
 import DebtPanel from './DebtPanel.vue'
+import LoansList from './LoansList.vue'
 import LoansPage from './LoansPage.vue'
 import SpendingPanel from './SpendingPanel.vue'
 
@@ -42,6 +43,7 @@ interface Routes {
   debts?: (u: URL) => Response
   transactions?: (u: URL) => Response
   debtDetail?: (id: string) => Response
+  loans?: (u: URL) => Response
   prefs?: (init: RequestInit | undefined) => Response | Promise<Response>
 }
 let fetchMock: ReturnType<typeof vi.fn>
@@ -56,6 +58,7 @@ function route(r: Routes = {}) {
       case '/api/budget/meta': return r.meta ? r.meta() : json(META)
       case '/api/budget/summary': return r.summary ? r.summary(u) : json(SUMMARY)
       case '/api/budget/debts': return r.debts ? r.debts(u) : json({ debts: DEBTS })
+      case '/api/budget/loans': return r.loans ? r.loans(u) : json({ debts: [], months: [] })
       case '/api/budget/transactions': return r.transactions ? r.transactions(u) : json(EMPTY_PAGE)
       default:
         if (r.debtDetail && u.pathname.startsWith('/api/budget/debts/')) return r.debtDetail(decodeURIComponent(u.pathname.slice('/api/budget/debts/'.length)))
@@ -973,5 +976,169 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     expect(callsTo('/api/budget/summary')).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(10000)
     expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(0)
+  })
+})
+
+describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page', () => {
+  const DETAIL = {
+    account: META.accounts[0],
+    history: [{ asOf: '2026-10-31', balanceCents: 90000, source: 'statement', aprBp: 1999 }],
+    periods: [], payments: [], terms: null, latest: null, promos: [],
+  }
+  const LOANS = { months: [], debts: DEBTS.map((d) => ({ ...d, terms: null, latest: null, promos: [], payments: [] })) }
+  const NAME = 'Card A ••0001'
+  const go = async (fn: () => void) => {
+    fn()
+    await new Promise((r) => setTimeout(r, 30)) // the browser's own popstate, then the section's settle timers
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 10))
+    await flushPromises()
+  }
+  const trailOf = (w: VueWrapper) => w.findAll('[data-testid="crumbs"] .cr-item').map((i) => i.text().replace('›', '').trim())
+  const trail = (w: VueWrapper) => trailOf(w.findComponent(LoansPage) as unknown as VueWrapper)
+  const here = (w: VueWrapper) => w.find('[aria-current="page"]').text()
+  const noPersonalData = () => expect(location.href).not.toMatch(/acct-1|Card|0001/)
+  async function openFromDrill(w: VueWrapper) {
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="debt-drilled-open"]').trigger('click')
+    await flushPromises()
+  }
+  // happy-dom drops a pushState called without an address (the drill steps do that: the URL stays the same), so
+  // give those the current one: the entries are then a real list that Back and Forward walk.
+  const realPush = history.pushState.bind(history)
+  beforeEach(() => {
+    route({ debtDetail: () => json(DETAIL), loans: () => json(LOANS) })
+    history.pushState = (st: unknown, t: string, u?: string | URL | null) => realPush(st, t, u ?? location.href)
+  })
+  afterEach(() => {
+    history.pushState = realPush
+  })
+
+  it('pie > drill > the All debts crumb back; Back and Forward match', async () => {
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="crumb-0"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    await go(() => history.forward()) // Forward re-opens the debt the crumb left
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    await go(() => history.back())
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    noPersonalData()
+  })
+
+  it('drill > Loan details: the trail is All debts > name > Loan details, with no personal data in the address', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    expect(here(w)).toBe('Loan details')
+    expect(w.text()).not.toContain('← Loans')
+    noPersonalData()
+  })
+
+  it('drill > Loan details > the name crumb lands on that debt open; Back and Forward match', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    await go(() => w.get('[data-testid="crumb-1"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    expect(new URLSearchParams(location.search).get('b_page')).toBeNull()
+    await go(() => history.forward()) // the detail page again, same trail
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    await go(() => history.back())
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    noPersonalData()
+  })
+
+  it('drill > Loan details > All debts lands on the debt list with no debt open; Back and Forward match', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    await go(() => history.forward()) // the debt, as it was one step in
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    await go(() => history.forward()) // and the detail page
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    noPersonalData()
+  })
+
+  it('a Details button of the debt list (no drill) gives All debts > name, and All debts goes back to the list', async () => {
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(trail(w)).toEqual(['All debts', NAME])
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+  })
+
+  it('Loans list > detail: Loans > name; the Loans crumb returns to the list; Back and Forward match', async () => {
+    const w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(trail(w)).toEqual(['Loans', NAME])
+    expect(here(w)).toBe(NAME)
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    expect(w.find('[data-testid="crumbs"]').exists()).toBe(false)
+    await go(() => history.forward())
+    expect(w.findComponent(LoansPage).props('loanId')).toBe('acct-1')
+    expect(trail(w)).toEqual(['Loans', NAME])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    noPersonalData()
+  })
+
+  it('a reload keeps the trail: the drill origin and the Loans origin each come back as they were', async () => {
+    let w = await mountSection()
+    await openFromDrill(w)
+    const keptUrl = location.pathname + location.search
+    const keptState = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection(keptUrl, keptState)
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    w.unmount()
+    mounted.pop()
+
+    w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    const loansUrl = location.pathname + location.search
+    const loansState = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection(loansUrl, loansState)
+    expect(trail(w)).toEqual(['Loans', NAME])
+    noPersonalData()
+  })
+
+  it('a deep link names no loan (no account id in an address), so it shows the Loans list; with its entry state it shows the Loans trail', async () => {
+    let w = await mountSection('/?section=budget&b_page=loans')
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    expect(w.find('[data-testid="crumbs"]').exists()).toBe(false)
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    const state = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection('/?section=budget&b_page=loans', state)
+    expect(trail(w)).toEqual(['Loans', NAME])
+  })
+
+  it('the crumbs are native buttons: focus reaches them, and activating one (what Enter and Space do) goes there', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    const buttons = w.findAll('[data-testid="crumbs"] button')
+    expect(buttons.map((b) => b.text())).toEqual(['All debts', NAME])
+    ;(buttons[1].element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(buttons[1].element)
+    await go(() => (document.activeElement as HTMLButtonElement).click())
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
   })
 })
