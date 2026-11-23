@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { Chart } from 'chart.js'
-import { defineComponent } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import BaseChart from './BaseChart.vue'
-import DrillPie, { sliceLabelParts, type PieSlice } from './DrillPie.vue'
+import DrillPie, { DONUT_MIN, DONUT_STEP, clampDonutSize, donutLayout, readDonutSize, sliceLabelParts, writeDonutSize, type PieSlice } from './DrillPie.vue'
 import source from './DrillPie.vue?raw'
 
 const SLICES: PieSlice[] = [
@@ -495,6 +495,167 @@ describe('DrillPie through the real BaseChart', () => {
     const final = arcs.map((a) => a.circumference)
     chart.draw()
     expect(arcs.map((a) => a.circumference)).toEqual(final) // put back after the frame
+  })
+})
+
+describe('donut size helpers', () => {
+  afterEach(() => window.localStorage.clear())
+  it('clamps to the smallest donut and to the room', () => {
+    expect(clampDonutSize(50)).toBe(DONUT_MIN)
+    expect(clampDonutSize(333.4)).toBe(333)
+    expect(clampDonutSize(900, 500)).toBe(500)
+    expect(clampDonutSize(300, 100)).toBe(DONUT_MIN) // a room smaller than the minimum never forces a smaller donut
+    expect(clampDonutSize(900, 0)).toBe(900) // no usable room figure: no upper limit
+  })
+  it('lays out wide only from 640 px, with room for one legend column', () => {
+    expect(donutLayout(0, true)).toEqual({ wideOn: false, max: Infinity, auto: null })
+    expect(donutLayout(639, true).wideOn).toBe(false)
+    expect(donutLayout(900, false)).toMatchObject({ wideOn: false, max: 900, auto: null })
+    const l = donutLayout(900, true)
+    expect(l.wideOn).toBe(true)
+    expect(l.max).toBe(900 - 240 - 24)
+    expect(l.auto).toBe(360)
+    expect(donutLayout(2000, true).auto).toBe(680) // the automatic size stops growing
+  })
+  it('reads and writes the saved size, and never throws', () => {
+    expect(readDonutSize(undefined)).toBeNull()
+    expect(readDonutSize('k')).toBeNull()
+    writeDonutSize('k', 411.6)
+    expect(window.localStorage.getItem('k')).toBe('412')
+    expect(readDonutSize('k')).toBe(412)
+    writeDonutSize('k', null)
+    expect(window.localStorage.getItem('k')).toBeNull()
+    for (const junk of ['abc', '-5', '0', '']) {
+      window.localStorage.setItem('k', junk)
+      expect(readDonutSize('k')).toBeNull()
+    }
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    expect(readDonutSize('k')).toBeNull()
+    expect(() => writeDonutSize('k', 300)).not.toThrow()
+  })
+})
+
+describe('DrillPie size (resizable, wide, sizeKey)', () => {
+  const KEY = 'test-donut'
+  let roomWidth = 0
+  beforeEach(() => {
+    window.localStorage.clear()
+    roomWidth = 0
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => roomWidth)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const px = this.style.width ? parseFloat(this.style.width) : 300
+      return { width: px, height: px, top: 0, left: 0, right: px, bottom: px, x: 0, y: 0, toJSON: () => ({}) }
+    })
+  })
+  afterEach(() => window.localStorage.clear())
+  // the room is measured when the pie is mounted, and the pie redraws for it on the next tick
+  const sized = async (props: Record<string, unknown>) => {
+    const w = mountPie(props)
+    await nextTick()
+    return w
+  }
+  const canvas = (w: VueWrapper) => w.get('.dp-canvas')
+  const sizeOf = (w: VueWrapper) => parseFloat((canvas(w).element as HTMLElement).style.width)
+
+  it('with the props off renders as it always did: no style, no handle, no wide class, role on the canvas box', async () => {
+    roomWidth = 900
+    const w = await sized({ wide: false })
+    expect(canvas(w).attributes('style')).toBeUndefined()
+    expect(w.find('[data-testid="pie-resize"]').exists()).toBe(false)
+    expect(w.classes()).not.toContain('dp-wide')
+    expect(w.attributes('style')).toBeUndefined()
+    expect(canvas(w).attributes('role')).toBe('img')
+  })
+
+  it('shows a labelled handle when resizable, with the chart (not the handle) carrying the image role', async () => {
+    const w = await sized({ resizable: true, sizeKey: KEY })
+    const h = w.get('[data-testid="pie-resize"]')
+    expect(h.attributes('aria-label')).toBe('Resize chart')
+    expect(h.attributes('role')).toBe('slider')
+    expect(h.attributes('tabindex')).toBe('0')
+    expect(canvas(w).attributes('role')).toBeUndefined()
+    expect(w.findComponent(ChartStub).attributes('role')).toBe('img')
+  })
+
+  it('goes wide with an automatic size only when the room is 640 px or more', async () => {
+    roomWidth = 600
+    expect((await sized({ wide: true })).classes()).not.toContain('dp-wide')
+    roomWidth = 900
+    const w = await sized({ wide: true })
+    expect(w.classes()).toContain('dp-wide')
+    expect(sizeOf(w)).toBe(360)
+    expect((w.element as HTMLElement).style.getPropertyValue('--dp-size')).toBe('360px')
+  })
+
+  it('steps by 16 px with the arrow keys, keeps the size, and stops at the minimum and the room', async () => {
+    roomWidth = 900
+    const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+    const h = w.get('[data-testid="pie-resize"]')
+    await h.trigger('keydown', { key: 'ArrowRight' })
+    expect(sizeOf(w)).toBe(360 + DONUT_STEP)
+    expect(window.localStorage.getItem(KEY)).toBe('376')
+    await h.trigger('keydown', { key: 'ArrowDown' })
+    expect(sizeOf(w)).toBe(360)
+    for (let i = 0; i < 60; i++) await h.trigger('keydown', { key: 'ArrowLeft' })
+    expect(sizeOf(w)).toBe(DONUT_MIN)
+    for (let i = 0; i < 80; i++) await h.trigger('keydown', { key: 'ArrowUp' })
+    expect(sizeOf(w)).toBe(900 - 240 - 24)
+  })
+
+  it('applies a saved size, clamped to the room it has now', async () => {
+    roomWidth = 900
+    window.localStorage.setItem(KEY, '450')
+    expect(sizeOf(await sized({ wide: true, resizable: true, sizeKey: KEY }))).toBe(450)
+    window.localStorage.setItem(KEY, '5000')
+    expect(sizeOf(await sized({ wide: true, resizable: true, sizeKey: KEY }))).toBe(636)
+    roomWidth = 0
+    window.localStorage.setItem(KEY, '300')
+    expect(sizeOf(await sized({ resizable: true, sizeKey: KEY }))).toBe(300) // not measured: used as saved
+  })
+
+  it('resets on a double-click and on Delete, forgetting the saved size', async () => {
+    roomWidth = 900
+    window.localStorage.setItem(KEY, '450')
+    const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+    await w.get('[data-testid="pie-resize"]').trigger('dblclick')
+    expect(sizeOf(w)).toBe(360)
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+    await w.get('[data-testid="pie-resize"]').trigger('keydown', { key: 'ArrowRight' })
+    expect(window.localStorage.getItem(KEY)).toBe('376')
+    await w.get('[data-testid="pie-resize"]').trigger('keydown', { key: 'Delete' })
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+    expect(sizeOf(w)).toBe(360)
+  })
+
+  it('a drag of the handle changes the size and saves it when the pointer is released', async () => {
+    roomWidth = 900
+    const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+    const h = w.get('[data-testid="pie-resize"]')
+    const ev = (x: number, y: number) => ({ pointerId: 7, pointerType: 'touch', button: 0, clientX: x, clientY: y })
+    await h.trigger('pointerdown', ev(100, 100))
+    await h.trigger('pointermove', ev(150, 110)) // the larger movement counts: 50 px
+    expect(sizeOf(w)).toBe(410)
+    expect(window.localStorage.getItem(KEY)).toBeNull() // nothing is written while the finger moves
+    await h.trigger('pointermove', ev(40, 90)) // back past the start: -60 px
+    expect(sizeOf(w)).toBe(300)
+    await h.trigger('pointerup', ev(40, 90))
+    expect(window.localStorage.getItem(KEY)).toBe('300')
+    await h.trigger('pointermove', ev(200, 200)) // released: no longer follows
+    expect(sizeOf(w)).toBe(300)
+  })
+
+  it('reloads the size when the key changes', async () => {
+    roomWidth = 900
+    window.localStorage.setItem('other', '500')
+    const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+    expect(sizeOf(w)).toBe(360)
+    await w.setProps({ sizeKey: 'other' })
+    expect(sizeOf(w)).toBe(500)
   })
 })
 
