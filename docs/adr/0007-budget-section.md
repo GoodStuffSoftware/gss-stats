@@ -157,6 +157,21 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
   Preview is therefore in Production's database too. Production's list stays unset until a production
   go, so the section answers 403 there; setting it opens the data at once.
 
+## Layout, debt drill and donut size (amendment)
+
+- **Layout is a per-device choice.** From 1024 px a picker switches Side by side and Tabs; it is kept in one
+  `localStorage` key per device (not per login, not in KV): it describes this screen, like the column widths and the
+  phone's Cards | Table switch. Below 1024 px the tabs always apply.
+- **A debt drills in place.** The Debts pie replaces its slices with that debt's balance and history (a crumb, Back,
+  and a "Loan details" link to the Loans page) rather than navigating away. The id is kept in `history.state` only,
+  never the URL, so a shared link cannot name a debt; the history is fetched once per debt and cached.
+- **Donut size is per device, chart and mode.** One `localStorage` key per chart and per mode (solo: one chart has
+  the width; split: two side by side), because a size that suits one chart alone is too big beside the other. When a
+  chart is alone and its box is 640 px or more, the donut sits beside an auto-filling legend.
+- **Shared-component rule.** `DrillPie` stays free of Budget words: `resizable`, `wide` and `sizeKey` are opt-in
+  props that default off (other callers render exactly as before), and the caller builds the storage key
+  (`donutSizeKey` in `lib/budget/panelVisibility.ts`). A saved size is clamped to the room it has now.
+
 ## Transactions table interaction (amendment)
 
 The table's note is read with a click or tap (a tip, as for the merchant) and edited with a press-and-hold, Enter or F2; an empty note

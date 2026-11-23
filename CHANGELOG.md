@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Side by side or Tabs on desktop** — a layout picker beside the Budget filters (from 1024 px) switches between both charts side by side and one chart at a time in tabs; the choice stays on the device.
+- **Debt drill in place** — clicking a debt in the Debts pie opens its balance and balance history right there, with a crumb, Back and a "Loan details" link, instead of jumping to the Loans page.
+- **Resizable donuts** — each Budget donut has a corner handle (drag it, use the arrow keys, double-click to reset) and the size is remembered per device, per chart and for one chart alone or two side by side.
+
+### Changed
+- **A lone chart uses the room** — when only one chart shows (Tabs, or the other chart hidden) its donut is bigger and sits beside a legend that fills as many columns as fit, with each row's name, amount and share together.
+
 ## [0.81.0] — 2026-11-23
 
 ### Added

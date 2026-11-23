@@ -2773,7 +2773,19 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   hint, list), so the donuts and lists align whatever height each header has; below that the Spending / Debts
   tabs show one panel. A "Show: Spending | Debts" control beside the filters hides either chart on desktop (never
   both), remembered per signed-in account in `localStorage` (`lib/budget/panelVisibility.ts`; the key holds a
-  hash of the address, not the address).
+  hash of the address, not the address). A "Layout: Side by side | Tabs" picker (from 1024 px) swaps the two
+  side-by-side panels for the phone's one-tab-at-a-time layout; it is kept per device (`gss-stats-budget-layout`),
+  not per account.
+- **Debt drill.** A debt picked in the Debts pie opens in place: the crumb reads "All debts › name", the panel
+  shows the balance and its history line, and Back, the crumb or the browser Back return to the pie. "Loan details"
+  opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
+  once per debt and cached.
+- **Donut size.** When one chart has the whole width (Tabs, or the other chart hidden) and its box is at least
+  640 px, its donut is bigger and sits beside a legend in as many 240 px-plus columns as fit. Every Budget donut has
+  a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); the size is kept
+  per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:<solo|split>` and is clamped to the
+  room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);
+  without them it renders as before.
 - **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
   are ever committed. The seed and the import requests live in a private folder outside the repo, and the
   SQL file the tool writes goes there too. Tests use only the made-up data in
