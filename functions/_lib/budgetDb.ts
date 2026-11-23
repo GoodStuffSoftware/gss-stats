@@ -14,7 +14,7 @@
 
 import type {
   Account, AccountKind, Category, Cents, DebtDetail, DebtSlice, DebtTerms, IsoDate, LatestStatement, LoanRow, LoansResponse, MerchantRule,
-  Person, ReviewReason, StatementPromo, SummaryQuery, SummaryResponse, SummarySlice, Txn, TxnKind, TxnQuery,
+  Person, ReviewReason, SimilarMixedReason, SimilarResponse, SimilarRow, StatementPromo, SummaryQuery, SummaryResponse, SummarySlice, Txn, TxnKind, TxnQuery,
 } from '../../src/lib/budget/types'
 import { SPENDING_KINDS, TXN_KINDS, UNCATEGORIZED } from '../../src/lib/budget/types'
 import { categorize, ruleIdFor } from '../../src/lib/budget/rules'
@@ -31,7 +31,9 @@ export const MAX_LIMIT = 200
 export const MAX_PURCHASES = 200
 export const MAX_MERCHANT_KEYS = 200
 /** Request body caps in bytes (413 too_large above). */
-export const MAX_BODY = { patch: 4096, rule: 1024, apply: 32_768, balance: 1024 } as const
+export const MAX_BODY = { patch: 4096, rule: 1024, apply: 32_768, balance: 1024, similar: 32_768 } as const
+/** Most candidates one similar-purchases read returns, and most rows one apply may change. */
+export const MAX_SIMILAR = 300
 /** The rule engine writes in chunks no bigger than this many serialized bytes (D1: 100 KB per statement). */
 export const CHUNK_BYTES = 60_000
 export const CHUNK_ROWS = 300
@@ -632,6 +634,118 @@ const UPDATE_FROM_JSON_SQL = `WITH ch AS (SELECT json_extract(value, '$.id') AS 
 UPDATE transactions SET kind = ch.kind, kind_source = ch.kind_source, category_id = ch.cat, category_source = ch.cat_source, rule_id = ch.rule_id,
   debt_account_id = ch.debt, confidence = ch.conf, needs_review = ch.review, review_reason = ch.reason, updated_at = ch.stamp, updated_by = ?2
 FROM ch WHERE transactions.id = ch.id AND transactions.updated_at = ch.prev`
+
+/**
+ * One statement for GET /transactions/similar: the source row, the merchant's category/name spread (spending rows) and the
+ * candidates, newest first. Candidates: same merchant_key (never ''), same kind group, any date, not already in the source's
+ * category. idx_txn_merchant (merchant_key, posted_date) serves the join and the order; idx_edits_txn serves the EXISTS.
+ * LIMIT is MAX_SIMILAR + 1 so a 301st row says "truncated". person_set: a manual category a person may have chosen.
+ */
+export const SIMILAR_SQL = `WITH src AS (SELECT id, merchant_key, kind, amount_cents, category_id FROM transactions WHERE id = ?1),
+k AS (SELECT COUNT(DISTINCT COALESCE(t.category_id, '')) AS cats, COUNT(DISTINCT t.merchant_name) AS names
+      FROM transactions t, src WHERE t.merchant_key = src.merchant_key AND src.merchant_key <> '' AND t.kind IN (${SPENDING_SQL}))
+SELECT src.id AS src_id, src.merchant_key AS src_key, src.kind AS src_kind, src.amount_cents AS src_amount, src.category_id AS src_cat, k.cats, k.names,
+       t.id, t.posted_date, t.amount_cents, t.merchant_name, t.description, t.account_id, t.kind, t.category_id, t.category_source, t.updated_at, t.note,
+       (t.category_source = 'manual' AND (instr(t.updated_by, '@') > 0 OR EXISTS (
+          SELECT 1 FROM category_edits e WHERE e.txn_id = t.id AND instr(e.edited_by, '@') > 0
+            AND e.new_category_id IS NOT e.old_category_id))) AS person_set
+FROM src CROSS JOIN k
+LEFT JOIN transactions t
+  ON t.merchant_key = src.merchant_key AND src.merchant_key <> '' AND t.id <> src.id
+ AND ((src.kind IN (${SPENDING_SQL}) AND t.kind IN (${SPENDING_SQL})) OR (src.kind NOT IN (${SPENDING_SQL}) AND t.kind = src.kind))
+ AND t.category_id IS NOT src.category_id
+ORDER BY t.posted_date DESC, t.id DESC
+LIMIT ${MAX_SIMILAR + 1}`
+
+/** The read's rows as the response; null when there is no source row (no rows at all). */
+export function buildSimilar(rows: Row[]): SimilarResponse | null {
+  const first = rows[0]
+  if (!first) return null
+  const key = str(first.src_key)
+  const reasons: SimilarMixedReason[] = []
+  if (isPaymentServiceKey(key)) reasons.push('payment_service')
+  if (Number(first.names) > 1) reasons.push('shared_name')
+  if (Number(first.cats) >= 3) reasons.push('many_categories')
+  const mixed = reasons.length > 0
+  const srcAmount = Number(first.src_amount)
+  const found = rows.filter((r) => r.id !== null && r.id !== undefined)
+  const out: SimilarRow[] = found.slice(0, MAX_SIMILAR).map((r) => {
+    const personSet = Number(r.person_set) === 1
+    const scriptSet = str(r.category_source) === 'manual' && !personSet
+    return {
+      id: str(r.id), postedDate: str(r.posted_date), amountCents: Number(r.amount_cents), merchantName: str(r.merchant_name), description: str(r.description),
+      accountId: str(r.account_id), kind: str(r.kind) as TxnKind, categoryId: strOrNull(r.category_id), categorySource: str(r.category_source) as Txn['categorySource'],
+      updatedAt: str(r.updated_at), note: strOrNull(r.note), personSet, scriptSet, sameAmount: Number(r.amount_cents) === srcAmount,
+      suggestTick: !personSet && !(scriptSet && mixed),
+    }
+  })
+  return {
+    source: { id: str(first.src_id), merchantKey: key, amountCents: srcAmount, categoryId: strOrNull(first.src_cat) },
+    mixed, mixedReasons: reasons, rows: out, truncated: found.length > MAX_SIMILAR,
+    ruleOffer: mixed ? { allowed: false, reason: 'Several merchants or purchase types share this name.' } : { allowed: true },
+  }
+}
+
+/** The apply's audit rows: one per item whose stamp still matches and whose row is another row of the source's merchant. */
+const SIMILAR_EDITS_SQL = `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
+SELECT t.id, t.category_id, ?2, t.kind, t.kind, NULL, json_extract(j.value, '$.stamp'), ?4
+FROM json_each(?1) j JOIN transactions t ON t.id = json_extract(j.value, '$.id') AND t.updated_at = json_extract(j.value, '$.prev')
+WHERE t.id <> ?3 AND t.merchant_key <> '' AND t.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)`
+
+/** Same category semantics as PATCH (manual, rule cleared, review settled); the merchant guard keeps this route from recategorizing other merchants' rows. */
+const SIMILAR_UPDATE_SQL = `WITH ch AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.prev') AS prev, json_extract(value, '$.stamp') AS stamp FROM json_each(?1))
+UPDATE transactions SET category_id = ?2, category_source = 'manual', rule_id = NULL, needs_review = 0, review_reason = NULL, confidence = 100,
+  updated_at = ch.stamp, updated_by = ?4
+FROM ch WHERE transactions.id = ch.id AND transactions.updated_at = ch.prev AND transactions.id <> ?3 AND transactions.merchant_key <> ''
+  AND transactions.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)`
+
+export interface SimilarItem { id: string; expectedUpdatedAt: string }
+
+/**
+ * Applies a category to the ticked rows in ONE batch (one transaction): per chunk an audit insert then the guarded update (the
+ * insert first, its join needs the old updated_at), optionally the merchant rule, then a read-back of every item. A row whose stamp
+ * moved or that is not a row of the source's merchant is not written; it comes back in `conflicts`.
+ */
+export async function applySimilar(
+  db: D1Database, sourceId: string, categoryId: string | null, items: SimilarItem[], who: string, rule: D1PreparedStatement | null, now: number = Date.now(),
+): Promise<{ changed: Array<{ id: string; updatedAt: string }>; conflicts: Array<{ id: string; current: Txn | null }> }> {
+  const planned = items.map((it) => ({ id: it.id, prev: it.expectedUpdatedAt, stamp: nextStamp(it.expectedUpdatedAt, now) }))
+  const stmts: D1PreparedStatement[] = []
+  for (const chunk of chunkBySize(planned)) {
+    const json = JSON.stringify(chunk)
+    stmts.push(db.prepare(SIMILAR_EDITS_SQL).bind(json, categoryId, sourceId, who))
+    stmts.push(db.prepare(SIMILAR_UPDATE_SQL).bind(json, categoryId, sourceId, who))
+  }
+  if (rule) stmts.push(rule)
+  stmts.push(db.prepare(`SELECT ${TXN_COLUMNS} FROM transactions WHERE id IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(items.map((i) => i.id))))
+  const results = await db.batch(stmts)
+  const current = new Map((results[results.length - 1].results as Row[]).map((r) => [str(r.id), r]))
+  const changed: Array<{ id: string; updatedAt: string }> = []
+  const conflicts: Array<{ id: string; current: Txn | null }> = []
+  for (const p of planned) {
+    const r = current.get(p.id)
+    if (r && str(r.updated_at) === p.stamp) changed.push({ id: p.id, updatedAt: p.stamp })
+    else conflicts.push({ id: p.id, current: r ? mapTxn(r) : null })
+  }
+  return { changed, conflicts }
+}
+
+/** The merchant-wide 'edit' rule POST /rules and the similar apply both write (upsert on the deterministic id). */
+export function editRuleStmt(
+  db: D1Database, r: { id: string; merchantKey: string; storeNo: string | null; setCategoryId: string | null; setKind: TxnKind | null }, who: string, now: string,
+): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO merchant_rules (id, merchant_key, store_no, account_id, amount_min_cents, amount_max_cents, set_category_id, set_kind,
+       debt_account_id, display_name, confidence, review, review_reason, source, active, created_at, created_by)
+     VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, NULL, 90, 0, NULL, 'edit', 1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET set_category_id = COALESCE(excluded.set_category_id, merchant_rules.set_category_id),
+       set_kind = COALESCE(excluded.set_kind, merchant_rules.set_kind), review = 0, review_reason = NULL, active = 1, source = 'edit'`,
+  ).bind(r.id, r.merchantKey, r.storeNo, r.setCategoryId, r.setKind, now, who)
+}
+
+/** The id a merchant-wide rule for this key has (see ruleIdFor). */
+export const merchantRuleId = (merchantKey: string): Promise<string> =>
+  ruleIdFor({ merchantKey, storeNo: null, accountId: null, amountMinCents: null, amountMaxCents: null })
 
 /** The rule a manual edit teaches, as its stored id and fields (see POST /rules). */
 export async function ruleFromTxn(txn: Txn, scope: 'merchant' | 'merchant_store'): Promise<{ id: string; storeNo: string | null; setCategoryId: string | null; setKind: TxnKind | null }> {

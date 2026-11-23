@@ -2719,7 +2719,8 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   and never re-checks access.
 - **Database.** The D1 binding `BUDGET_DB` (database `gss-budget`, schema in `migrations/gss-budget/`) is
   used only by `functions/api/budget/**`. Routes: `meta`, `summary`, `transactions` (list, and
-  `PATCH transactions/:id`), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
+  `PATCH transactions/:id`, and `transactions/similar`: `GET ?id=` lists the same merchant's other purchases
+  from every month, `POST` changes the ticked ones in one batch, each audited), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
   `debts/:id`, `debts/:id/balance`). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
 - **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:

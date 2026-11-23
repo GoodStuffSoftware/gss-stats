@@ -86,6 +86,39 @@ export interface TxnPatchResponse { txn: Txn }
 /** POST /api/budget/categories. `created` is false when a category of that name (any letter case) already existed: it comes back as is. */
 export interface CategoryCreateRequest { name: string }
 export interface CategoryCreateResponse { category: Category; created: boolean }
+/** GET /api/budget/transactions/similar?id=: other purchases of the same merchant the person may want in the same category. */
+export type SimilarMixedReason = 'payment_service' | 'shared_name' | 'many_categories'
+export interface SimilarRow {
+  id: string; postedDate: IsoDate; amountCents: Cents; merchantName: string; description: string; accountId: string; kind: TxnKind
+  categoryId: string | null; categorySource: Txn['categorySource']; updatedAt: string; note: string | null
+  /** A person chose this row's category (never pre-ticked). */
+  personSet: boolean
+  /** A data-fix script chose it (manual, no person edit). */
+  scriptSet: boolean
+  /** Same amount (sign included) as the source row. */
+  sameAmount: boolean
+  /** Server's default tick: not person-set, and not script-set on a mixed merchant. */
+  suggestTick: boolean
+}
+export interface SimilarResponse {
+  source: { id: string; merchantKey: string; amountCents: Cents; categoryId: string | null }
+  mixed: boolean; mixedReasons: SimilarMixedReason[]
+  rows: SimilarRow[]
+  /** More than the cap matched: `rows` holds the newest ones. */
+  truncated: boolean
+  ruleOffer: { allowed: boolean; reason?: string }
+}
+/** POST /api/budget/transactions/similar: `items` carry the updated_at the client last saw; a stale or other-merchant row is left alone. */
+export interface SimilarApply {
+  sourceId: string; categoryId: string | null
+  items: Array<{ id: string; expectedUpdatedAt: string }>
+  makeRule?: boolean
+}
+export interface SimilarApplyResponse {
+  changed: Array<{ id: string; updatedAt: string }>
+  conflicts: Array<{ id: string; current: Txn | null }>
+  rule?: { id: string; created: boolean }
+}
 export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_store' }
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null

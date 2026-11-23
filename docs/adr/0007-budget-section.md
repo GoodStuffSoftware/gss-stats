@@ -117,6 +117,15 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    fixed by hand in the table. To undo, remove the two `instr(updated_by, '@') = 0` terms in `pairUpdateSql`
    (`src/lib/budget/sqlFile.ts`) and the matching test.
 
+11. **Similar-purchase spread (`transactions/similar`, no schema change).** After a person changes a category, `GET ?id=` returns
+    the same merchant key's other rows from every month (one statement, `idx_txn_merchant`; newest 300) and `POST` changes the
+    ticked ones in one batch with a per-row `updated_at` check and one `category_edits` row each under the signed-in address.
+    The POST only touches other rows of the source's merchant; stale or foreign rows come back as `conflicts`. A merchant is
+    "mixed" by a heuristic (payment-service key, several display names, or 3+ categories), never by a chain list (public repo);
+    mixed merchants get no rule offer. A row a person set (manual and an `@` edit) is never suggested for ticking; a
+    script-set manual row is not suggested on a mixed merchant. No Undo: `category_edits` does not record the old
+    `category_source`, so an exact undo needs an additive column.
+
 ## Consequences
 
 - Two more places carry a list of emails (`ALLOWED_EMAILS`, `BUDGET_ALLOWED_EMAILS`) plus the

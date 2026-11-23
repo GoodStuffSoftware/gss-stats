@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Change similar purchases (server).** After a category change the app can now fetch the same merchant's other purchases from every month, ticked where safe, and change the chosen ones in one audited step.
+
 ## [0.80.0] — 2026-11-22
 
 
