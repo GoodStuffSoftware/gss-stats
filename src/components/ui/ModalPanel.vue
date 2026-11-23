@@ -17,6 +17,8 @@ const props = withDefaults(
     returnTo?: HTMLElement | null
     /** CSS selector inside the panel for the first focus. */
     initialFocus?: string
+    /** When this changes while open, focus moves in again (e.g. a dialog reused for another subject). */
+    openKey?: string | number | null
   }>(),
   { titleId: 'mp-title' },
 )
@@ -26,9 +28,17 @@ const panel = ref<HTMLElement | null>(null)
 let returnFocus: HTMLElement | null = null
 let lockedBody = false
 
+// radios: one tab stop per group (the checked one, or the first when none is checked)
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 function focusables(): HTMLElement[] {
-  return panel.value ? Array.from(panel.value.querySelectorAll<HTMLElement>(FOCUSABLE)) : []
+  if (!panel.value) return []
+  const all = Array.from(panel.value.querySelectorAll<HTMLElement>(FOCUSABLE))
+  return all.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || !el.name) return true
+    const group = all.filter((o) => o instanceof HTMLInputElement && o.type === 'radio' && o.name === el.name && o.form === el.form) as HTMLInputElement[]
+    const checked = group.find((o) => o.checked)
+    return checked ? el === checked : el === group[0]
+  })
 }
 
 function unlock() {
@@ -59,6 +69,14 @@ watch(
     }
   },
   { immediate: true },
+)
+watch(
+  () => props.openKey,
+  async () => {
+    if (!props.open) return
+    await nextTick()
+    ;((props.initialFocus ? panel.value?.querySelector<HTMLElement>(props.initialFocus) : null) ?? focusables()[0])?.focus()
+  },
 )
 onBeforeUnmount(unlock)
 

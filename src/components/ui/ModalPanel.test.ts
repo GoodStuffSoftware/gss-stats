@@ -51,6 +51,35 @@ describe('ModalPanel', () => {
     dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
     expect(document.activeElement?.id).toBe('act')
   })
+  it('a radio group is one tab stop: Shift+Tab on the checked 2nd radio wraps to the last button', async () => {
+    wrapper = mount(ModalPanel as never, {
+      props: { open: true, title: 'Hello', initialFocus: 'input:checked' },
+      slots: {
+        default:
+          '<input type="radio" name="d" value="a" /><input type="radio" name="d" value="b" checked /><input type="radio" name="d" value="c" />',
+        actions: '<button id="cancel">Cancel</button><button id="act">Go</button>',
+      },
+      attachTo: document.body,
+    } as never) as unknown as VueWrapper
+    await nextTick()
+    await nextTick()
+    const dlg = document.querySelector('[role="dialog"]')!
+    expect((document.activeElement as HTMLInputElement).value).toBe('b')
+    const ev = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+    dlg.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement?.id).toBe('act')
+  })
+  it('moves focus in again when openKey changes while open', async () => {
+    const w = mountPanel({ openKey: 'A', initialFocus: '#last' })
+    await nextTick()
+    await nextTick()
+    ;(document.getElementById('act') as HTMLElement).focus()
+    await w.setProps({ openKey: 'B' })
+    await nextTick()
+    await nextTick()
+    expect(document.activeElement?.id).toBe('last')
+  })
   it('gives focus back to the opener on close', async () => {
     const opener = document.createElement('button')
     document.body.appendChild(opener)

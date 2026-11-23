@@ -44,6 +44,7 @@ const pagesText = computed(() => {
 <template>
   <ModalPanel
     :open="!!group"
+    :open-key="group"
     title-id="dg-title"
     described-by="dg-desc"
     :return-to="returnTo"
