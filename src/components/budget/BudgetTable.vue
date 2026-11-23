@@ -19,8 +19,12 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import CategorySelect from './CategorySelect.vue'
+import TxnToolbar from './TxnToolbar.vue'
 import { createCategory, createRule, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
+import { loadRemainingPages } from '../../lib/budget/txnFill'
+import { applyTxnView, anythingActive, defaultTxnViewPrefs, samePrefs, type TxnViewPrefs } from '../../lib/budget/txnView'
+import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
 
 const props = defineProps<BudgetTableProps>()
@@ -57,6 +61,47 @@ const VIEWS: Array<{ id: TxnView; label: string }> = [
 
 const columns = computed(() => budgetColumns(props.categories, props.accounts))
 
+// The search / filter / sort toolbar above the table: it narrows and orders the rows loaded here (never the pies), and is
+// remembered per login: a localStorage copy for the first paint, the server copy (GET/PUT /api/budget/prefs) once loaded.
+const viewPrefs = ref<TxnViewPrefs>(readCachedPrefs(props.accountEmail) ?? defaultTxnViewPrefs())
+const viewRows = computed(() => applyTxnView(rows.value, viewPrefs.value, { categories: props.categories, accounts: props.accounts }))
+const saver = createPrefsSaver(putServerPrefs)
+let userEdited = false
+function onPrefs(p: TxnViewPrefs) {
+  userEdited = true
+  viewPrefs.value = p
+  writeCachedPrefs(props.accountEmail, p)
+  saver.schedule(p)
+}
+async function loadServerPrefs() {
+  const email = props.accountEmail
+  if (!email) return
+  const server = await fetchServerPrefs()
+  if (email !== props.accountEmail) return
+  saver.setBaseline(server ?? defaultTxnViewPrefs())
+  if (server && !userEdited && !samePrefs(server, viewPrefs.value)) {
+    viewPrefs.value = server
+    writeCachedPrefs(email, server)
+  }
+}
+watch(() => props.accountEmail, () => {
+  userEdited = false
+  saver.cancel()
+  viewPrefs.value = readCachedPrefs(props.accountEmail) ?? defaultTxnViewPrefs()
+  void loadServerPrefs()
+})
+function onHide() {
+  saver.flush()
+}
+onMounted(() => {
+  void loadServerPrefs()
+  window.addEventListener('pagehide', onHide)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', onHide)
+  saver.flush()
+})
+
 function reload() {
   void model.load(props.query)
 }
@@ -69,6 +114,17 @@ watch(
   },
 )
 onMounted(reload)
+
+// With a search, filter or sort active, fetch every remaining page of the period (one request per page, no per-row calls),
+// so the toolbar covers the whole period and "N of M" counts against all of it. The query never carries the filters.
+watch(
+  [() => anythingActive(viewPrefs.value), nextCursor, loading, loadingMore],
+  () => {
+    if (!anythingActive(viewPrefs.value) || loading.value || loadingMore.value) return
+    void loadRemainingPages(model, () => anythingActive(viewPrefs.value))
+  },
+  { flush: 'post' },
+)
 
 // Find the highlighted purchase: it may be past the first page.
 watch(
@@ -136,6 +192,19 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         >{{ v.label }}</button>
       </div>
     </div>
+    <!-- Toolbar mount point (feat/budget-txn-filters): one contiguous block; the phone Cards | Table switch sits above it. -->
+    <TxnToolbar
+      v-if="!(loadError && !rows.length) && (rows.length || anythingActive(viewPrefs))"
+      :model-value="viewPrefs"
+      :rows="rows"
+      :categories="categories"
+      :accounts="accounts"
+      :people="people ?? []"
+      :shown="viewRows.length"
+      :partial="!!nextCursor"
+      :bounds="bounds"
+      @update:model-value="onPrefs"
+    />
     <div v-if="loadError && !rows.length" class="bt-error" role="alert">
       <span>Couldn’t load transactions.</span>
       <button type="button" class="bt-btn" @click="reload">Retry</button>
@@ -146,7 +215,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
     <EditableTable
       v-else
       :columns="columns"
-      :rows="rows"
+      :rows="viewRows"
       row-key="id"
       :editable="canEdit"
       :layout="narrow && view === 'table' ? 'table' : 'auto'"

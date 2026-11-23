@@ -2720,7 +2720,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
 - **Database.** The D1 binding `BUDGET_DB` (database `gss-budget`, schema in `migrations/gss-budget/`) is
   used only by `functions/api/budget/**`. Routes: `meta`, `summary`, `transactions` (list, and
   `PATCH transactions/:id`), `categories` (`POST`, adds one), `rules` (and `rules/apply`), `debts` (and
-  `debts/:id`, `debts/:id/balance`). Every response is `Cache-Control: private, no-store`; none of them
+  `debts/:id`, `debts/:id/balance`), `prefs` (`GET`/`PUT`, the Transactions toolbar's saved state, below). Every response is `Cache-Control: private, no-store`; none of them
   touches the edge cache.
 - **Loans schema.** `migrations/gss-budget/0002_loans.sql` is additive: `debt_terms` (one row per debt:
   original amount, opened and maturity dates, term, scheduled payment and cadence, cosigned flag),
@@ -2753,6 +2753,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   a Cards | Table switch above the list (kept per device in `gss-stats-budget-txn-view`) shows the real table at 880 px, scrolled sideways.
   The category legend under the pie is two columns when its own width is 560 px or more.
 - **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
+- **Transactions toolbar.** `components/budget/TxnToolbar.vue` (mounted by `BudgetTable.vue`) searches, filters (merchant, category, account, person, dates) and sorts the table; logic in `src/lib/budget/txnView.ts`. It never changes the pies or totals. While anything is active, `txnFill.ts` fetches the remaining pages of the period through the paging endpoint (one request per page) so "N of M" counts the whole period. Search text and filters are never put in a URL or query string. The state is saved per login: a localStorage copy for the first paint and `GET`/`PUT /api/budget/prefs` (body `{ txnView }`, strict schema, 4096-byte cap) in the `STATS_CONFIG` KV under `budget:prefs:<sha256 of the lowercased login>`.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
   `{ name }` creates and the row takes in one step. The name is trimmed, at most 40 characters, with no

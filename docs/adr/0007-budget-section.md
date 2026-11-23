@@ -117,6 +117,12 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    fixed by hand in the table. To undo, remove the two `instr(updated_by, '@') = 0` terms in `pairUpdateSql`
    (`src/lib/budget/sqlFile.ts`) and the matching test.
 
+11. **Transactions toolbar prefs (2026-11-22).** Search, filter and sort state is saved per login in `STATS_CONFIG` KV
+   (`budget:prefs:<sha256 hex of the lowercased login>`, route `GET`/`PUT /api/budget/prefs`, body `{ txnView }`) with a
+   localStorage cache for the first paint; no D1 schema change. The filters are applied client-side after fetching every page
+   of the current period (one request per page), and never appear in a URL. To reverse: remove the route and delete the
+   `budget:prefs:*` keys.
+
 ## Consequences
 
 - Two more places carry a list of emails (`ALLOWED_EMAILS`, `BUDGET_ALLOWED_EMAILS`) plus the

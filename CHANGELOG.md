@@ -10,6 +10,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Cards or Table on a phone** — a Cards | Table switch above the Budget transactions on a phone shows either the card list or the full table, scrolled sideways; the choice stays on the device.
 - **Resizable transaction columns** — drag the edge of a header to resize a column, double-click the edge to reset it; widths stay on the device.
 - **Add a note from a phone card** — a row with no note shows a small "Add note" line on the phone cards (and on touch screens), and tapping it opens the editor.
+- **Search, filter and sort transactions** — a toolbar above the Budget table searches, filters by merchant, category, account, person and dates, and sorts; it counts "N of M" over the whole period, and your choices are remembered per login across devices.
 
 ### Changed
 - **Two-column legend** — the category legend under the pie lays out in two columns when it stacks under the pie with room (tablet widths), and stays one column on a phone.

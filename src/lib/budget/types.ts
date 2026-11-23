@@ -127,5 +127,8 @@ export interface ApiError { error: BudgetErrorCode; message?: string; current?: 
 
 // U1 <-> U2: BudgetSection renders <BudgetTable v-bind="BudgetTableProps" @edited="..."/>
 export interface BudgetTableProps { query: TxnQuery; categories: Category[]; accounts: Account[]
-  canEdit: boolean; refreshKey: number; highlightId?: string | null }
+  canEdit: boolean; refreshKey: number; highlightId?: string | null
+  /** For the search/filter/sort toolbar above the table (all optional: without them the toolbar still works, it just
+   *  has no person choices and no saved state): the people, the signed-in login (the key of its saved toolbar), the period. */
+  people?: Person[]; accountEmail?: string; bounds?: { from: IsoDate; to: IsoDate } }
 export interface BudgetEditedEvent { txnId: string; ruleApplied: boolean; reapplied: number }
