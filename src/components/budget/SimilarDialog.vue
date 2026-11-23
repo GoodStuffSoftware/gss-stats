@@ -35,7 +35,8 @@ watch(
   () => props.offer,
   (o) => {
     if (!o) return
-    sameAmount.value = defaultSameAmount(o.response, props.prefs)
+    // The switch exists only for a mixed merchant; otherwise every purchase is listed (a stale saved choice can't hide rows).
+    sameAmount.value = o.response.mixed && defaultSameAmount(o.response, props.prefs)
     chosen.value = new Set(o.response.rows.filter(preTick).map((r) => r.id))
     ruleOn.value = false
   },
@@ -101,7 +102,7 @@ const mixedLine = 'Sold many kinds of things, so only same-amount purchases are 
     <template v-if="resp">
       <p id="sd-desc" class="sd-desc" data-testid="sd-desc">{{ description }}</p>
       <div class="sd-controls">
-        <label class="sd-row">
+        <label v-if="resp.mixed" class="sd-row">
           <input
             type="checkbox"
             role="switch"

@@ -18,6 +18,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
+import SegmentedControl, { type SegOption } from '../ui/SegmentedControl.vue'
 import CategorySelect from './CategorySelect.vue'
 import SimilarDialog from './SimilarDialog.vue'
 import TxnToolbar from './TxnToolbar.vue'
@@ -55,9 +56,9 @@ function setView(v: TxnView) {
   view.value = v
   saveTxnView(v)
 }
-const VIEWS: Array<{ id: TxnView; label: string }> = [
-  { id: 'cards', label: 'Cards' },
-  { id: 'table', label: 'Table' },
+const VIEWS: SegOption[] = [
+  { value: 'cards', label: 'Cards', testid: 'txn-view-cards' },
+  { value: 'table', label: 'Table', testid: 'txn-view-table' },
 ]
 
 const columns = computed(() => budgetColumns(props.categories, props.accounts))
@@ -206,18 +207,13 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
 <template>
   <section class="budget-table" aria-label="Transactions">
     <div v-if="narrow" class="bt-viewbar">
-      <div class="sp-seg" role="radiogroup" aria-label="Transactions view" data-testid="txn-view">
-        <button
-          v-for="v in VIEWS"
-          :key="v.id"
-          type="button"
-          class="sp-seg-btn"
-          role="radio"
-          :aria-checked="view === v.id"
-          :data-testid="'txn-view-' + v.id"
-          @click="setView(v.id)"
-        >{{ v.label }}</button>
-      </div>
+      <SegmentedControl
+        :options="VIEWS"
+        :model-value="view"
+        label="Transactions view"
+        data-testid="txn-view"
+        @update:model-value="(v) => setView(v as TxnView)"
+      />
     </div>
     <!-- Toolbar mount point (feat/budget-txn-filters): one contiguous block; the phone Cards | Table switch sits above it. -->
     <TxnToolbar
@@ -578,35 +574,10 @@ tr:hover .bt-note-empty,
   border-radius: 6px;
   background: rgb(var(--sunken));
 }
-/* Cards | Table switch (phone). The same look as the segmented control in SpendingPanel (that one's styles are scoped to it). */
+/* Cards | Table switch (phone); the control itself is SegmentedControl. */
 .bt-viewbar {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 8px;
-}
-.sp-seg {
-  display: inline-flex;
-  border: 1px solid rgb(var(--line));
-  border-radius: 8px;
-  overflow: hidden;
-}
-.sp-seg-btn {
-  min-height: 44px;
-  padding: 0 14px;
-  border: 0;
-  background: transparent;
-  color: rgb(var(--ink-2));
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-.sp-seg-btn[aria-checked='true'] {
-  background: rgb(var(--sunken));
-  color: rgb(var(--ink));
-  font-weight: 600;
-}
-.sp-seg-btn:focus-visible {
-  outline: 2px solid rgb(var(--amber));
-  outline-offset: -2px;
 }
 </style>

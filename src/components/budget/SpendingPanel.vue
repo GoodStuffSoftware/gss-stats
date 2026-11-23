@@ -31,6 +31,12 @@ import type { Category, SummaryResponse } from '../../lib/budget/types'
 import type { DrillStep, GroupBy } from '../../lib/budget/viewState'
 import DrillPie, { type PieTransition } from '../charts/DrillPie.vue'
 import Crumbs from '../nav/Crumbs.vue'
+import SegmentedControl, { type SegOption } from '../ui/SegmentedControl.vue'
+
+const GROUP_OPTIONS: SegOption[] = [
+  { value: 'merchant', label: 'Stores', testid: 'group-merchant' },
+  { value: 'account', label: 'Accounts', testid: 'group-account' },
+]
 
 const props = defineProps<{
   summary: SummaryResponse
@@ -93,24 +99,13 @@ watch(
       <div class="sp-head">
         <Crumbs :items="crumbItems" label="Spending path" @go="(i) => emit('crumb', i)" />
         <div class="sp-controls">
-          <div v-if="path.length >= 1" class="sp-seg" role="radiogroup" aria-label="Group by">
-            <button
-              type="button"
-              role="radio"
-              class="sp-seg-btn"
-              :aria-checked="groupBy === 'merchant'"
-              data-testid="group-merchant"
-              @click="emit('group-by', 'merchant')"
-            >Stores</button>
-            <button
-              type="button"
-              role="radio"
-              class="sp-seg-btn"
-              :aria-checked="groupBy === 'account'"
-              data-testid="group-account"
-              @click="emit('group-by', 'account')"
-            >Accounts</button>
-          </div>
+          <SegmentedControl
+            v-if="path.length >= 1"
+            :options="GROUP_OPTIONS"
+            :model-value="groupBy"
+            label="Group by"
+            @update:model-value="(g) => emit('group-by', g as GroupBy)"
+          />
           <button
             v-if="summary.reviewCount > 0 || reviewOnly"
             type="button"
@@ -175,13 +170,6 @@ watch(
   align-items: center;
   gap: 8px;
 }
-.sp-seg {
-  display: inline-flex;
-  border: 1px solid rgb(var(--line));
-  border-radius: 8px;
-  overflow: hidden;
-}
-.sp-seg-btn,
 .sp-review {
   min-height: 44px;
   padding: 0 14px;
@@ -192,11 +180,6 @@ watch(
   font-size: 14px;
   cursor: pointer;
 }
-.sp-seg-btn[aria-checked='true'] {
-  background: rgb(var(--sunken));
-  color: rgb(var(--ink));
-  font-weight: 600;
-}
 .sp-review {
   border: 1px solid rgb(var(--line));
   border-radius: 8px;
@@ -206,7 +189,6 @@ watch(
   color: rgb(var(--ink));
   font-weight: 600;
 }
-.sp-seg-btn:focus-visible,
 .sp-review:focus-visible {
   outline: 2px solid rgb(var(--amber));
   outline-offset: -2px;

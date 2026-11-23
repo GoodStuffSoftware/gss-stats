@@ -74,6 +74,12 @@ describe('SimilarDialog', () => {
     expect(w.emitted('flip')?.[0]).toEqual(['acme', false])
     expect(document.querySelectorAll('[data-testid="select-row"]')).toHaveLength(3)
   })
+  it('an ordinary merchant has no same-amount switch and lists every purchase, even with a stale saved choice', async () => {
+    mountDialog({ prefs: withSameAmount(defaultTxnViewPrefs(), 'acme', true) })
+    await nextTick()
+    expect(q('[data-testid="sd-same-amount"]')).toBeNull()
+    expect(document.querySelectorAll('[data-testid="select-row"]')).toHaveLength(3)
+  })
   it('a saved choice wins over the mixed default', async () => {
     mountDialog({ offer: offer({ mixed: true }), prefs: withSameAmount(defaultTxnViewPrefs(), 'acme', false) })
     await nextTick()
