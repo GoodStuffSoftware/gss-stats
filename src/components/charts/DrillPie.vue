@@ -29,6 +29,56 @@ export interface PieTransition {
 export function sliceLabelParts(amount: string, share: number): string[] {
   return [`${amount} · ${share}%`, amount, `${share}%`]
 }
+
+// ── Size of the donut (opt-in: `resizable`, `wide`, `sizeKey`; see the header of the script below) ──────────────
+/** The smallest donut a person can drag or step it to, in px (the square that holds the ring and its labels). */
+export const DONUT_MIN = 200
+/** `wide` takes effect from this width of the room the pie has; below it the pie is laid out as without `wide`. */
+export const WIDE_MIN_PX = 640
+/** The narrowest a legend column is allowed to get, and the gap between the donut and the legend. */
+export const LEGEND_COL_PX = 240
+export const WIDE_GAP_PX = 24
+/** Step of an arrow key on the resize handle. */
+export const DONUT_STEP = 16
+
+/** A size kept within DONUT_MIN and `max` (a `max` that is not a positive number is no upper limit). */
+export function clampDonutSize(n: number, max = Infinity): number {
+  const hi = Number.isFinite(max) && max > 0 ? Math.max(DONUT_MIN, max) : Infinity
+  return Math.round(Math.min(hi, Math.max(DONUT_MIN, n)))
+}
+
+/** What the room (`box`, the width the pie has, 0 = not measured) allows: whether the wide layout applies (the donut
+ * beside the legend), the largest donut (the whole width; with the wide layout one legend column is left), and the
+ * donut's automatic size there (null without the wide layout: the stylesheet decides). */
+export function donutLayout(box: number, wide: boolean): { wideOn: boolean; max: number; auto: number | null } {
+  if (!(box > 0)) return { wideOn: false, max: Infinity, auto: null }
+  const wideOn = wide && box >= WIDE_MIN_PX
+  const max = Math.max(DONUT_MIN, wideOn ? box - LEGEND_COL_PX - WIDE_GAP_PX : box)
+  const auto = wideOn ? Math.min(max, Math.max(320, Math.min(680, Math.round(box * 0.4)))) : null
+  return { wideOn, max, auto }
+}
+
+/** A saved size, or null when there is none or it cannot be read. Never throws. */
+export function readDonutSize(key: string | undefined): number | null {
+  if (!key) return null
+  try {
+    const n = Number(globalThis.localStorage?.getItem(key))
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+  } catch {
+    return null
+  }
+}
+
+/** Keep (a number) or forget (null) the size under `key`. Never throws: a failed write lasts this visit only. */
+export function writeDonutSize(key: string | undefined, size: number | null): void {
+  if (!key) return
+  try {
+    if (size === null) globalThis.localStorage?.removeItem(key)
+    else globalThis.localStorage?.setItem(key, String(Math.round(size)))
+  } catch {
+    // storage full, blocked or unavailable
+  }
+}
 </script>
 
 <script setup lang="ts">
