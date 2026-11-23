@@ -38,6 +38,7 @@ const PATHS = [
   '/api/budget/access',
   '/api/budget/transactions/x',
   '/api/budget/transactions/similar',
+  '/api/budget/prefs',
   '/api/Budget/meta',
   '/api//budget/meta',
   '/api/%62udget/meta',
