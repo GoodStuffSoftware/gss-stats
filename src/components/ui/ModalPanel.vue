@@ -40,7 +40,7 @@ function unlock() {
 
 watch(
   () => props.open,
-  async (o) => {
+  async (o, was) => {
     if (o) {
       returnFocus = props.returnTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
       if (props.sheet) {
@@ -49,7 +49,7 @@ watch(
       }
       await nextTick()
       ;((props.initialFocus ? panel.value?.querySelector<HTMLElement>(props.initialFocus) : null) ?? focusables()[0])?.focus()
-    } else {
+    } else if (was) {
       unlock()
       const el = returnFocus
       returnFocus = null

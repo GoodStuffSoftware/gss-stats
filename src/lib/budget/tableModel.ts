@@ -328,7 +328,7 @@ export function createTxnTable(
     const mine = ++similarToken
     try {
       const response = await deps.fetchSimilar(id)
-      if (mine !== similarToken || response.rows.length === 0) return
+      if (mine !== similarToken || !response?.source || !Array.isArray(response.rows) || response.rows.length === 0) return
       similar.value = { sourceId: id, categoryId, response }
     } catch {
       // The offer is a convenience: no dialog, no error.

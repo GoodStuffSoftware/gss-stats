@@ -469,3 +469,26 @@ describe('EditableTable resizable columns', () => {
     expect(clampColumnWidth(5)).toBe(MIN_COL_WIDTH)
   })
 })
+
+describe('EditableTable selectable', () => {
+  it('off by default: no checkboxes', async () => {
+    const w = await mountTable()
+    expect(w.find('[data-testid="select-all"]').exists()).toBe(false)
+    expect(w.find('[data-testid="select-row"]').exists()).toBe(false)
+  })
+  it('on: a box per row; select all and none skip disabled rows', async () => {
+    const w = await mountTable({ selectable: true, selected: new Set(['r1']), selectDisabled: (r: Row) => (r.id === 'r2' ? 'locked' : null) })
+    expect(w.findAll('[data-testid="select-row"]')).toHaveLength(2)
+    expect(w.findAll('[data-testid="select-row"]')[1].attributes('disabled')).toBeDefined()
+    await w.find('[data-testid="select-all"]').setValue(false)
+    expect((w.emitted('update:selected')?.at(-1)?.[0] as Set<string>).size).toBe(0)
+    await w.setProps({ selected: new Set<string>() })
+    await w.find('[data-testid="select-all"]').setValue(true)
+    expect([...(w.emitted('update:selected')?.at(-1)?.[0] as Set<string>)]).toEqual(['r1'])
+  })
+  it('a row box toggles that row', async () => {
+    const w = await mountTable({ selectable: true, selected: new Set<string>() })
+    await w.findAll('[data-testid="select-row"]')[1].setValue(true)
+    expect([...(w.emitted('update:selected')?.at(-1)?.[0] as Set<string>)]).toEqual(['r2'])
+  })
+})

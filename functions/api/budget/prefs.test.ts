@@ -47,6 +47,19 @@ async function call(e: BudgetEnv, who: string | null, method: string, body?: str
 
 const good = { txnView: { ...defaultTxnViewPrefs(), search: 'milk', categories: ['fun'], sortKey: 'amount', sortDir: 'asc' } }
 
+describe('/api/budget/prefs sameAmount', () => {
+  it('accepts the map at its limits and round trips it', async () => {
+    const { store } = kv()
+    const e = env(store)
+    const sameAmount: Record<string, boolean> = Object.fromEntries(Array.from({ length: 29 }, (_, i) => [`m${i}`, i % 2 === 0]))
+    sameAmount['k'.repeat(80)] = true
+    const put = await call(e, LISTED, 'PUT', JSON.stringify({ txnView: { ...good.txnView, sameAmount } }))
+    expect(put.status).toBe(200)
+    const got = (await (await call(e, LISTED, 'GET')).json()) as { txnView: { sameAmount: Record<string, boolean> } }
+    expect(got.txnView.sameAmount).toEqual(sameAmount)
+  })
+})
+
 describe('/api/budget/prefs access', () => {
   it('GET and PUT are 403 for a login off the budget list, 401 when signed out; nothing is written', async () => {
     const { store, m } = kv()
@@ -91,6 +104,11 @@ describe('/api/budget/prefs storage', () => {
       '{"txnView":' + JSON.stringify({ ...good.txnView, sortKey: 'nope' }) + '}',
       '{"txnView":' + JSON.stringify({ ...good.txnView, merchants: [1] }) + '}',
       JSON.stringify({ ...good, other: 1 }),
+      '{"txnView":' + JSON.stringify({ ...good.txnView, sameAmount: { acme: 'yes' } }) + '}',
+      '{"txnView":' + JSON.stringify({ ...good.txnView, sameAmount: { '': true } }) + '}',
+      '{"txnView":' + JSON.stringify({ ...good.txnView, sameAmount: { ['k'.repeat(81)]: true } }) + '}',
+      '{"txnView":' + JSON.stringify({ ...good.txnView, sameAmount: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`m${i}`, true])) }) + '}',
+      '{"txnView":' + JSON.stringify({ ...good.txnView, sameAmount: ['acme'] }) + '}',
       '{"txnView":null}',
       '[]',
       'not json',

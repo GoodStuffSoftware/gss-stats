@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Category, Txn } from './types'
 import {
-  anythingActive, applyTxnView, categoryChoices, defaultTxnViewPrefs, filterTxns, merchantChoices, parseTxnViewPrefs, sortTxns, type TxnViewPrefs,
+  anythingActive, applyTxnView, categoryChoices, defaultTxnViewPrefs, filterTxns, merchantChoices, parseTxnViewPrefs, sortTxns, withSameAmount, type TxnViewPrefs,
 } from './txnView'
 
 const acct = (id: string, label: string, personId: string | null): Account =>
@@ -111,5 +111,31 @@ describe('prefs schema', () => {
   it('lenient mode (the browser cache) falls back per field', () => {
     const p = parseTxnViewPrefs({ search: 5, merchants: ['a', 3], sortKey: 'amount', junk: true })
     expect(p).toEqual(prefs({ merchants: ['a'], sortKey: 'amount' }))
+  })
+})
+
+const { sameAmount: _gone, ...oldBlob } = defaultTxnViewPrefs()
+describe('sameAmount choices', () => {
+  it('an old blob without the field parses to an empty map', () => {
+    expect(parseTxnViewPrefs(oldBlob, true)?.sameAmount).toEqual({})
+  })
+  it('strict parse rejects bad values, long keys, an empty key and more than 30 entries', () => {
+    expect(parseTxnViewPrefs({ sameAmount: { acme: 'yes' } }, true)).toBeNull()
+    expect(parseTxnViewPrefs({ sameAmount: { '': true } }, true)).toBeNull()
+    expect(parseTxnViewPrefs({ sameAmount: { ['k'.repeat(81)]: true } }, true)).toBeNull()
+    expect(parseTxnViewPrefs({ sameAmount: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`m${i}`, true])) }, true)).toBeNull()
+    expect(parseTxnViewPrefs({ ...oldBlob, sameAmount: { acme: false } }, true)?.sameAmount).toEqual({ acme: false })
+  })
+  it('lenient parse drops bad entries', () => {
+    expect(parseTxnViewPrefs({ sameAmount: { acme: true, bad: 3 } })?.sameAmount).toEqual({ acme: true })
+  })
+  it('withSameAmount replaces a key and keeps at most 30, newest last', () => {
+    let p = defaultTxnViewPrefs()
+    for (let i = 0; i < 31; i++) p = withSameAmount(p, `m${i}`, true)
+    expect(Object.keys(p.sameAmount)).toHaveLength(30)
+    expect(p.sameAmount.m0).toBeUndefined()
+    p = withSameAmount(p, 'm5', false)
+    expect(p.sameAmount.m5).toBe(false)
+    expect(Object.keys(p.sameAmount).at(-1)).toBe('m5')
   })
 })

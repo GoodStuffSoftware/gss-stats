@@ -88,13 +88,13 @@ function sameAmountMap(v: unknown, strict: boolean): Record<string, boolean> | n
 
 /** The remembered choice for a merchant key, or undefined (none yet: the dialog's own default applies). */
 export function sameAmountChoice(p: Pick<TxnViewPrefs, 'sameAmount'>, merchantKey: string): boolean | undefined {
-  return Object.prototype.hasOwnProperty.call(p.sameAmount, merchantKey) ? p.sameAmount[merchantKey] : undefined
+  return p.sameAmount && Object.prototype.hasOwnProperty.call(p.sameAmount, merchantKey) ? p.sameAmount[merchantKey] : undefined
 }
 
 /** Prefs with one merchant's choice set (moved to the newest end); past SAME_AMOUNT_MAX the oldest entries go. A key too long to keep is not stored. */
 export function withSameAmount(p: TxnViewPrefs, merchantKey: string, on: boolean): TxnViewPrefs {
   if (!merchantKey || merchantKey.length > SAME_AMOUNT_KEY_MAX) return p
-  const next = Object.entries(p.sameAmount).filter(([k]) => k !== merchantKey)
+  const next = Object.entries(p.sameAmount ?? {}).filter(([k]) => k !== merchantKey)
   next.push([merchantKey, on])
   return { ...p, sameAmount: Object.fromEntries(next.slice(-SAME_AMOUNT_MAX)) }
 }
