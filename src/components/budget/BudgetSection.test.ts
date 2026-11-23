@@ -7,6 +7,7 @@ import { resetAccessProbe } from '../../lib/budget/clientRead'
 import { LAYOUT_KEY, panelsKey } from '../../lib/budget/panelVisibility'
 import { defaultSavedView, type SavedView } from '../../lib/budget/savedView'
 import type { DebtSlice, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import BudgetFilters from './BudgetFilters.vue'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
@@ -571,6 +572,26 @@ describe('BudgetSection: desktop layout (side by side or tabs), saved per device
     expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
   })
 
+  it('below 1024 px the charts are solo (their own donut size key) even when Side by side is chosen', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+    w.unmount()
+    mounted.pop()
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: q.includes('max-width'),
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    }))
+    const narrow = await mountSection()
+    expect(narrow.get('[data-testid="budget-section"]').classes()).toContain('sbs')
+    expect(narrow.findComponent(SpendingPanel).props('solo')).toBe(true)
+    expect(narrow.findComponent(DebtPanel).props('solo')).toBe(true)
+  })
+
   it('opens in the saved layout, and a hidden chart saved for side by side does not hide anything in Tabs', async () => {
     localStorage.setItem(LAYOUT_KEY, 'tabs')
     localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['debts'] }))
@@ -681,6 +702,37 @@ describe('BudgetSection: debt drill in place', () => {
     expect(new URLSearchParams(location.search).get('b_page')).toBe('loans')
   })
 
+  it('a person change that keeps the drilled debt reloads its balance line (no stuck skeleton)', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    expect(w.findComponent(DebtPanel).props('history')).toHaveLength(2)
+    w.findComponent(BudgetFilters).vm.$emit('person', 'p1') // acct-1 stays in the new person's debts
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    expect(w.findComponent(DebtPanel).props('history')).toHaveLength(2)
+    expect(w.find('[data-testid="debt-chart"]').exists()).toBe(true)
+  })
+
+  it('recording a balance on the Loans page, then back to Overview, reloads the drilled balance line', async () => {
+    route({ debtDetail: () => json(DETAIL) })
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="debt-drilled-open"]').trigger('click') // Loans page, state.debt stays acct-1
+    await flushPromises()
+    w.findComponent(LoansPage).vm.$emit('saved')
+    await flushPromises()
+    history.back()
+    await flushPromises()
+    window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }))
+    await flushPromises()
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    expect(w.findComponent(DebtPanel).props('history')).toHaveLength(2)
+  })
+
   it('works in Tabs mode too, on the Debts tab', async () => {
     localStorage.setItem(LAYOUT_KEY, 'tabs')
     route({ debtDetail: () => json(DETAIL) })
@@ -734,6 +786,23 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     expect([q.get('category'), q.get('person'), q.get('from'), q.get('to')]).toEqual(['groceries', 'p1', '2026-10-01', '2026-10-31'])
     await vi.advanceTimersByTimeAsync(5000)
     expect(puts).toHaveLength(0) // nothing changed: nothing to save
+  })
+
+  it('the toolbar waits for the saved view, so a choice made while it is pending cannot be overwritten', async () => {
+    stored = saved({ hidden: 'debts', person: 'p1' })
+    let release: (r: Response) => void = () => {}
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve
+    })
+    route({ prefs: (init) => (init?.method === 'PUT' ? prefs(init) : gate) })
+    const w = await mountSection()
+    expect(w.find('[data-testid="budget-person-p2"]').exists()).toBe(false) // nothing to click yet
+    expect(callsTo('/api/budget/summary')).toHaveLength(0)
+    release(json({ view: stored }))
+    await flushPromises()
+    expect(w.find('[data-testid="budget-person-p2"]').exists()).toBe(true)
+    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(summaryParams(0).get('person')).toBe('p1')
   })
 
   it('restores the second drill step and an open debt once their data is there', async () => {

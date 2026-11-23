@@ -428,8 +428,12 @@ function roomElement(): HTMLElement | null {
 function measure() {
   room.value = roomElement()?.clientWidth ?? 0
 }
+// Measured only while the pie has a size to manage (resizable or wide): every other pie holds no listener or observer.
 let resizeObserver: ResizeObserver | undefined
-onMounted(() => {
+let measuring = false
+function startMeasuring() {
+  if (measuring) return
+  measuring = true
   measure()
   window.addEventListener('resize', measure)
   if (typeof ResizeObserver === 'function') {
@@ -437,7 +441,25 @@ onMounted(() => {
     const el = roomElement()
     if (el) resizeObserver.observe(el)
   }
+}
+function stopMeasuring() {
+  if (!measuring) return
+  measuring = false
+  window.removeEventListener('resize', measure)
+  resizeObserver?.disconnect()
+  resizeObserver = undefined
+  room.value = 0
+}
+onMounted(() => {
+  if (props.resizable || props.wide) startMeasuring()
 })
+watch(
+  () => props.resizable || props.wide,
+  (on) => {
+    if (on) startMeasuring()
+    else stopMeasuring()
+  },
+)
 
 // The handle. A drag grows the donut by the larger of the two movements; centred (not wide) the corner moves half as
 // far as the size changes, so the movement counts twice.
@@ -492,8 +514,7 @@ function onHandleKey(e: KeyboardEvent) {
 }
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', measure)
-  resizeObserver?.disconnect()
+  stopMeasuring()
   detach?.()
   gesture?.destroy()
   clearTimeout(waitTimer)

@@ -53,7 +53,14 @@ const layout = ref<DesktopLayout>(readDesktopLayout())
 const sideBySide = computed(() => layout.value === 'side')
 // One chart has the whole width (Tabs, or the other chart hidden): its donut is bigger there, beside its legend, and
 // its size is kept apart from the side-by-side one (lib/budget/panelVisibility.ts donutSizeKey).
-const solo = computed(() => !sideBySide.value || hiddenPanels.value.length > 0)
+// Below 1024 px the tabs always apply, so one chart has the width there too (and a donut resized in a narrow
+// window is not saved under the side-by-side key).
+const narrowQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 1023.98px)') : null
+const narrow = ref(!!narrowQuery?.matches)
+const onNarrow = () => {
+  narrow.value = !!narrowQuery?.matches
+}
+const solo = computed(() => narrow.value || !sideBySide.value || hiddenPanels.value.length > 0)
 function onLayout(l: DesktopLayout) {
   layout.value = l
   writeDesktopLayout(l)
@@ -115,8 +122,10 @@ async function loadMeta() {
   try {
     const m = await fetchMeta()
     if (state.person !== 'all' && !m.people.some((p) => p.id === state.person)) setPerson('all')
-    meta.value = m
+    // The toolbar appears only after the saved view is applied (at most the GET timeout), so a choice made while it
+    // is pending can never be overwritten by the restore. The data fetches were waiting on `ready` anyway.
     await settleView(m)
+    meta.value = m
     ready.value = m.range.min !== null || m.range.max !== null
   } catch {
     metaError.value = true
@@ -175,8 +184,8 @@ async function loadSummary() {
       pushStep(step)
     }
   } catch {
-    pendingStep = null
     if (seq !== summarySeq) return
+    pendingStep = null
     summary.value = null
     shown.value = null
     summaryError.value = true
@@ -264,9 +273,11 @@ async function loadDrillHistory(id: string) {
     drillFailed.value = true
   }
 }
+// Reloads when the drilled debt changes AND when the debts are read again (a person change or a recorded balance
+// clears the cache above, and the same debt can still be in the new list: its id alone would not change).
 watch(
-  () => drilled.value?.accountId ?? null,
-  (id) => {
+  [() => drilled.value?.accountId ?? null, debts],
+  ([id]) => {
     drillSeq++
     if (id) void loadDrillHistory(id)
     else {
@@ -317,8 +328,13 @@ onMounted(() => {
 })
 // Leaving (closing the tab, another page, the section unmounting) sends a queued view change now.
 const flushView = () => viewSaver.flush()
-onMounted(() => window.addEventListener('pagehide', flushView))
+onMounted(() => {
+  window.addEventListener('pagehide', flushView)
+  narrowQuery?.addEventListener?.('change', onNarrow)
+  onNarrow()
+})
 onBeforeUnmount(() => {
+  narrowQuery?.removeEventListener?.('change', onNarrow)
   window.removeEventListener('popstate', readUrl)
   window.removeEventListener('pagehide', flushView)
   viewSaver.flush()

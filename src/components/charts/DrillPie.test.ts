@@ -649,6 +649,88 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
     expect(sizeOf(w)).toBe(300)
   })
 
+  it('a cancelled drag (pointercancel) ends like a release: the size is saved and the pointer no longer followed', async () => {
+    roomWidth = 900
+    const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+    const h = w.get('[data-testid="pie-resize"]')
+    const ev = (x: number, y: number) => ({ pointerId: 7, pointerType: 'touch', button: 0, clientX: x, clientY: y })
+    await h.trigger('pointerdown', ev(100, 100))
+    await h.trigger('pointermove', ev(130, 100))
+    await h.trigger('pointercancel', ev(130, 100))
+    expect(window.localStorage.getItem(KEY)).toBe('390')
+    await h.trigger('pointermove', ev(300, 100))
+    expect(sizeOf(w)).toBe(390)
+  })
+
+  describe('measuring', () => {
+    let resizeAdds: number
+    let resizeRemoves: number
+    let observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }>
+    beforeEach(() => {
+      resizeAdds = 0
+      resizeRemoves = 0
+      observers = []
+      const add = window.addEventListener.bind(window)
+      const remove = window.removeEventListener.bind(window)
+      vi.spyOn(window, 'addEventListener').mockImplementation(((t: string, ...rest: unknown[]) => {
+        if (t === 'resize') resizeAdds++
+        return (add as (...a: unknown[]) => void)(t, ...rest)
+      }) as typeof window.addEventListener)
+      vi.spyOn(window, 'removeEventListener').mockImplementation(((t: string, ...rest: unknown[]) => {
+        if (t === 'resize') resizeRemoves++
+        return (remove as (...a: unknown[]) => void)(t, ...rest)
+      }) as typeof window.removeEventListener)
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe = vi.fn()
+          disconnect = vi.fn()
+          constructor() {
+            observers.push(this)
+          }
+        },
+      )
+    })
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.mocked(window.addEventListener).mockRestore()
+      vi.mocked(window.removeEventListener).mockRestore()
+    })
+
+    it('a pie with the size props off holds no resize listener and no observer', async () => {
+      roomWidth = 900
+      const w = await sized({ wide: false })
+      expect(resizeAdds).toBe(0)
+      expect(observers).toHaveLength(0)
+      w.unmount()
+    })
+
+    it('a resizable or wide pie attaches both, and removes both on unmount', async () => {
+      roomWidth = 900
+      const w = await sized({ wide: true, resizable: true, sizeKey: KEY })
+      expect(resizeAdds).toBe(1)
+      expect(observers).toHaveLength(1)
+      expect(observers[0].observe).toHaveBeenCalledTimes(1)
+      w.unmount()
+      expect(resizeRemoves).toBeGreaterThanOrEqual(1)
+      expect(observers[0].disconnect).toHaveBeenCalled()
+    })
+
+    it('starts and stops measuring as the props turn on and off', async () => {
+      roomWidth = 900
+      const w = await sized({ wide: false })
+      expect(resizeAdds).toBe(0)
+      await w.setProps({ wide: true })
+      expect(resizeAdds).toBe(1)
+      expect(w.classes()).toContain('dp-wide')
+      await w.setProps({ wide: false })
+      expect(resizeRemoves).toBe(1)
+      expect(observers[0].disconnect).toHaveBeenCalled()
+      expect(w.classes()).not.toContain('dp-wide')
+      w.unmount()
+    })
+  })
+
   it('reloads the size when the key changes', async () => {
     roomWidth = 900
     window.localStorage.setItem('other', '500')

@@ -11,7 +11,9 @@
 //     race when both save as the page closes) and neither can squeeze the other under the cap.
 //     The address is never in a key and nothing the client sends picks the key. The dashboard layout key is never read or written.
 //   - PUT carries `txnView`, `view` or both, validates strictly (known fields only, `parseTxnViewPrefs(raw, true)`,
-//     `parseSavedView(raw, true)`) and caps the body at 4 KB: 400 on anything else, 413 on an oversize body.
+//     `parseSavedView(raw, true)`) and caps the body at 4 KB (combined; the client sends one block per PUT, so each block
+//     has the whole cap): 400 on anything else, 413 on an oversize body. Both blocks are validated before either is written;
+//     a KV error between the two writes can leave the first written (a PUT with both blocks is not atomic).
 //     GET answers `{ txnView?, view? }` (`{}` when nothing is saved).
 //   - No database access: the budget database is not touched.
 

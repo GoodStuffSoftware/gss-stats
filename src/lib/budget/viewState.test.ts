@@ -813,8 +813,13 @@ describe('Budget pages: Overview and Loans', () => {
         await nextTick()
         view.setDebt('acct-1')
         await nextTick()
-        view.setDebt(null)
-        await new Promise((r) => setTimeout(r, 20))
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        try {
+          view.setDebt(null)
+          await vi.advanceTimersByTimeAsync(20) // the popstate, a bounce go() and its landing all settle
+        } finally {
+          vi.useRealTimers()
+        }
         await nextTick()
         expect(view.state.debt).toBeNull()
         expect(b.at).toBe(0)
