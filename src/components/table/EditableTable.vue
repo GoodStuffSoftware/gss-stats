@@ -105,7 +105,8 @@ export function clampColumnWidth(w: number): number {
 // edits. Opt-in resizing (`resizable`, with `storageKey`): the table layout gets a drag handle on each header edge (double-click
 // or double-tap resets that column; arrow keys on the focused handle nudge it), widths are kept per device in localStorage
 // under `storageKey`, and the table still fills the width (unsized columns share what is left; saved widths scale up to
-// fill). Both are off by default, so other tables are unchanged.
+// fill). Opt-in selection (`selectable`, with `selected` / `update:selected`): a checkbox column (a checkbox on each card) with a select all / none header over
+// the rows that can be ticked. All three are off by default, so other tables are unchanged.
 //
 // Accessibility: `status` is announced through a polite live region; each editor has an aria-label of the column
 // and the row; a row with an error shows it with role="alert".
@@ -137,6 +138,13 @@ const props = withDefaults(
     storageKey?: string
     /** Table layout: the table is never narrower than this (px); the page scrolls sideways instead (needs `resizable`). */
     tableMinWidth?: number
+    /** Opt-in checkbox column (a checkbox on each card): ticked row keys come from `selected`, changes go out as `update:selected`. */
+    selectable?: boolean
+    selected?: ReadonlySet<string>
+    /** Why a row cannot be ticked (null or empty: it can). Such a row is skipped by select all / none. */
+    selectDisabled?: (row: R) => string | null | undefined
+    /** Accessible name of a row's checkbox. Default: the row label. */
+    selectLabel?: (row: R) => string
   }>(),
   {
     editable: false,
@@ -150,6 +158,8 @@ const props = withDefaults(
     resizable: false,
     storageKey: '',
     tableMinWidth: 0,
+    selectable: false,
+    selected: () => new Set<string>(),
   },
 )
 
@@ -162,6 +172,8 @@ const emit = defineEmits<{
   'edit-start': [rowKey: string, field: string]
   /** The component is narrower than TABLE_MIN_WIDTH (the card list is what `auto` would draw). Fires on every change. */
   narrow: [narrow: boolean]
+  /** `selectable`: the new set of ticked row keys. */
+  'update:selected': [keys: Set<string>]
 }>()
 
 const rootEl = ref<HTMLElement | null>(null)
@@ -185,6 +197,31 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => observer?.disconnect())
+
+function rowSelectable(row: R): boolean {
+  return !props.selectDisabled?.(row)
+}
+const selectableRows = computed(() => props.rows.filter(rowSelectable))
+const selectedCount = computed(() => selectableRows.value.filter((r) => props.selected.has(keyOf(r))).length)
+const allSelected = computed(() => selectableRows.value.length > 0 && selectedCount.value === selectableRows.value.length)
+const someSelected = computed(() => selectedCount.value > 0 && !allSelected.value)
+function toggleRow(row: R, on: boolean) {
+  const next = new Set(props.selected)
+  if (on) next.add(keyOf(row))
+  else next.delete(keyOf(row))
+  emit('update:selected', next)
+}
+function toggleAll(on: boolean) {
+  const next = new Set(props.selected)
+  for (const r of selectableRows.value) {
+    if (on) next.add(keyOf(r))
+    else next.delete(keyOf(r))
+  }
+  emit('update:selected', next)
+}
+function selLabelOf(row: R): string {
+  return props.selectLabel ? props.selectLabel(row) : props.rowLabel ? props.rowLabel(row) : keyOf(row)
+}
 
 function keyOf(row: R): string {
   return typeof props.rowKey === 'function' ? props.rowKey(row) : String(row[props.rowKey])
@@ -446,10 +483,23 @@ function rowClass(row: R) {
     <ScrollBox v-if="!cards" :on="resizable">
     <table class="et-table" :class="{ 'et-fixed': sized }" :style="tableStyle" :aria-label="label || undefined">
       <colgroup v-if="sized">
+        <col v-if="selectable" style="width: 44px" />
         <col v-for="col in columns" :key="col.key" :style="colStyle(col)" />
       </colgroup>
       <thead>
         <tr>
+          <th v-if="selectable" scope="col" class="et-selcell">
+            <input
+              type="checkbox"
+              class="et-check"
+              data-testid="select-all"
+              aria-label="Select all"
+              :checked="allSelected"
+              :indeterminate="someSelected"
+              :disabled="!selectableRows.length"
+              @change="toggleAll(($event.target as HTMLInputElement).checked)"
+            />
+          </th>
           <th v-for="col in columns" :key="col.key" scope="col" :class="{ 'et-end': col.align === 'end' }" :style="thStyle(col)">
             {{ col.label }}
             <span
@@ -474,6 +524,18 @@ function rowClass(row: R) {
       <tbody>
         <template v-for="row in rows" :key="keyOf(row)">
           <tr :data-row-key="keyOf(row)" :class="rowClass(row)" :aria-busy="disabledOf(row) || undefined">
+            <td v-if="selectable" class="et-selcell">
+              <input
+                type="checkbox"
+                class="et-check"
+                data-testid="select-row"
+                :aria-label="selLabelOf(row)"
+                :title="selectDisabled?.(row) || undefined"
+                :checked="selected.has(keyOf(row))"
+                :disabled="!rowSelectable(row) || disabledOf(row)"
+                @change="toggleRow(row, ($event.target as HTMLInputElement).checked)"
+              />
+            </td>
             <td v-for="col in columns" :key="col.key" :class="{ 'et-end': col.align === 'end' }">
               <slot v-if="isEditable(col) && $slots['editor-' + col.key]" :name="'editor-' + col.key" v-bind="scopeOf(row, col)" />
               <select
@@ -525,7 +587,7 @@ function rowClass(row: R) {
             </td>
           </tr>
           <tr v-if="hasExtra(row)" class="et-extra-row" :class="rowClass(row)">
-            <td :colspan="columns.length">
+            <td :colspan="columns.length + (selectable ? 1 : 0)">
               <span v-if="statusOf(row)?.error" class="et-error" role="alert">{{ statusOf(row)?.error }}</span>
               <span v-else-if="statusOf(row)?.message" class="et-note">{{ statusOf(row)?.message }}</span>
               <button
@@ -546,7 +608,18 @@ function rowClass(row: R) {
 
     <!-- Card layout -->
     <ul v-else class="et-list" :aria-label="label || undefined">
-      <li v-for="row in rows" :key="keyOf(row)" class="et-card" :data-row-key="keyOf(row)" :class="rowClass(row)" :aria-busy="disabledOf(row) || undefined">
+      <li v-for="row in rows" :key="keyOf(row)" class="et-card" :data-row-key="keyOf(row)" :class="[rowClass(row), { 'et-has-sel': selectable }]" :aria-busy="disabledOf(row) || undefined">
+        <input
+          v-if="selectable"
+          type="checkbox"
+          class="et-check et-card-check"
+          data-testid="select-row"
+          :aria-label="selLabelOf(row)"
+          :title="selectDisabled?.(row) || undefined"
+          :checked="selected.has(keyOf(row))"
+          :disabled="!rowSelectable(row) || disabledOf(row)"
+          @change="toggleRow(row, ($event.target as HTMLInputElement).checked)"
+        />
         <div class="et-line et-line1" :class="{ 'et-labelled': cardLabels }">
           <span v-for="col in cardColumns(1)" :key="col.key" class="et-part" :class="{ 'et-end': col.align === 'end' }">
             <span v-if="cardLabels" class="et-lab" data-testid="card-label">{{ col.label }}</span>
@@ -808,6 +881,29 @@ function rowClass(row: R) {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.et-selcell {
+  width: 44px;
+  text-align: center;
+}
+.et-check {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: rgb(var(--amber));
+  cursor: pointer;
+}
+.et-check:disabled {
+  cursor: not-allowed;
+}
+.et-card.et-has-sel {
+  position: relative;
+  padding-left: 44px;
+}
+.et-card-check {
+  position: absolute;
+  left: 13px;
+  top: 12px;
 }
 .et-line1 {
   display: flex;

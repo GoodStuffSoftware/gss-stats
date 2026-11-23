@@ -4,7 +4,7 @@
 // so the app's 401 handling (session.ts isAuthError) recognises it. A 401 or a network failure runs the
 // confirming session probe (the same one src/api.ts runs) before the error is rethrown.
 import { checkSessionExpired, isAuthError, isNetworkError } from '../../session'
-import type { ApiError, BudgetErrorCode, CategoryCreateRequest, CategoryCreateResponse, RuleFromEdit, RuleResponse, Txn, TxnPage, TxnPatch, TxnPatchResponse, TxnQuery } from './types'
+import type { ApiError, BudgetErrorCode, CategoryCreateRequest, CategoryCreateResponse, RuleFromEdit, RuleResponse, SimilarApply, SimilarApplyResponse, SimilarResponse, Txn, TxnPage, TxnPatch, TxnPatchResponse, TxnQuery } from './types'
 
 export class BudgetApiError extends Error {
   readonly status: number
@@ -69,4 +69,13 @@ export function createCategory(name: string): Promise<CategoryCreateResponse> {
 
 export function createRule(req: RuleFromEdit): Promise<RuleResponse> {
   return call<RuleResponse>('/rules', { method: 'POST', body: JSON.stringify(req) })
+}
+
+/** GET /transactions/similar: only the opaque id goes in the URL (never a merchant, category or search text). */
+export function fetchSimilar(id: string): Promise<SimilarResponse> {
+  return call<SimilarResponse>(`/transactions/similar?id=${encodeURIComponent(id)}`)
+}
+
+export function applySimilar(req: SimilarApply): Promise<SimilarApplyResponse> {
+  return call<SimilarApplyResponse>('/transactions/similar', { method: 'POST', body: JSON.stringify(req) })
 }

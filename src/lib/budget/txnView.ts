@@ -23,14 +23,20 @@ export interface TxnViewPrefs {
   to: string
   sortKey: TxnSortKey
   sortDir: TxnSortDir
+  /** "Same amount only" in the similar-purchases dialog, as last chosen per merchant key (true = on). A capped map, oldest dropped first;
+   *  not a filter of the table, so it never counts as "something active". An old saved blob without it reads as {}. */
+  sameAmount: Record<string, boolean>
 }
 
 export const SEARCH_MAX = 100
 export const LIST_MAX = 100
 export const ITEM_MAX = 120
+/** The most merchants whose "same amount only" choice is kept, and the longest key: 30 x ~90 bytes keeps the blob well under the 4 KB cap. */
+export const SAME_AMOUNT_MAX = 30
+export const SAME_AMOUNT_KEY_MAX = 80
 
 export function defaultTxnViewPrefs(): TxnViewPrefs {
-  return { search: '', merchants: [], categories: [], accounts: [], people: [], from: '', to: '', sortKey: 'date', sortDir: 'desc' }
+  return { search: '', merchants: [], categories: [], accounts: [], people: [], from: '', to: '', sortKey: 'date', sortDir: 'desc', sameAmount: {} }
 }
 
 /** True when the sort differs from the default (newest first, which is the order the server pages in). */
@@ -48,7 +54,7 @@ export function anythingActive(p: TxnViewPrefs): boolean {
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/
-const FIELDS: readonly string[] = ['search', 'merchants', 'categories', 'accounts', 'people', 'from', 'to', 'sortKey', 'sortDir']
+const FIELDS: readonly string[] = ['search', 'merchants', 'categories', 'accounts', 'people', 'from', 'to', 'sortKey', 'sortDir', 'sameAmount']
 
 function strList(v: unknown, strict: boolean): string[] | null {
   if (!Array.isArray(v)) return strict ? null : []
@@ -64,6 +70,35 @@ function strList(v: unknown, strict: boolean): string[] | null {
   return out
 }
 
+function sameAmountMap(v: unknown, strict: boolean): Record<string, boolean> | null {
+  if (v === undefined) return {}
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return strict ? null : {}
+  const entries = Object.entries(v as Record<string, unknown>)
+  if (strict && entries.length > SAME_AMOUNT_MAX) return null
+  const out: Record<string, boolean> = {}
+  for (const [k, on] of entries) {
+    if (k.length === 0 || k.length > SAME_AMOUNT_KEY_MAX || typeof on !== 'boolean') {
+      if (strict) return null
+      continue
+    }
+    if (Object.keys(out).length < SAME_AMOUNT_MAX) out[k] = on
+  }
+  return out
+}
+
+/** The remembered choice for a merchant key, or undefined (none yet: the dialog's own default applies). */
+export function sameAmountChoice(p: Pick<TxnViewPrefs, 'sameAmount'>, merchantKey: string): boolean | undefined {
+  return Object.prototype.hasOwnProperty.call(p.sameAmount, merchantKey) ? p.sameAmount[merchantKey] : undefined
+}
+
+/** Prefs with one merchant's choice set (moved to the newest end); past SAME_AMOUNT_MAX the oldest entries go. A key too long to keep is not stored. */
+export function withSameAmount(p: TxnViewPrefs, merchantKey: string, on: boolean): TxnViewPrefs {
+  if (!merchantKey || merchantKey.length > SAME_AMOUNT_KEY_MAX) return p
+  const next = Object.entries(p.sameAmount).filter(([k]) => k !== merchantKey)
+  next.push([merchantKey, on])
+  return { ...p, sameAmount: Object.fromEntries(next.slice(-SAME_AMOUNT_MAX)) }
+}
+
 /** Reads a saved or posted value. `strict` (the server): every field present and exactly right, no unknown field, else null.
  *  Not strict (the browser cache): anything wrong falls back to that field's default; null only when it is not an object. */
 export function parseTxnViewPrefs(raw: unknown, strict = false): TxnViewPrefs | null {
@@ -73,6 +108,8 @@ export function parseTxnViewPrefs(raw: unknown, strict = false): TxnViewPrefs | 
   const d = defaultTxnViewPrefs()
   const lists = (['merchants', 'categories', 'accounts', 'people'] as const).map((k) => strList(o[k], strict))
   if (strict && lists.some((l) => l === null)) return null
+  const sameAmount = sameAmountMap(o.sameAmount, strict)
+  if (strict && sameAmount === null) return null
   const searchOk = typeof o.search === 'string' && o.search.length <= SEARCH_MAX
   const fromOk = typeof o.from === 'string' && (o.from === '' || ISO.test(o.from))
   const toOk = typeof o.to === 'string' && (o.to === '' || ISO.test(o.to))
@@ -89,6 +126,7 @@ export function parseTxnViewPrefs(raw: unknown, strict = false): TxnViewPrefs | 
     to: toOk ? (o.to as string) : '',
     sortKey: keyOk ? (o.sortKey as TxnSortKey) : d.sortKey,
     sortDir: dirOk ? (o.sortDir as TxnSortDir) : d.sortDir,
+    sameAmount: sameAmount ?? {},
   }
 }
 

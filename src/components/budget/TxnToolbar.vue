@@ -47,7 +47,7 @@ function toggle(key: ListKey, value: string) {
 }
 function clearAll() {
   open.value = null
-  emit('update:modelValue', defaultTxnViewPrefs())
+  emit('update:modelValue', { ...defaultTxnViewPrefs(), sameAmount: props.modelValue.sameAmount })
 }
 
 // Typing is reflected at once (the table narrows as you type).

@@ -9,6 +9,7 @@ import {
   SPENDING_KINDS, UNCATEGORIZED,
   type Account, type BudgetEditedEvent, type Category, type CategoryCreateResponse, type RuleFromEdit, type RuleResponse, type Txn, type TxnKind,
   type TxnPage, type TxnPatch, type TxnPatchResponse, type TxnQuery,
+  type SimilarApply, type SimilarApplyResponse, type SimilarResponse,
 } from './types'
 
 // ---- display helpers ------------------------------------------------------------------------------------
@@ -151,6 +152,16 @@ export interface TableDeps {
   createRule(r: RuleFromEdit): Promise<RuleResponse>
   /** Makes a category (the server answers with the existing one when the name is taken). Absent = the table cannot add. */
   createCategory?(name: string): Promise<CategoryCreateResponse>
+  /** GET similar: the same merchant's other purchases (the dialog after a category change). Absent = no dialog. */
+  fetchSimilar?(id: string): Promise<SimilarResponse>
+  applySimilar?(req: SimilarApply): Promise<SimilarApplyResponse>
+}
+
+/** What the "Change similar purchases?" dialog shows: the row that was just changed, the category it got, and the server's list. */
+export interface SimilarOffer {
+  sourceId: string
+  categoryId: string | null
+  response: SimilarResponse
 }
 
 /** Why a row no longer belongs to the query, or null while it still does. Used to dim it ("moved to X"). */
@@ -180,6 +191,9 @@ export function createTxnTable(
   const rowState = reactive<Record<string, RowStatus>>({})
   /** Text for the polite live region. */
   const status = ref('')
+  /** The open "Change similar purchases?" dialog, or null. */
+  const similar = ref<SimilarOffer | null>(null)
+  let similarToken = 0 // a newer category change (or a close) makes an older answer stale
 
   let query: TxnQuery | null = null
   let token = 0 // a newer load makes older answers stale
@@ -246,6 +260,7 @@ export function createTxnTable(
     const i = indexOf(id)
     if (i < 0 || rowState[id]?.pending) return
     const before = rows.value[i]
+    if (!confirm && parseSelection(value).categoryId !== undefined) closeSimilar()
     // Confirming a row that is not spending in a way the select can name (a card payment) saves its own kind.
     const sel = confirm && value.startsWith('kind:') && !NOT_SPENDING.some((n) => n.value === value) ? { kind: before.kind } : parseSelection(value)
     if (sel.categoryId === undefined && sel.kind === undefined) return
@@ -282,6 +297,7 @@ export function createTxnTable(
       if (offer) setState(id, { ...rowState[id], action: { id: 'rule', label: `Use for all ${res.txn.merchantName || res.txn.merchantKey}` } })
       status.value = `Saved. ${res.txn.merchantName || 'Row'} is now ${categoryLabel(cats, res.txn)}.`
       onEdited({ txnId: id, ruleApplied: false, reapplied: 0 })
+      if (!confirm && patch.categoryId !== undefined) void offerSimilar(id, patch.categoryId)
     } catch (e) {
       const j = indexOf(id)
       if (e instanceof BudgetApiError && e.status === 409) {
@@ -298,6 +314,54 @@ export function createTxnTable(
         status.value = msg
       }
     }
+  }
+
+  function closeSimilar() {
+    similarToken++
+    similar.value = null
+  }
+
+  /** After a category change: ask the server for the merchant's other purchases. Rows -> the dialog opens; none, or any failure ->
+   *  nothing shows (the change itself is already saved). */
+  async function offerSimilar(id: string, categoryId: string | null) {
+    if (!deps.fetchSimilar) return
+    const mine = ++similarToken
+    try {
+      const response = await deps.fetchSimilar(id)
+      if (mine !== similarToken || response.rows.length === 0) return
+      similar.value = { sourceId: id, categoryId, response }
+    } catch {
+      // The offer is a convenience: no dialog, no error.
+    }
+  }
+
+  /** Apply the ticked rows: PATCH-like batch, then mirror it onto the loaded page (changed rows take the category, conflicting ones the
+   *  server's current row) and say so plainly. Throws what the call throws, so the dialog can keep itself open. */
+  async function applySimilar(items: Array<{ id: string; expectedUpdatedAt: string }>, makeRule: boolean): Promise<SimilarApplyResponse | null> {
+    const offer = similar.value
+    if (!offer || !deps.applySimilar || items.length === 0) return null
+    const res = await deps.applySimilar({ sourceId: offer.sourceId, categoryId: offer.categoryId, items, ...(makeRule ? { makeRule: true } : {}) })
+    const done = new Map(res.changed.map((c) => [c.id, c.updatedAt]))
+    const cur = new Map(res.conflicts.filter((c) => c.current).map((c) => [c.id, c.current as Txn]))
+    rows.value = rows.value.map((r) => {
+      const at = done.get(r.id)
+      let next = r
+      if (at) next = { ...r, categoryId: offer.categoryId, categorySource: 'manual', updatedAt: at, needsReview: false, reviewReason: null }
+      else if (cur.has(r.id)) next = cur.get(r.id) as Txn
+      if (next !== r) markIfMoved(next)
+      return next
+    })
+    const n = res.changed.length
+    const k = res.conflicts.length
+    const word = (x: number) => `${x} ${x === 1 ? 'purchase' : 'purchases'}`
+    let msg = n === 0 ? 'No purchases were changed.' : `Changed ${word(n)}.`
+    if (k) msg = n === 0 ? `${k} changed elsewhere; not updated.` : `Changed ${n}; ${k} changed elsewhere; not updated.`
+    if (res.rule) msg += res.rule.created ? ' New purchases follow the rule after the next rules re-apply.' : ' The rule was already there.'
+    status.value = msg
+    similarToken++
+    similar.value = null
+    if (n > 0) onEdited({ txnId: offer.sourceId, ruleApplied: !!res.rule, reapplied: n })
+    return res
   }
 
   /** The Included switch of a row: flip it now, save (PATCH `included`, a manual edit), revert if the save fails. Excluding a
@@ -431,5 +495,5 @@ export function createTxnTable(
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, load, loadMore, setSelection, setIncluded, setNote, addCategoryTo, confirmReview, useForAll }
+  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, similar, closeSimilar, applySimilar, load, loadMore, setSelection, setIncluded, setNote, addCategoryTo, confirmReview, useForAll }
 }
