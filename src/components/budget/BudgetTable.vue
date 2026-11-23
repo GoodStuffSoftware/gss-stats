@@ -23,7 +23,7 @@ import SimilarDialog from './SimilarDialog.vue'
 import TxnToolbar from './TxnToolbar.vue'
 import { applySimilar, createCategory, createRule, fetchSimilar, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
 import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
-import { loadRemainingPages } from '../../lib/budget/txnFill'
+import { createFillRunner } from '../../lib/budget/txnFill'
 import { applyTxnView, anythingActive, defaultTxnViewPrefs, fitPrefs, samePrefs, withSameAmount, type TxnViewPrefs } from '../../lib/budget/txnView'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
 import { SPENDING_KINDS, type BudgetEditedEvent, type BudgetTableProps, type Category, type Txn } from '../../lib/budget/types'
@@ -142,14 +142,16 @@ onMounted(reload)
 
 // With a search, filter or sort active, fetch every remaining page of the period (one request per page, no per-row calls),
 // so the toolbar covers the whole period and "N of M" counts against all of it. The query never carries the filters.
+// One run per filter activation and period (createFillRunner): its own pages do not start another, so the page cap holds.
+const fill = createFillRunner(model, () => anythingActive(viewPrefs.value))
 watch(
-  [() => anythingActive(viewPrefs.value), nextCursor, loading, loadingMore],
+  [() => anythingActive(viewPrefs.value), () => JSON.stringify(props.query), loading],
   () => {
-    if (!anythingActive(viewPrefs.value) || loading.value || loadingMore.value) return
-    void loadRemainingPages(model, () => anythingActive(viewPrefs.value))
+    void fill.sync(JSON.stringify(props.query), loading.value)
   },
   { flush: 'post' },
 )
+onBeforeUnmount(() => fill.cancel())
 
 // Find the highlighted purchase: it may be past the first page.
 watch(

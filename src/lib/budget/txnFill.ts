@@ -23,3 +23,30 @@ export async function loadRemainingPages(model: PagedModel, stillWanted: () => b
   }
   return pages
 }
+
+/**
+ * One fill run per filter activation and period. `sync` is called whenever the filters, the query or the loading flag change:
+ * it starts a run when the filters are on and none has run for this load of this query, and cancels the run in flight when the
+ * filters go off, the query changes or a fresh load starts. A run's own pages never start another, so MAX_FILL_PAGES holds.
+ */
+export function createFillRunner(model: PagedModel, active: () => boolean) {
+  let ranKey: string | null = null
+  let runId = 0
+  return {
+    sync(queryKey: string, loading: boolean): Promise<number> | null {
+      if (!active() || loading) {
+        ranKey = null
+        runId++
+        return null
+      }
+      if (ranKey === queryKey) return null
+      ranKey = queryKey
+      const mine = ++runId
+      return loadRemainingPages(model, () => mine === runId && active())
+    },
+    cancel() {
+      ranKey = null
+      runId++
+    },
+  }
+}
