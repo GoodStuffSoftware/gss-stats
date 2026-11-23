@@ -83,3 +83,28 @@ export function togglePanel(hidden: readonly PanelId[], id: PanelId): PanelId[] 
   if (hidden.includes(id)) return hidden.filter((p) => p !== id)
   return canHide(hidden, id) ? [...hidden, id] : [...hidden]
 }
+
+// ── Desktop layout (Side by side | Tabs) ──────────────────────────────────────────────────────────────────
+// How the Spending and Debts panels are arranged from 1024 px up. A choice about THIS device's screen, like the
+// table's column sizing and the phone's Cards | Table switch, so it is kept per device (one localStorage key, not
+// per account and not in the per-login KV prefs). Below 1024 px the tabs always apply and this is ignored.
+export type DesktopLayout = 'side' | 'tabs'
+export const LAYOUT_KEY = 'gss-stats-budget-layout'
+
+/** The saved layout; anything missing, unknown or unreadable is Side by side. Never throws. */
+export function readDesktopLayout(storage: PanelStorage | null = defaultStorage()): DesktopLayout {
+  try {
+    return storage?.getItem(LAYOUT_KEY) === 'tabs' ? 'tabs' : 'side'
+  } catch {
+    return 'side'
+  }
+}
+
+/** Remember the layout on this device. Never throws (a failed write lasts this visit only). */
+export function writeDesktopLayout(layout: DesktopLayout, storage: PanelStorage | null = defaultStorage()): void {
+  try {
+    storage?.setItem(LAYOUT_KEY, layout === 'tabs' ? 'tabs' : 'side')
+  } catch {
+    // storage full, blocked or unavailable: the choice lasts this visit only
+  }
+}

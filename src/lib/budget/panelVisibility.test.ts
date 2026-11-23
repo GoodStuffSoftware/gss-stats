@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canHide, panelsKey, readHiddenPanels, togglePanel, writeHiddenPanels, type PanelStorage } from './panelVisibility'
+import { LAYOUT_KEY, canHide, panelsKey, readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type PanelStorage } from './panelVisibility'
 
 function memory(): PanelStorage & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -73,5 +73,29 @@ describe('togglePanel / canHide', () => {
     expect(canHide(['debts'], 'spending')).toBe(false)
     expect(togglePanel(['debts'], 'spending')).toEqual(['debts'])
     expect(canHide([], 'spending')).toBe(true)
+  })
+})
+
+describe('readDesktopLayout / writeDesktopLayout', () => {
+  it('defaults to side by side', () => {
+    expect(readDesktopLayout(memory())).toBe('side')
+    expect(readDesktopLayout(null)).toBe('side')
+  })
+  it('round-trips tabs and side, one key for the device', () => {
+    const s = memory()
+    writeDesktopLayout('tabs', s)
+    expect(s.data.get(LAYOUT_KEY)).toBe('tabs')
+    expect(readDesktopLayout(s)).toBe('tabs')
+    writeDesktopLayout('side', s)
+    expect(readDesktopLayout(s)).toBe('side')
+  })
+  it('reads an unknown value as side by side', () => {
+    const s = memory()
+    s.setItem(LAYOUT_KEY, 'grid')
+    expect(readDesktopLayout(s)).toBe('side')
+  })
+  it('never throws when storage is blocked', () => {
+    expect(readDesktopLayout(throwing)).toBe('side')
+    expect(() => writeDesktopLayout('tabs', throwing)).not.toThrow()
   })
 })
