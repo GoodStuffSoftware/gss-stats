@@ -12,9 +12,9 @@
 // Budget rights); the server is the real check on every write.
 // Props: `dark` (site theme), `today` (YYYY-MM-DD, tests only).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
-import { readHiddenPanels, togglePanel, writeHiddenPanels, type PanelId } from '../../lib/budget/panelVisibility'
-import type { Category, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import { fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
+import { readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type DesktopLayout, type PanelId } from '../../lib/budget/panelVisibility'
+import type { Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import type { BudgetPage } from '../../lib/budget/sectionLink'
 import { useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import BudgetFilters from './BudgetFilters.vue'
@@ -25,7 +25,7 @@ import SpendingPanel from './SpendingPanel.vue'
 
 const props = defineProps<{ dark: boolean; today?: IsoDate }>()
 
-const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage } =
+const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt } =
   useBudgetViewState(props.today)
 
 // ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -41,6 +41,17 @@ const hiddenPanels = ref<PanelId[]>([])
 function onTogglePanel(id: PanelId) {
   hiddenPanels.value = togglePanel(hiddenPanels.value, id)
   writeHiddenPanels(accountEmail.value, hiddenPanels.value)
+}
+
+// ── Desktop layout ────────────────────────────────────────────────────────────────────────────────────────
+// "Side by side" (both charts, the table under them) or "Tabs" (the phone layout: one tab at a time, the table
+// under Spending). Chosen in BudgetFilters, remembered per device (lib/budget/panelVisibility.ts), shown from
+// 1024 px up; below that the tabs always apply. In Tabs the hide-a-chart toggles do not apply.
+const layout = ref<DesktopLayout>(readDesktopLayout())
+const sideBySide = computed(() => layout.value === 'side')
+function onLayout(l: DesktopLayout) {
+  layout.value = l
+  writeDesktopLayout(l)
 }
 
 // ── Meta ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -158,6 +169,58 @@ watch(
   },
   { immediate: true },
 )
+// ── Debt drill ──────────────────────────────────────────────────────────────────────────────────────────────
+// A slice or legend row of the debt pie opens that debt's balance line in place (state.debt, kept in history.state
+// only, never in the URL). The history comes from GET /api/budget/debts/:id, once per drill open, cached per person
+// while on the page (cleared when the person or the debts change).
+const drilled = computed(() => (state.debt && debts.value ? (debts.value.find((d) => d.accountId === state.debt) ?? null) : null))
+const debtHistories = new Map<string, DebtDetail['history']>()
+const drillHistory = ref<DebtDetail['history'] | null>(null)
+const drillFailed = ref(false)
+let drillSeq = 0
+// Defined before the drill watch below so a person change clears the cache before the drill reloads.
+watch(
+  () => state.person + '|' + debtsRefresh.value,
+  () => {
+    debtHistories.clear()
+    drillHistory.value = null
+  },
+)
+async function loadDrillHistory(id: string) {
+  const seq = ++drillSeq
+  drillFailed.value = false
+  const hit = debtHistories.get(id)
+  if (hit) {
+    drillHistory.value = hit
+    return
+  }
+  drillHistory.value = null
+  try {
+    const d = await fetchDebtDetail(id)
+    if (seq !== drillSeq) return
+    debtHistories.set(id, d.history)
+    drillHistory.value = d.history
+  } catch {
+    if (seq !== drillSeq) return
+    drillFailed.value = true
+  }
+}
+watch(
+  () => drilled.value?.accountId ?? null,
+  (id) => {
+    drillSeq++
+    if (id) void loadDrillHistory(id)
+    else {
+      drillHistory.value = null
+      drillFailed.value = false
+    }
+  },
+  { immediate: true },
+)
+// A drilled debt that is not among the loaded debts (a stale history entry, another person) goes back to the pie.
+watch([() => state.debt, debts], ([id, list]) => {
+  if (id && list && !list.some((d) => d.accountId === id)) setDebt(null)
+})
 // A pane that holds its chart panel joins the shared grid rows (so the two donuts and lists line up); a pane that
 // shows a note, a skeleton or a debt's detail does not.
 const spendingPanelUp = computed(
@@ -197,7 +260,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
 </script>
 
 <template>
-  <section class="budget-section" aria-label="Budget" data-testid="budget-section">
+  <section class="budget-section" :class="sideBySide ? 'sbs' : 'tabs-mode'" aria-label="Budget" data-testid="budget-section">
     <p v-if="access === 'checking'" class="b-note" role="status">Loading Budget…</p>
     <p v-else-if="access === 'denied'" class="b-note" data-testid="budget-unavailable">Budget isn't available for this account</p>
     <p v-else-if="access === 'expired'" class="b-note" role="alert">Your sign-in session expired. Sign in again to open Budget.</p>
@@ -224,11 +287,13 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
           :person="state.person"
           :people="meta.people"
           :today="today"
-          :hidden="state.page === 'overview' ? hiddenPanels : undefined"
+          :hidden="state.page === 'overview' && sideBySide ? hiddenPanels : undefined"
+          :layout="state.page === 'overview' ? layout : undefined"
           :range-hidden="state.page === 'loans'"
           @range="(r) => setRange(r.from, r.to)"
           @person="setPerson"
           @toggle-panel="onTogglePanel"
+          @layout="onLayout"
         />
 
         <LoansPage
@@ -264,10 +329,10 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
           >Debts</button>
         </div>
 
-        <div class="b-grid" :class="{ solo: hiddenPanels.length > 0 }">
+        <div class="b-grid" :class="{ solo: sideBySide && hiddenPanels.length > 0 }">
           <div
             class="b-pane"
-            :class="{ active: state.tab === 'spending', 'is-hidden': hiddenPanels.includes('spending'), 'has-panel': spendingPanelUp }"
+            :class="{ active: state.tab === 'spending', 'is-hidden': sideBySide && hiddenPanels.includes('spending'), 'has-panel': spendingPanelUp }"
             data-pane="spending"
           >
             <div v-if="summaryError" class="b-note" role="alert">
@@ -300,7 +365,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
 
           <div
             class="b-pane"
-            :class="{ active: state.tab === 'debts', 'is-hidden': hiddenPanels.includes('debts'), 'has-panel': debtPanelUp }"
+            :class="{ active: state.tab === 'debts', 'is-hidden': sideBySide && hiddenPanels.includes('debts'), 'has-panel': debtPanelUp }"
             data-pane="debts"
           >
             <div v-if="debtsError" class="b-note" role="alert">
@@ -312,7 +377,19 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
               <div v-for="n in 6" :key="n" class="sk-row" />
             </div>
             <p v-else-if="debts.length === 0" class="b-note" data-testid="budget-empty-debts">No debts recorded</p>
-            <DebtPanel v-else :debts="debts" :dark="dark" :can-edit="canEdit" @open="(id) => setPage('loans', id)" />
+            <DebtPanel
+              v-else
+              :debts="debts"
+              :dark="dark"
+              :can-edit="canEdit"
+              :selected="drilled"
+              :history="drillHistory"
+              :history-failed="drillFailed"
+              @drill="setDebt"
+              @back="setDebt(null)"
+              @open="(id) => setPage('loans', id)"
+              @retry="drilled && loadDrillHistory(drilled.accountId)"
+            />
           </div>
         </div>
 
@@ -390,7 +467,12 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
 .b-table {
   min-width: 0;
 }
-/* Below 1024px one panel at a time (the tabs); from 1024px the two sit side by side and the tabs go. */
+/* Below 1024px, and in Tabs mode at any width, one panel at a time (the tabs). From 1024px in Side by side mode the
+ * two sit side by side and the tabs go. */
+.tabs-mode .b-pane:not(.active),
+.tabs-mode .b-table:not(.active) {
+  display: none;
+}
 @media (max-width: 1023.98px) {
   .b-pane:not(.active),
   .b-table:not(.active) {
@@ -398,7 +480,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
   }
 }
 @media (min-width: 1024px) {
-  .b-tabs {
+  .sbs .b-tabs {
     display: none;
   }
   /* Side by side. The grid has shared rows and each panel takes them as a subgrid, so the same part of each panel
@@ -406,74 +488,78 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
    * debt total), 2 the donut, 3 the hint line, 4 the list, 5 whatever follows the list (the debts without a
    * balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the spacing is
    * margins on the items, so a row with nothing in it (no hint) costs nothing. */
-  .b-grid {
+  .sbs .b-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: auto auto auto auto 1fr;
     column-gap: 16px;
     row-gap: 0;
     align-items: start;
   }
-  .b-pane {
+  .sbs .b-pane {
     grid-row: 1 / -1;
   }
-  .b-pane.has-panel {
+  .sbs .b-pane.has-panel {
     display: grid;
     grid-template-rows: subgrid;
     align-self: stretch;
   }
   /* A hidden chart takes its whole panel away (the table stays); the one left is centred at a readable width. */
-  .b-pane.is-hidden {
+  .sbs .b-pane.is-hidden {
     display: none;
   }
-  .b-grid.solo {
+  .sbs .b-grid.solo {
     grid-template-columns: minmax(0, 720px);
     justify-content: center;
   }
 
   /* The panels' own parts, placed in those rows (the DrillPie wrapper dissolves so its donut, hint and list are
    * placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
-  .b-pane.has-panel :deep(.spending-panel),
-  .b-pane.has-panel :deep(.debt-panel) {
+  .sbs .b-pane.has-panel :deep(.spending-panel),
+  .sbs .b-pane.has-panel :deep(.debt-panel) {
     display: grid;
     grid-template-rows: subgrid;
     grid-row: 1 / -1;
     row-gap: 0;
     align-items: start;
   }
-  .b-pane.has-panel :deep(.sp-body),
-  .b-pane.has-panel :deep(.drill-pie) {
+  .sbs .b-pane.has-panel :deep(.sp-body),
+  .sbs .b-pane.has-panel :deep(.drill-pie) {
     display: contents;
   }
-  .b-pane.has-panel :deep(.sp-top),
-  .b-pane.has-panel :deep(.dp-total) {
+  .sbs .b-pane.has-panel :deep(.sp-top),
+  .sbs .b-pane.has-panel :deep(.dp-total) {
     grid-row: 1;
     align-self: end; /* the two totals share a line at the bottom of the header row */
   }
-  .b-pane.has-panel :deep(.dp-canvas) {
+  .sbs .b-pane.has-panel :deep(.dp-canvas) {
     grid-row: 2;
     justify-self: center;
     align-self: start;
     margin-top: 8px;
   }
-  .b-pane.has-panel :deep(.dp-hint) {
+  .sbs .b-pane.has-panel :deep(.dp-hint) {
     grid-row: 3;
     margin: 12px 0 0;
   }
-  .b-pane.has-panel :deep(.dp-list) {
+  .sbs .b-pane.has-panel :deep(.dp-list) {
     grid-row: 4 / 6; /* spans the row after it, so a longer list than the other panel's does not stretch row 4 */
     margin-top: 12px;
   }
-  .b-pane.has-panel :deep(.debt-panel .dp-list) {
+  .sbs .b-pane.has-panel :deep(.debt-panel .dp-list) {
     grid-row: 4;
   }
-  .b-pane.has-panel :deep(.sp-none),
-  .b-pane.has-panel :deep(.dp-none) {
+  .sbs .b-pane.has-panel :deep(.sp-none),
+  .sbs .b-pane.has-panel :deep(.dp-none) {
     grid-row: 4;
     margin-top: 12px;
   }
-  .b-pane.has-panel :deep(.dp-others) {
+  .sbs .b-pane.has-panel :deep(.dp-others) {
     grid-row: 5;
     margin-top: 12px;
+  }
+  .sbs .b-pane.has-panel :deep(.dp-drilled) {
+    grid-row: 2 / 6; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
+    margin-top: 8px;
   }
 }
 .b-skeleton {

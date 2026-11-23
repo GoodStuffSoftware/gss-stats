@@ -56,6 +56,7 @@ describe('URL round trip', () => {
       tab: 'debts',
       page: 'loans',
       loan: null,
+      debt: null,
     }
     expect(stateFromSearch(searchWithState('', s), TODAY)).toEqual(s)
     const drilled: BudgetViewState = {
