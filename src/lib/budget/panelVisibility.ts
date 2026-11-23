@@ -1,23 +1,25 @@
-// Which Budget charts this viewer chose to hide (desktop, where the spending and debt panels sit side by
-// side). Per viewer, in this browser's localStorage, like the site's other view state (lib/viewerPrefs.ts),
-// and keyed by the signed-in account so two people sharing one browser keep separate choices. The key holds a
-// hash of the address, never the address (BudgetSection gets it from GET /api/budget/access).
+// What is left of the pre-0.83.0 chart choices, and the donut size keys.
+//
+// Until 0.83.0 a viewer chose "Side by side | Tabs" (one localStorage key per device) and hid one chart with the
+// "Show" toggles (one key per signed-in account, holding a hash of the address, never the address). The Budget section
+// now always shows tabs (Spending | Debts | Both; lib/budget/savedView.ts keeps the tab per login on the server), so
+// `migrateLegacyTab` reads those two keys ONCE, maps them to a tab and removes them.
 //
 // localStorage can be missing, blocked or throw (private windows, disabled site data, quota), so every read and
-// write is wrapped: a failed read is "nothing hidden", a failed write is ignored (the choice lasts this visit).
-//
-// Hiding both charts is not allowed: `togglePanel` refuses to hide the last one shown, and a stored value that
-// hides both reads as "nothing hidden", so the section can never be left with no chart and no way back.
+// write is wrapped: a failed read is "nothing saved", a failed write is ignored.
+import type { BudgetTab } from './viewState'
 
 export type PanelId = 'spending' | 'debts'
 export const PANEL_IDS: readonly PanelId[] = ['spending', 'debts']
 
 export const PANELS_KEY_PREFIX = 'gss-stats-budget-panels'
+export const LAYOUT_KEY = 'gss-stats-budget-layout'
 
 /** Minimal slice of the Storage API, so tests can pass a stand-in. */
 export interface PanelStorage {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+  removeItem(key: string): void
 }
 
 /** cyrb53: a small non-cryptographic 53-bit hash, as 14 hex digits. Enough to tell two accounts apart in a key. */
@@ -34,7 +36,7 @@ function hash53(text: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
 }
 
-/** The localStorage key for one account: a hash of the lower-cased address ('anon' while it is not known). */
+/** The old per-account Show key: a hash of the lower-cased address ('anon' while it is not known). */
 export function panelsKey(email: string | null | undefined): string {
   const who = (email ?? '').trim().toLowerCase()
   return `${PANELS_KEY_PREFIX}:${who ? hash53(who) : 'anon'}`
@@ -48,72 +50,67 @@ function defaultStorage(): PanelStorage | null {
   }
 }
 
-/** The charts this account hid. Anything malformed, or a value that hides both, reads as nothing hidden. */
-export function readHiddenPanels(email: string | null | undefined, storage: PanelStorage | null = defaultStorage()): PanelId[] {
-  try {
-    const text = storage?.getItem(panelsKey(email))
-    if (!text) return []
-    const raw: unknown = JSON.parse(text)
-    const list = raw && typeof raw === 'object' ? (raw as { hidden?: unknown }).hidden : undefined
-    if (!Array.isArray(list)) return []
-    const hidden = PANEL_IDS.filter((id) => list.includes(id))
-    return hidden.length >= PANEL_IDS.length ? [] : hidden
-  } catch {
-    return []
-  }
-}
-
-/** Remember the hidden charts for this account. Never throws. */
-export function writeHiddenPanels(email: string | null | undefined, hidden: readonly PanelId[], storage: PanelStorage | null = defaultStorage()): void {
-  try {
-    storage?.setItem(panelsKey(email), JSON.stringify({ hidden: PANEL_IDS.filter((id) => hidden.includes(id)) }))
-  } catch {
-    // storage full, blocked or unavailable: the choice lasts this visit only
-  }
-}
-
-/** Whether `id` may be hidden now: only while the other chart stays shown. */
-export function canHide(hidden: readonly PanelId[], id: PanelId): boolean {
-  return PANEL_IDS.some((p) => p !== id && !hidden.includes(p))
-}
-
-/** The hidden list after the control for `id` is pressed: a hidden chart comes back; a shown one hides unless it
- * is the last one shown (then nothing changes). */
-export function togglePanel(hidden: readonly PanelId[], id: PanelId): PanelId[] {
-  if (hidden.includes(id)) return hidden.filter((p) => p !== id)
-  return canHide(hidden, id) ? [...hidden, id] : [...hidden]
-}
-
-// ── Desktop layout (Side by side | Tabs) ──────────────────────────────────────────────────────────────────
-// How the Spending and Debts panels are arranged from 1024 px up. A choice about THIS device's screen, like the
-// table's column sizing and the phone's Cards | Table switch, so it is kept per device (one localStorage key, not
-// per account and not in the per-login KV prefs). Below 1024 px the tabs always apply and this is ignored.
-export type DesktopLayout = 'side' | 'tabs'
-export const LAYOUT_KEY = 'gss-stats-budget-layout'
-
 // ── Donut size ──────────────────────────────────────────────────────────────────────────────────────────────
-// How big a person made a chart's donut (the DrillPie handle), kept per device like the layout. One size per chart
-// and per mode: a size that suits a chart that has the whole width is too big when it shares the row with the other.
-// DrillPie reads and writes the key; it knows nothing about charts, so the name is built here.
+// How big a person made a chart's donut (the DrillPie handle), kept per device. A chart shown alone keeps its own size
+// (it has the whole width, so its donut is bigger). In Both the two donuts share ONE size key, so dragging either
+// sizes both. DrillPie reads and writes the key; it knows nothing about charts, so the name is built here.
 export const DONUT_KEY_PREFIX = 'gss-stats-budget-donut'
-export function donutSizeKey(chart: PanelId, solo: boolean): string {
-  return `${DONUT_KEY_PREFIX}:${chart}:${solo ? 'solo' : 'split'}`
+export function donutSizeKey(chart: PanelId, both: boolean): string {
+  return both ? `${DONUT_KEY_PREFIX}:both` : `${DONUT_KEY_PREFIX}:${chart}:solo`
 }
 
-/** The saved layout; anything missing, unknown or unreadable is Side by side. Never throws. */
-export function readDesktopLayout(storage: PanelStorage | null = defaultStorage()): DesktopLayout {
-  try {
-    return storage?.getItem(LAYOUT_KEY) === 'tabs' ? 'tabs' : 'side'
-  } catch {
-    return 'side'
-  }
-}
+// ── Migration (once, 0.83.0) ──────────────────────────────────────────────────────────────────────────────────
+const legacyDonutKey = (chart: PanelId) => `${DONUT_KEY_PREFIX}:${chart}:split`
 
-/** Remember the layout on this device. Never throws (a failed write lasts this visit only). */
-export function writeDesktopLayout(layout: DesktopLayout, storage: PanelStorage | null = defaultStorage()): void {
-  try {
-    storage?.setItem(LAYOUT_KEY, layout === 'tabs' ? 'tabs' : 'side')
-  } catch {
-    // storage full, blocked or unavailable: the choice lasts this visit only
+/**
+ * Reads the pre-0.83.0 choices of this browser, maps them and removes them (so it runs once):
+ *  - a hidden chart is the other chart's tab (hide Spending = Debts, hide Debts = Spending);
+ *  - else the layout "Side by side" chosen on purpose is Both;
+ *  - else (Tabs, or nothing was ever chosen) no opinion: null, and the saved or default tab applies.
+ * The side-by-side donut size becomes the Both size (if there is none yet). Never throws.
+ */
+export function migrateLegacyTab(email: string | null | undefined, storage: PanelStorage | null = defaultStorage()): BudgetTab | null {
+  if (!storage) return null
+  const get = (key: string): string | null => {
+    try {
+      return storage.getItem(key)
+    } catch {
+      return null
+    }
   }
+  const remove = (key: string) => {
+    try {
+      storage.removeItem(key)
+    } catch {
+      // blocked or unavailable: it is read again next visit, with the same result
+    }
+  }
+  const showKey = panelsKey(email)
+  let hidden: PanelId[] = []
+  try {
+    const text = get(showKey)
+    const raw: unknown = text ? JSON.parse(text) : null
+    const list = raw && typeof raw === 'object' ? (raw as { hidden?: unknown }).hidden : undefined
+    if (Array.isArray(list)) hidden = PANEL_IDS.filter((id) => list.includes(id))
+  } catch {
+    hidden = []
+  }
+  const layout = get(LAYOUT_KEY)
+  let tab: BudgetTab | null = null
+  if (hidden.length === 1) tab = hidden[0] === 'spending' ? 'debts' : 'spending'
+  else if (layout === 'side') tab = 'both'
+
+  const bothKey = donutSizeKey('spending', true)
+  if (get(bothKey) === null) {
+    const split = get(legacyDonutKey('spending')) ?? get(legacyDonutKey('debts'))
+    if (split !== null) {
+      try {
+        storage.setItem(bothKey, split)
+      } catch {
+        // storage full: the Both size starts automatic
+      }
+    }
+  }
+  for (const key of [showKey, LAYOUT_KEY, legacyDonutKey('spending'), legacyDonutKey('debts')]) remove(key)
+  return tab
 }

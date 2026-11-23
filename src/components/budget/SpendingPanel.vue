@@ -42,6 +42,8 @@ const GROUP_OPTIONS: SegOption[] = [
 const props = defineProps<{
   /** One chart has the whole width: the donut is bigger, beside its legend. */
   solo?: boolean
+  /** Shown in the Both tab: the two donuts share one size (lib/budget/panelVisibility.ts donutSizeKey). */
+  both?: boolean
   summary: SummaryResponse
   categories: Category[]
   path: DrillStep[]
@@ -137,7 +139,7 @@ watch(
         :label="pieLabel"
         resizable
         :wide="solo"
-        :size-key="donutSizeKey('spending', !!solo)"
+        :size-key="donutSizeKey('spending', !!both)"
         @select="onSelect"
       />
       <p v-if="slices.length === 0" class="sp-none" data-testid="spending-none">Nothing above zero here: refunds cover the spending.</p>

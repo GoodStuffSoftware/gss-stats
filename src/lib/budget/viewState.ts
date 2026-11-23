@@ -4,8 +4,8 @@
 //
 // URL (`?section=budget` plus `b_*` params; every other param is left alone, see sectionLink.ts):
 //   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_group=account (omitted = merchant),
-//   b_review=1, b_tab=debts, b_page=loans (Overview is the default and writes nothing; anything but `loans`
-//   reads as Overview).
+//   b_review=1, b_tab=spending|debts|both (always written; absent reads as the width's default tab),
+//   b_page=loans (Overview is the default and writes nothing; anything but `loans` reads as Overview).
 // The drill path (category and store names) is NOT in the URL: the repo is public and URLs reach logs and synced
 // history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
 // still carries a `b_path` has it ignored and removed (searchWithoutPath). Likewise the open loan on the Loans
@@ -20,7 +20,13 @@ import { fitSavedView, VIEW_STEP_KEY_MAX, VIEW_STEP_LABEL_MAX, type SavedView } 
 import { BUDGET_PARAM_PREFIX, PAGE_PARAM, budgetPageOf, budgetSectionOpen, type BudgetPage } from './sectionLink'
 import type { IsoDate, PersonFilter, SummaryQuery, TxnQuery } from './types'
 
-export type BudgetTab = 'spending' | 'debts'
+export type BudgetTab = 'spending' | 'debts' | 'both'
+export const BUDGET_TABS: readonly BudgetTab[] = ['spending', 'debts', 'both']
+/** The tab shown when nothing says otherwise (no link, no history entry, nothing saved): both charts where they fit side
+ * by side (1024 px and wider), Spending below that. */
+export function defaultTabFor(wide: boolean): BudgetTab {
+  return wide ? 'both' : 'spending'
+}
 export type GroupBy = 'merchant' | 'account'
 export interface DrillStep { level: 'category' | 'merchant'; key: string; label: string }
 export interface LoanStep { level: 'loan'; key: string; label: string }
@@ -131,9 +137,9 @@ export function presetOf(from: string, to: string, today: IsoDate): RangePreset 
 }
 
 // ── State <-> URL ─────────────────────────────────────────────────────────────────────────────────────────
-export function defaultViewState(today: IsoDate = todayIso()): BudgetViewState {
+export function defaultViewState(today: IsoDate = todayIso(), tab: BudgetTab = 'spending'): BudgetViewState {
   const r = rangeForPreset('this-month', today)!
-  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab: 'spending', page: 'overview', loan: null, debt: null }
+  return { from: r.from, to: r.to, person: 'all', path: [], groupBy: 'merchant', reviewOnly: false, tab, page: 'overview', loan: null, debt: null }
 }
 
 const P = BUDGET_PARAM_PREFIX
@@ -191,9 +197,9 @@ export function searchWithoutPath(search: string): string {
   return s ? `?${s}` : ''
 }
 
-/** The view state a query string names; anything missing or malformed takes its default. */
-export function stateFromSearch(search: string, today: IsoDate = todayIso()): BudgetViewState {
-  const state = defaultViewState(today)
+/** The view state a query string names; anything missing or malformed takes its default (`tab`: the width's default). */
+export function stateFromSearch(search: string, today: IsoDate = todayIso(), tab: BudgetTab = 'spending'): BudgetViewState {
+  const state = defaultViewState(today, tab)
   let q: URLSearchParams
   try {
     q = new URLSearchParams(search)
@@ -210,7 +216,8 @@ export function stateFromSearch(search: string, today: IsoDate = todayIso()): Bu
   if (person && (person === 'all' || PERSON_RE.test(person))) state.person = person
   state.groupBy = q.get(`${P}group`) === 'account' ? 'account' : 'merchant'
   state.reviewOnly = q.get(`${P}review`) === '1'
-  state.tab = q.get(`${P}tab`) === 'debts' ? 'debts' : 'spending'
+  const tabParam = q.get(`${P}tab`) as BudgetTab | null
+  if (tabParam && BUDGET_TABS.includes(tabParam)) state.tab = tabParam
   state.page = budgetPageOf(search)
   return state
 }
@@ -225,7 +232,7 @@ export function searchWithState(search: string, state: BudgetViewState): string 
   if (state.person !== 'all') q.set(`${P}person`, state.person)
   if (state.groupBy === 'account') q.set(`${P}group`, 'account')
   if (state.reviewOnly) q.set(`${P}review`, '1')
-  if (state.tab === 'debts') q.set(`${P}tab`, 'debts')
+  q.set(`${P}tab`, state.tab) // always written: the default depends on the width, so an omitted tab would not survive a reload
   if (state.page === 'loans') q.set(PAGE_PARAM, 'loans')
   const s = q.toString()
   return s ? `?${s}` : ''
@@ -244,14 +251,13 @@ export function hasExplicitViewState(search: string, historyState: unknown): boo
   return !!(readMark(historyState) || readMark(historyState, LOAN_MARK_KEY) || readMark(historyState, DEBT_MARK_KEY))
 }
 
-/** The state as a saved view. `hidden` is the Show choice (the one hidden chart, kept outside the view state). A path that
- * cannot be saved (a key over the cap) is dropped; the whole block is kept under the byte cap. */
-export function savedViewOfState(state: BudgetViewState, hidden: SavedView['hidden'], today: IsoDate): SavedView {
+/** The state as a saved view. A path that cannot be saved (a key over the cap) is dropped; the whole block is kept under
+ * the byte cap. */
+export function savedViewOfState(state: BudgetViewState, today: IsoDate): SavedView {
   const steps = state.path.slice(0, PATH_LEVELS.length)
   const pathOk = steps.every((s) => s.key.length > 0 && s.key.length <= VIEW_STEP_KEY_MAX)
   const preset = presetOf(state.from, state.to, today)
   return fitSavedView({
-    hidden,
     tab: state.tab,
     page: state.page,
     path: pathOk ? steps.map((s) => ({ level: s.level, key: s.key, label: s.label.slice(0, VIEW_STEP_LABEL_MAX) })) : [],
@@ -336,8 +342,9 @@ export function txnQueryOf(state: BudgetViewState): TxnQuery {
 }
 
 // ── The live state ────────────────────────────────────────────────────────────────────────────────────────
-export function useBudgetViewState(today: IsoDate = todayIso()) {
-  const state = reactive<BudgetViewState>(stateFromSearch(globalThis.location?.search ?? '', today))
+/** `defaultTab` names the tab for a link or entry that does not carry one (the width decides: `defaultTabFor`). */
+export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () => BudgetTab = () => 'spending') {
+  const state = reactive<BudgetViewState>(stateFromSearch(globalThis.location?.search ?? '', today, defaultTab()))
   // Read before anything below (or writeUrl) stamps the address or history: does it already say what to show? Then the
   // saved view is never applied (restoreView).
   let explicit = true
@@ -502,7 +509,7 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     // a debt step of this session: Back/Forward only moves the open debt
     if (e && debtHist && readMark(e.state, DEBT_MARK_KEY)?.s === debtHist.session) return
     // the address names no drill path: whatever is on screen stays (drillHistory.ts sets it from the entry)
-    const { path: _path, page: _page, loan: _loan, debt: _debt, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today)
+    const { path: _path, page: _page, loan: _loan, debt: _debt, ...fromUrl } = stateFromSearch(globalThis.location?.search ?? '', today, defaultTab())
     Object.assign(state, fromUrl)
   }
   /** Back/Forward onto an entry of another page: take the page from the address and the open loan from the entry's
@@ -606,5 +613,12 @@ export function useBudgetViewState(today: IsoDate = todayIso()) {
     if (state.page === 'overview') state.path = p.path
     return { applied: true, pendingStep: state.page === 'overview' ? p.pendingStep : null }
   }
-  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, today }
+  /** The tab a pre-0.83.0 browser left behind (lib/budget/panelVisibility.ts `migrateLegacyTab`), used only when the server
+   * holds no view and the address and history said nothing: same precedence as the saved view. */
+  function applyLegacyTab(tab: BudgetTab): boolean {
+    if (explicit || restored) return false
+    state.tab = tab
+    return true
+  }
+  return { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today }
 }

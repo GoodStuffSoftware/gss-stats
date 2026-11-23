@@ -31,6 +31,8 @@ import BalanceChart from './BalanceChart.vue'
 const props = defineProps<{
   /** One chart has the whole width: the donut is bigger, beside its legend. */
   solo?: boolean
+  /** Shown in the Both tab: the two donuts share one size (lib/budget/panelVisibility.ts donutSizeKey). */
+  both?: boolean
   debts: DebtSlice[]
   dark: boolean
   canEdit: boolean
@@ -89,7 +91,7 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
       label="Debt balances"
       resizable
       :wide="solo"
-      :size-key="donutSizeKey('debts', !!solo)"
+      :size-key="donutSizeKey('debts', !!both)"
       @select="onSelect"
     />
     <p v-else class="dp-none" data-testid="debt-none">No balances yet.</p>
