@@ -19,6 +19,7 @@
 //   open(accountId)    "Details", "Add balance" or "Loan details": BudgetSection opens the Loans page on that loan
 //   retry()            "Retry" after the history failed
 import { computed } from 'vue'
+import { donutSizeKey } from '../../lib/budget/panelVisibility'
 import { debtSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { DebtSlice } from '../../lib/budget/types'
@@ -28,6 +29,8 @@ import Crumbs from '../nav/Crumbs.vue'
 import BalanceChart from './BalanceChart.vue'
 
 const props = defineProps<{
+  /** One chart has the whole width: the donut is bigger, beside its legend. */
+  solo?: boolean
   debts: DebtSlice[]
   dark: boolean
   canEdit: boolean
@@ -84,6 +87,9 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
       :dark="dark"
       :format="formatAmount"
       label="Debt balances"
+      resizable
+      :wide="solo"
+      :size-key="donutSizeKey('debts', !!solo)"
       @select="onSelect"
     />
     <p v-else class="dp-none" data-testid="debt-none">No balances yet.</p>

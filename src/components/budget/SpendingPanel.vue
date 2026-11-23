@@ -25,6 +25,7 @@
 //   review-only(on)        the "Needs review (n)" toggle.
 //   select-purchase(id)    a purchase slice was picked: the table scrolls to and highlights that row.
 import { computed, ref, watch } from 'vue'
+import { donutSizeKey } from '../../lib/budget/panelVisibility'
 import { spendingSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { Category, SummaryResponse } from '../../lib/budget/types'
@@ -39,6 +40,8 @@ const GROUP_OPTIONS: SegOption[] = [
 ]
 
 const props = defineProps<{
+  /** One chart has the whole width: the donut is bigger, beside its legend. */
+  solo?: boolean
   summary: SummaryResponse
   categories: Category[]
   path: DrillStep[]
@@ -132,6 +135,9 @@ watch(
         :deliberate="summary.level !== 'purchase'"
         :format="formatAmount"
         :label="pieLabel"
+        resizable
+        :wide="solo"
+        :size-key="donutSizeKey('spending', !!solo)"
         @select="onSelect"
       />
       <p v-if="slices.length === 0" class="sp-none" data-testid="spending-none">Nothing above zero here: refunds cover the spending.</p>

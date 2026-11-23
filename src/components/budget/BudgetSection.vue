@@ -49,6 +49,9 @@ function onTogglePanel(id: PanelId) {
 // 1024 px up; below that the tabs always apply. In Tabs the hide-a-chart toggles do not apply.
 const layout = ref<DesktopLayout>(readDesktopLayout())
 const sideBySide = computed(() => layout.value === 'side')
+// One chart has the whole width (Tabs, or the other chart hidden): its donut is bigger there, beside its legend, and
+// its size is kept apart from the side-by-side one (lib/budget/panelVisibility.ts donutSizeKey).
+const solo = computed(() => !sideBySide.value || hiddenPanels.value.length > 0)
 function onLayout(l: DesktopLayout) {
   layout.value = l
   writeDesktopLayout(l)
@@ -354,6 +357,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
               :group-by="shownGroupBy"
               :review-only="state.reviewOnly"
               :dark="dark"
+              :solo="solo"
               :refreshing="summaryLoading"
               @drill="onDrill"
               @crumb="popTo"
@@ -382,6 +386,7 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
               :debts="debts"
               :dark="dark"
               :can-edit="canEdit"
+              :solo="solo"
               :selected="drilled"
               :history="drillHistory"
               :history-failed="drillFailed"
@@ -498,66 +503,67 @@ onBeforeUnmount(() => window.removeEventListener('popstate', readUrl))
   .sbs .b-pane {
     grid-row: 1 / -1;
   }
-  .sbs .b-pane.has-panel {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel {
     display: grid;
     grid-template-rows: subgrid;
     align-self: stretch;
   }
-  /* A hidden chart takes its whole panel away (the table stays); the one left is centred at a readable width. */
+  /* A hidden chart takes its whole panel away (the table stays); the one left has the whole width, and its donut
+   * and legend sit side by side there (DrillPie `wide`). */
   .sbs .b-pane.is-hidden {
     display: none;
   }
   .sbs .b-grid.solo {
-    grid-template-columns: minmax(0, 720px);
-    justify-content: center;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
   }
 
   /* The panels' own parts, placed in those rows (the DrillPie wrapper dissolves so its donut, hint and list are
    * placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
-  .sbs .b-pane.has-panel :deep(.spending-panel),
-  .sbs .b-pane.has-panel :deep(.debt-panel) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.spending-panel),
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.debt-panel) {
     display: grid;
     grid-template-rows: subgrid;
     grid-row: 1 / -1;
     row-gap: 0;
     align-items: start;
   }
-  .sbs .b-pane.has-panel :deep(.sp-body),
-  .sbs .b-pane.has-panel :deep(.drill-pie) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-body),
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.drill-pie) {
     display: contents;
   }
-  .sbs .b-pane.has-panel :deep(.sp-top),
-  .sbs .b-pane.has-panel :deep(.dp-total) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-top),
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-total) {
     grid-row: 1;
     align-self: end; /* the two totals share a line at the bottom of the header row */
   }
-  .sbs .b-pane.has-panel :deep(.dp-canvas) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-canvas) {
     grid-row: 2;
     justify-self: center;
     align-self: start;
     margin-top: 8px;
   }
-  .sbs .b-pane.has-panel :deep(.dp-hint) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-hint) {
     grid-row: 3;
     margin: 12px 0 0;
   }
-  .sbs .b-pane.has-panel :deep(.dp-list) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-list) {
     grid-row: 4 / 6; /* spans the row after it, so a longer list than the other panel's does not stretch row 4 */
     margin-top: 12px;
   }
-  .sbs .b-pane.has-panel :deep(.debt-panel .dp-list) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.debt-panel .dp-list) {
     grid-row: 4;
   }
-  .sbs .b-pane.has-panel :deep(.sp-none),
-  .sbs .b-pane.has-panel :deep(.dp-none) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-none),
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-none) {
     grid-row: 4;
     margin-top: 12px;
   }
-  .sbs .b-pane.has-panel :deep(.dp-others) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-others) {
     grid-row: 5;
     margin-top: 12px;
   }
-  .sbs .b-pane.has-panel :deep(.dp-drilled) {
+  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-drilled) {
     grid-row: 2 / 6; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
     margin-top: 8px;
   }

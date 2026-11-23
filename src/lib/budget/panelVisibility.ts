@@ -91,6 +91,15 @@ export function togglePanel(hidden: readonly PanelId[], id: PanelId): PanelId[] 
 export type DesktopLayout = 'side' | 'tabs'
 export const LAYOUT_KEY = 'gss-stats-budget-layout'
 
+// ── Donut size ──────────────────────────────────────────────────────────────────────────────────────────────
+// How big a person made a chart's donut (the DrillPie handle), kept per device like the layout. One size per chart
+// and per mode: a size that suits a chart that has the whole width is too big when it shares the row with the other.
+// DrillPie reads and writes the key; it knows nothing about charts, so the name is built here.
+export const DONUT_KEY_PREFIX = 'gss-stats-budget-donut'
+export function donutSizeKey(chart: PanelId, solo: boolean): string {
+  return `${DONUT_KEY_PREFIX}:${chart}:${solo ? 'solo' : 'split'}`
+}
+
 /** The saved layout; anything missing, unknown or unreadable is Side by side. Never throws. */
 export function readDesktopLayout(storage: PanelStorage | null = defaultStorage()): DesktopLayout {
   try {

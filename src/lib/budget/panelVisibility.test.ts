@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LAYOUT_KEY, canHide, panelsKey, readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type PanelStorage } from './panelVisibility'
+import { DONUT_KEY_PREFIX, LAYOUT_KEY, canHide, donutSizeKey, panelsKey, readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type PanelStorage } from './panelVisibility'
 
 function memory(): PanelStorage & { data: Map<string, string> } {
   const data = new Map<string, string>()
@@ -97,5 +97,16 @@ describe('readDesktopLayout / writeDesktopLayout', () => {
   it('never throws when storage is blocked', () => {
     expect(readDesktopLayout(throwing)).toBe('side')
     expect(() => writeDesktopLayout('tabs', throwing)).not.toThrow()
+  })
+})
+
+describe('donutSizeKey', () => {
+  it('gives each chart and each mode its own key, shared by nobody else', () => {
+    const keys = [donutSizeKey('spending', true), donutSizeKey('spending', false), donutSizeKey('debts', true), donutSizeKey('debts', false)]
+    expect(new Set(keys).size).toBe(4)
+    expect(keys[0]).toBe(`${DONUT_KEY_PREFIX}:spending:solo`)
+    expect(keys[3]).toBe(`${DONUT_KEY_PREFIX}:debts:split`)
+    // not the per-account panel key and not the layout key
+    for (const k of keys) expect([LAYOUT_KEY, panelsKey('a@b.c')]).not.toContain(k)
   })
 })
