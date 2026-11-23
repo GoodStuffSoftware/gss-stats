@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Legend position** — a wide donut has a Legend picker (Left, Right, Below) at the top of its list; the choice is kept per device and chart.
+
+### Changed
+- **Resizing a donut never highlights page text**, and two donuts that share a size (both charts in the same mode) resize together while you drag one.
+- **A donut starts centred** in its box, and legend names wrap instead of being cut off at the edge.
+
 ## [0.82.0] — 2026-11-23
 
 ### Added

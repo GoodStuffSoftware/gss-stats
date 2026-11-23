@@ -171,6 +171,13 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
 - **Shared-component rule.** `DrillPie` stays free of Budget words: `resizable`, `wide` and `sizeKey` are opt-in
   props that default off (other callers render exactly as before), and the caller builds the storage key
   (`donutSizeKey` in `lib/budget/panelVisibility.ts`). A saved size is clamped to the room it has now.
+- **Legend side and shared size (amendment, 2026-11-23).** `DrillPie` also takes `legendSide` and `legendPicker`
+  (both opt-in, `update:legendSide` out); the panel keeps the side per device and chart
+  (`readLegendSide`/`writeLegendSide`, key `gss-stats-budget-legend:<chart>`, no personal data, `right` when the
+  stored value is invalid). Pies that name the same `sizeKey` share one live size (a module store re-read from
+  `localStorage` when a pie appears), so they resize together. A pie whose own box has no width (`display: contents`
+  in a parent grid) never takes the wide layout, and the resize drag locks text selection (body `user-select`,
+  `selectstart`) until the pointer is released, cancelled or the pie unmounts.
 
 ## Remembered view (amendment, 2026-11-23)
 

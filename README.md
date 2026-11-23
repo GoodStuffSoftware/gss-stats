@@ -2795,6 +2795,9 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:<solo|split>` and is clamped to the
   room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);
   without them it renders as before.
+  The wide layout also takes `legendSide` (left, right or below the donut) and `legendPicker` (a Left | Right |
+  Below group at the top of the legend, wide only); the choice is kept per device and chart under
+  `gss-stats-budget-legend:<spending|debts>`.
 - **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
   are ever committed. The seed and the import requests live in a private folder outside the repo, and the
   SQL file the tool writes goes there too. Tests use only the made-up data in
