@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.82.0] — 2026-11-23
+
 ### Added
 - **Budget remembers where you left off** — your Show choice, tab, date range, person, drill and open debt are saved to your login and come back when you reopen Budget on any device; a link or Back/Forward still wins, and the layout and donut sizes stay on the device.
 - **Side by side or Tabs on desktop** — a layout picker beside the Budget filters (from 1024 px) switches between both charts side by side and one chart at a time in tabs; the choice stays on the device.
