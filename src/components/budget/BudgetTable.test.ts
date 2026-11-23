@@ -896,7 +896,7 @@ describe('BudgetTable phone Cards | Table switch', () => {
     await radio(w, 'table').trigger('click')
     expect(radio(w, 'table').attributes('aria-checked')).toBe('true')
     expect(w.find('li[data-row-key="t1"]').exists()).toBe(false)
-    expect(w.get('tr[data-row-key="t1"]').exists()).toBe(true)
+    expect(w.find('tr[data-row-key="t1"]').exists()).toBe(true)
     expect(w.get('.et-scroll').attributes('style')).toContain('overflow-x: auto')
     expect(w.get('table').attributes('style')).toContain('min-width: 880px')
     expect(window.localStorage.getItem('gss-stats-budget-txn-view')).toBe('table')
