@@ -117,3 +117,31 @@ export function writeDesktopLayout(layout: DesktopLayout, storage: PanelStorage 
     // storage full, blocked or unavailable: the choice lasts this visit only
   }
 }
+
+// ── Legend side ─────────────────────────────────────────────────────────────────────────────────────────────
+// Which side of the donut its category list sits on when the chart is wide (left | right | below). Kept per device
+// and per chart, like the layout; the key holds only the chart name.
+export type LegendSide = 'left' | 'right' | 'bottom'
+export const LEGEND_KEY_PREFIX = 'gss-stats-budget-legend'
+export function legendSideKey(chart: PanelId): string {
+  return `${LEGEND_KEY_PREFIX}:${chart}`
+}
+
+/** The saved side; anything missing, unknown or unreadable is 'right'. Never throws. */
+export function readLegendSide(chart: PanelId, storage: PanelStorage | null = defaultStorage()): LegendSide {
+  try {
+    const v = storage?.getItem(legendSideKey(chart))
+    return v === 'left' || v === 'bottom' ? v : 'right'
+  } catch {
+    return 'right'
+  }
+}
+
+/** Remember the side on this device. Never throws (a failed write lasts this visit only). */
+export function writeLegendSide(chart: PanelId, side: LegendSide, storage: PanelStorage | null = defaultStorage()): void {
+  try {
+    storage?.setItem(legendSideKey(chart), side === 'left' || side === 'bottom' ? side : 'right')
+  } catch {
+    // storage full, blocked or unavailable: the choice lasts this visit only
+  }
+}

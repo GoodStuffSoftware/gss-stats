@@ -18,8 +18,8 @@
 //   back()             the "All debts" crumb: back to the pie
 //   open(accountId)    "Details", "Add balance" or "Loan details": BudgetSection opens the Loans page on that loan
 //   retry()            "Retry" after the history failed
-import { computed } from 'vue'
-import { donutSizeKey } from '../../lib/budget/panelVisibility'
+import { computed, ref } from 'vue'
+import { donutSizeKey, readLegendSide, writeLegendSide, type LegendSide } from '../../lib/budget/panelVisibility'
 import { debtSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { DebtSlice } from '../../lib/budget/types'
@@ -48,6 +48,12 @@ const others = computed(() => [...model.value.noBalance, ...model.value.settled]
 
 function onSelect(key: string) {
   emit('drill', key)
+}
+// Which side of the donut the legend takes in the wide layout: remembered on this device.
+const legendSide = ref<LegendSide>(readLegendSide('debts'))
+function onLegendSide(side: LegendSide) {
+  legendSide.value = side
+  writeLegendSide('debts', side)
 }
 const name = (d: DebtSlice) => `${d.label}${d.last4 ? ` ••${d.last4}` : ''}`
 const crumbItems = computed(() => (props.selected ? [{ key: 'all', label: 'All debts' }, { key: props.selected.accountId, label: name(props.selected) }] : []))
@@ -90,6 +96,9 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
       resizable
       :wide="solo"
       :size-key="donutSizeKey('debts', !!solo)"
+      :legend-side="legendSide"
+      legend-picker
+      @update:legend-side="onLegendSide"
       @select="onSelect"
     />
     <p v-else class="dp-none" data-testid="debt-none">No balances yet.</p>

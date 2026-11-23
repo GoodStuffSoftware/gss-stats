@@ -739,6 +739,169 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
     await w.setProps({ sizeKey: 'other' })
     expect(sizeOf(w)).toBe(500)
   })
+
+  describe('legend side', () => {
+    const SIDE_KEY = 'test-donut-side'
+    const picker = (w: VueWrapper) => w.find('[data-testid="legend-picker"]')
+
+    it('lays out beside the donut by default and under it for the bottom side, with a bigger room for the donut there', () => {
+      expect(donutLayout(900, true, 'bottom')).toEqual({ wideOn: true, max: 900, auto: 540 })
+      expect(donutLayout(900, true, 'left')).toEqual(donutLayout(900, true, 'right'))
+      expect(donutLayout(2000, true, 'bottom').auto).toBe(560)
+      expect(donutLayout(639, true, 'bottom').wideOn).toBe(false)
+    })
+
+    it.each(['left', 'right', 'bottom'])('the legendSide prop puts the wide layout on the %s side', async (s) => {
+      roomWidth = 900
+      const w = await sized({ wide: true, legendSide: s })
+      expect(w.classes()).toContain(`dp-side-${s}`)
+    })
+
+    it('an unknown or missing side is the right side', async () => {
+      roomWidth = 900
+      expect((await sized({ wide: true })).classes()).toContain('dp-side-right')
+      expect((await sized({ wide: true, legendSide: 'sideways' })).classes()).toContain('dp-side-right')
+    })
+
+    it('the side shows only in the wide layout', async () => {
+      roomWidth = 600
+      const w = await sized({ wide: true, legendSide: 'left', legendPicker: true })
+      expect(w.classes().some((c) => c.startsWith('dp-side-'))).toBe(false)
+      expect(picker(w).exists()).toBe(false)
+    })
+
+    it('offers the picker only when asked for and wide, marks the side in use, and emits the side pressed', async () => {
+      roomWidth = 900
+      expect(picker(await sized({ wide: true })).exists()).toBe(false) // not asked for
+      expect(picker(await sized({ legendPicker: true })).exists()).toBe(false) // not wide
+      const w = await sized({ wide: true, legendPicker: true, legendSide: 'left' })
+      expect(picker(w).exists()).toBe(true)
+      expect(w.get('[data-testid="legend-side-left"]').attributes('aria-pressed')).toBe('true')
+      expect(w.get('[data-testid="legend-side-right"]').attributes('aria-pressed')).toBe('false')
+      await w.get('[data-testid="legend-side-bottom"]').trigger('click')
+      expect(w.emitted('update:legendSide')).toEqual([['bottom']])
+      await w.setProps({ legendSide: 'bottom' })
+      expect(w.classes()).toContain('dp-side-bottom')
+      expect(w.get('[data-testid="legend-side-bottom"]').attributes('aria-pressed')).toBe('true')
+    })
+
+    it('a pie without the new props is unchanged: no picker, nothing on the page', async () => {
+      roomWidth = 900
+      const w = await sized({ wide: true, resizable: true, sizeKey: SIDE_KEY })
+      expect(picker(w).exists()).toBe(false)
+      expect(w.classes()).toContain('dp-side-right')
+    })
+
+    it('a pie whose own box has no size (display: contents in a parent grid) never takes the wide layout', async () => {
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('drill-pie') ? 0 : 900
+      })
+      const w = await sized({ wide: true, legendPicker: true, legendSide: 'left' })
+      expect(w.classes()).not.toContain('dp-wide')
+      expect(picker(w).exists()).toBe(false)
+    })
+
+    it('starts centred: a pie that is not wide grows twice the pointer movement, and the canvas is centred in the source', async () => {
+      const w = await sized({ resizable: true, sizeKey: SIDE_KEY })
+      const h = w.get('[data-testid="pie-resize"]')
+      const ev = (x: number) => ({ pointerId: 3, pointerType: 'mouse', button: 0, clientX: x, clientY: 0 })
+      await h.trigger('pointerdown', ev(100))
+      await h.trigger('pointermove', ev(150))
+      expect(sizeOf(w)).toBe(400) // 300 + 2 * 50
+      await h.trigger('pointerup', ev(150))
+      expect(source).toMatch(/\.dp-canvas\s*\{[^}]*justify-self:\s*center/)
+    })
+  })
+
+  describe('shared size (two pies, one sizeKey)', () => {
+    it('resize together while one is dragged, reset together, and a pie that appears later takes the saved size', async () => {
+      roomWidth = 900
+      const props = { wide: true, resizable: true, sizeKey: 'test-shared-a' }
+      const a = await sized(props)
+      const b = await sized(props)
+      expect(sizeOf(a)).toBe(360)
+      expect(sizeOf(b)).toBe(360)
+      const h = a.get('[data-testid="pie-resize"]')
+      const ev = (x: number) => ({ pointerId: 5, pointerType: 'mouse', button: 0, clientX: x, clientY: 0 })
+      await h.trigger('pointerdown', ev(100))
+      await h.trigger('pointermove', ev(150))
+      await nextTick()
+      expect(sizeOf(a)).toBe(410)
+      expect(sizeOf(b)).toBe(410) // live, before the pointer is released
+      await h.trigger('pointerup', ev(150))
+      expect(window.localStorage.getItem('test-shared-a')).toBe('410')
+      expect(sizeOf(await sized(props))).toBe(410)
+      await a.get('[data-testid="pie-resize"]').trigger('dblclick')
+      await nextTick()
+      expect(sizeOf(a)).toBe(360)
+      expect(sizeOf(b)).toBe(360)
+    })
+
+    it('a different key stays independent', async () => {
+      roomWidth = 900
+      const a = await sized({ wide: true, resizable: true, sizeKey: 'test-shared-b1' })
+      const b = await sized({ wide: true, resizable: true, sizeKey: 'test-shared-b2' })
+      await a.get('[data-testid="pie-resize"]').trigger('keydown', { key: 'ArrowRight' })
+      await nextTick()
+      expect(sizeOf(a)).toBe(376)
+      expect(sizeOf(b)).toBe(360)
+    })
+  })
+
+  describe('a drag does not select page text', () => {
+    const ev = (x: number, type = 'mouse') => ({ pointerId: 9, pointerType: type, button: 0, clientX: x, clientY: 0 })
+    const selectStart = () => {
+      const e = new Event('selectstart', { cancelable: true })
+      document.dispatchEvent(e)
+      return e.defaultPrevented
+    }
+    const held = async () => {
+      roomWidth = 900
+      const w = await sized({ wide: true, resizable: true, sizeKey: 'test-select' })
+      const h = w.get('[data-testid="pie-resize"]')
+      expect(document.body.style.userSelect).not.toBe('none') // nothing is locked before the press
+      await h.trigger('pointerdown', ev(100))
+      return { w, h }
+    }
+
+    it('locks selection while the handle is held and puts it back on release', async () => {
+      document.body.style.userSelect = 'text'
+      const { h } = await held()
+      expect(document.body.style.userSelect).toBe('none')
+      expect(selectStart()).toBe(true)
+      await h.trigger('pointermove', ev(130))
+      expect(document.body.style.userSelect).toBe('none')
+      await h.trigger('pointerup', ev(130))
+      expect(document.body.style.userSelect).toBe('text')
+      expect(selectStart()).toBe(false)
+      document.body.style.userSelect = ''
+    })
+
+    it('puts it back on pointercancel', async () => {
+      const { h } = await held()
+      expect(document.body.style.userSelect).toBe('none')
+      await h.trigger('pointercancel', ev(100))
+      expect(document.body.style.userSelect).toBe('')
+      expect(selectStart()).toBe(false)
+    })
+
+    it('puts it back when the pie goes away mid-drag', async () => {
+      const { w } = await held()
+      expect(document.body.style.userSelect).toBe('none')
+      w.unmount()
+      mounted.splice(mounted.indexOf(w), 1)
+      expect(document.body.style.userSelect).toBe('')
+      expect(selectStart()).toBe(false)
+    })
+
+    it('a pointer that is not the dragging one does not unlock', async () => {
+      const { h } = await held()
+      await h.trigger('pointerup', { ...ev(100), pointerId: 99 })
+      expect(document.body.style.userSelect).toBe('none')
+      await h.trigger('pointerup', ev(100))
+      expect(document.body.style.userSelect).toBe('')
+    })
+  })
 })
 
 describe('DrillPie legend columns', () => {
