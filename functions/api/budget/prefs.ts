@@ -6,7 +6,7 @@
 //
 //   - `txnView`: the Transactions toolbar (search, filters, sort), stored in the STATS_CONFIG KV under
 //     `budget:prefs:<sha-256 hex of the lower-cased login>`.
-//   - `view`: where the person left the section (the hidden chart, tab, drill path, range, person, page; lib/budget/savedView.ts),
+//   - `view`: where the person left the section (the tab: Spending, Debts or Both, drill path, range, person, page; lib/budget/savedView.ts),
 //     under `budget:prefs-view:<same hash>`. A key of its own, so the two blocks are written independently (no read-modify-write
 //     race when both save as the page closes) and neither can squeeze the other under the cap.
 //     The address is never in a key and nothing the client sends picks the key. The dashboard layout key is never read or written.

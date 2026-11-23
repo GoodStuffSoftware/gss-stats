@@ -457,6 +457,7 @@ describe('BudgetSection: tabs and URL', () => {
   it('Spending and Debts tabs mark the active pane and the URL', async () => {
     route()
     const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
     expect(w.get('[data-pane="spending"]').classes()).toContain('active')
     expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
     await w.get('[data-testid="budget-tab-debts"]').trigger('click')
@@ -517,7 +518,6 @@ describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
     expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
     expect(w.findComponent(DebtPanel).props('both')).toBe(true)
     expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
-    expect(new URLSearchParams(location.search).get('b_tab')).toBe('both')
   })
 
   it('opens on Spending below 1024 px', async () => {
@@ -717,6 +717,7 @@ describe('BudgetSection: debt drill in place', () => {
 describe('BudgetSection: remembers where you left off (saved view per login)', () => {
   let stored: SavedView | null
   let puts: Array<{ view: SavedView; keepalive: boolean | undefined }>
+  let viewLegacy = false // the server says the stored block is a 0.82.0 one that hid nothing
   const prefs = (init: RequestInit | undefined) => {
     if (init?.method === 'PUT') {
       const view = (JSON.parse(String(init.body)) as { view: SavedView }).view
@@ -724,7 +725,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
       puts.push({ view, keepalive: init.keepalive })
       return json({ ok: true })
     }
-    return json({ view: stored })
+    return json({ view: stored, ...(viewLegacy ? { viewLegacy: true } : {}) })
   }
   const saved = (over: Partial<SavedView>): SavedView => ({ ...defaultSavedView(), ...over })
   const summaryParams = (i: number) => new URL(callsTo('/api/budget/summary')[i][0], 'http://x').searchParams
@@ -734,6 +735,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
   beforeEach(() => {
     localStorage.clear()
     stored = null
+    viewLegacy = false
     puts = []
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   })
@@ -743,12 +745,12 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     localStorage.clear()
   })
 
-  it('a plain open puts the saved view back: Show choice, range, person and drill, with one summary fetch', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1', range: { preset: 'last-month' }, path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+  it('a plain open puts the saved view back: tab, range, person and drill, with one summary fetch', async () => {
+    stored = saved({ tab: 'spending', person: 'p1', range: { preset: 'last-month' }, path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
     route({ prefs, summary: byLevel })
     const w = await mountSection()
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    expect(JSON.parse(localStorage.getItem(panelsKey('a@example.com'))!)).toEqual({ hidden: ['debts'] })
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
     expect(callsTo('/api/budget/summary')).toHaveLength(1)
     const q = summaryParams(0)
     expect([q.get('category'), q.get('person'), q.get('from'), q.get('to')]).toEqual(['groceries', 'p1', '2026-10-01', '2026-10-31'])
@@ -757,7 +759,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
   })
 
   it('the toolbar waits for the saved view, so a choice made while it is pending cannot be overwritten', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1' })
+    stored = saved({ tab: 'spending', person: 'p1' })
     let release: (r: Response) => void = () => {}
     const gate = new Promise<Response>((resolve) => {
       release = resolve
@@ -769,7 +771,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     release(json({ view: stored }))
     await flushPromises()
     expect(w.find('[data-testid="budget-person-p2"]').exists()).toBe(true)
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
     expect(summaryParams(0).get('person')).toBe('p1')
   })
 
@@ -785,13 +787,13 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
   })
 
-  it('a link wins over the saved view (the Show choice is not part of a link and still applies)', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1', path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+  it('a link wins over the saved view (a link with no b_tab opens on the width\'s default tab, Both here)', async () => {
+    stored = saved({ tab: 'spending', person: 'p1', path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
     route({ prefs, summary: byLevel })
     const w = await mountSection('/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
     const q = summaryParams(0)
     expect([q.get('person'), q.get('category'), q.get('from')]).toEqual(['p2', null, '2026-10-01'])
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
     await vi.advanceTimersByTimeAsync(2000)
     expect(puts.at(-1)!.view).toMatchObject({ person: 'p2', path: [], range: { preset: 'last-month' } })
   })
@@ -826,13 +828,90 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
     route({ prefs })
     const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
+    expect(localStorage.getItem(panelsKey('a@example.com'))).toBeNull() // read once, then gone
     expect(puts).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(2000)
     expect(puts).toHaveLength(1)
-    expect(puts[0].view).toMatchObject({ hidden: 'spending', person: 'all', path: [] })
+    expect(puts[0].view).toMatchObject({ tab: 'debts', person: 'all', path: [] })
+    expect('hidden' in puts[0].view).toBe(false)
     await vi.advanceTimersByTimeAsync(10000)
     expect(puts).toHaveLength(1)
+  })
+
+  describe('the old Side by side / Show choices carry over once', () => {
+    const SIDE = () => localStorage.setItem(LAYOUT_KEY, 'side')
+
+    it('Side by side over a 0.82.0 view that hid nothing lands on Both, with one write and the old key gone', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+      expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+      expect(localStorage.getItem(LAYOUT_KEY)).toBeNull()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(puts).toHaveLength(1)
+      expect(puts[0].view.tab).toBe('both')
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(puts).toHaveLength(1)
+    })
+
+    it('Tabs layout over that same legacy view keeps the saved tab and writes nothing', async () => {
+      localStorage.setItem(LAYOUT_KEY, 'tabs')
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a legacy view that hid a chart (the server folded it into its single tab) keeps that tab even on Side by side', async () => {
+      SIDE()
+      stored = saved({ tab: 'spending' }) // viewLegacy stays false: only hidden:null blocks carry the flag
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a new view (no legacy flag) keeps its saved tab over Side by side', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a b_tab link beats the Side by side carry-over', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection('/?section=budget&b_tab=spending')
+      expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    })
+
+    it('Side by side with nothing saved lands on Both (the wide default, so nothing to write) and removes the old key', async () => {
+      SIDE()
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+      expect(localStorage.getItem(LAYOUT_KEY)).toBeNull()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
   })
 
   it('nothing hidden and nothing changed: no write at all', async () => {
@@ -847,12 +926,12 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     route({ prefs })
     const w = await mountSection()
     await w.get('[data-testid="budget-person-p2"]').trigger('click')
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
     await vi.advanceTimersByTimeAsync(1900)
     expect(puts).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(200)
     expect(puts).toHaveLength(1)
-    expect(puts[0].view).toMatchObject({ person: 'p2', hidden: 'debts' })
+    expect(puts[0].view).toMatchObject({ person: 'p2', tab: 'debts' })
   })
 
   it('leaving the page (pagehide) sends a queued change now, kept alive', async () => {

@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A Both tab on Budget** — the Spending, Debts and Both tabs sit above the charts at every width; Both shows the two charts together, side by side on a wide screen and stacked on a narrow one. A desktop window opens on Both, a phone on Spending, and the tab you leave on is remembered with your saved view.
+
+### Changed
+- **One way to choose what Budget shows** — the Show toggles and the "Side by side | Tabs" picker are gone; the tabs replace them. Your old choice carries over once: a hidden chart becomes the other chart's tab, and Side by side becomes Both. A link can still name a tab.
+- **Donut sizes** — the size you dragged for two charts side by side now belongs to the Both tab.
+
 ## [0.82.0] — 2026-11-23
 
 ### Added
