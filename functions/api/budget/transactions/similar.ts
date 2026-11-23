@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 //
-// /api/budget/transactions/similar: "apply this category to the merchant's other purchases" (ADR 0007, point 11).
+// /api/budget/transactions/similar: "apply this category to the merchant's other purchases" (ADR 0007, point 12).
 //
 // GET ?id=<transaction id>: the candidates for that row, from ONE statement (SIMILAR_SQL): same merchant, any month, same
 //   kind group, not already in the row's category, newest first, at most MAX_SIMILAR. The URL carries only the opaque id.

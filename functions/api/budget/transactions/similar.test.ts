@@ -194,6 +194,28 @@ describe('POST', () => {
     expect(edits(other)).toEqual([])
   })
 
+  it('a transfer row of the merchant is never given a spending category, and a row already in the category is skipped, not rewritten as manual', async () => {
+    const { src, a } = ordinary()
+    const xfer = shop({ kind: 'transfer', category_id: null, category_source: 'none' })
+    const already = shop({ category_id: 'fuel', category_source: 'rule' })
+    const body = await json<SimilarApplyResponse>(await post({ sourceId: src, categoryId: 'fuel', items: [item(a), item(xfer), item(already)] }))
+    expect(body.changed.map((x) => x.id)).toEqual([a])
+    expect(body.conflicts.map((x) => x.id)).toEqual([xfer, already])
+    expect(row(xfer)).toMatchObject({ category_id: null, category_source: 'none', updated_at: STAMP })
+    expect(edits(xfer)).toEqual([])
+    expect(row(already)).toMatchObject({ category_id: 'fuel', category_source: 'rule', updated_at: STAMP })
+    expect(edits(already)).toEqual([])
+  })
+
+  it('a non-spending source only reaches rows of its own kind', async () => {
+    const t1 = insertTxn(db, { merchant_key: 'transfer-x', kind: 'transfer', category_id: 'fuel' })
+    const t2 = insertTxn(db, { merchant_key: 'transfer-x', kind: 'transfer', category_id: null })
+    const sp = insertTxn(db, { merchant_key: 'transfer-x', kind: 'spend', category_id: null })
+    const body = await json<SimilarApplyResponse>(await post({ sourceId: t1, categoryId: 'fuel', items: [item(t2), item(sp)] }))
+    expect(body.changed.map((x) => x.id)).toEqual([t2])
+    expect(row(sp).category_id).toBeNull()
+  })
+
   it('a null category (uncategorized) is allowed', async () => {
     const { src, a } = ordinary()
     const body = await json<SimilarApplyResponse>(await post({ sourceId: src, categoryId: null, items: [item(a)] }))

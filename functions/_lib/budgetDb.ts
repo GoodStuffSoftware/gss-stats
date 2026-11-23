@@ -690,21 +690,27 @@ export function buildSimilar(rows: Row[]): SimilarResponse | null {
 const SIMILAR_EDITS_SQL = `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
 SELECT t.id, t.category_id, ?2, t.kind, t.kind, NULL, json_extract(j.value, '$.stamp'), ?4
 FROM json_each(?1) j JOIN transactions t ON t.id = json_extract(j.value, '$.id') AND t.updated_at = json_extract(j.value, '$.prev')
-WHERE t.id <> ?3 AND t.merchant_key <> '' AND t.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)`
+WHERE t.id <> ?3 AND t.merchant_key <> '' AND t.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)
+  AND ((SELECT kind FROM transactions WHERE id = ?3) IN (${SPENDING_SQL}) AND t.kind IN (${SPENDING_SQL})
+   OR (SELECT kind FROM transactions WHERE id = ?3) NOT IN (${SPENDING_SQL}) AND t.kind = (SELECT kind FROM transactions WHERE id = ?3))
+  AND t.category_id IS NOT ?2`
 
-/** Same category semantics as PATCH (manual, rule cleared, review settled); the merchant guard keeps this route from recategorizing other merchants' rows. */
+/** Same category semantics as PATCH (manual, rule cleared, review settled). The guards (same merchant, same kind group as SIMILAR_SQL, not already in the target category) are re-checked here so a stale or crafted client list cannot recategorize other merchants' rows, a transfer with a spending category, or rewrite a row already there as manual. */
 const SIMILAR_UPDATE_SQL = `WITH ch AS (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.prev') AS prev, json_extract(value, '$.stamp') AS stamp FROM json_each(?1))
 UPDATE transactions SET category_id = ?2, category_source = 'manual', rule_id = NULL, needs_review = 0, review_reason = NULL, confidence = 100,
   updated_at = ch.stamp, updated_by = ?4
 FROM ch WHERE transactions.id = ch.id AND transactions.updated_at = ch.prev AND transactions.id <> ?3 AND transactions.merchant_key <> ''
-  AND transactions.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)`
+  AND transactions.merchant_key = (SELECT merchant_key FROM transactions WHERE id = ?3)
+  AND ((SELECT kind FROM transactions WHERE id = ?3) IN (${SPENDING_SQL}) AND transactions.kind IN (${SPENDING_SQL})
+   OR (SELECT kind FROM transactions WHERE id = ?3) NOT IN (${SPENDING_SQL}) AND transactions.kind = (SELECT kind FROM transactions WHERE id = ?3))
+  AND transactions.category_id IS NOT ?2`
 
 export interface SimilarItem { id: string; expectedUpdatedAt: string }
 
 /**
  * Applies a category to the ticked rows in ONE batch (one transaction): per chunk an audit insert then the guarded update (the
  * insert first, its join needs the old updated_at), optionally the merchant rule, then a read-back of every item. A row whose stamp
- * moved or that is not a row of the source's merchant is not written; it comes back in `conflicts`.
+ * moved, that is not a candidate (other merchant or kind group, or already in the category) is not written; it comes back in `conflicts`.
  */
 export async function applySimilar(
   db: D1Database, sourceId: string, categoryId: string | null, items: SimilarItem[], who: string, rule: D1PreparedStatement | null, now: number = Date.now(),
