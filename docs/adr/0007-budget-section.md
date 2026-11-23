@@ -139,3 +139,10 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
   database); only each environment's `BUDGET_ALLOWED_EMAILS` decides who can open it. Data loaded for
   Preview is therefore in Production's database too. Production's list stays unset until a production
   go, so the section answers 403 there; setting it opens the data at once.
+
+## Transactions table interaction (amendment)
+
+The table's note is read with a click or tap (a tip, as for the merchant) and edited with a press-and-hold, Enter or F2; an empty note
+shows "Add note". Columns resize by dragging the header edge and the widths stay per device. On a phone the card list is the default and
+a Cards | Table switch (per device) shows the real table scrolled sideways. All of this is `EditableTable` options and one shared
+toggletip composable, no new widget type (ADR 0005).

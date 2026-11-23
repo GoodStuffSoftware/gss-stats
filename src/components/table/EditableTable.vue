@@ -21,6 +21,14 @@ export interface EditableColumn<R> {
   options?: SelectOption[] | ((row: R) => SelectOption[])
   /** Card layout: 1 = first line (default), 2 = second line (default for editor columns), 0 = left out. */
   cardLine?: 0 | 1 | 2
+  /**
+   * How a `text` cell starts editing. `click` (default): a click or tap. `hold`: press and hold (HOLD_MS; moving or scrolling
+   * cancels), or Enter / F2 on the focused cell. A plain click then emits `peek` (the parent shows the full text in a tip)
+   * and focusing it by keyboard emits `peek` too; a click on an EMPTY cell opens the editor, since there is nothing to peek at.
+   */
+  editGesture?: 'click' | 'hold'
+  /** Table layout: the narrowest this column is drawn (px); also the width a reset column returns to in a resized table. */
+  minWidth?: number
 }
 
 /** What a row shows besides its cells. All parts are optional; a row with none shows nothing extra. */
@@ -39,6 +47,40 @@ export interface RowStatus {
 
 /** The container width (px) from which the table layout is used; narrower gets the card list. */
 export const TABLE_MIN_WIDTH = 600
+/** Press-and-hold time (ms) and the movement (px) that cancels it, for `editGesture: 'hold'`. */
+export const HOLD_MS = 500
+export const HOLD_SLOP = 8
+/** Narrowest and widest a resized column can be (px). */
+export const MIN_COL_WIDTH = 60
+export const MAX_COL_WIDTH = 900
+
+/** Saved column widths ({ column key: px }) from this device's localStorage; anything unreadable or out of range is dropped. */
+export function loadColumnWidths(storageKey: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= MIN_COL_WIDTH && v <= MAX_COL_WIDTH) out[k] = Math.round(v)
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+export function saveColumnWidths(storageKey: string, widths: Record<string, number>): void {
+  try {
+    if (Object.keys(widths).length === 0) window.localStorage.removeItem(storageKey)
+    else window.localStorage.setItem(storageKey, JSON.stringify(widths))
+  } catch {
+    // Storage blocked or full: the widths just do not stay.
+  }
+}
+export function clampColumnWidth(w: number): number {
+  return Math.round(Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, w)))
+}
 </script>
 
 <script setup lang="ts" generic="R extends Record<string, any>">
@@ -59,9 +101,15 @@ export const TABLE_MIN_WIDTH = 600
 // field saves. A column can take over its editor with the `editor-<key>` slot (scope: row, column, value,
 // disabled, label, commit) and its read-only look with `cell-<key>`. Not editable: every cell is plain text.
 //
+// Opt-in column gesture (`editGesture: 'hold'` on a text column): click or tap emits `peek`, press-and-hold or Enter / F2
+// edits. Opt-in resizing (`resizable`, with `storageKey`): the table layout gets a drag handle on each header edge (double-click
+// or double-tap resets that column; arrow keys on the focused handle nudge it), widths are kept per device in localStorage
+// under `storageKey`, and the table still fills the width (unsized columns share what is left; saved widths scale up to
+// fill). Both are off by default, so other tables are unchanged.
+//
 // Accessibility: `status` is announced through a polite live region; each editor has an aria-label of the column
 // and the row; a row with an error shows it with role="alert".
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, type FunctionalComponent } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -83,18 +131,45 @@ const props = withDefaults(
     label?: string
     /** Card layout: show each column's label above its value. */
     cardLabels?: boolean
+    /** Table layout: drag handles to resize the columns, kept per device under `storageKey`. */
+    resizable?: boolean
+    /** localStorage key of the saved widths (no personal data in it). Without one, widths last until the page closes. */
+    storageKey?: string
+    /** Table layout: the table is never narrower than this (px); the page scrolls sideways instead (needs `resizable`). */
+    tableMinWidth?: number
   }>(),
-  { editable: false, layout: 'auto', status: '', rowStatus: () => ({}), highlightKey: null, loading: false, label: '', cardLabels: false },
+  {
+    editable: false,
+    layout: 'auto',
+    status: '',
+    rowStatus: () => ({}),
+    highlightKey: null,
+    loading: false,
+    label: '',
+    cardLabels: false,
+    resizable: false,
+    storageKey: '',
+    tableMinWidth: 0,
+  },
 )
 
 const emit = defineEmits<{
   edit: [rowKey: string, field: string, value: string]
   action: [rowKey: string, actionId: string]
+  /** `hold` columns: a click (or keyboard focus) on a cell that has text; `el` is the cell's button. */
+  peek: [rowKey: string, field: string, el: HTMLElement, source: 'click' | 'focus']
+  /** A text editor opened. */
+  'edit-start': [rowKey: string, field: string]
+  /** The component is narrower than TABLE_MIN_WIDTH (the card list is what `auto` would draw). Fires on every change. */
+  narrow: [narrow: boolean]
 }>()
 
 const rootEl = ref<HTMLElement | null>(null)
 const width = ref(typeof window !== 'undefined' ? window.innerWidth : TABLE_MIN_WIDTH)
 const cards = computed(() => props.layout === 'cards' || (props.layout === 'auto' && width.value < TABLE_MIN_WIDTH))
+
+const narrow = computed(() => width.value < TABLE_MIN_WIDTH)
+watch(narrow, (n) => emit('narrow', n), { immediate: true })
 
 function measure() {
   const w = rootEl.value?.clientWidth
@@ -185,6 +260,7 @@ function openText(row: R, col: EditableColumn<R>) {
   if (disabledOf(row)) return
   editing.value = { key: keyOf(row), field: col.key }
   draft.value = textOf(row, col)
+  emit('edit-start', keyOf(row), col.key)
   void nextTick(() => {
     const input = rootRef.value?.querySelector<HTMLInputElement>('input.et-input')
     input?.focus()
@@ -212,6 +288,132 @@ function cancelText(row: R, col: EditableColumn<R>) {
   editing.value = null
   focusTrigger(key, col.key)
 }
+
+// Text-cell gestures (see EditableColumn.editGesture).
+const isHold = (col: EditableColumn<R>) => col.editGesture === 'hold'
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let holdFrom = { x: 0, y: 0 }
+let suppressClick = false
+function holdCancel() {
+  if (holdTimer !== null) clearTimeout(holdTimer)
+  holdTimer = null
+  document.removeEventListener('pointermove', onHoldMove)
+  document.removeEventListener('pointerup', holdCancel)
+  document.removeEventListener('pointercancel', holdCancel)
+  window.removeEventListener('scroll', holdCancel, true)
+}
+function onHoldMove(e: PointerEvent) {
+  if (Math.hypot(e.clientX - holdFrom.x, e.clientY - holdFrom.y) > HOLD_SLOP) holdCancel()
+}
+function holdStart(row: R, col: EditableColumn<R>, e: PointerEvent) {
+  suppressClick = false
+  if (!isHold(col) || disabledOf(row)) return
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  holdCancel()
+  holdFrom = { x: e.clientX, y: e.clientY }
+  document.addEventListener('pointermove', onHoldMove)
+  document.addEventListener('pointerup', holdCancel)
+  document.addEventListener('pointercancel', holdCancel)
+  window.addEventListener('scroll', holdCancel, true)
+  holdTimer = setTimeout(() => {
+    holdCancel()
+    suppressClick = true // the release that follows must not count as a click
+    openText(row, col)
+  }, HOLD_MS)
+}
+function onTextClick(row: R, col: EditableColumn<R>, e: MouseEvent) {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  if (!isHold(col) || !textOf(row, col)) {
+    openText(row, col)
+    return
+  }
+  emit('peek', keyOf(row), col.key, e.currentTarget as HTMLElement, 'click')
+}
+function onTextKey(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
+  if (!isHold(col) || e.altKey || e.ctrlKey || e.metaKey) return
+  if (e.key === 'Enter' || e.key === 'F2') {
+    e.preventDefault() // Enter would otherwise click the button, which only peeks
+    openText(row, col)
+  }
+}
+function onTextFocus(row: R, col: EditableColumn<R>, e: FocusEvent) {
+  if (isHold(col) && textOf(row, col)) emit('peek', keyOf(row), col.key, e.currentTarget as HTMLElement, 'focus')
+}
+function onTextContext(col: EditableColumn<R>, e: Event) {
+  if (isHold(col)) e.preventDefault() // a hold on touch must not open the browser's menu
+}
+onBeforeUnmount(holdCancel)
+
+// Column resizing (only when `resizable`, table layout).
+const widths = ref<Record<string, number>>(props.resizable && props.storageKey ? loadColumnWidths(props.storageKey) : {})
+const sized = computed(() => props.resizable && Object.keys(widths.value).length > 0)
+const DEFAULT_COL_WIDTH = 120
+// The table's scroll box: drawn only when `resizable` (other tables keep the bare <table>). Inline styles, since a
+// functional component's elements do not carry this file's scoped-style id.
+const ScrollBox: FunctionalComponent<{ on: boolean }> = (p, { slots }) =>
+  p.on ? h('div', { class: 'et-scroll et-resizable', style: { overflowX: 'auto' } }, slots.default?.()) : slots.default?.()
+ScrollBox.props = ['on']
+function persistWidths() {
+  if (props.storageKey) saveColumnWidths(props.storageKey, widths.value)
+}
+/** Fix every column at the width it has now, so one can change alone. */
+function freezeWidths() {
+  const ths = rootEl.value?.querySelectorAll<HTMLElement>('thead th') ?? []
+  const next = { ...widths.value }
+  props.columns.forEach((c, i) => {
+    if (next[c.key] == null) next[c.key] = clampColumnWidth(ths[i]?.getBoundingClientRect().width || MIN_COL_WIDTH)
+  })
+  widths.value = next
+}
+let resizing: { key: string; startX: number; startW: number; id: number } | null = null
+function resizeStart(col: EditableColumn<R>, e: PointerEvent) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  freezeWidths()
+  resizing = { key: col.key, startX: e.clientX, startW: widths.value[col.key], id: e.pointerId }
+  try {
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  } catch {
+    // No pointer capture (an old browser, a test): moves are still heard on the handle while the pointer is over it.
+  }
+}
+function resizeMove(e: PointerEvent) {
+  if (!resizing || e.pointerId !== resizing.id) return
+  widths.value = { ...widths.value, [resizing.key]: clampColumnWidth(resizing.startW + e.clientX - resizing.startX) }
+}
+function resizeEnd(e: PointerEvent) {
+  if (!resizing || e.pointerId !== resizing.id) return
+  resizing = null
+  persistWidths()
+}
+function resizeReset(col: EditableColumn<R>) {
+  const next = { ...widths.value }
+  delete next[col.key]
+  // Only this column goes back to its automatic share; the others keep their widths.
+  widths.value = next
+  persistWidths()
+}
+function resizeKey(col: EditableColumn<R>, e: KeyboardEvent) {
+  const step = e.shiftKey ? 48 : 16
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault()
+    freezeWidths()
+    widths.value = { ...widths.value, [col.key]: clampColumnWidth(widths.value[col.key] + (e.key === 'ArrowRight' ? step : -step)) }
+    persistWidths()
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    resizeReset(col)
+  }
+}
+// A column without a saved width (reset, or never dragged) gets its default, so it is never left to share what is
+// left over (which can be nothing once the others are wide).
+const colStyle = (col: EditableColumn<R>) => ({ width: `${widths.value[col.key] ?? col.minWidth ?? DEFAULT_COL_WIDTH}px` })
+const thStyle = (col: EditableColumn<R>) => (col.minWidth ? { minWidth: `${col.minWidth}px` } : undefined)
+const tableStyle = computed(() => (props.resizable && props.tableMinWidth ? { minWidth: `${props.tableMinWidth}px` } : undefined))
 
 // Scroll to and mark the highlighted row, once per key, as soon as that row is in `rows`.
 let scrolledFor: string | null = null
@@ -241,10 +443,32 @@ function rowClass(row: R) {
     <div class="et-sr" role="status" aria-live="polite">{{ status }}</div>
 
     <!-- Table layout -->
-    <table v-if="!cards" class="et-table" :aria-label="label || undefined">
+    <ScrollBox v-if="!cards" :on="resizable">
+    <table class="et-table" :class="{ 'et-fixed': sized }" :style="tableStyle" :aria-label="label || undefined">
+      <colgroup v-if="sized">
+        <col v-for="col in columns" :key="col.key" :style="colStyle(col)" />
+      </colgroup>
       <thead>
         <tr>
-          <th v-for="col in columns" :key="col.key" scope="col" :class="{ 'et-end': col.align === 'end' }">{{ col.label }}</th>
+          <th v-for="col in columns" :key="col.key" scope="col" :class="{ 'et-end': col.align === 'end' }" :style="thStyle(col)">
+            {{ col.label }}
+            <span
+              v-if="resizable"
+              class="et-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              tabindex="0"
+              :aria-label="`Resize ${col.label} column`"
+              data-testid="col-resizer"
+              title="Drag to resize; double-click to reset"
+              @pointerdown="resizeStart(col, $event)"
+              @pointermove="resizeMove"
+              @pointerup="resizeEnd"
+              @pointercancel="resizeEnd"
+              @dblclick.stop="resizeReset(col)"
+              @keydown="resizeKey(col, $event)"
+            />
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -284,10 +508,15 @@ function rowClass(row: R) {
                   v-else
                   type="button"
                   class="et-text-btn"
+                  :class="{ 'et-hold': isHold(col) }"
                   :data-text-trigger="keyOf(row) + '\u0000' + col.key"
                   :disabled="disabledOf(row)"
                   :aria-label="`Edit ${labelOf(row, col)}`"
-                  @click="openText(row, col)"
+                  @click="onTextClick(row, col, $event)"
+                  @pointerdown="holdStart(row, col, $event)"
+                  @keydown="onTextKey(row, col, $event)"
+                  @focus="onTextFocus(row, col, $event)"
+                  @contextmenu="onTextContext(col, $event)"
                 >
                   <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) || '—' }}</slot>
                 </button>
@@ -313,6 +542,7 @@ function rowClass(row: R) {
         </template>
       </tbody>
     </table>
+    </ScrollBox>
 
     <!-- Card layout -->
     <ul v-else class="et-list" :aria-label="label || undefined">
@@ -360,10 +590,15 @@ function rowClass(row: R) {
                 v-else
                 type="button"
                 class="et-text-btn"
+                :class="{ 'et-hold': isHold(col) }"
                 :data-text-trigger="keyOf(row) + '\u0000' + col.key"
                 :disabled="disabledOf(row)"
                 :aria-label="`Edit ${labelOf(row, col)}`"
-                @click="openText(row, col)"
+                @click="onTextClick(row, col, $event)"
+                @pointerdown="holdStart(row, col, $event)"
+                @keydown="onTextKey(row, col, $event)"
+                @focus="onTextFocus(row, col, $event)"
+                @contextmenu="onTextContext(col, $event)"
               >
                 <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) || '—' }}</slot>
               </button>
@@ -429,6 +664,55 @@ function rowClass(row: R) {
   border-bottom: 1px solid rgb(var(--line));
   vertical-align: middle;
 }
+.et-fixed {
+  table-layout: fixed;
+}
+.et-fixed td {
+  overflow-wrap: anywhere;
+}
+.et-resizable .et-table th {
+  position: relative;
+}
+/* The drag handle on a header's right edge: a thin line shows on hover or focus; 10 px wide to grab. */
+.et-resizer {
+  position: absolute;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  z-index: 1;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* A finger needs a wider target than a mouse. */
+@media (pointer: coarse) {
+  .et-resizer {
+    right: -12px;
+    width: 24px;
+  }
+  .et-resizer::after {
+    left: 11px;
+  }
+}
+.et-resizer::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgb(var(--line-2));
+}
+.et-resizer:hover::after,
+.et-resizer:focus-visible::after {
+  background: rgb(var(--amber));
+}
+.et-resizer:focus-visible {
+  outline: none;
+}
 .et-end,
 .et-table th.et-end {
   text-align: right;
@@ -468,6 +752,13 @@ function rowClass(row: R) {
   padding: 2px 4px;
   cursor: text;
   text-align: left;
+}
+/* A hold-to-edit cell: a hold must not select its text or pop the browser's callout. */
+.et-hold {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
 }
 .et-text-btn:hover,
 .et-text-btn:focus-visible {

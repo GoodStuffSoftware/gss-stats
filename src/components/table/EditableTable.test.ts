@@ -3,7 +3,7 @@
 // row notes and actions, the live region and highlighting. It knows nothing of any one data set; made-up rows only.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import EditableTable, { TABLE_MIN_WIDTH, type EditableColumn, type RowStatus } from './EditableTable.vue'
+import EditableTable, { TABLE_MIN_WIDTH, MIN_COL_WIDTH, loadColumnWidths, saveColumnWidths, clampColumnWidth, type EditableColumn, type RowStatus } from './EditableTable.vue'
 import tableSrc from './EditableTable.vue?raw'
 
 interface Row { id: string; name: string; size: string; note: string }
@@ -277,5 +277,195 @@ describe('EditableTable highlight', () => {
 describe('EditableTable is generic', () => {
   it('has no budget words in it', async () => {
     expect(tableSrc).not.toMatch(/budget|categor|merchant|transaction|amount|cents|account/i)
+  })
+})
+
+describe('EditableTable hold-to-edit columns', () => {
+  const HOLD_COLS: EditableColumn<Row>[] = COLUMNS.map((c) => (c.key === 'note' ? { ...c, editGesture: 'hold' as const } : c))
+  const btn = (w: VueWrapper, id: string) => w.get(`tr[data-row-key="${id}"] button.et-text-btn`)
+  afterEach(() => vi.useRealTimers())
+
+  it('a plain column still edits on click, and says nothing about peeking', async () => {
+    const w = await mountTable()
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('input.et-input').exists()).toBe(true)
+    expect(w.emitted('peek')).toBeUndefined()
+  })
+  it('a click on a hold column peeks and does not edit', async () => {
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('input.et-input').exists()).toBe(false)
+    const [rowKey, field, el, source] = w.emitted('peek')![0] as [string, string, HTMLElement, string]
+    expect([rowKey, field, source]).toEqual(['r1', 'note', 'click'])
+    expect(el).toBe(btn(w, 'r1').element)
+  })
+  it('a click on an empty hold cell edits it (there is nothing to peek at)', async () => {
+    const w = await mountTable({ columns: HOLD_COLS, rows: [{ id: 'r1', name: 'Alpha', size: 'small', note: '' }] })
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('input.et-input').exists()).toBe(true)
+    expect(w.emitted('peek')).toBeUndefined()
+  })
+  it('holding for 500 ms edits, emits edit-start, and the release does not peek', async () => {
+    vi.useFakeTimers()
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+    vi.advanceTimersByTime(499)
+    expect(w.find('input.et-input').exists()).toBe(false)
+    vi.advanceTimersByTime(1)
+    await w.vm.$nextTick()
+    expect(w.find('input.et-input').exists()).toBe(true)
+    expect(w.emitted('edit-start')![0]).toEqual(['r1', 'note'])
+    expect(w.emitted('peek')).toBeUndefined()
+  })
+  it('moving more than 8 px, or lifting early, cancels the hold', async () => {
+    vi.useFakeTimers()
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 5, clientY: 20 }))
+    vi.advanceTimersByTime(600)
+    expect(w.find('input.et-input').exists()).toBe(false)
+    await btn(w, 'r1').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 8, clientY: 8 })) // within the slop
+    document.dispatchEvent(new Event('pointerup'))
+    vi.advanceTimersByTime(600)
+    expect(w.find('input.et-input').exists()).toBe(false)
+  })
+  it('a scroll cancels the hold', async () => {
+    vi.useFakeTimers()
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+    window.dispatchEvent(new Event('scroll'))
+    vi.advanceTimersByTime(600)
+    expect(w.find('input.et-input').exists()).toBe(false)
+  })
+  it('Enter and F2 edit; focus peeks', async () => {
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('keydown', { key: 'Enter' })
+    expect(w.find('input.et-input').exists()).toBe(true)
+    await w.get('input.et-input').trigger('keydown', { key: 'Escape' })
+    await btn(w, 'r2').trigger('keydown', { key: 'F2' })
+    expect(w.find('input.et-input').exists()).toBe(true)
+    await w.get('input.et-input').trigger('keydown', { key: 'Escape' })
+    await btn(w, 'r2').trigger('focus')
+    expect(w.emitted('peek')!.at(-1)!.filter((x) => typeof x === 'string')).toEqual(['r2', 'note', 'focus'])
+  })
+})
+
+describe('EditableTable resizable columns', () => {
+  const KEY = 'test-table-cols'
+  beforeEach(() => window.localStorage.clear())
+  const handles = (w: VueWrapper) => w.findAll('[data-testid="col-resizer"]')
+  async function drag(w: VueWrapper, i: number, dx: number) {
+    const h = handles(w)[i]
+    await h.trigger('pointerdown', { button: 0, clientX: 100, pointerId: 1 })
+    await h.trigger('pointermove', { clientX: 100 + dx, pointerId: 1 })
+    await h.trigger('pointerup', { clientX: 100 + dx, pointerId: 1 })
+  }
+  function stubHeaderWidths(px = 150) {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: px, height: 20, top: 0, left: 0, right: px, bottom: 20, x: 0, y: 0, toJSON() {} })
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it('is off by default: no handles, no colgroup, no wrapper scroll', async () => {
+    const w = await mountTable()
+    expect(handles(w)).toHaveLength(0)
+    expect(w.find('colgroup').exists()).toBe(false)
+    expect(w.find('.et-resizable').exists()).toBe(false)
+  })
+  it('shows a handle on each header and no fixed layout until something is sized', async () => {
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    expect(handles(w)).toHaveLength(COLUMNS.length)
+    expect(w.get('table').classes()).not.toContain('et-fixed')
+  })
+  it('dragging sets that column, fixes the layout, and saves per device', async () => {
+    stubHeaderWidths(150)
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    await drag(w, 0, 40)
+    expect(w.get('table').classes()).toContain('et-fixed')
+    const cols = w.findAll('col').map((c) => c.attributes('style'))
+    expect(cols[0]).toContain('190px')
+    expect(cols[1]).toContain('150px')
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ name: 190, size: 150, note: 150 })
+  })
+  it('keeps a minimum width', async () => {
+    stubHeaderWidths(150)
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    await drag(w, 1, -500)
+    expect(JSON.parse(window.localStorage.getItem(KEY)!).size).toBe(MIN_COL_WIDTH)
+  })
+  it('double-click resets that column only', async () => {
+    stubHeaderWidths(150)
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    await drag(w, 0, 40)
+    await handles(w)[0].trigger('dblclick')
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ size: 150, note: 150 })
+  })
+  it('resetting the last sized column goes back to automatic layout and clears the key', async () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ name: 200 }))
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    expect(w.get('table').classes()).toContain('et-fixed')
+    await handles(w)[0].trigger('dblclick')
+    expect(w.get('table').classes()).not.toContain('et-fixed')
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+  it('reads saved widths at mount (and drops junk)', async () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ name: 222, size: 5, note: 'wide', other: 100 }))
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    expect(w.findAll('col')[0].attributes('style')).toContain('222px')
+    // An unsized column gets the default width, never "whatever is left".
+    expect(w.findAll('col')[1].attributes('style')).toContain('120px')
+  })
+  it('a reset column goes back to its minWidth, or the default; the others keep theirs', async () => {
+    stubHeaderWidths(150)
+    const columns = COLUMNS.map((c) => (c.key === 'name' ? { ...c, minWidth: 140 } : c))
+    const w = await mountTable({ resizable: true, storageKey: KEY, columns })
+    await drag(w, 0, 200)
+    await drag(w, 1, 10)
+    await handles(w)[0].trigger('dblclick')
+    expect(w.findAll('col')[0].attributes('style')).toContain('140px')
+    expect(w.findAll('col')[1].attributes('style')).toContain('160px')
+  })
+  it('the scroll box and tableMinWidth exist only when resizable', async () => {
+    const off = await mountTable({ tableMinWidth: 880 })
+    expect(off.find('.et-scroll').exists()).toBe(false)
+    expect(off.get('table').element.parentElement?.classList.contains('et')).toBe(true)
+    const on = await mountTable({ resizable: true, storageKey: KEY, tableMinWidth: 880 })
+    expect(on.get('.et-scroll').attributes('style')).toContain('overflow-x: auto')
+    expect(on.get('table').attributes('style')).toContain('min-width: 880px')
+  })
+  it('emits narrow when the width is under the table minimum', async () => {
+    const wide = await mountTable()
+    expect(wide.emitted('narrow')?.at(-1) ?? [false]).toEqual([false])
+    width = 400
+    const phone = await mountTable({ layout: 'table' })
+    expect(phone.emitted('narrow')?.at(-1)).toEqual([true])
+    expect(phone.find('table').exists()).toBe(true)
+  })
+  it('arrow keys on a handle nudge the column', async () => {
+    stubHeaderWidths(150)
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    await handles(w)[2].trigger('keydown', { key: 'ArrowRight' })
+    expect(JSON.parse(window.localStorage.getItem(KEY)!).note).toBe(166)
+  })
+  it('does not break when localStorage throws', async () => {
+    stubHeaderWidths(150)
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+    const w = await mountTable({ resizable: true, storageKey: KEY })
+    await drag(w, 0, 30)
+    expect(w.findAll('col')[0].attributes('style')).toContain('180px')
+  })
+  it('card layout has no handles', async () => {
+    const w = await mountTable({ resizable: true, storageKey: KEY, layout: 'cards' })
+    expect(handles(w)).toHaveLength(0)
+  })
+  it('loadColumnWidths / saveColumnWidths survive bad storage and bad JSON', () => {
+    window.localStorage.setItem(KEY, '{nope')
+    expect(loadColumnWidths(KEY)).toEqual({})
+    window.localStorage.setItem(KEY, '[1,2]')
+    expect(loadColumnWidths(KEY)).toEqual({})
+    saveColumnWidths(KEY, { a: 100 })
+    expect(loadColumnWidths(KEY)).toEqual({ a: 100 })
+    expect(clampColumnWidth(5)).toBe(MIN_COL_WIDTH)
   })
 })

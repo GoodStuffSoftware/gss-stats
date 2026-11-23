@@ -106,19 +106,40 @@ export function reviewReasonText(reason: string | null | undefined): string | nu
 
 // ---- columns ---------------------------------------------------------------------------------------------
 
+/** How a phone shows the transactions: the card list, or the real table scrolled sideways. Kept per device. */
+export type TxnView = 'cards' | 'table'
+export const TXN_VIEW_KEY = 'gss-stats-budget-txn-view'
+/** The saved choice; anything unreadable (storage blocked, another value) is the card list. */
+export function loadTxnView(): TxnView {
+  try {
+    return window.localStorage.getItem(TXN_VIEW_KEY) === 'table' ? 'table' : 'cards'
+  } catch {
+    return 'cards'
+  }
+}
+export function saveTxnView(v: TxnView): void {
+  try {
+    window.localStorage.setItem(TXN_VIEW_KEY, v)
+  } catch {
+    // Storage blocked or full: the choice just does not stay.
+  }
+}
+/** The table's width on a phone in Table mode (the sum of the column minimums, a little under); the page scrolls sideways past the screen. */
+export const PHONE_TABLE_MIN_WIDTH = 880
+
 export function budgetColumns(categories: Category[], accounts: Account[]): EditableColumn<Txn>[] {
   const accountLabel = (t: Txn) => accounts.find((a) => a.id === t.accountId)?.label ?? ''
   return [
-    { key: 'postedDate', label: 'Date', editor: null, value: (t) => formatDate(t.postedDate) },
-    { key: 'merchant', label: 'Merchant', editor: null, value: (t) => t.merchantName || t.description },
+    { key: 'postedDate', label: 'Date', editor: null, minWidth: 90, value: (t) => formatDate(t.postedDate) },
+    { key: 'merchant', label: 'Merchant', editor: null, minWidth: 160, value: (t) => t.merchantName || t.description },
     // The note (short item descriptions, or what a person typed): text-editable; BudgetTable.vue draws it, clamped.
-    { key: 'note', label: 'Note', editor: 'text', value: (t) => t.note ?? '', cardLine: 2 },
-    { key: 'account', label: 'Account', editor: null, value: accountLabel, cardLine: 2 },
-    { key: 'category', label: 'Category', editor: 'select', value: selectValueFor, options: (t) => categoryOptions(categories, t) },
-    { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (t) => formatAmount(t.amountCents), cardLine: 1 },
+    { key: 'note', label: 'Note', editor: 'text', editGesture: 'hold', minWidth: 180, value: (t) => t.note ?? '', cardLine: 2 },
+    { key: 'account', label: 'Account', editor: null, minWidth: 120, value: accountLabel, cardLine: 2 },
+    { key: 'category', label: 'Category', editor: 'select', minWidth: 170, value: selectValueFor, options: (t) => categoryOptions(categories, t) },
+    { key: 'amountCents', label: 'Amount', editor: null, align: 'end', minWidth: 90, value: (t) => formatAmount(t.amountCents), cardLine: 1 },
     // Included is an on/off switch right of the amount (BudgetTable.vue draws it), not a category. On (the default) = the
     // purchase counts in every spending total, pie and trend.
-    { key: 'included', label: 'Included', editor: null, value: (t) => (t.included === false ? 'Excluded' : 'Included'), cardLine: 1 },
+    { key: 'included', label: 'Included', editor: null, minWidth: 80, value: (t) => (t.included === false ? 'Excluded' : 'Included'), cardLine: 1 },
   ]
 }
 
