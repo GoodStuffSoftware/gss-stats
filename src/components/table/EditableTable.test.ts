@@ -317,6 +317,18 @@ describe('EditableTable hold-to-edit columns', () => {
     expect(w.emitted('edit-start')![0]).toEqual(['r1', 'note'])
     expect(w.emitted('peek')).toBeUndefined()
   })
+  it('after a hold the next click is not swallowed once the pointer is released without one (touch)', async () => {
+    vi.useFakeTimers()
+    const w = await mountTable({ columns: HOLD_COLS })
+    await btn(w, 'r1').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+    vi.advanceTimersByTime(500)
+    await w.vm.$nextTick()
+    document.dispatchEvent(new Event('pointercancel'))
+    vi.advanceTimersByTime(100)
+    await w.get('input.et-input').trigger('keydown', { key: 'Escape' })
+    await btn(w, 'r1').trigger('click') // a keyboard activation: no pointerdown first
+    expect((w.emitted('peek') as unknown[][]).some((e) => e[3] === 'click')).toBe(true)
+  })
   it('moving more than 8 px, or lifting early, cancels the hold', async () => {
     vi.useFakeTimers()
     const w = await mountTable({ columns: HOLD_COLS })
@@ -386,6 +398,17 @@ describe('EditableTable resizable columns', () => {
     expect(cols[0]).toContain('190px')
     expect(cols[1]).toContain('150px')
     expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ name: 190, size: 150, note: 150 })
+  })
+  it('with selectable too, each column freezes at its own width (the checkbox column is skipped)', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const px = this.classList.contains('et-selcell') ? 30 : this.textContent?.includes('Name') ? 210 : 150
+      return { width: px, height: 20, top: 0, left: 0, right: px, bottom: 20, x: 0, y: 0, toJSON() {} } as DOMRect
+    })
+    const w = await mountTable({ resizable: true, storageKey: KEY, selectable: true, selected: new Set<string>() })
+    await drag(w, 1, 0)
+    const saved = JSON.parse(window.localStorage.getItem(KEY)!)
+    expect(saved.name).toBe(210)
+    expect(saved.size).toBe(150)
   })
   it('keeps a minimum width', async () => {
     stubHeaderWidths(150)

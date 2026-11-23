@@ -355,6 +355,10 @@ function holdStart(row: R, col: EditableColumn<R>, e: PointerEvent) {
   holdTimer = setTimeout(() => {
     holdCancel()
     suppressClick = true // the release that follows must not count as a click
+    // ...but only that one: a release with no click after it (touch) must not leave the flag set for a later keyboard activation
+    const clear = () => setTimeout(() => (suppressClick = false), 60)
+    document.addEventListener('pointerup', clear, { once: true })
+    document.addEventListener('pointercancel', clear, { once: true })
     openText(row, col)
   }, HOLD_MS)
 }
@@ -398,7 +402,7 @@ function persistWidths() {
 }
 /** Fix every column at the width it has now, so one can change alone. */
 function freezeWidths() {
-  const ths = rootEl.value?.querySelectorAll<HTMLElement>('thead th') ?? []
+  const ths = rootEl.value?.querySelectorAll<HTMLElement>('thead th:not(.et-selcell)') ?? []
   const next = { ...widths.value }
   props.columns.forEach((c, i) => {
     if (next[c.key] == null) next[c.key] = clampColumnWidth(ths[i]?.getBoundingClientRect().width || MIN_COL_WIDTH)
