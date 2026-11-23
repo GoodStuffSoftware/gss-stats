@@ -486,98 +486,9 @@ describe('BudgetSection: tabs and URL', () => {
   })
 })
 
-describe('BudgetSection: hide a chart', () => {
-  const key = (email: string) => panelsKey(email)
+describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
   beforeEach(() => localStorage.clear())
-
-  it('both shown by default; hiding one hides its panel, keeps the table, and is saved per account', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-    expect(w.find('[data-pane="table"]').exists()).toBe(true)
-    expect(w.get('[data-testid="budget-show-debts"]').attributes('aria-pressed')).toBe('false')
-    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: ['debts'] })
-    expect(localStorage.getItem(key('b@example.com'))).toBeNull()
-  })
-
-  it('restores the saved choice for this account only', async () => {
-    localStorage.setItem(key('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
-    route({ access: () => json({ ok: true, email: 'b@example.com' }) })
-    resetAccessProbe()
-    const other = await mountSection()
-    expect(other.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-  })
-
-  it('a hidden chart comes back with its button; hiding both is not possible', async () => {
-    route()
-    const w = await mountSection()
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-testid="budget-show-spending"]').attributes('disabled')).toBeDefined()
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: [] })
-  })
-
-  it('works when localStorage throws: hides for the visit, nothing breaks', async () => {
-    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('quota')
-    })
-    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked')
-    })
-    try {
-      route()
-      const w = await mountSection()
-      expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-      await w.get('[data-testid="budget-show-debts"]').trigger('click')
-      expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    } finally {
-      set.mockRestore()
-      get.mockRestore()
-    }
-  })
-})
-
-describe('BudgetSection: desktop layout (side by side or tabs), saved per device', () => {
-  beforeEach(() => localStorage.clear())
-
-  it('side by side is the default: the toggles show, the picker marks it', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-testid="budget-section"]').classes()).toContain('sbs')
-    expect(w.get('[data-testid="budget-layout-side"]').attributes('aria-checked')).toBe('true')
-    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(true)
-  })
-
-  it('choosing Tabs saves per device, switches to one pane at a time and drops the hide toggles', async () => {
-    route()
-    const w = await mountSection()
-    await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('tabs')
-    const root = w.get('[data-testid="budget-section"]')
-    expect(root.classes()).toContain('tabs-mode')
-    expect(root.classes()).not.toContain('sbs')
-    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(false)
-    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
-    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
-  })
-
-  it('below 1024 px the charts are solo (their own donut size key) even when Side by side is chosen', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
-    w.unmount()
-    mounted.pop()
+  const narrowMedia = () =>
     vi.stubGlobal('matchMedia', (q: string) => ({
       matches: q.includes('max-width'),
       media: q,
@@ -586,25 +497,82 @@ describe('BudgetSection: desktop layout (side by side or tabs), saved per device
       addListener: () => {},
       removeListener: () => {},
     }))
-    const narrow = await mountSection()
-    expect(narrow.get('[data-testid="budget-section"]').classes()).toContain('sbs')
-    expect(narrow.findComponent(SpendingPanel).props('solo')).toBe(true)
-    expect(narrow.findComponent(DebtPanel).props('solo')).toBe(true)
-  })
 
-  it('opens in the saved layout, and a hidden chart saved for side by side does not hide anything in Tabs', async () => {
-    localStorage.setItem(LAYOUT_KEY, 'tabs')
-    localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['debts'] }))
+  it('the bar has Spending, Debts and Both, and there are no Show toggles or layout picker', async () => {
     route()
     const w = await mountSection()
-    expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    await w.get('[data-testid="budget-layout-side"]').trigger('click')
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('side')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden') // the side-by-side choice is still there
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['Spending', 'Debts', 'Both'])
+    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(false)
+    expect(w.find('[data-testid="budget-layout-side"]').exists()).toBe(false)
   })
 
-  it('works when localStorage throws: the choice holds for the visit', async () => {
+  it('opens on Both at 1024 px and wider: both panes and the table, one shared donut size key', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-section"]').classes()).toContain('is-both')
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('both')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('both')
+  })
+
+  it('opens on Spending below 1024 px', async () => {
+    narrowMedia()
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-testid="budget-section"]').classes()).not.toContain('is-both')
+  })
+
+  it('Spending shows its pane and the table; Debts shows its pane and no table', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(false)
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).not.toContain('active')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('debts')
+    await w.get('[data-testid="budget-tab-both"]').trigger('click')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('both')
+  })
+
+  it('a narrow Both stacks: both panes, the wide (solo) donut layout, the shared Both size key', async () => {
+    narrowMedia()
+    route()
+    const w = await mountSection('/?section=budget&b_tab=both')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('solo')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('both')).toBe(true)
+  })
+
+  it('a link names the tab, and a reload keeps it (the address always carries b_tab)', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_tab=debts')
+    expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+    w.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    const again = await mountSection(`/${location.search}`) // what a reload opens on
+    expect(again.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('works when localStorage throws', async () => {
     const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota')
     })
@@ -614,8 +582,8 @@ describe('BudgetSection: desktop layout (side by side or tabs), saved per device
     try {
       route()
       const w = await mountSection()
-      await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
-      expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
+      await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+      expect(w.get('[data-pane="debts"]').classes()).toContain('active')
     } finally {
       set.mockRestore()
       get.mockRestore()
