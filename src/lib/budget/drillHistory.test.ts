@@ -119,6 +119,62 @@ describe('a second instance with its own markKey', () => {
   })
 })
 
+describe('carry and canGoBack (two instances sharing entries)', () => {
+  const mk = (h: FakeHistory, markKey: string | undefined, opts: { carry?: boolean; canGoBack?: (floor: number) => boolean } = {}) => {
+    const path: Step[] = []
+    const dh = createDrillHistory<Step>({
+      history: h, markKey, drill: (s) => void path.push(s), popTo: (d) => void path.splice(d), path: () => path.slice(), parseSteps, ...opts,
+    })
+    dh.start()
+    return { dh, path }
+  }
+
+  it('a pushed entry keeps the other instance mark with carry, and drops it without', () => {
+    const carried = new FakeHistory()
+    const a = mk(carried, undefined, { carry: true })
+    const b = mk(carried, 'otherKey', { carry: true })
+    a.dh.pathChanged([FUEL])
+    b.dh.pathChanged([SHOP])
+    expect(readMark(carried.state)).toMatchObject({ d: 1 }) // the first instance's mark rode along on the second one's entry
+    expect(readMark(carried.state, 'otherKey')).toMatchObject({ d: 1 })
+
+    const plain = new FakeHistory()
+    const c = mk(plain, undefined)
+    const d = mk(plain, 'otherKey')
+    c.dh.pathChanged([FUEL])
+    d.dh.pathChanged([SHOP])
+    expect(readMark(plain.state)).toBeNull()
+    expect(readMark(plain.state, 'otherKey')).toMatchObject({ d: 1 })
+  })
+
+  it('a cut goes back through history when canGoBack allows it, and re-marks the entry when it does not', () => {
+    const allowed = new FakeHistory()
+    const a = mk(allowed, undefined, { canGoBack: () => true })
+    a.dh.pathChanged([FUEL])
+    const before = allowed.idx
+    a.dh.pathChanged([])
+    expect(allowed.pending).toBe(before - 1) // a go(-1) was issued
+
+    const blocked = new FakeHistory()
+    const b = mk(blocked, undefined, { canGoBack: () => false })
+    b.dh.pathChanged([FUEL])
+    const idx = blocked.idx
+    b.dh.pathChanged([])
+    expect(blocked.pending).toBeNull() // no go()
+    expect(blocked.idx).toBe(idx)
+    expect(readMark(blocked.state)).toMatchObject({ d: 0 }) // the entry the user is on was re-marked at the new depth
+  })
+
+  it('canGoBack is asked with the depth the cut would land on', () => {
+    const h = new FakeHistory()
+    const asked: number[] = []
+    const a = mk(h, undefined, { canGoBack: (floor) => (asked.push(floor), true) })
+    a.dh.pathChanged([FUEL, FOOD])
+    a.dh.pathChanged([FUEL])
+    expect(asked).toEqual([1])
+  })
+})
+
 describe('the mark', () => {
   it('is read back from a state that carries it, and from nothing else', () => {
     expect(readMark(withMark(null, { s: 'a', d: 2 }))).toEqual({ s: 'a', d: 2 })
