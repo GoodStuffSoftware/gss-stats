@@ -10,7 +10,7 @@
 // group_blocked or conflict.
 
 import { budgetJson } from '../../../_lib/budgetAccess'
-import { BudgetHttpError, assertCategory, badRequest, defineRoute, readJsonObject } from '../../../_lib/budgetDb'
+import { BudgetHttpError, badRequest, categoryChecker, defineRoute, readJsonObject } from '../../../_lib/budgetDb'
 import { MAX_APPLY, applyReceipts, type ApplyItem } from '../../../_lib/receiptsDb'
 
 const matchId = (v: unknown, where: string): number => {
@@ -45,7 +45,7 @@ export const onRequest = defineRoute({
       return id
     })
     try {
-      return budgetJson(200, await applyReceipts(db, ctx.data.budgetEmail!, items, reject, (c) => assertCategory(db, c, 'categoryId', true)))
+      return budgetJson(200, await applyReceipts(db, ctx.data.budgetEmail!, items, reject, (ids) => categoryChecker(db, ids, 'categoryId', true)))
     } catch (err) {
       if (err instanceof BudgetHttpError) throw err
       // The one-applied-receipt-per-row unique index lost a race: the batch wrote nothing. A retry reads fresh state.

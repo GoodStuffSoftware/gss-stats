@@ -287,6 +287,26 @@ export async function assertCategory(db: D1Database, categoryId: string | null |
   if (forWrite && Number(hit.archived) === 1) throw badRequest(`${field}: category is archived`)
 }
 
+/**
+ * `assertCategory` for many ids at once: ONE read for the distinct ids, then a synchronous check per id with the same
+ * messages. Reads and writes of one request share it (apply plans up to 100 items on a few categories).
+ */
+export async function categoryChecker(db: D1Database, ids: Iterable<string>, field = 'category', forWrite = false): Promise<(id: string) => void> {
+  const distinct = [...new Set([...ids].filter((id) => id !== UNCATEGORIZED))]
+  const found = new Map<string, number>()
+  if (distinct.length > 0) {
+    const { results } = await db.prepare('SELECT id, archived FROM categories WHERE id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify(distinct)).all<{ id: string; archived: number }>()
+    for (const r of results) found.set(r.id, Number(r.archived))
+  }
+  return (id) => {
+    if (id === UNCATEGORIZED) return
+    const archived = found.get(id)
+    if (archived === undefined) throw badRequest(`${field}: unknown category`)
+    if (forWrite && archived === 1) throw badRequest(`${field}: category is archived`)
+  }
+}
+
 // ---------- query builders -----------------------------------------------------------------------
 
 export interface Built {

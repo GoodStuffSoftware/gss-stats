@@ -166,6 +166,36 @@ describe('apply', () => {
     expect(txn(t).category_id).toBe('dining')
   })
 
+  it('category checks are one read for the whole request, not one per item', async () => {
+    const items: Array<{ matchId: number; expectedUpdatedAt: string; categoryId?: string }> = []
+    const txns: string[] = []
+    for (let n = 1; n <= 30; n++) {
+      const t = autoTxn()
+      txns.push(t)
+      items.push({ matchId: match(receipt(n, CONN_A), t, { group: `e${n}` }), expectedUpdatedAt: NOW, ...(n % 2 === 0 ? { categoryId: 'dining' } : {}) })
+    }
+    db.statements.length = 0
+    const body = await json(await post({ items }))
+    expect(body.applied.length).toBe(30)
+    expect(txn(txns[0]).category_id).toBe('shopping')
+    expect(txn(txns[1]).category_id).toBe('dining')
+    const reads = db.statements.filter((q) => /\bFROM categories\b/i.test(q))
+    expect(reads.length).toBeLessThanOrEqual(1)
+  })
+
+  it('an archived category on a planned item is still 400, and a skipped item never trips the check', async () => {
+    db.exec("UPDATE categories SET archived = 1 WHERE id = 'dining'")
+    const t1 = autoTxn()
+    const t2 = autoTxn()
+    const m1 = match(receipt(1, CONN_A), t1, { group: 'e1' })
+    const stale = match(receipt(2, CONN_A), t2, { group: 'e2' })
+    expect((await post({ items: [{ matchId: m1, expectedUpdatedAt: NOW, categoryId: 'dining' }] })).status).toBe(400)
+    expect(mstat(m1)).toBe('suggested')
+    // a stale item is skipped before any category check, so its bad category does not fail the request
+    const body = await json(await post({ items: [{ matchId: stale, expectedUpdatedAt: '2020-01-01T00:00:00.000Z', categoryId: 'nope' }] }))
+    expect(body.skipped).toEqual([{ matchId: stale, reason: 'stale', currentUpdatedAt: NOW }])
+  })
+
   it('a manual category is kept: link only, categoryKept manual', async () => {
     const t = insertTxn(db, { category_source: 'manual', category_id: 'dining', needs_review: 1, review_reason: 'x' })
     const r = receipt(1, CONN_A)

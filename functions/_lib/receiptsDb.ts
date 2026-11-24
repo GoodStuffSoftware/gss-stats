@@ -194,7 +194,7 @@ WHERE id IN (SELECT receipt_id FROM receipt_matches WHERE id IN (SELECT value FR
 export const READBACK_SQL = `SELECT id, status FROM receipt_matches WHERE id IN (SELECT value FROM json_each(?1))`
 
 export async function applyReceipts(
-  db: D1Database, email: string, items: ApplyItem[], reject: number[], validCategory: (id: string) => Promise<void>, now: number = Date.now(),
+  db: D1Database, email: string, items: ApplyItem[], reject: number[], categoryChecker: (ids: string[]) => Promise<(id: string) => void>, now: number = Date.now(),
 ): Promise<ApplyResult> {
   const ids = [...items.map((i) => i.matchId), ...reject]
   const read = (await db.prepare(APPLY_READ_SQL).bind(JSON.stringify(ids), email).all<Row>()).results
@@ -206,6 +206,16 @@ export async function applyReceipts(
   const splitReceipts = [...new Set(read.filter((r) => r.rule === 'split_charges').map((r) => String(r.receipt_id)))]
   const sibs = splitReceipts.length ? (await db.prepare(GROUP_SIBLINGS_SQL).bind(JSON.stringify(splitReceipts)).all<Row>()).results : []
   const wanted = new Set(items.map((i) => i.matchId))
+
+  // One category read for the whole request: every category an item could write (an upper bound, before the skip checks);
+  // an item that is skipped never trips the check, only a planned one does.
+  const wantedCats = new Set<string>()
+  for (const item of items) {
+    const r = by.get(item.matchId)
+    const c = item.categoryId === undefined ? (r ? s(r.proposed_category_id) : null) : item.categoryId
+    if (c !== null && c !== '' && c !== 'uncategorized') wantedCats.add(c)
+  }
+  const validCategory = await categoryChecker([...wantedCats])
 
   interface Plan { item: ApplyItem; row: Row; cat: string | null; kept: 'manual' | 'person_edit' | null; stamp: string }
   const plans = new Map<number, Plan>()
@@ -225,7 +235,7 @@ export async function applyReceipts(
     let cat: string | null = item.categoryId === undefined ? s(r.proposed_category_id) : item.categoryId
     if (cat === '' || cat === 'uncategorized') cat = null
     if (kept || cat === s(r.category_id)) cat = null
-    if (cat !== null) await validCategory(cat)
+    if (cat !== null) validCategory(cat)
     txnTaken.add(String(r.txn_id))
     receiptTaken.set(String(r.receipt_id), rTag)
     plans.set(item.matchId, { item, row: r, cat, kept, stamp: cat !== null ? nextStamp(String(r.updated_at), now) : String(r.updated_at) })
