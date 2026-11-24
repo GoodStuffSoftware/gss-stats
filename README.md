@@ -2776,7 +2776,9 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   layout picker. The pre-0.83.0 choices are read once by `lib/budget/panelVisibility.ts` (`migrateLegacyTab`) and
   removed: a hidden chart is the other chart's tab, "Side by side" is Both (over a saved 0.82.0 view that hid nothing,
   which the prefs `GET` flags `viewLegacy: true`; a saved view that did hide a chart already folded into its single
-  tab), and the side-by-side donut size becomes the Both size.
+  tab), and the side-by-side donut size becomes the Both size. A wide screen with no saved layout key, or with
+  Tabs and nothing saved, lands on Both (a missing key means side by side, as 0.82.0 read it); a narrow one lands on
+  Spending.
 - **Remembered view.** The tab (Spending, Debts or Both), page, date range (a preset moves with the calendar; "custom" keeps its
   dates), person, review filter, the spending drill (category, then merchant or account) and the open debt are saved
   per login in KV under `budget:prefs-view:<hash>` (`PUT /api/budget/prefs`, body `{ view }`, written two seconds after

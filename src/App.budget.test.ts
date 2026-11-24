@@ -6,6 +6,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import BudgetSection from './components/budget/BudgetSection.vue'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
 import { stubAppFetch } from './testing/appFetch'
 import { loadConfig, saveConfig } from './api'
@@ -196,7 +197,7 @@ describe('App: Budget pages (Overview, Loans)', () => {
     await vi.waitFor(() => expect(w.find('[data-testid="loans-page"]').exists()).toBe(true), { timeout: 4000 })
     const label = () => w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')
     expect(label()).toBe('Budget›Loans')
-    const section = w.findComponent('[data-testid="budget-section"]')
+    const section = w.findComponent(BudgetSection)
     section.vm.$emit('fromOverview', true)
     await flushPromises()
     expect(label()).toBe('Budget')

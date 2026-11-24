@@ -167,7 +167,17 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
   link can name it (`b_tab`). A window opens on Both from 1024 px and on Spending below. The old per-device choices are
   read once and removed: a hidden chart becomes the other chart's tab, and Side by side becomes Both (also over a saved
   0.82.0 view that hid nothing, which the prefs `GET` marks `viewLegacy`). To reverse: restore the picker and Show from
-  0.82.0; the saved `tab` field already accepts all three values.
+  0.82.0; the saved `tab` field already accepts all three values. A rolled-back 0.82.0 reader reads a saved tab
+  `both` as Spending and a block without `hidden` as `hidden: null` (nothing hidden), so a rollback loses only the
+  Both choice. A missing layout key counts as side by side (as 0.82.0's `readDesktopLayout` does), so a wide screen
+  with no key keeps Both over a 0.82.0 view.
+- **Navigation: one Back per crumb, one top-bar label (0.83.0).** `backToOverview` takes a one-second lock so a
+  double click is one `history.back()`, and the "close the open debt" intent is kept in `sessionStorage`
+  (`gss-stats-budget-leave-debt`, ten-second life, no personal data) so it survives a full page load as well as a
+  popstate. `BudgetSection` emits `fromOverview` while a loan opened from the debt drill is showing, and the top bar
+  shows only "Budget" then, because the in-page trail already carries the rest; a loan opened from the Loans list
+  keeps "Budget › Loans". To reverse: drop the `fromOverview` listener in `App.vue` and the lock and storage key in
+  `viewState.ts`.
 - **A debt drills in place.** The Debts pie replaces its slices with that debt's balance and history (a crumb, Back,
   and a "Loan details" link to the Loans page) rather than navigating away. The id is kept in `history.state` only,
   never the URL, so a shared link cannot name a debt; the history is fetched once per debt and cached.

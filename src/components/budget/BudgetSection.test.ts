@@ -611,6 +611,40 @@ describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
     expect(w.findComponent(DebtPanel).props('both')).toBe(true)
   })
 
+  it('crossing 1024 px on Both stacks it (solo) and back: the tab stays Both', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+    await crossTo(true)
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('solo')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    await crossTo(false)
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+  })
+
+  it('a bare open stamps the width default, and a click on Spending writes it so a reload keeps it', async () => {
+    route()
+    const w = await mountSection('/?section=budget') // no b_tab
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('spending')
+    w.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    narrowMedia() // the reload happens on a narrow window: the written tab, not the width default
+    const again = await mountSection(`/${location.search}`)
+    expect(again.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+    wideMedia()
+    again.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    const wideAgain = await mountSection(`/${location.search}`) // still Spending on a wide window
+    expect(wideAgain.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+  })
+
   it('a link names the tab, and a reload keeps it (the address always carries b_tab)', async () => {
     route()
     const w = await mountSection('/?section=budget&b_tab=debts')
@@ -1034,11 +1068,13 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
   }
   const LOANS = { months: [], debts: DEBTS.map((d) => ({ ...d, terms: null, latest: null, promos: [], payments: [] })) }
   const NAME = 'Card A ••0001'
+  // Timers are fake (setTimeout only), so no real clock decides: the stub's traversal fires its popstate on a timer, then the
+  // section's settle timers; each is advanced by hand.
   const go = async (fn: () => void) => {
     fn()
-    await new Promise((r) => setTimeout(r, 30)) // the browser's own popstate, then the section's settle timers
+    await vi.advanceTimersByTimeAsync(1)
     await flushPromises()
-    await new Promise((r) => setTimeout(r, 10))
+    await vi.advanceTimersByTimeAsync(1)
     await flushPromises()
   }
   const trailOf = (w: VueWrapper) => w.findAll('[data-testid="crumbs"] .cr-item').map((i) => i.text().replace('›', '').trim())
@@ -1054,10 +1090,15 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
   // Back and Forward walk a real entry list (happy-dom's history does not: see the helper).
   let stub: HistoryStub
   beforeEach(() => {
+    sessionStorage.clear()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     route({ debtDetail: () => json(DETAIL), loans: () => json(LOANS) })
     stub = installHistoryStub()
   })
-  afterEach(() => stub.restore())
+  afterEach(() => {
+    stub.restore()
+    vi.useRealTimers()
+  })
 
   it('pie > drill > the All debts crumb back; Back and Forward match', async () => {
     const w = await mountSection()
@@ -1137,7 +1178,39 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
     noPersonalData()
   })
 
-  it('a reload keeps the trail: the drill origin and the Loans origin each come back as they were', async () => {
+  it('the header knows where the loan came from: a loan from the drill says so, one from the Loans list does not', async () => {
+    let w = await mountSection()
+    await openFromDrill(w)
+    expect(w.emitted('fromOverview')?.at(-1)).toEqual([true])
+    w.unmount()
+    mounted.pop()
+    w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(w.emitted('fromOverview')?.at(-1)).toEqual([false])
+  })
+
+  it('a double click on the All debts crumb goes back once: still on Budget, no debt open', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    const back = vi.spyOn(history, 'back')
+    const crumb = w.get('[data-testid="crumb-0"]')
+    const first = crumb.trigger('click')
+    const second = crumb.trigger('click') // before the first Back has landed
+    await Promise.all([first, second])
+    await go(() => {})
+    await vi.advanceTimersByTimeAsync(1100) // past the lock: nothing queued a second Back
+    await flushPromises()
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+    expect(new URLSearchParams(location.search).get('section')).toBe('budget')
+    // two clicks, one history.back() (the lock holds); the debt close is its own step, not another crumb Back
+    expect(back).toHaveBeenCalledTimes(1)
+    expect(stub.index).toBe(0)
+    back.mockRestore()
+  })
+
+  it('a reload keeps the trail: the drill origin and the Loans origin each come back as they were; Back and Forward after it match', async () => {
     let w = await mountSection()
     await openFromDrill(w)
     const keptUrl = location.pathname + location.search
@@ -1145,6 +1218,11 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
     w.unmount()
     mounted.pop()
     w = await mountSection(keptUrl, keptState)
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(new URLSearchParams(location.search).get('section')).toBe('budget')
+    await go(() => history.forward())
     expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
     w.unmount()
     mounted.pop()
@@ -1157,6 +1235,10 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
     w.unmount()
     mounted.pop()
     w = await mountSection(loansUrl, loansState)
+    expect(trail(w)).toEqual(['Loans', NAME])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    await go(() => history.forward())
     expect(trail(w)).toEqual(['Loans', NAME])
     noPersonalData()
   })
@@ -1172,6 +1254,11 @@ describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page
     mounted.pop()
     w = await mountSection('/?section=budget&b_page=loans', state)
     expect(trail(w)).toEqual(['Loans', NAME])
+    const at = stub.index
+    await go(() => history.back()) // the deep link is the first entry of this visit: Back leaves it cleanly
+    expect(stub.index).toBeLessThanOrEqual(at)
+    await go(() => history.forward())
+    expect(stub.index).toBeLessThanOrEqual(stub.entries.length - 1)
   })
 
   it('the crumbs are native buttons: focus reaches them, and activating one (what Enter and Space do) goes there', async () => {
