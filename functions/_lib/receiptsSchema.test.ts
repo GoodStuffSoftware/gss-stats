@@ -14,7 +14,8 @@ const M4 = readFileSync('migrations/gss-budget/0004_receipts.sql', 'utf8')
 const NOW = '2026-12-05T10:00:00.000Z'
 
 const NEW_TABLES = ['email_connections', 'receipt_queries', 'receipts', 'receipt_items', 'receipt_matches', 'receipt_sync_runs']
-const NEW_INDEXES = ['idx_conn_status', 'idx_rcpt_review', 'idx_rcpt_open', 'idx_rcpt_retry', 'idx_match_receipt', 'idx_match_txn', 'idx_match_applied', 'idx_runs_conn']
+const NEW_INDEXES = ['idx_rcpt_review', 'idx_rcpt_open', 'idx_rcpt_order', 'idx_rcpt_retry', 'idx_match_txn', 'idx_match_applied', 'idx_runs_conn']
+const NEW_TRIGGERS = ['trg_match_applied_gone']
 
 type Row = Record<string, unknown>
 let db: FakeBudgetDb
@@ -82,7 +83,7 @@ describe('email_connections', () => {
   })
 
   it('rejects an owner_email that is not lower case, has no usable @, or is too long', () => {
-    for (const e of ['User-A@example.com', 'nobody', '@example.com', `${'a'.repeat(250)}@example.com`]) rejects(() => conn({}, CONN, e))
+    for (const e of ['User-A@example.com', 'nobody', '@example.com', `${'a'.repeat(250)}@example.com`, 'a@']) rejects(() => conn({}, CONN, e))
   })
 
   it('rejects a second connection for the same owner_email', () => {
@@ -99,6 +100,10 @@ describe('email_connections', () => {
     rejects(() => conn({ scopes: 'x'.repeat(513) }, CONN2, 'u2@example.com'))
     rejects(() => conn({ token_iv: 'short' }, CONN2, 'u2@example.com'))
     rejects(() => conn({ token_ct: '' }, CONN2, 'u2@example.com'))
+    rejects(() => conn({ scopes: '' }, CONN2, 'u2@example.com'))
+    // base64 only: a plaintext refresh token (with - or _) cannot be written into either column
+    rejects(() => conn({ token_ct: '1//0gFakeRefresh-Token_xyz' }, CONN2, 'u2@example.com'))
+    rejects(() => conn({ token_iv: 'aXZpdml2aXZpa-==' }, CONN2, 'u2@example.com'))
     rejects(() => conn({ token_ct: 'x'.repeat(2049) }, CONN2, 'u2@example.com'))
     rejects(() => conn({ key_id: '0a1b2c3' }, CONN2, 'u2@example.com'))
     rejects(() => conn({ key_id: '0A1B2C3D' }, CONN2, 'u2@example.com'))
@@ -214,6 +219,7 @@ describe('receipts', () => {
     for (const v of ['123', '12345', '12a4', '    ', '']) rejects(() => rcpt({ card_last4: v }))
     for (const v of ['usd', 'US', 'USDX', 'U$D', '']) rejects(() => rcpt({ currency: v }))
     rejects(() => rcpt({ total_cents: -1 }))
+    for (const c of ['total_cents', 'tax_cents', 'shipping_cents']) rejects(() => rcpt({ [c]: 12.5 }))
     rejects(() => rcpt({ total_cents: 100000001 }))
     rejects(() => rcpt({ tax_cents: -1 }))
     rejects(() => rcpt({ tax_cents: 100000001 }))
@@ -246,8 +252,14 @@ describe('receipts', () => {
 
   it('serves the review list, the open window and the retry sweep from their indexes', () => {
     const plan = (sql: string, ...v: unknown[]): string => db.explain(sql, v).join(' | ')
-    expect(plan('SELECT id FROM receipts WHERE connection_id = ? AND status = ? ORDER BY email_date DESC, id LIMIT 20', CONN, 'suggested')).toContain('idx_rcpt_review')
-    expect(plan(`SELECT id FROM receipts WHERE connection_id = ? AND status IN ('unmatched','suggested') AND receipt_date >= ?`, CONN, '2026-11-01')).toContain('idx_rcpt_open')
+    expect(plan('SELECT id FROM receipts WHERE connection_id = ? AND status = ? ORDER BY email_date DESC, id DESC LIMIT 20', CONN, 'suggested')).toContain('idx_rcpt_review')
+    // the keyset page reads the index backward: no temp b-tree sort
+    const keyset = plan('SELECT id FROM receipts WHERE connection_id = ? AND status = ? AND (email_date, id) < (?, ?) ORDER BY email_date DESC, id DESC LIMIT 21', CONN, 'suggested', '2026-11-10', 'r9')
+    expect(keyset).toContain('idx_rcpt_review')
+    expect(keyset).not.toContain('TEMP B-TREE')
+    // the open window uses the coalesce expression, so a NULL receipt_date still falls inside it
+    expect(plan(`SELECT id FROM receipts WHERE connection_id = ? AND status IN ('unmatched','suggested') AND coalesce(receipt_date, email_date) >= ?`, CONN, '2026-11-01')).toContain('idx_rcpt_open')
+    expect(plan('SELECT id FROM receipts WHERE connection_id = ? AND order_ref = ?', CONN, '112-1234567-1234567')).toContain('idx_rcpt_order')
     expect(plan(`SELECT id FROM receipts WHERE connection_id = ? AND status IN ('pending','error') AND attempts < 3`, CONN)).toContain('idx_rcpt_retry')
     expect(plan('SELECT id FROM receipts WHERE connection_id = ? AND gmail_msg_id = ?', CONN, 'abcdef01')).toContain('USING INDEX')
   })
@@ -271,6 +283,8 @@ describe('receipt_items', () => {
     rejects(() => item({ description: 'x'.repeat(121) }))
     rejects(() => item({ amount_cents: 100000001 }))
     rejects(() => item({ quantity: 0 }))
+    rejects(() => item({ amount_cents: 12.5 }))
+    rejects(() => item({ quantity: 1.5 }))
     rejects(() => item({ quantity: 1000 }))
     rejects(() => item({ receipt_id: 'r0000000000000fff' }), 'FOREIGN KEY')
     rejects(() => item({ category_hint: 'no-such-category' }), 'FOREIGN KEY')
@@ -296,6 +310,8 @@ describe('receipt_matches', () => {
     rejects(() => match('r0000000000000001', t2, { status: 'maybe' }))
     rejects(() => match('r0000000000000001', t2, { score: 101 }))
     rejects(() => match('r0000000000000001', t2, { score: -1 }))
+    rejects(() => match('r0000000000000001', t2, { score: 50.5 }))
+    rejects(() => match('r0000000000000001', t2, { share_cents: 5.5 }))
     rejects(() => match('r0000000000000001', t2, { share_cents: 100000001 }))
     rejects(() => match('r0000000000000001', t2, { group_key: '' }))
     rejects(() => match('r0000000000000001', t2, { group_key: 'x'.repeat(41) }))
@@ -325,7 +341,7 @@ describe('receipt_matches', () => {
 
   it('looks up by receipt, and by bank row through indexes', () => {
     const plan = (sql: string, ...v: unknown[]): string => db.explain(sql, v).join(' | ')
-    expect(plan('SELECT * FROM receipt_matches WHERE receipt_id = ? AND status = ?', 'r0000000000000001', 'suggested')).toContain('idx_match_receipt')
+    expect(plan('SELECT * FROM receipt_matches WHERE receipt_id = ? AND status = ?', 'r0000000000000001', 'suggested')).toContain('sqlite_autoindex_receipt_matches_1 (receipt_id=?)')
     expect(plan('SELECT * FROM receipt_matches WHERE txn_id = ? AND status = ?', t1, 'suggested')).toContain('idx_match_txn')
     // the planner may pick idx_match_txn or the partial idx_match_applied for this query; both are a keyed lookup on txn_id (never a scan)
     expect(plan(`SELECT receipt_id FROM receipt_matches WHERE txn_id IN (SELECT value FROM json_each(?)) AND status = 'applied'`, JSON.stringify([t1, t2]))).toMatch(/SEARCH receipt_matches USING INDEX idx_match_(txn|applied) \(txn_id=\?/)
@@ -397,6 +413,29 @@ describe('foreign key cascades', () => {
     expect(count(db, 'receipt_items')).toBe(2)
   })
 
+  it('a deleted transaction resets a receipt whose applied match it took, and only that one', () => {
+    const { t1, t2 } = populate()
+    db.sqlite.exec(`UPDATE receipt_matches SET status = 'applied'`)
+    db.sqlite.exec(`UPDATE receipts SET status = 'applied'`)
+    db.sqlite.prepare('DELETE FROM transactions WHERE id = ?').run(t2)
+    expect(db.get('SELECT status, updated_by FROM receipts WHERE id = ?', 'r0000000000000002')).toEqual({ status: 'unmatched', updated_by: 'db:match_deleted' })
+    expect(db.get('SELECT status FROM receipts WHERE id = ?', 'r0000000000000001')).toEqual({ status: 'applied' })
+    expect(t1).not.toBe(t2)
+  })
+
+  it('a receipt with another applied match stays applied when one of its rows goes; a suggested match changes nothing', () => {
+    const { t1 } = populate()
+    const t3 = insertTxn(db)
+    db.sqlite.exec(`UPDATE receipt_matches SET status = 'applied' WHERE receipt_id = 'r0000000000000001'`)
+    db.sqlite.exec(`UPDATE receipts SET status = 'applied' WHERE id = 'r0000000000000001'`)
+    match('r0000000000000001', t3, { status: 'applied', rule: 'split_charges' })
+    db.sqlite.prepare('DELETE FROM transactions WHERE id = ?').run(t3)
+    expect(db.get('SELECT status FROM receipts WHERE id = ?', 'r0000000000000001')).toEqual({ status: 'applied' })
+    db.sqlite.exec(`UPDATE receipt_matches SET status = 'suggested' WHERE receipt_id = 'r0000000000000001'`)
+    db.sqlite.prepare('DELETE FROM transactions WHERE id = ?').run(t1)
+    expect(db.get('SELECT status FROM receipts WHERE id = ?', 'r0000000000000001')).toEqual({ status: 'applied' })
+  })
+
   it('a deleted receipt removes its items and matches only', () => {
     populate()
     db.sqlite.exec(`DELETE FROM receipts WHERE id = 'r0000000000000001'`)
@@ -434,7 +473,7 @@ describe('0004 over an existing database', () => {
     return d
   }
 
-  it('is additive: it adds exactly the six tables and eight indexes and changes no existing object or row', async () => {
+  it('is additive: it adds exactly the six tables, seven indexes and one trigger and changes no existing object or row', async () => {
     const d = await upTo3()
     const before = objects(d)
     const beforeNames = new Set(before.map((o) => o.name))
@@ -446,7 +485,9 @@ describe('0004 over an existing database', () => {
     const added = after.filter((o) => !beforeNames.has(o.name as string))
     expect(added.filter((o) => o.type === 'table').map((o) => o.name).sort()).toEqual([...NEW_TABLES].sort())
     expect(added.filter((o) => o.type === 'index').map((o) => o.name).sort()).toEqual([...NEW_INDEXES].sort())
-    expect(added.filter((o) => o.type === 'index').every((o) => NEW_TABLES.includes(o.tbl_name as string))).toBe(true)
+    expect(added.filter((o) => o.type === 'trigger').map((o) => o.name).sort()).toEqual([...NEW_TRIGGERS].sort())
+    expect(added.filter((o) => o.type === 'index' || o.type === 'trigger').every((o) => NEW_TABLES.includes(o.tbl_name as string))).toBe(true)
+    expect(added).toHaveLength(NEW_TABLES.length + NEW_INDEXES.length + NEW_TRIGGERS.length)
     expect(dump(d, tables)).toEqual(rows)
   })
 
@@ -469,9 +510,9 @@ describe('rollback and re-apply', () => {
   }
 
   const dropped = (d: DatabaseSync): string[] =>
-    (d.prepare(`SELECT name FROM sqlite_master WHERE name LIKE 'receipt%' OR name LIKE 'email_%' OR name LIKE 'idx_rcpt%' OR name LIKE 'idx_match%' OR name LIKE 'idx_runs%' OR name = 'idx_conn_status'`).all() as { name: string }[]).map((r) => r.name)
+    (d.prepare(`SELECT name FROM sqlite_master WHERE name LIKE 'receipt%' OR name LIKE 'email_%' OR name LIKE 'idx_rcpt%' OR name LIKE 'idx_match%' OR name LIKE 'idx_runs%' OR name LIKE 'trg_match%'`).all() as { name: string }[]).map((r) => r.name)
 
-  it('drops exactly the six tables, in an order the foreign keys allow, as one batch, and un-records the migration', async () => {
+  it('drops exactly the six tables (their indexes and the trigger go with them), in an order the foreign keys allow, as one batch, and un-records the migration', async () => {
     const d = new DatabaseSync(':memory:')
     d.exec('PRAGMA foreign_keys = ON')
     d.exec(M1); d.exec(M2); d.exec(M3)
@@ -489,7 +530,7 @@ describe('rollback and re-apply', () => {
     d.exec(`INSERT INTO receipt_items (receipt_id, seq, description) VALUES ('r0000000000000001', 1, 'Widget')`)
     d.exec(`INSERT INTO receipt_matches (receipt_id, txn_id, group_key, rule, share_cents, score, status, txn_updated_at, created_at) VALUES ('r0000000000000001', '${txn}', 'g', 'exact', 1, 1, 'applied', '${NOW}', '${NOW}')`)
     d.exec(`INSERT INTO receipt_sync_runs (connection_id, trigger, started_at) VALUES ('${CONN}', 'cron', '${NOW}')`)
-    expect(dropped(d).length).toBeGreaterThan(NEW_TABLES.length)
+    expect(dropped(d).length).toBe(NEW_TABLES.length + NEW_INDEXES.length + NEW_TRIGGERS.length)
 
     const stmts = rollbackStatements()
     expect(stmts.filter((s) => s.startsWith('DROP TABLE')).map((s) => s.replace(/^DROP TABLE |;$/g, ''))).toEqual(
