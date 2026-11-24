@@ -119,7 +119,7 @@ describe('failed saves', () => {
 
 describe('saver for the saved view', () => {
   const v0 = defaultSavedView()
-  const v1: SavedView = { ...v0, hidden: 'spending' }
+  const v1: SavedView = { ...v0, tab: 'both' }
   const settle = async () => {
     await Promise.resolve()
     await Promise.resolve()
@@ -183,12 +183,18 @@ describe('server calls', () => {
     expect(await putServerPrefs(a, (async () => { throw new Error('x') }) as unknown as typeof fetch)).toBe(false)
   })
   it('the view GET tells a failed read from nothing saved, and reads the block leniently', async () => {
-    const saved = { ...defaultSavedView(), hidden: 'debts' as const, tab: 'debts' as const }
+    const saved = { ...defaultSavedView(), tab: 'both' as const }
     const got = await fetchServerView((async () => new Response(JSON.stringify({ txnView: b, view: saved }), { status: 200 })) as unknown as typeof fetch)
-    expect(got).toEqual({ ok: true, view: saved })
-    expect(await fetchServerView((async () => new Response('{}', { status: 200 })) as unknown as typeof fetch)).toEqual({ ok: true, view: null })
-    expect(await fetchServerView((async () => new Response('{}', { status: 403 })) as unknown as typeof fetch)).toEqual({ ok: false, view: null })
-    expect(await fetchServerView((async () => { throw new Error('offline') }) as unknown as typeof fetch)).toEqual({ ok: false, view: null })
+    expect(got).toEqual({ ok: true, view: saved, legacyOpen: false })
+    expect(await fetchServerView((async () => new Response('{}', { status: 200 })) as unknown as typeof fetch)).toEqual({ ok: true, view: null, legacyOpen: false })
+    expect(await fetchServerView((async () => new Response('{}', { status: 403 })) as unknown as typeof fetch)).toEqual({ ok: false, view: null, legacyOpen: false })
+    expect(await fetchServerView((async () => { throw new Error('offline') }) as unknown as typeof fetch)).toEqual({ ok: false, view: null, legacyOpen: false })
+  })
+  it('the view GET passes on the legacy-open flag only with a view', async () => {
+    const saved = { ...defaultSavedView(), tab: 'debts' as const }
+    const got = await fetchServerView((async () => new Response(JSON.stringify({ view: saved, viewLegacy: true }), { status: 200 })) as unknown as typeof fetch)
+    expect(got).toEqual({ ok: true, view: saved, legacyOpen: true })
+    expect(await fetchServerView((async () => new Response(JSON.stringify({ viewLegacy: true }), { status: 200 })) as unknown as typeof fetch)).toEqual({ ok: true, view: null, legacyOpen: false })
   })
   it('the view PUT posts only { view } with keepalive, and never throws', async () => {
     const f = vi.fn(async () => new Response('{"ok":true}', { status: 200 }))

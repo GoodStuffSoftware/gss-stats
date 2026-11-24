@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The Budget section frame (docs/adr/0007-budget-section.md): access check, filters, "Spending | Debts"
-// tabs, the panels and the transactions table. It owns the view state (lib/budget/viewState.ts, mirrored
+// The Budget section frame (docs/adr/0007-budget-section.md): access check, filters, "Spending | Debts | Both"
+// tabs (at every width), the panels and the transactions table. It owns the view state (lib/budget/viewState.ts, mirrored
 // to the URL) and ALL fetching, so the panels only draw and report clicks.
 //
 // Order of events: nothing is fetched before GET /api/budget/access (probeAccess, memoized) says 200;
@@ -13,10 +13,10 @@
 // Props: `dark` (site theme), `today` (YYYY-MM-DD, tests only).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
-import { readDesktopLayout, readHiddenPanels, togglePanel, writeDesktopLayout, writeHiddenPanels, type DesktopLayout, type PanelId } from '../../lib/budget/panelVisibility'
+import { migrateLegacyTab, type LegacyChoice } from '../../lib/budget/panelVisibility'
 import type { Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import type { BudgetPage } from '../../lib/budget/sectionLink'
-import { savedViewOfState, useBudgetViewState, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
+import { defaultTabFor, savedViewOfState, useBudgetViewState, type BudgetTab, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import { sameSavedView, type SavedView } from '../../lib/budget/savedView'
 import { createPrefsSaver, fetchServerView, putServerView, VIEW_SAVE_DELAY_MS } from '../../lib/budget/txnPrefsStore'
 import BudgetFilters from './BudgetFilters.vue'
@@ -27,44 +27,36 @@ import SpendingPanel from './SpendingPanel.vue'
 
 const props = defineProps<{ dark: boolean; today?: IsoDate }>()
 
-const { state, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, today: viewToday } =
-  useBudgetViewState(props.today)
-
-// ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
-const access = ref<'checking' | 'ok' | 'denied' | 'expired' | 'error'>('checking')
-const canEdit = computed(() => access.value === 'ok')
-const accountEmail = ref('') // from the access probe: the key of this viewer's saved view choices (hashed there)
-
-// ── Hidden charts (desktop) ───────────────────────────────────────────────────────────────────────────────
-// Which of the two charts this viewer hid, remembered per account in localStorage (lib/budget/panelVisibility.ts).
-// Read once the account is known; at most one chart can be hidden. Below 1024 px the tabs pick the panel and
-// this is ignored.
-const hiddenPanels = ref<PanelId[]>([])
-function onTogglePanel(id: PanelId) {
-  hiddenPanels.value = togglePanel(hiddenPanels.value, id)
-  writeHiddenPanels(accountEmail.value, hiddenPanels.value)
-}
-
-// ── Desktop layout ────────────────────────────────────────────────────────────────────────────────────────
-// "Side by side" (both charts, the table under them) or "Tabs" (the phone layout: one tab at a time, the table
-// under Spending). Chosen in BudgetFilters, remembered per device (lib/budget/panelVisibility.ts), shown from
-// 1024 px up; below that the tabs always apply. In Tabs the hide-a-chart toggles do not apply.
-const layout = ref<DesktopLayout>(readDesktopLayout())
-const sideBySide = computed(() => layout.value === 'side')
-// One chart has the whole width (Tabs, or the other chart hidden): its donut is bigger there, beside its legend, and
-// its size is kept apart from the side-by-side one (lib/budget/panelVisibility.ts donutSizeKey).
-// Below 1024 px the tabs always apply, so one chart has the width there too (and a donut resized in a narrow
-// window is not saved under the side-by-side key).
+// ── Width ─────────────────────────────────────────────────────────────────────────────────────────────────
+// From 1024 px up the tabs are Spending | Debts | Both and Both puts the two charts side by side; below that Both stacks
+// them. The tab nobody chose is Both at 1024 px and wider, Spending below (lib/budget/viewState.ts `defaultTabFor`).
 const narrowQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 1023.98px)') : null
 const narrow = ref(!!narrowQuery?.matches)
 const onNarrow = () => {
   narrow.value = !!narrowQuery?.matches
 }
-const solo = computed(() => narrow.value || !sideBySide.value || hiddenPanels.value.length > 0)
-function onLayout(l: DesktopLayout) {
-  layout.value = l
-  writeDesktopLayout(l)
-}
+
+const { state, loanFrom, backToOverview, summaryQuery, txnQuery, readUrl, setRange, setPerson, pushStep, popTo, setGroupBy, setReviewOnly, setTab, setPage, setDebt, restoreView, applyLegacyTab, today: viewToday } =
+  useBudgetViewState(props.today, () => defaultTabFor(!narrowQuery?.matches))
+
+// ── Access ────────────────────────────────────────────────────────────────────────────────────────────────
+const access = ref<'checking' | 'ok' | 'denied' | 'expired' | 'error'>('checking')
+const canEdit = computed(() => access.value === 'ok')
+const accountEmail = ref('') // from the access probe: the key of the pre-0.83.0 browser choices (hashed there), migrated once
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────────────────────────────────
+// Spending and Debts show one chart; Both shows the two (side by side from 1024 px, stacked below). The table sits under
+// Spending and under Both. A chart that has the whole row (one chart, or Both stacked) draws its donut beside its legend
+// and keeps its own size per chart; in Both side by side the two donuts share ONE size (donutSizeKey).
+const showSpending = computed(() => state.tab !== 'debts')
+const showDebts = computed(() => state.tab !== 'spending')
+const isBoth = computed(() => state.tab === 'both')
+const solo = computed(() => narrow.value || !isBoth.value)
+const TABS: { id: BudgetTab; label: string }[] = [
+  { id: 'spending', label: 'Spending' },
+  { id: 'debts', label: 'Debts' },
+  { id: 'both', label: 'Both' },
+]
 
 // ── Meta ──────────────────────────────────────────────────────────────────────────────────────────────────
 const meta = ref<MetaResponse | null>(null)
@@ -73,16 +65,16 @@ const hasData = computed(() => !!meta.value && (meta.value.range.min !== null ||
 const ready = ref(false) // meta is in and the database has rows: data fetches may start
 
 // ── Saved view (where the viewer left off) ────────────────────────────────────────────────────────────────
-// The Show choice and the drill location are saved per login on the server (lib/budget/savedView.ts, its own KV
+// The tab and the drill location are saved per login on the server (lib/budget/savedView.ts, its own KV
 // key) and put back on a plain open. A link or Back/Forward state always wins (restoreView refuses), and a part
 // that no longer exists falls back quietly. The GET is raced against a short timeout so a slow server never holds
 // the page; the first data fetches wait for the restore so there is no double fetch.
 const VIEW_GET_TIMEOUT_MS = 3000
-type ServerView = { ok: boolean; view: SavedView | null }
+type ServerView = { ok: boolean; view: SavedView | null; legacyOpen: boolean }
 async function loadServerView(): Promise<ServerView> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<ServerView>((resolve) => {
-    timer = setTimeout(() => resolve({ ok: false, view: null }), VIEW_GET_TIMEOUT_MS)
+    timer = setTimeout(() => resolve({ ok: false, view: null, legacyOpen: false }), VIEW_GET_TIMEOUT_MS)
   })
   try {
     return await Promise.race([fetchServerView(), timeout])
@@ -90,11 +82,12 @@ async function loadServerView(): Promise<ServerView> {
     clearTimeout(timer)
   }
 }
-let viewLoaded: Promise<ServerView> = Promise.resolve({ ok: false, view: null })
+let viewLoaded: Promise<ServerView> = Promise.resolve({ ok: false, view: null, legacyOpen: false })
 let pendingStep: DrillStep | null = null // the saved second drill step, checked when the first level's slices load
 const viewSaver = createPrefsSaver<SavedView>(putServerView, VIEW_SAVE_DELAY_MS, undefined, undefined, sameSavedView)
 let viewSaverArmed = false
-const currentView = computed(() => savedViewOfState(state, hiddenPanels.value[0] ?? null, viewToday))
+let legacy: LegacyChoice = { tab: null, side: false } // the pre-0.83.0 Side by side / Show choice of this browser
+const currentView = computed(() => savedViewOfState(state, viewToday))
 watch(currentView, (v) => {
   if (viewSaverArmed) viewSaver.schedule(v)
 })
@@ -103,16 +96,17 @@ async function settleView(m: MetaResponse) {
   const sv = await viewLoaded
   if (viewSaverArmed) return
   if (sv.ok && sv.view) {
-    // The Show choice is the account's, not part of a link: it applies even when a link names the rest.
-    const hidden: PanelId[] = sv.view.hidden ? [sv.view.hidden] : []
-    hiddenPanels.value = hidden
-    writeHiddenPanels(accountEmail.value, hidden) // the first-paint cache follows the server
     const r = restoreView(sv.view, { categoryIds: [...m.categories.map((c) => c.id), '__none__'], personIds: m.people.map((p) => p.id) })
     pendingStep = r.pendingStep
   }
-  // Baseline = what the server holds. With nothing saved it is the current view minus the local Show choice, so a
-  // local choice (the old localStorage one) is sent once, and an untouched view sends nothing.
-  viewSaver.setBaseline(sv.ok ? (sv.view ?? { ...currentView.value, hidden: null }) : null)
+  // Baseline = what the server holds. With nothing saved it is the view as it stands before the pre-0.83.0 browser
+  // choice is applied, so that choice (mapped to a tab) is sent once, and an untouched view sends nothing.
+  // A saved 0.82.0 view that hid nothing carries only the phone tab: a browser that was on Side by side lands on Both
+  // over it. A legacy view that hid a chart already folded into its single tab; a new view keeps its saved tab.
+  const baseline = sv.view ?? currentView.value
+  if (!sv.view && legacy.tab) applyLegacyTab(legacy.tab)
+  else if (sv.view && sv.legacyOpen && legacy.side && !narrow.value) applyLegacyTab('both', true)
+  viewSaver.setBaseline(sv.ok ? baseline : null)
   viewSaverArmed = true
   if (sv.ok) viewSaver.schedule(currentView.value)
 }
@@ -137,7 +131,8 @@ async function init() {
   access.value = probed.state
   if (probed.state === 'ok') {
     accountEmail.value = probed.email
-    hiddenPanels.value = readHiddenPanels(probed.email)
+    const found = migrateLegacyTab(probed.email) // read once, then the old keys are gone
+    legacy = { tab: found.tab ?? legacy.tab, side: found.side || legacy.side }
     viewLoaded = loadServerView()
     await loadMeta()
   }
@@ -314,8 +309,11 @@ function onCategoryAdded(c: Category) {
 // ── Pages ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Overview or Loans (lib/budget/viewState.ts keeps it in `b_page`). The shell tells App when it changes (the top
 // bar crumbs and the remembered page) and App asks for a page through `goPage` (the ☰ menu, the crumbs).
-const emit = defineEmits<{ page: [page: BudgetPage] }>()
+// `fromOverview`: the open loan was reached from the Overview debt views, so the page's own trail starts at "All debts"
+// and the top bar reads just "Budget" (one trail, not two that disagree). The Loans list's detail keeps "Budget > Loans".
+const emit = defineEmits<{ page: [page: BudgetPage]; fromOverview: [on: boolean] }>()
 watch(() => state.page, (p) => emit('page', p), { immediate: true })
+watch(() => state.page === 'loans' && !!state.loan && !!loanFrom.value, (on) => emit('fromOverview', on), { immediate: true })
 function goPage(page: BudgetPage) {
   setPage(page)
 }
@@ -342,7 +340,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="budget-section" :class="sideBySide ? 'sbs' : 'tabs-mode'" aria-label="Budget" data-testid="budget-section">
+  <section class="budget-section" :class="{ 'is-both': isBoth }" aria-label="Budget" data-testid="budget-section">
     <p v-if="access === 'checking'" class="b-note" role="status">Loading Budget…</p>
     <p v-else-if="access === 'denied'" class="b-note" data-testid="budget-unavailable">Budget isn't available for this account</p>
     <p v-else-if="access === 'expired'" class="b-note" role="alert">Your sign-in session expired. Sign in again to open Budget.</p>
@@ -369,52 +367,43 @@ onBeforeUnmount(() => {
           :person="state.person"
           :people="meta.people"
           :today="today"
-          :hidden="state.page === 'overview' && sideBySide ? hiddenPanels : undefined"
-          :layout="state.page === 'overview' ? layout : undefined"
           :range-hidden="state.page === 'loans'"
           @range="(r) => setRange(r.from, r.to)"
           @person="setPerson"
-          @toggle-panel="onTogglePanel"
-          @layout="onLayout"
         />
 
         <LoansPage
           v-if="state.page === 'loans'"
           :person="state.person === 'all' ? null : state.person"
           :loan-id="state.loan"
+          :from="loanFrom"
           :can-edit="canEdit"
           :dark="dark"
           @open="(id) => setPage('loans', id)"
           @close="setPage('loans')"
+          @leave="backToOverview"
           @saved="onDebtSaved"
         />
 
         <template v-else>
         <div class="b-tabs" role="tablist" aria-label="Budget view">
           <button
+            v-for="t in TABS"
+            :key="t.id"
             type="button"
             role="tab"
             class="b-tab"
-            :class="{ on: state.tab === 'spending' }"
-            :aria-selected="state.tab === 'spending'"
-            data-testid="budget-tab-spending"
-            @click="setTab('spending')"
-          >Spending</button>
-          <button
-            type="button"
-            role="tab"
-            class="b-tab"
-            :class="{ on: state.tab === 'debts' }"
-            :aria-selected="state.tab === 'debts'"
-            data-testid="budget-tab-debts"
-            @click="setTab('debts')"
-          >Debts</button>
+            :class="{ on: state.tab === t.id }"
+            :aria-selected="state.tab === t.id"
+            :data-testid="`budget-tab-${t.id}`"
+            @click="setTab(t.id)"
+          >{{ t.label }}</button>
         </div>
 
-        <div class="b-grid" :class="{ solo: sideBySide && hiddenPanels.length > 0 }">
+        <div class="b-grid">
           <div
             class="b-pane"
-            :class="{ active: state.tab === 'spending', 'is-hidden': sideBySide && hiddenPanels.includes('spending'), 'has-panel': spendingPanelUp }"
+            :class="{ active: showSpending, 'has-panel': spendingPanelUp }"
             data-pane="spending"
           >
             <div v-if="summaryError" class="b-note" role="alert">
@@ -437,6 +426,7 @@ onBeforeUnmount(() => {
               :review-only="state.reviewOnly"
               :dark="dark"
               :solo="solo"
+              :both="isBoth"
               :refreshing="summaryLoading"
               @drill="onDrill"
               @crumb="popTo"
@@ -448,7 +438,7 @@ onBeforeUnmount(() => {
 
           <div
             class="b-pane"
-            :class="{ active: state.tab === 'debts', 'is-hidden': sideBySide && hiddenPanels.includes('debts'), 'has-panel': debtPanelUp }"
+            :class="{ active: showDebts, 'has-panel': debtPanelUp }"
             data-pane="debts"
           >
             <div v-if="debtsError" class="b-note" role="alert">
@@ -466,6 +456,7 @@ onBeforeUnmount(() => {
               :dark="dark"
               :can-edit="canEdit"
               :solo="solo"
+              :both="isBoth"
               :selected="drilled"
               :history="drillHistory"
               :history-failed="drillFailed"
@@ -477,7 +468,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="b-table" :class="{ active: state.tab === 'spending' }" data-pane="table">
+        <div class="b-table" :class="{ active: showSpending }" data-pane="table">
           <h2 class="b-h2">Transactions</h2>
           <BudgetTable
             :query="txnQuery"
@@ -551,99 +542,92 @@ onBeforeUnmount(() => {
 .b-table {
   min-width: 0;
 }
-/* Below 1024px, and in Tabs mode at any width, one panel at a time (the tabs). From 1024px in Side by side mode the
- * two sit side by side and the tabs go. */
-.tabs-mode .b-pane:not(.active),
-.tabs-mode .b-table:not(.active) {
+/* One tab at a time at every width: the pane of a tab that is not shown goes away (Both shows both panes). Below 1024px
+ * Both stacks the two charts; from 1024px they sit side by side. */
+.b-pane:not(.active),
+.b-table:not(.active) {
   display: none;
 }
-@media (max-width: 1023.98px) {
-  .b-pane:not(.active),
-  .b-table:not(.active) {
-    display: none;
-  }
-}
 @media (min-width: 1024px) {
-  .sbs .b-tabs {
-    display: none;
-  }
-  /* Side by side. The grid has shared rows and each panel takes them as a subgrid, so the same part of each panel
-   * sits in the same row whatever height the other has: 1 header (the spending crumbs / review / total stack, the
-   * debt total), 2 the donut, 3 the hint line, 4 the list, 5 whatever follows the list (the debts without a
-   * balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the spacing is
-   * margins on the items, so a row with nothing in it (no hint) costs nothing. */
-  .sbs .b-grid {
+  /* Both side by side. The grid has shared rows and each panel takes them as a subgrid, so the same part of each panel
+   * sits in the same row whatever height the other has: 1 heading (the crumbs), 2 controls (group by, needs review;
+   * empty on the debt side), 3 the total, 4 the donut, 5 the hint line, 6 the list, 7 whatever follows the list (the
+   * debts without a balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the
+   * spacing is margins on the items, so a row with nothing in it (no hint) costs nothing. */
+  .is-both .b-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto 1fr;
+    grid-template-rows: auto auto auto auto auto auto auto 1fr;
     column-gap: 16px;
     row-gap: 0;
     align-items: start;
   }
-  .sbs .b-pane {
+  .is-both .b-pane {
     grid-row: 1 / -1;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel {
+  .is-both .b-grid .b-pane.has-panel {
     display: grid;
     grid-template-rows: subgrid;
     align-self: stretch;
   }
-  /* A hidden chart takes its whole panel away (the table stays); the one left has the whole width, and its donut
-   * and legend sit side by side there (DrillPie `wide`). */
-  .sbs .b-pane.is-hidden {
-    display: none;
-  }
-  .sbs .b-grid.solo {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-  }
 
-  /* The panels' own parts, placed in those rows (the DrillPie wrapper dissolves so its donut, hint and list are
-   * placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.spending-panel),
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.debt-panel) {
+  /* The panels' own parts, placed in those rows (the header stacks and the DrillPie wrapper dissolve so their parts
+   * are placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
+  .is-both .b-grid .b-pane.has-panel :deep(.spending-panel),
+  .is-both .b-grid .b-pane.has-panel :deep(.debt-panel) {
     display: grid;
     grid-template-rows: subgrid;
     grid-row: 1 / -1;
     row-gap: 0;
     align-items: start;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-body),
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.drill-pie) {
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-top),
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-head),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-top),
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-body),
+  .is-both .b-grid .b-pane.has-panel :deep(.drill-pie) {
     display: contents;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-top),
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-total) {
+  .is-both .b-grid .b-pane.has-panel :deep(.crumbs),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-crumbhead) {
     grid-row: 1;
-    align-self: end; /* the two totals share a line at the bottom of the header row */
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-canvas) {
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-controls) {
     grid-row: 2;
+    margin-top: 4px;
+  }
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-total),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-top .dp-total) {
+    grid-row: 3;
+    margin-top: 8px;
+  }
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-canvas) {
+    grid-row: 4;
     justify-self: center;
     align-self: start;
     margin-top: 8px;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-hint) {
-    grid-row: 3;
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-hint) {
+    grid-row: 5;
     margin: 12px 0 0;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-list) {
-    grid-row: 4 / 6; /* spans the row after it, so a longer list than the other panel's does not stretch row 4 */
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-list) {
+    grid-row: 6 / 8; /* spans the row after it, so a longer list than the other panel's does not stretch row 6 */
     margin-top: 12px;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.debt-panel .dp-list) {
-    grid-row: 4;
+  .is-both .b-grid .b-pane.has-panel :deep(.debt-panel .dp-list) {
+    grid-row: 6;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.sp-none),
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-none) {
-    grid-row: 4;
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-none),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-none) {
+    grid-row: 6;
     margin-top: 12px;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-others) {
-    grid-row: 5;
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-others) {
+    grid-row: 7;
     margin-top: 12px;
   }
-  .sbs .b-grid:not(.solo) .b-pane.has-panel :deep(.dp-drilled) {
-    grid-row: 2 / 6; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-drilled) {
+    grid-row: 4 / 8; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
     margin-top: 8px;
   }
 }

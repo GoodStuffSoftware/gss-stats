@@ -31,6 +31,16 @@ describe('DebtPanel', () => {
     expect(w.get('[data-testid="debt-total"]').text()).toContain('$3,400.00')
   })
 
+  it('the pie view has the "All debts" root crumb above the total, as the spending panel has "All spending" (so side by side the totals line up)', () => {
+    const w = mountPanel()
+    const nav = w.get('nav[aria-label="Debts path"]')
+    expect(nav.text()).toBe('All debts')
+    expect(nav.find('[aria-current="page"]').exists()).toBe(true) // the place you are, not a button
+    expect(nav.find('button').exists()).toBe(false)
+    expect(w.get('.dp-top').element.children[0]).toBe(nav.element)
+    expect(w.get('.dp-top').element.children[1]).toBe(w.get('[data-testid="debt-total"]').element)
+  })
+
   it('a slice (or its list row) drills into that debt, in place', async () => {
     const w = mountPanel()
     await w.get('[data-testid="pie-row-a"]').trigger('click')
@@ -116,5 +126,32 @@ describe('DebtPanel', () => {
     expect(w.get('[data-testid="cosigned-badge"]').text()).toBe('Cosigned')
     await w.get('[data-testid="debt-open-b"]').trigger('click')
     expect(w.emitted('open')).toEqual([['b']])
+  })
+})
+
+describe('debts legend side', () => {
+  afterEach(() => window.localStorage.clear())
+  it('starts on the right, offers the picker, and keeps a pressed side for this device', async () => {
+    const w = mountPanel()
+    const pie = () => w.findComponent(DrillPie)
+    expect(pie().props('legendSide')).toBe('right')
+    expect(pie().props('legendPicker')).toBe(true)
+    pie().vm.$emit('update:legendSide', 'bottom')
+    await w.vm.$nextTick()
+    expect(pie().props('legendSide')).toBe('bottom')
+    expect(window.localStorage.getItem('gss-stats-budget-legend:debts')).toBe('bottom')
+    expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('bottom') // a later visit restores it
+  })
+  it('in Both the picker is hidden and the donut takes the shared Both size key', () => {
+    const pie = mountPanel({ both: true } as never).findComponent(DrillPie)
+    expect(pie.props('legendPicker')).toBe(false)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:both')
+  })
+  it('on its own the donut keeps its own size key', () => {
+    expect(mountPanel().findComponent(DrillPie).props('sizeKey')).toBe('gss-stats-budget-donut:debts:solo')
+  })
+  it('an invalid saved value is the right side', () => {
+    window.localStorage.setItem('gss-stats-budget-legend:debts', 'sideways')
+    expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('right')
   })
 })

@@ -18,8 +18,8 @@
 //   back()             the "All debts" crumb: back to the pie
 //   open(accountId)    "Details", "Add balance" or "Loan details": BudgetSection opens the Loans page on that loan
 //   retry()            "Retry" after the history failed
-import { computed } from 'vue'
-import { donutSizeKey } from '../../lib/budget/panelVisibility'
+import { computed, ref } from 'vue'
+import { donutSizeKey, readLegendSide, writeLegendSide, type LegendSide } from '../../lib/budget/panelVisibility'
 import { debtSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { DebtSlice } from '../../lib/budget/types'
@@ -31,6 +31,8 @@ import BalanceChart from './BalanceChart.vue'
 const props = defineProps<{
   /** One chart has the whole width: the donut is bigger, beside its legend. */
   solo?: boolean
+  /** Shown in the Both tab: the two donuts share one size (lib/budget/panelVisibility.ts donutSizeKey). */
+  both?: boolean
   debts: DebtSlice[]
   dark: boolean
   canEdit: boolean
@@ -49,8 +51,15 @@ const others = computed(() => [...model.value.noBalance, ...model.value.settled]
 function onSelect(key: string) {
   emit('drill', key)
 }
+// Which side of the donut the legend takes in the wide layout: remembered on this device.
+const legendSide = ref<LegendSide>(readLegendSide('debts'))
+function onLegendSide(side: LegendSide) {
+  legendSide.value = side
+  writeLegendSide('debts', side)
+}
 const name = (d: DebtSlice) => `${d.label}${d.last4 ? ` ••${d.last4}` : ''}`
 const crumbItems = computed(() => (props.selected ? [{ key: 'all', label: 'All debts' }, { key: props.selected.accountId, label: name(props.selected) }] : []))
+const rootCrumb = [{ key: 'all', label: 'All debts' }]
 const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
 </script>
 
@@ -75,11 +84,15 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   </div>
 
   <div v-else class="debt-panel" data-testid="debt-panel">
-    <p class="dp-total" data-testid="debt-total">
-      <span class="dp-total-label">Total owed</span>
-      <strong class="dp-total-value">{{ formatAmount(totalCents) }}</strong>
-      <span v-if="owed.cosignedCents > 0" class="dp-total-sub" data-testid="debt-cosigned">+ {{ formatAmount(owed.cosignedCents) }} cosigned</span>
-    </p>
+    <!-- The header stack the spending panel has (its root crumb, then the total), so side by side the two totals sit on one line. -->
+    <div class="dp-top">
+      <Crumbs :items="rootCrumb" label="Debts path" />
+      <p class="dp-total" data-testid="debt-total">
+        <span class="dp-total-label">Total owed</span>
+        <strong class="dp-total-value">{{ formatAmount(totalCents) }}</strong>
+        <span v-if="owed.cosignedCents > 0" class="dp-total-sub" data-testid="debt-cosigned">+ {{ formatAmount(owed.cosignedCents) }} cosigned</span>
+      </p>
+    </div>
 
     <DrillPie
       v-if="model.slices.length"
@@ -89,7 +102,10 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
       label="Debt balances"
       resizable
       :wide="solo"
-      :size-key="donutSizeKey('debts', !!solo)"
+      :size-key="donutSizeKey('debts', !!both)"
+      :legend-side="legendSide"
+      :legend-picker="!both"
+      @update:legend-side="onLegendSide"
       @select="onSelect"
     />
     <p v-else class="dp-none" data-testid="debt-none">No balances yet.</p>
@@ -143,6 +159,17 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   gap: 8px;
   min-height: 44px;
   margin: 0;
+}
+/* Crumb row, then the total: the spending panel's header stack (see SpendingPanel .sp-top). */
+.dp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.dp-top .dp-total {
+  min-height: 0;
+  align-items: baseline;
 }
 .dp-total-sub {
   margin-inline-start: 8px;

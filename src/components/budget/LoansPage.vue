@@ -6,19 +6,29 @@
 // opened and closed through `open` / `close` (it lives in history.state, never in the URL: an account id names an
 // institution).
 //
-// Props: `person` (a person id, or null for everyone), `loanId` (the open loan, or null), `canEdit`, `dark`.
-// Emits: `open(id)`, `close()`, and `saved` when the open loan's edit was saved.
+// The open loan shows a breadcrumb trail (components/nav/Crumbs.vue, wrapping) in place of a back button. Opened from the
+// Loans list: `Loans > <name ••last4>`. Opened from the Overview debt drill's "Loan details": `All debts > <name ••last4>
+// > Loan details`; from a Details button of the debt list: `All debts > <name ••last4>`. Each earlier crumb is exactly
+// what browser Back goes to (viewState.ts backToOverview).
+//
+// Props: `person` (a person id, or null for everyone), `loanId` (the open loan, or null), `from` (where it was opened
+// from: viewState.ts LoanFrom, null = this page's list), `canEdit`, `dark`.
+// Emits: `open(id)`, `close()` (the Loans crumb), `leave(clearDebt)` (a crumb back to Overview: `true` = to the debt list,
+// `false` = to the debt it was opened from), and `saved` when the open loan's edit was saved.
 import { computed, ref, watch } from 'vue'
 import { fetchLoans } from '../../lib/budget/clientRead'
 import type { LoansResponse } from '../../lib/budget/types'
+import type { LoanFrom } from '../../lib/budget/viewState'
+import Crumbs from '../nav/Crumbs.vue'
 import DebtDetail from './DebtDetail.vue'
 import LoansList from './LoansList.vue'
 
-const props = withDefaults(defineProps<{ person: string | null; loanId: string | null; canEdit?: boolean; dark?: boolean }>(), {
+const props = withDefaults(defineProps<{ person: string | null; loanId: string | null; from?: LoanFrom | null; canEdit?: boolean; dark?: boolean }>(), {
+  from: null,
   canEdit: false,
   dark: false,
 })
-const emit = defineEmits<{ open: [id: string]; close: []; saved: [] }>()
+const emit = defineEmits<{ open: [id: string]; close: []; leave: [clearDebt: boolean]; saved: [] }>()
 
 const data = ref<LoansResponse | null>(null)
 const loading = ref(true)
@@ -46,6 +56,22 @@ watch(() => props.person, load, { immediate: true })
 const recentPayments = computed(() =>
   data.value?.debts.find((d) => d.accountId === props.loanId)?.payments.map((p) => p.amountCents))
 
+/** "Mortgage ••1234" (made-up digits): the open loan's name, once the list has loaded. */
+const loanName = computed(() => {
+  const d = data.value?.debts.find((x) => x.accountId === props.loanId)
+  return d ? `${d.label}${d.last4 ? ` ••${d.last4}` : ''}` : 'Loan'
+})
+const trail = computed(() => {
+  const name = { key: props.loanId ?? '', label: loanName.value }
+  if (props.from === 'drill') return [{ key: 'all', label: 'All debts' }, name, { key: 'details', label: 'Loan details' }]
+  if (props.from === 'debts') return [{ key: 'all', label: 'All debts' }, name]
+  return [{ key: 'loans', label: 'Loans' }, name]
+})
+function onCrumb(i: number) {
+  if (!props.from) emit('close')
+  else emit('leave', props.from === 'drill' && i === 0)
+}
+
 function onSaved() {
   emit('saved')
   void load()
@@ -55,7 +81,7 @@ function onSaved() {
 <template>
   <div class="loans-page" data-testid="loans-page" :data-person="person ?? 'all'">
     <template v-if="loanId">
-      <button type="button" class="btn lp-back" data-testid="loans-back" @click="emit('close')">← Loans</button>
+      <Crumbs :items="trail" label="Loan path" wrap class="lp-crumbs" @go="onCrumb" />
       <DebtDetail
         :account-id="loanId" :can-edit="canEdit" :dark="dark" hide-back :recent-payments-cents="recentPayments" :recent-months="data?.months"
         @close="emit('close')" @saved="onSaved"
@@ -80,7 +106,7 @@ function onSaved() {
   font-size: 16px;
   font-weight: 600;
 }
-.lp-back {
-  align-self: flex-start;
+.lp-crumbs {
+  align-self: stretch;
 }
 </style>

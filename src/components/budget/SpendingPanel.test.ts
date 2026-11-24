@@ -211,3 +211,30 @@ describe('SpendingPanel: where the next pie comes from', () => {
     expect(t).toEqual({ key: 'chain-x', dir: 'in' })
   })
 })
+
+describe('spending legend side', () => {
+  afterEach(() => window.localStorage.clear())
+  it('starts on the right, offers the picker, and keeps a pressed side for this device', async () => {
+    const w = mountPanel()
+    const pie = () => w.findComponent(DrillPie)
+    expect(pie().props('legendSide')).toBe('right')
+    expect(pie().props('legendPicker')).toBe(true)
+    pie().vm.$emit('update:legendSide', 'bottom')
+    await w.vm.$nextTick()
+    expect(pie().props('legendSide')).toBe('bottom')
+    expect(window.localStorage.getItem('gss-stats-budget-legend:spending')).toBe('bottom')
+    expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('bottom') // a later visit restores it
+  })
+  it('in Both the picker is hidden and the donut takes the shared Both size key', () => {
+    const pie = mountPanel({ both: true }).findComponent(DrillPie)
+    expect(pie.props('legendPicker')).toBe(false)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:both')
+  })
+  it('on its own the donut keeps its own size key', () => {
+    expect(mountPanel().findComponent(DrillPie).props('sizeKey')).toBe('gss-stats-budget-donut:spending:solo')
+  })
+  it('an invalid saved value is the right side', () => {
+    window.localStorage.setItem('gss-stats-budget-legend:spending', 'sideways')
+    expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('right')
+  })
+})

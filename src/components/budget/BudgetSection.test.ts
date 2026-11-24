@@ -11,9 +11,12 @@ import BudgetFilters from './BudgetFilters.vue'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
+import DrillPie from '../charts/DrillPie.vue'
 import DebtPanel from './DebtPanel.vue'
+import LoansList from './LoansList.vue'
 import LoansPage from './LoansPage.vue'
 import SpendingPanel from './SpendingPanel.vue'
+import { installHistoryStub, type HistoryStub } from '../../testing/historyStub'
 
 const TODAY = '2026-11-20'
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -42,6 +45,7 @@ interface Routes {
   debts?: (u: URL) => Response
   transactions?: (u: URL) => Response
   debtDetail?: (id: string) => Response
+  loans?: (u: URL) => Response
   prefs?: (init: RequestInit | undefined) => Response | Promise<Response>
 }
 let fetchMock: ReturnType<typeof vi.fn>
@@ -56,6 +60,7 @@ function route(r: Routes = {}) {
       case '/api/budget/meta': return r.meta ? r.meta() : json(META)
       case '/api/budget/summary': return r.summary ? r.summary(u) : json(SUMMARY)
       case '/api/budget/debts': return r.debts ? r.debts(u) : json({ debts: DEBTS })
+      case '/api/budget/loans': return r.loans ? r.loans(u) : json({ debts: [], months: [] })
       case '/api/budget/transactions': return r.transactions ? r.transactions(u) : json(EMPTY_PAGE)
       default:
         if (r.debtDetail && u.pathname.startsWith('/api/budget/debts/')) return r.debtDetail(decodeURIComponent(u.pathname.slice('/api/budget/debts/'.length)))
@@ -457,6 +462,7 @@ describe('BudgetSection: tabs and URL', () => {
   it('Spending and Debts tabs mark the active pane and the URL', async () => {
     route()
     const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
     expect(w.get('[data-pane="spending"]').classes()).toContain('active')
     expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
     await w.get('[data-testid="budget-tab-debts"]').trigger('click')
@@ -486,125 +492,171 @@ describe('BudgetSection: tabs and URL', () => {
   })
 })
 
-describe('BudgetSection: hide a chart', () => {
-  const key = (email: string) => panelsKey(email)
+describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
   beforeEach(() => localStorage.clear())
-
-  it('both shown by default; hiding one hides its panel, keeps the table, and is saved per account', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-    expect(w.find('[data-pane="table"]').exists()).toBe(true)
-    expect(w.get('[data-testid="budget-show-debts"]').attributes('aria-pressed')).toBe('false')
-    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: ['debts'] })
-    expect(localStorage.getItem(key('b@example.com'))).toBeNull()
-  })
-
-  it('restores the saved choice for this account only', async () => {
-    localStorage.setItem(key('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
-    route({ access: () => json({ ok: true, email: 'b@example.com' }) })
-    resetAccessProbe()
-    const other = await mountSection()
-    expect(other.get('[data-pane="spending"]').classes()).not.toContain('is-hidden')
-  })
-
-  it('a hidden chart comes back with its button; hiding both is not possible', async () => {
-    route()
-    const w = await mountSection()
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-testid="budget-show-spending"]').attributes('disabled')).toBeDefined()
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    expect(JSON.parse(localStorage.getItem(key('a@example.com'))!)).toEqual({ hidden: [] })
-  })
-
-  it('works when localStorage throws: hides for the visit, nothing breaks', async () => {
-    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('quota')
-    })
-    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked')
-    })
-    try {
-      route()
-      const w = await mountSection()
-      expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-      await w.get('[data-testid="budget-show-debts"]').trigger('click')
-      expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    } finally {
-      set.mockRestore()
-      get.mockRestore()
-    }
-  })
-})
-
-describe('BudgetSection: desktop layout (side by side or tabs), saved per device', () => {
-  beforeEach(() => localStorage.clear())
-
-  it('side by side is the default: the toggles show, the picker marks it', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.get('[data-testid="budget-section"]').classes()).toContain('sbs')
-    expect(w.get('[data-testid="budget-layout-side"]').attributes('aria-checked')).toBe('true')
-    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(true)
-  })
-
-  it('choosing Tabs saves per device, switches to one pane at a time and drops the hide toggles', async () => {
-    route()
-    const w = await mountSection()
-    await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('tabs')
-    const root = w.get('[data-testid="budget-section"]')
-    expect(root.classes()).toContain('tabs-mode')
-    expect(root.classes()).not.toContain('sbs')
-    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(false)
-    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
-    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
-    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
-  })
-
-  it('below 1024 px the charts are solo (their own donut size key) even when Side by side is chosen', async () => {
-    route()
-    const w = await mountSection()
-    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
-    w.unmount()
-    mounted.pop()
+  // A matchMedia whose width the test sets (the section asks `(max-width: 1023.98px)`); `setNarrow` fires the `change`
+  // event a browser sends when the width crosses 1024 px. Every test names its width: none leans on happy-dom's default.
+  let listeners: Array<() => void> = []
+  let isNarrow = false
+  const setWidth = (narrow: boolean) => {
+    isNarrow = narrow
+    listeners = []
     vi.stubGlobal('matchMedia', (q: string) => ({
-      matches: q.includes('max-width'),
+      get matches() {
+        return q.includes('max-width') && isNarrow
+      },
       media: q,
-      addEventListener: () => {},
-      removeEventListener: () => {},
+      addEventListener: (_t: string, fn: () => void) => {
+        if (q.includes('max-width')) listeners.push(fn)
+      },
+      removeEventListener: (_t: string, fn: () => void) => {
+        listeners = listeners.filter((l) => l !== fn)
+      },
       addListener: () => {},
       removeListener: () => {},
     }))
-    const narrow = await mountSection()
-    expect(narrow.get('[data-testid="budget-section"]').classes()).toContain('sbs')
-    expect(narrow.findComponent(SpendingPanel).props('solo')).toBe(true)
-    expect(narrow.findComponent(DebtPanel).props('solo')).toBe(true)
-  })
+  }
+  const crossTo = async (narrow: boolean) => {
+    isNarrow = narrow
+    for (const fn of [...listeners]) fn()
+    await flushPromises()
+  }
+  const narrowMedia = () => setWidth(true)
+  const wideMedia = () => setWidth(false)
+  beforeEach(wideMedia)
 
-  it('opens in the saved layout, and a hidden chart saved for side by side does not hide anything in Tabs', async () => {
-    localStorage.setItem(LAYOUT_KEY, 'tabs')
-    localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['debts'] }))
+  it('the bar has Spending, Debts and Both, and there are no Show toggles or layout picker', async () => {
     route()
     const w = await mountSection()
-    expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
-    expect(w.get('[data-pane="debts"]').classes()).not.toContain('is-hidden')
-    await w.get('[data-testid="budget-layout-side"]').trigger('click')
-    expect(localStorage.getItem(LAYOUT_KEY)).toBe('side')
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden') // the side-by-side choice is still there
+    expect(w.findAll('[role="tab"]').map((t) => t.text())).toEqual(['Spending', 'Debts', 'Both'])
+    expect(w.find('[data-testid="budget-show-debts"]').exists()).toBe(false)
+    expect(w.find('[data-testid="budget-layout-side"]').exists()).toBe(false)
   })
 
-  it('works when localStorage throws: the choice holds for the visit', async () => {
+  it('opens on Both at 1024 px and wider: both panes and the table, one shared donut size key', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-section"]').classes()).toContain('is-both')
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('both')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+  })
+
+  it('Both: both donuts use the one shared Both size key (a drag resizes both) and hide the legend side picker', async () => {
+    route()
+    const w = await mountSection()
+    const pies = w.findAllComponents(DrillPie)
+    expect(pies).toHaveLength(2)
+    for (const pie of pies) {
+      expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:both')
+      expect(pie.props('legendPicker')).toBe(false)
+    }
+  })
+
+  it('one chart (Spending tab, Debts tab): its own size key and the legend side picker', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    let pie = w.findComponent(SpendingPanel).findComponent(DrillPie)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:spending:solo')
+    expect(pie.props('legendPicker')).toBe(true)
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    pie = w.findComponent(DebtPanel).findComponent(DrillPie)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:debts:solo')
+    expect(pie.props('legendPicker')).toBe(true)
+  })
+
+  it('opens on Spending below 1024 px', async () => {
+    narrowMedia()
+    route()
+    const w = await mountSection()
+    expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-testid="budget-section"]').classes()).not.toContain('is-both')
+  })
+
+  it('Spending shows its pane and the table; Debts shows its pane and no table', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(false)
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
+    expect(w.get('[data-pane="table"]').classes()).not.toContain('active')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('debts')
+    await w.get('[data-testid="budget-tab-both"]').trigger('click')
+    expect(w.get('[data-pane="table"]').classes()).toContain('active')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('both')
+  })
+
+  it('a narrow Both stacks: both panes, the wide (solo) donut layout, the shared Both size key', async () => {
+    narrowMedia()
+    route()
+    const w = await mountSection('/?section=budget&b_tab=both')
+    expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('solo')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('both')).toBe(true)
+  })
+
+  it('crossing 1024 px on Both stacks it (solo) and back: the tab stays Both', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+    await crossTo(true)
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(true)
+    expect(w.findComponent(DebtPanel).props('solo')).toBe(true)
+    expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
+    await crossTo(false)
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+  })
+
+  it('a bare open stamps the width default, and a click on Spending writes it so a reload keeps it', async () => {
+    route()
+    const w = await mountSection('/?section=budget') // no b_tab
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    expect(new URLSearchParams(location.search).get('b_tab')).toBe('spending')
+    w.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    narrowMedia() // the reload happens on a narrow window: the written tab, not the width default
+    const again = await mountSection(`/${location.search}`)
+    expect(again.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+    wideMedia()
+    again.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    const wideAgain = await mountSection(`/${location.search}`) // still Spending on a wide window
+    expect(wideAgain.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('a link names the tab, and a reload keeps it (the address always carries b_tab)', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_tab=debts')
+    expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+    w.unmount()
+    mounted.pop()
+    resetAccessProbe()
+    const again = await mountSection(`/${location.search}`) // what a reload opens on
+    expect(again.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('works when localStorage throws', async () => {
     const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota')
     })
@@ -614,8 +666,8 @@ describe('BudgetSection: desktop layout (side by side or tabs), saved per device
     try {
       route()
       const w = await mountSection()
-      await w.get('[data-testid="budget-layout-tabs"]').trigger('click')
-      expect(w.get('[data-testid="budget-section"]').classes()).toContain('tabs-mode')
+      await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+      expect(w.get('[data-pane="debts"]').classes()).toContain('active')
     } finally {
       set.mockRestore()
       get.mockRestore()
@@ -749,6 +801,7 @@ describe('BudgetSection: debt drill in place', () => {
 describe('BudgetSection: remembers where you left off (saved view per login)', () => {
   let stored: SavedView | null
   let puts: Array<{ view: SavedView; keepalive: boolean | undefined }>
+  let viewLegacy = false // the server says the stored block is a 0.82.0 one that hid nothing
   const prefs = (init: RequestInit | undefined) => {
     if (init?.method === 'PUT') {
       const view = (JSON.parse(String(init.body)) as { view: SavedView }).view
@@ -756,7 +809,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
       puts.push({ view, keepalive: init.keepalive })
       return json({ ok: true })
     }
-    return json({ view: stored })
+    return json({ view: stored, ...(viewLegacy ? { viewLegacy: true } : {}) })
   }
   const saved = (over: Partial<SavedView>): SavedView => ({ ...defaultSavedView(), ...over })
   const summaryParams = (i: number) => new URL(callsTo('/api/budget/summary')[i][0], 'http://x').searchParams
@@ -766,6 +819,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
   beforeEach(() => {
     localStorage.clear()
     stored = null
+    viewLegacy = false
     puts = []
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   })
@@ -775,12 +829,12 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     localStorage.clear()
   })
 
-  it('a plain open puts the saved view back: Show choice, range, person and drill, with one summary fetch', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1', range: { preset: 'last-month' }, path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+  it('a plain open puts the saved view back: tab, range, person and drill, with one summary fetch', async () => {
+    stored = saved({ tab: 'spending', person: 'p1', range: { preset: 'last-month' }, path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
     route({ prefs, summary: byLevel })
     const w = await mountSection()
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
-    expect(JSON.parse(localStorage.getItem(panelsKey('a@example.com'))!)).toEqual({ hidden: ['debts'] })
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
     expect(callsTo('/api/budget/summary')).toHaveLength(1)
     const q = summaryParams(0)
     expect([q.get('category'), q.get('person'), q.get('from'), q.get('to')]).toEqual(['groceries', 'p1', '2026-10-01', '2026-10-31'])
@@ -789,7 +843,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
   })
 
   it('the toolbar waits for the saved view, so a choice made while it is pending cannot be overwritten', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1' })
+    stored = saved({ tab: 'spending', person: 'p1' })
     let release: (r: Response) => void = () => {}
     const gate = new Promise<Response>((resolve) => {
       release = resolve
@@ -801,7 +855,7 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     release(json({ view: stored }))
     await flushPromises()
     expect(w.find('[data-testid="budget-person-p2"]').exists()).toBe(true)
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
     expect(summaryParams(0).get('person')).toBe('p1')
   })
 
@@ -817,13 +871,13 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
   })
 
-  it('a link wins over the saved view (the Show choice is not part of a link and still applies)', async () => {
-    stored = saved({ hidden: 'debts', person: 'p1', path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
+  it('a link wins over the saved view (a link with no b_tab opens on the width\'s default tab, Both here)', async () => {
+    stored = saved({ tab: 'spending', person: 'p1', path: [{ level: 'category', key: 'groceries', label: 'Groceries' }] })
     route({ prefs, summary: byLevel })
     const w = await mountSection('/?section=budget&b_person=p2&b_from=2026-10-01&b_to=2026-10-31')
     const q = summaryParams(0)
     expect([q.get('person'), q.get('category'), q.get('from')]).toEqual(['p2', null, '2026-10-01'])
-    expect(w.get('[data-pane="debts"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
     await vi.advanceTimersByTimeAsync(2000)
     expect(puts.at(-1)!.view).toMatchObject({ person: 'p2', path: [], range: { preset: 'last-month' } })
   })
@@ -858,13 +912,90 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     localStorage.setItem(panelsKey('a@example.com'), JSON.stringify({ hidden: ['spending'] }))
     route({ prefs })
     const w = await mountSection()
-    expect(w.get('[data-pane="spending"]').classes()).toContain('is-hidden')
+    expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+    expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+    expect(w.get('[data-pane="spending"]').classes()).not.toContain('active')
+    expect(localStorage.getItem(panelsKey('a@example.com'))).toBeNull() // read once, then gone
     expect(puts).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(2000)
     expect(puts).toHaveLength(1)
-    expect(puts[0].view).toMatchObject({ hidden: 'spending', person: 'all', path: [] })
+    expect(puts[0].view).toMatchObject({ tab: 'debts', person: 'all', path: [] })
+    expect('hidden' in puts[0].view).toBe(false)
     await vi.advanceTimersByTimeAsync(10000)
     expect(puts).toHaveLength(1)
+  })
+
+  describe('the old Side by side / Show choices carry over once', () => {
+    const SIDE = () => localStorage.setItem(LAYOUT_KEY, 'side')
+
+    it('Side by side over a 0.82.0 view that hid nothing lands on Both, with one write and the old key gone', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="spending"]').classes()).toContain('active')
+      expect(w.get('[data-pane="debts"]').classes()).toContain('active')
+      expect(localStorage.getItem(LAYOUT_KEY)).toBeNull()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(puts).toHaveLength(1)
+      expect(puts[0].view.tab).toBe('both')
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(puts).toHaveLength(1)
+    })
+
+    it('Tabs layout over that same legacy view keeps the saved tab and writes nothing', async () => {
+      localStorage.setItem(LAYOUT_KEY, 'tabs')
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a legacy view that hid a chart (the server folded it into its single tab) keeps that tab even on Side by side', async () => {
+      SIDE()
+      stored = saved({ tab: 'spending' }) // viewLegacy stays false: only hidden:null blocks carry the flag
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a new view (no legacy flag) keeps its saved tab over Side by side', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-debts"]').attributes('aria-selected')).toBe('true')
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
+
+    it('a b_tab link beats the Side by side carry-over', async () => {
+      SIDE()
+      stored = saved({ tab: 'debts' })
+      viewLegacy = true
+      route({ prefs })
+      const w = await mountSection('/?section=budget&b_tab=spending')
+      expect(w.get('[data-testid="budget-tab-spending"]').attributes('aria-selected')).toBe('true')
+      expect(w.get('[data-pane="debts"]').classes()).not.toContain('active')
+    })
+
+    it('Side by side with nothing saved lands on Both (the wide default, so nothing to write) and removes the old key', async () => {
+      SIDE()
+      route({ prefs })
+      const w = await mountSection()
+      expect(w.get('[data-testid="budget-tab-both"]').attributes('aria-selected')).toBe('true')
+      expect(localStorage.getItem(LAYOUT_KEY)).toBeNull()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(puts).toHaveLength(0)
+    })
   })
 
   it('nothing hidden and nothing changed: no write at all', async () => {
@@ -879,12 +1010,12 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     route({ prefs })
     const w = await mountSection()
     await w.get('[data-testid="budget-person-p2"]').trigger('click')
-    await w.get('[data-testid="budget-show-debts"]').trigger('click')
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
     await vi.advanceTimersByTimeAsync(1900)
     expect(puts).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(200)
     expect(puts).toHaveLength(1)
-    expect(puts[0].view).toMatchObject({ person: 'p2', hidden: 'debts' })
+    expect(puts[0].view).toMatchObject({ person: 'p2', tab: 'debts' })
   })
 
   it('leaving the page (pagehide) sends a queued change now, kept alive', async () => {
@@ -926,5 +1057,219 @@ describe('BudgetSection: remembers where you left off (saved view per login)', (
     expect(callsTo('/api/budget/summary')).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(10000)
     expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'PUT')).toHaveLength(0)
+  })
+})
+
+describe('BudgetSection: one breadcrumb trail, in the drill and on the loan page', () => {
+  const DETAIL = {
+    account: META.accounts[0],
+    history: [{ asOf: '2026-10-31', balanceCents: 90000, source: 'statement', aprBp: 1999 }],
+    periods: [], payments: [], terms: null, latest: null, promos: [],
+  }
+  const LOANS = { months: [], debts: DEBTS.map((d) => ({ ...d, terms: null, latest: null, promos: [], payments: [] })) }
+  const NAME = 'Card A ••0001'
+  // Timers are fake (setTimeout only), so no real clock decides: the stub's traversal fires its popstate on a timer, then the
+  // section's settle timers; each is advanced by hand.
+  const go = async (fn: () => void) => {
+    fn()
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+  }
+  const trailOf = (w: VueWrapper) => w.findAll('[data-testid="crumbs"] .cr-item').map((i) => i.text().replace('›', '').trim())
+  const trail = (w: VueWrapper) => trailOf(w.findComponent(LoansPage) as unknown as VueWrapper)
+  const here = (w: VueWrapper) => w.find('[aria-current="page"]').text()
+  const noPersonalData = () => expect(location.href).not.toMatch(/acct-1|Card|0001/)
+  async function openFromDrill(w: VueWrapper) {
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="debt-drilled-open"]').trigger('click')
+    await flushPromises()
+  }
+  // Back and Forward walk a real entry list (happy-dom's history does not: see the helper).
+  let stub: HistoryStub
+  beforeEach(() => {
+    sessionStorage.clear()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    route({ debtDetail: () => json(DETAIL), loans: () => json(LOANS) })
+    stub = installHistoryStub()
+  })
+  afterEach(() => {
+    stub.restore()
+    vi.useRealTimers()
+  })
+
+  it('pie > drill > the All debts crumb back; Back and Forward match', async () => {
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('drill', 'acct-1')
+    await flushPromises()
+    await w.get('[data-testid="crumb-0"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    await go(() => history.forward()) // Forward re-opens the debt the crumb left
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(true)
+    await go(() => history.back())
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    noPersonalData()
+  })
+
+  it('drill > Loan details: the trail is All debts > name > Loan details, with no personal data in the address', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    expect(here(w)).toBe('Loan details')
+    expect(w.text()).not.toContain('← Loans')
+    noPersonalData()
+  })
+
+  it('drill > Loan details > the name crumb lands on that debt open; Back and Forward match', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    await go(() => w.get('[data-testid="crumb-1"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    expect(new URLSearchParams(location.search).get('b_page')).toBeNull()
+    await go(() => history.forward()) // the detail page again, same trail
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    await go(() => history.back())
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    noPersonalData()
+  })
+
+  it('drill > Loan details > All debts lands on the debt list with no debt open; Back and Forward match', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+    expect(w.find('[data-testid="debt-drilled"]').exists()).toBe(false)
+    await go(() => history.forward()) // the debt, as it was one step in
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
+    await go(() => history.forward()) // and the detail page
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    noPersonalData()
+  })
+
+  it('a Details button of the debt list (no drill) gives All debts > name, and All debts goes back to the list', async () => {
+    const w = await mountSection()
+    w.findComponent(DebtPanel).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(trail(w)).toEqual(['All debts', NAME])
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+  })
+
+  it('Loans list > detail: Loans > name; the Loans crumb returns to the list; Back and Forward match', async () => {
+    const w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(trail(w)).toEqual(['Loans', NAME])
+    expect(here(w)).toBe(NAME)
+    await go(() => w.get('[data-testid="crumb-0"]').trigger('click'))
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    expect(w.find('[data-testid="crumbs"]').exists()).toBe(false)
+    await go(() => history.forward())
+    expect(w.findComponent(LoansPage).props('loanId')).toBe('acct-1')
+    expect(trail(w)).toEqual(['Loans', NAME])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    noPersonalData()
+  })
+
+  it('the header knows where the loan came from: a loan from the drill says so, one from the Loans list does not', async () => {
+    let w = await mountSection()
+    await openFromDrill(w)
+    expect(w.emitted('fromOverview')?.at(-1)).toEqual([true])
+    w.unmount()
+    mounted.pop()
+    w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    expect(w.emitted('fromOverview')?.at(-1)).toEqual([false])
+  })
+
+  it('a double click on the All debts crumb goes back once: still on Budget, no debt open', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    const back = vi.spyOn(history, 'back')
+    const crumb = w.get('[data-testid="crumb-0"]')
+    const first = crumb.trigger('click')
+    const second = crumb.trigger('click') // before the first Back has landed
+    await Promise.all([first, second])
+    await go(() => {})
+    await vi.advanceTimersByTimeAsync(1100) // past the lock: nothing queued a second Back
+    await flushPromises()
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toBeNull()
+    expect(new URLSearchParams(location.search).get('section')).toBe('budget')
+    // two clicks, one history.back() (the lock holds); the debt close is its own step, not another crumb Back
+    expect(back).toHaveBeenCalledTimes(1)
+    expect(stub.index).toBe(0)
+    back.mockRestore()
+  })
+
+  it('a reload keeps the trail: the drill origin and the Loans origin each come back as they were; Back and Forward after it match', async () => {
+    let w = await mountSection()
+    await openFromDrill(w)
+    const keptUrl = location.pathname + location.search
+    const keptState = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection(keptUrl, keptState)
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(new URLSearchParams(location.search).get('section')).toBe('budget')
+    await go(() => history.forward())
+    expect(trail(w)).toEqual(['All debts', NAME, 'Loan details'])
+    w.unmount()
+    mounted.pop()
+
+    w = await mountSection('/?section=budget&b_page=loans')
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    const loansUrl = location.pathname + location.search
+    const loansState = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection(loansUrl, loansState)
+    expect(trail(w)).toEqual(['Loans', NAME])
+    await go(() => history.back())
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    await go(() => history.forward())
+    expect(trail(w)).toEqual(['Loans', NAME])
+    noPersonalData()
+  })
+
+  it('a deep link names no loan (no account id in an address), so it shows the Loans list; with its entry state it shows the Loans trail', async () => {
+    let w = await mountSection('/?section=budget&b_page=loans')
+    expect(w.findComponent(LoansPage).props('loanId')).toBeNull()
+    expect(w.find('[data-testid="crumbs"]').exists()).toBe(false)
+    w.findComponent(LoansList).vm.$emit('open', 'acct-1')
+    await flushPromises()
+    const state = history.state
+    w.unmount()
+    mounted.pop()
+    w = await mountSection('/?section=budget&b_page=loans', state)
+    expect(trail(w)).toEqual(['Loans', NAME])
+    const at = stub.index
+    await go(() => history.back()) // the deep link is the first entry of this visit: Back leaves it cleanly
+    expect(stub.index).toBeLessThanOrEqual(at)
+    await go(() => history.forward())
+    expect(stub.index).toBeLessThanOrEqual(stub.entries.length - 1)
+  })
+
+  it('the crumbs are native buttons: focus reaches them, and activating one (what Enter and Space do) goes there', async () => {
+    const w = await mountSection()
+    await openFromDrill(w)
+    const buttons = w.findAll('[data-testid="crumbs"] button')
+    expect(buttons.map((b) => b.text())).toEqual(['All debts', NAME])
+    ;(buttons[1].element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(buttons[1].element)
+    await go(() => (document.activeElement as HTMLButtonElement).click())
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.findComponent(DebtPanel).props('selected')).toMatchObject({ accountId: 'acct-1' })
   })
 })

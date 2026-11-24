@@ -6,6 +6,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import BudgetSection from './components/budget/BudgetSection.vue'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
 import { stubAppFetch } from './testing/appFetch'
 import { loadConfig, saveConfig } from './api'
@@ -189,6 +190,20 @@ describe('App: Budget pages (Overview, Loans)', () => {
     await openMenu(w)
     expect(subRow('loans')!.getAttribute('aria-current')).toBe('page')
     expect(subRow('overview')!.getAttribute('aria-current')).toBeNull()
+  })
+
+  it('a loan reached from the Overview debt views makes the top bar read just Budget (its own trail starts at All debts); the Loans list keeps Budget › Loans', async () => {
+    const w = await mountAt('/?section=budget&b_page=loans')
+    await vi.waitFor(() => expect(w.find('[data-testid="loans-page"]').exists()).toBe(true), { timeout: 4000 })
+    const label = () => w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')
+    expect(label()).toBe('Budget›Loans')
+    const section = w.findComponent(BudgetSection)
+    section.vm.$emit('fromOverview', true)
+    await flushPromises()
+    expect(label()).toBe('Budget')
+    section.vm.$emit('fromOverview', false)
+    await flushPromises()
+    expect(label()).toBe('Budget›Loans')
   })
 
   it('the Budget crumb goes back to Overview with one history entry (Back returns to Loans)', async () => {

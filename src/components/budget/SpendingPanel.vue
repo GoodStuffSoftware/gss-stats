@@ -25,7 +25,7 @@
 //   review-only(on)        the "Needs review (n)" toggle.
 //   select-purchase(id)    a purchase slice was picked: the table scrolls to and highlights that row.
 import { computed, ref, watch } from 'vue'
-import { donutSizeKey } from '../../lib/budget/panelVisibility'
+import { donutSizeKey, readLegendSide, writeLegendSide, type LegendSide } from '../../lib/budget/panelVisibility'
 import { spendingSlices } from '../../lib/budget/pieModel'
 import { formatAmount } from '../../lib/budget/tableModel'
 import type { Category, SummaryResponse } from '../../lib/budget/types'
@@ -42,6 +42,8 @@ const GROUP_OPTIONS: SegOption[] = [
 const props = defineProps<{
   /** One chart has the whole width: the donut is bigger, beside its legend. */
   solo?: boolean
+  /** Shown in the Both tab: the two donuts share one size (lib/budget/panelVisibility.ts donutSizeKey). */
+  both?: boolean
   summary: SummaryResponse
   categories: Category[]
   path: DrillStep[]
@@ -57,6 +59,13 @@ const emit = defineEmits<{
   'review-only': [on: boolean]
   'select-purchase': [txnId: string]
 }>()
+
+// Which side of the donut the legend takes in the wide layout: remembered on this device.
+const legendSide = ref<LegendSide>(readLegendSide('spending'))
+function onLegendSide(side: LegendSide) {
+  legendSide.value = side
+  writeLegendSide('spending', side)
+}
 
 const TOP_LABEL = 'All spending'
 const crumbItems = computed(() => [{ key: '', label: TOP_LABEL }, ...props.path.map((s) => ({ key: s.key, label: s.label }))])
@@ -137,7 +146,10 @@ watch(
         :label="pieLabel"
         resizable
         :wide="solo"
-        :size-key="donutSizeKey('spending', !!solo)"
+        :size-key="donutSizeKey('spending', !!both)"
+        :legend-side="legendSide"
+        :legend-picker="!both"
+        @update:legend-side="onLegendSide"
         @select="onSelect"
       />
       <p v-if="slices.length === 0" class="sp-none" data-testid="spending-none">Nothing above zero here: refunds cover the spending.</p>

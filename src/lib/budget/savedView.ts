@@ -1,4 +1,4 @@
-// The Budget view a login left behind: which chart is hidden (the Show choice), the tab, the spending drill path, Group by,
+// The Budget view a login left behind: the tab (Spending, Debts or Both), the spending drill path, Group by,
 // Needs review, the open debt, the range, the person and the page. One small JSON block per login (GET and PUT
 // /api/budget/prefs, key `view`), so "come back to where we left off" works on any device.
 //
@@ -6,8 +6,12 @@
 // lenient form, so the schema lives here once. It imports nothing at run time (the function bundle must not pull in Vue).
 // Every string and list is bounded, so a valid view is always far under the 4 KB the prefs endpoint accepts.
 //
-// What it is NOT: the layout picker (Side by side | Tabs) and the donut sizes stay per device. The state a link or a
-// history entry carries always wins over this on open (lib/budget/viewState.ts `restoreView`).
+// What it is NOT: the donut sizes, which stay per device. The state a link or a history entry carries always wins over
+// this on open (lib/budget/viewState.ts `restoreView`).
+//
+// Legacy: until 0.83.0 a block also carried `hidden` (the Show choice: the one hidden chart) and `tab` was only the phone
+// tab. Both are still accepted, from old stored blocks and old cached clients, and folded into `tab` on read: hiding the
+// spending chart is the Debts tab, hiding the debts chart is the Spending tab. `hidden` is never part of a view any more.
 
 export const VIEW_PRESETS = ['this-month', 'last-month', '3-months', 'ytd', 'custom'] as const
 export type ViewPreset = (typeof VIEW_PRESETS)[number]
@@ -18,9 +22,7 @@ export interface SavedStep {
   label: string
 }
 export interface SavedView {
-  /** The hidden chart (Show choice): at most one, null = both shown. */
-  hidden: 'spending' | 'debts' | null
-  tab: 'spending' | 'debts'
+  tab: 'spending' | 'debts' | 'both'
   page: 'overview' | 'loans'
   /** The spending drill: category, then merchant (or account). At most two steps. */
   path: SavedStep[]
@@ -41,10 +43,12 @@ export const VIEW_BYTES_MAX = 4096
 const ISO = /^\d{4}-\d{2}-\d{2}$/
 const PERSON = /^[a-z0-9][\w-]{0,23}$/
 const DEBT_ID = /^[A-Za-z0-9][\w.-]{0,63}$/
-const FIELDS = ['hidden', 'tab', 'page', 'path', 'groupBy', 'review', 'debt', 'range', 'person']
+const FIELDS = ['tab', 'page', 'path', 'groupBy', 'review', 'debt', 'range', 'person']
+/** Accepted but optional: the pre-0.83.0 Show choice (see the header). */
+const LEGACY_FIELDS = ['hidden']
 
 export function defaultSavedView(): SavedView {
-  return { hidden: null, tab: 'spending', page: 'overview', path: [], groupBy: 'merchant', review: false, debt: null, range: { preset: 'this-month' }, person: 'all' }
+  return { tab: 'spending', page: 'overview', path: [], groupBy: 'merchant', review: false, debt: null, range: { preset: 'this-month' }, person: 'all' }
 }
 
 /** Bytes of the PUT body for this view. */
@@ -94,15 +98,26 @@ function range(raw: unknown, strict: boolean): SavedView['range'] | null {
   return { preset, from: o.from as string, to: o.to as string }
 }
 
+/** A legacy hidden chart leaves the other one: the matching single tab. */
+function tabFolded(tab: SavedView['tab'], hidden: unknown): SavedView['tab'] {
+  return hidden === 'spending' ? 'debts' : hidden === 'debts' ? 'spending' : tab
+}
+
+/** True for a 0.82.0 block that hid nothing (`hidden: null`): the one legacy shape whose tab is only the phone tab, so a
+ *  browser that chose "Side by side" there lands on Both (BudgetSection `settleView`). A new block never carries `hidden`. */
+export function isLegacyOpenView(raw: unknown): boolean {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as Record<string, unknown>).hidden === null
+}
+
 /** Reads a saved or posted view. `strict` (the server): every field present and exactly right, no unknown field, else null.
  *  Lenient (the browser): a wrong field takes its default; null only when it is not an object. */
 export function parseSavedView(raw: unknown, strict = false): SavedView | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const o = raw as Record<string, unknown>
-  if (strict && (Object.keys(o).some((k) => !FIELDS.includes(k)) || FIELDS.some((k) => !(k in o)))) return null
+  if (strict && (Object.keys(o).some((k) => !FIELDS.includes(k) && !LEGACY_FIELDS.includes(k)) || FIELDS.some((k) => !(k in o)))) return null
   const d = defaultSavedView()
-  const hiddenOk = o.hidden === null || o.hidden === 'spending' || o.hidden === 'debts'
-  const tabOk = o.tab === 'spending' || o.tab === 'debts'
+  const hiddenOk = !('hidden' in o) || o.hidden === null || o.hidden === 'spending' || o.hidden === 'debts'
+  const tabOk = o.tab === 'spending' || o.tab === 'debts' || o.tab === 'both'
   const pageOk = o.page === 'overview' || o.page === 'loans'
   const groupOk = o.groupBy === 'merchant' || o.groupBy === 'account'
   const reviewOk = typeof o.review === 'boolean'
@@ -112,8 +127,7 @@ export function parseSavedView(raw: unknown, strict = false): SavedView | null {
   const rng = range(o.range, strict)
   if (strict && !(hiddenOk && tabOk && pageOk && groupOk && reviewOk && debtOk && personOk && path && rng)) return null
   const out: SavedView = {
-    hidden: hiddenOk ? (o.hidden as SavedView['hidden']) : d.hidden,
-    tab: tabOk ? (o.tab as SavedView['tab']) : d.tab,
+    tab: tabFolded(tabOk ? (o.tab as SavedView['tab']) : d.tab, hiddenOk ? o.hidden : null),
     page: pageOk ? (o.page as SavedView['page']) : d.page,
     path: path ?? [],
     groupBy: groupOk ? (o.groupBy as SavedView['groupBy']) : d.groupBy,

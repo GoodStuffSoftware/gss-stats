@@ -216,8 +216,11 @@ const budgetOpen = ref(budgetSectionOpen(globalThis.location?.search ?? ''))
 // copy feeds the ☰ menu's current row and the top bar crumbs, and the viewer's last page is remembered per login.
 const budgetPage = ref<BudgetPage>(budgetPageOf(globalThis.location?.search ?? ''))
 const budgetSectionRef = ref<{ goPage: (page: BudgetPage) => void } | null>(null)
+// A loan opened from the Overview debt views carries its own trail ("All debts > name"), so the top bar then reads
+// just "Budget"; a loan opened from the Loans list keeps "Budget > Loans" (BudgetSection `fromOverview`).
+const budgetLoanFromOverview = ref(false)
 const budgetCrumbs = computed(() =>
-  budgetPage.value === 'loans' ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
+  budgetPage.value === 'loans' && !budgetLoanFromOverview.value ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
 )
 function onBudgetPage(page: BudgetPage) {
   budgetPage.value = page
@@ -1163,7 +1166,7 @@ function toggleDark() {
          breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
          only on the campaign page, whose widgets each cover their own fixed campaign window and
          aren't filter-driven. -->
-    <BudgetSection v-if="budgetOpen" ref="budgetSectionRef" :dark="dark" @page="onBudgetPage" />
+    <BudgetSection v-if="budgetOpen" ref="budgetSectionRef" :dark="dark" @page="onBudgetPage" @from-overview="budgetLoanFromOverview = $event" />
 
     <div v-if="showFilterBar && !budgetOpen" ref="barSectionEl" class="filterbar-inflow">
       <FilterBar

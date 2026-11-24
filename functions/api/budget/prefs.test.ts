@@ -155,8 +155,7 @@ describe('/api/budget/prefs storage', () => {
 
 // The saved view block (lib/budget/savedView.ts): its own hashed key beside the toolbar block.
 const view: SavedView = {
-  hidden: 'debts',
-  tab: 'spending',
+  tab: 'both',
   page: 'overview',
   path: [
     { level: 'category', key: 'groceries', label: 'Groceries' },
@@ -197,6 +196,35 @@ describe('/api/budget/prefs view block', () => {
     const both = await call(e, OTHER, 'PUT', JSON.stringify({ txnView: next, view: { ...view, tab: 'debts' } }))
     expect(both.status).toBe(200)
     expect(await (await call(e, OTHER, 'GET')).json()).toEqual({ txnView: next, view: { ...view, tab: 'debts' } })
+  })
+  it('a new block (Both tab, no hidden) is kept; an old 0.82.0 body with hidden is folded into its tab and stored without it', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    expect((await call(e, LISTED, 'PUT', JSON.stringify({ view }))).status).toBe(200)
+    expect(JSON.parse(m.get(await viewKey(LISTED)) as string)).toEqual({ view })
+    expect(await (await call(e, LISTED, 'GET')).json()).toEqual({ view })
+    const old = { ...view, tab: 'spending', hidden: 'spending' }
+    expect((await call(e, OTHER, 'PUT', JSON.stringify({ view: old }))).status).toBe(200)
+    const stored = JSON.parse(m.get(await viewKey(OTHER)) as string) as { view: Record<string, unknown> }
+    expect(stored.view.tab).toBe('debts')
+    expect(stored.view).not.toHaveProperty('hidden')
+    expect((await call(e, OTHER, 'PUT', JSON.stringify({ view: { ...view, hidden: null, tab: 'debts' } }))).status).toBe(200)
+    expect((JSON.parse(m.get(await viewKey(OTHER)) as string) as { view: SavedView }).view.tab).toBe('debts')
+  })
+  it('GET flags a stored 0.82.0 block that hid nothing (viewLegacy) and no other', async () => {
+    const { store, m } = kv()
+    const e = env(store)
+    await m.set(await viewKey(LISTED), JSON.stringify({ view: { ...view, tab: 'debts', hidden: null } }))
+    await m.set(await viewKey(OTHER), JSON.stringify({ view: { ...view, tab: 'spending', hidden: 'debts' } }))
+    const open = (await (await call(e, LISTED, 'GET')).json()) as Record<string, unknown>
+    expect(open.viewLegacy).toBe(true)
+    expect((open.view as SavedView).tab).toBe('debts')
+    expect(open.view).not.toHaveProperty('hidden')
+    const folded = (await (await call(e, OTHER, 'GET')).json()) as Record<string, unknown>
+    expect(folded).not.toHaveProperty('viewLegacy')
+    expect((folded.view as SavedView).tab).toBe('spending')
+    await call(e, LISTED, 'PUT', JSON.stringify({ view }))
+    expect(await (await call(e, LISTED, 'GET')).json()).toEqual({ view })
   })
   it('rejects bad views with 400 and writes nothing, even when the toolbar block beside it is fine', async () => {
     const { store, m } = kv()

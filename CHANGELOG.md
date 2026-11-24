@@ -6,6 +6,19 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A Both tab on Budget** — Spending, Debts and Both tabs sit above the charts, and Both shows the two together, opening on a wide screen by default.
+- **Legend position** — a wide donut has a Legend picker (Left, Right, Below) at the top of its list on the Spending and Debts tabs; the choice is kept per device and chart.
+
+### Changed
+- **One breadcrumb trail on the loan page** — the "← Loans" link is now a trail that shows where you came from (Loans, or All debts and the debt you drilled into), and each crumb and the browser Back go to the same place, and one click on a crumb is one step back, even if you double-click it.
+- **The top bar agrees with the trail** — a loan opened from the debt drill shows just "Budget" up top, because the trail in the page already says where you are, while one opened from the Loans list still shows "Budget › Loans".
+- **One way to choose what Budget shows** — the Show toggles and the "Side by side | Tabs" picker are gone; the tabs replace them. Your old choice carries over once: a hidden chart becomes the other chart's tab, and Side by side becomes Both. A link can still name a tab.
+- **Donut sizes** — the size you dragged for two charts side by side now belongs to the Both tab.
+- **Resizing a donut never highlights page text**, and two donuts that share a size (both charts in the same mode) resize together while you drag one.
+- **A donut starts centred** in its box, and legend names wrap instead of being cut off at the edge.
+- **Chart and legend sizing** — the donut starts square and centred beside or above its legend, resizes smoothly, and both donuts in Both stay the same size with their headings and totals lined up.
+
 ## [0.82.0] — 2026-11-23
 
 ### Added

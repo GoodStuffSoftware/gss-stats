@@ -6,7 +6,7 @@
 //
 //   - `txnView`: the Transactions toolbar (search, filters, sort), stored in the STATS_CONFIG KV under
 //     `budget:prefs:<sha-256 hex of the lower-cased login>`.
-//   - `view`: where the person left the section (the hidden chart, tab, drill path, range, person, page; lib/budget/savedView.ts),
+//   - `view`: where the person left the section (the tab: Spending, Debts or Both, drill path, range, person, page; lib/budget/savedView.ts),
 //     under `budget:prefs-view:<same hash>`. A key of its own, so the two blocks are written independently (no read-modify-write
 //     race when both save as the page closes) and neither can squeeze the other under the cap.
 //     The address is never in a key and nothing the client sends picks the key. The dashboard layout key is never read or written.
@@ -14,10 +14,10 @@
 //     `parseSavedView(raw, true)`) and caps the body at 4 KB (combined; the client sends one block per PUT, so each block
 //     has the whole cap): 400 on anything else, 413 on an oversize body. Both blocks are validated before either is written;
 //     a KV error between the two writes can leave the first written (a PUT with both blocks is not atomic).
-//     GET answers `{ txnView?, view? }` (`{}` when nothing is saved).
+//     GET answers `{ txnView?, view?, viewLegacy? }` (`{}` when nothing is saved; `viewLegacy` only for an old 0.82.0 block).
 //   - No database access: the budget database is not touched.
 
-import { parseSavedView } from '../../../src/lib/budget/savedView'
+import { isLegacyOpenView, parseSavedView } from '../../../src/lib/budget/savedView'
 import { parseTxnViewPrefs, TXN_PREFS_MAX_BYTES } from '../../../src/lib/budget/txnView'
 import { BUDGET_DENIED } from '../../_lib/auth'
 import { budgetJson, type BudgetData, type BudgetEnv } from '../../_lib/budgetAccess'
@@ -87,5 +87,13 @@ export const onRequest: PagesFunction<BudgetEnv, any, BudgetData> = async (ctx) 
   const [savedTxn, savedView] = await Promise.all([kv.get(await prefsKey(email)), kv.get(await viewKey(email))])
   const txnView = readSaved(savedTxn, 'txnView')
   const view = readSaved(savedView, 'view')
-  return budgetJson(200, { ...(txnView ? { txnView } : {}), ...(view ? { view } : {}) })
+  // `viewLegacy`: the stored block is a 0.82.0 one that hid nothing (its `hidden` key is gone from `view`), so the browser
+  // can map an old "Side by side" choice to the Both tab.
+  let viewLegacy = false
+  try {
+    viewLegacy = !!view && !!savedView && isLegacyOpenView((JSON.parse(savedView) as { view?: unknown } | null)?.view)
+  } catch {
+    viewLegacy = false
+  }
+  return budgetJson(200, { ...(txnView ? { txnView } : {}), ...(view ? { view } : {}), ...(viewLegacy ? { viewLegacy: true } : {}) })
 }

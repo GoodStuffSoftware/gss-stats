@@ -2753,7 +2753,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   resets one column to its minimum) and kept per device in localStorage `gss-stats-budget-txn-cols`. Under 600 px the card list is the default;
   a Cards | Table switch above the list (kept per device in `gss-stats-budget-txn-view`) shows the real table at 880 px, scrolled sideways.
   The category legend under the pie is two columns when its own width is 560 px or more.
-- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; "← Loans" and Back return to the list.
+- **Loans list.** `GET /api/budget/loans?person=` is fetched once per page view by `components/budget/LoansPage.vue`, which feeds `LoansList.vue` (facts row plus a Loans and a Cards table; payoff, interest and payment come from `src/lib/budget/loanMath.ts`). Built from `EditableTable` (card labels under 600 px) and the facts `dl`; no new widget type, no layout entry. An open loan replaces the facts row and the list at every width; one breadcrumb trail (the shared `Crumbs`, wrapping) replaces the old "← Loans" link: `Loans › name` from the list, `All debts › name › Loan details` from the debt drill, `All debts › name` from the debt list's Details. A crumb and Back go to the same place, and where the loan was opened from lives in `history.state` only, never in the address.
 - **Transactions toolbar.** `components/budget/TxnToolbar.vue` (mounted by `BudgetTable.vue`) searches, filters (merchant, category, account, person, dates) and sorts the table; logic in `src/lib/budget/txnView.ts`. It never changes the pies or totals. While anything is active, `txnFill.ts` fetches the remaining pages of the period through the paging endpoint (one request per page) so "N of M" counts the whole period. Search text and filters are never put in a URL or query string. The state is saved per login: a localStorage copy for the first paint and `GET`/`PUT /api/budget/prefs` (body `{ txnView }`, strict schema, 4096-byte cap) in the `STATS_CONFIG` KV under `budget:prefs:<sha256 of the lowercased login>`.
 - **Categories.** The category field in the table is one searchable list (type to filter, arrows and Enter,
   Esc to close). Text that matches no category offers `Add category "<text>"`, which `POST /api/budget/categories`
@@ -2769,32 +2769,42 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run
   `npx wrangler d1 execute gss-budget --local --file <file.sql>`. The tool refuses an output path inside a
   git work tree. Remote migrations and loads are run by hand by the owner, never by an agent or by CI.
-- **Layout.** From 1024 px the spending and debt panels sit side by side on shared grid rows (header, donut,
-  hint, list), so the donuts and lists align whatever height each header has; below that the Spending / Debts
-  tabs show one panel. A "Show: Spending | Debts" control beside the filters hides either chart on desktop (never
-  both), remembered per signed-in account in `localStorage` (`lib/budget/panelVisibility.ts`; the key holds a
-  hash of the address, not the address). A "Layout: Side by side | Tabs" picker (from 1024 px) swaps the two
-  side-by-side panels for the phone's one-tab-at-a-time layout; it is kept per device (`gss-stats-budget-layout`),
-  not per account.
-- **Remembered view.** The Show choice, tab, page, date range (a preset moves with the calendar; "custom" keeps its
+- **Layout.** Three tabs at every width: Spending, Debts and Both (`b_tab=spending|debts|both`, always written to
+  the address; with none, 1024 px and wider opens on Both and narrower on Spending, `defaultTabFor` in
+  `lib/budget/viewState.ts`). Both shows the two panels on shared grid rows (header, donut, hint, list) from 1024 px
+  and stacked below that; the transactions table follows Spending and Both, not Debts. There are no Show toggles and no
+  layout picker. The pre-0.83.0 choices are read once by `lib/budget/panelVisibility.ts` (`migrateLegacyTab`) and
+  removed: a hidden chart is the other chart's tab, "Side by side" is Both (over a saved 0.82.0 view that hid nothing,
+  which the prefs `GET` flags `viewLegacy: true`; a saved view that did hide a chart already folded into its single
+  tab), and the side-by-side donut size becomes the Both size. A wide screen with no saved layout key, or with
+  Tabs and nothing saved, lands on Both (a missing key means side by side, as 0.82.0 read it); a narrow one lands on
+  Spending.
+- **Remembered view.** The tab (Spending, Debts or Both), page, date range (a preset moves with the calendar; "custom" keeps its
   dates), person, review filter, the spending drill (category, then merchant or account) and the open debt are saved
   per login in KV under `budget:prefs-view:<hash>` (`PUT /api/budget/prefs`, body `{ view }`, written two seconds after
   the last change and on page hide or leaving the section; at most 4 KB) and put back on a plain open of Budget, on
   any device. The `GET` is raced against a 3 s timeout, so a slow server never holds the page. A link with `b_*`
-  parameters, or Back/Forward, always wins over the saved view (the Show choice is not in a link, so it still applies);
+  parameters, or Back/Forward, always wins over the saved view (a link with no `b_tab` opens on the width's default tab);
   a part that no longer exists (a deleted category, person or debt, a merchant that left the list) falls back
-  quietly to the top, "All" or the pie. A device's old `localStorage` Show choice is sent once when the server holds
-  nothing yet; `localStorage` stays the first-paint cache. Layout and donut sizes stay per device.
+  quietly to the top, "All" or the pie. A device's old Show choice (mapped to a tab, see Layout) is sent once when the
+  server holds nothing yet. Donut sizes stay per device.
 - **Debt drill.** A debt picked in the Debts pie opens in place: the crumb reads "All debts › name", the panel
   shows the balance and its history line, and Back, the crumb or the browser Back return to the pie. "Loan details"
   opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
   once per debt and cached.
-- **Donut size.** When one chart has the whole width (Tabs, or the other chart hidden) and its box is at least
-  640 px, its donut is bigger and sits beside a legend in as many 240 px-plus columns as fit. Every Budget donut has
-  a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); the size is kept
-  per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:<solo|split>` and is clamped to the
+- **Donut size.** When one chart has the whole width (the Spending or Debts tab, or Both stacked on a narrow screen) and its box is at least
+  640 px, its donut is bigger and sits beside a legend, the two as one group centred in the room with 48 px between them.
+  The legend is as many columns as fit, each 280 to 320 px wide so a name, its amount and its share stay together
+  (names wrap), and the same columns sit centred under the donut where the legend goes below or the chart is not wide
+  (the Both tab). A donut starts square. Every Budget donut has
+  a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); a drag changes the
+  diameter in step with the pointer (twice the movement when the donut is centred); the size is kept
+  per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:solo` (one key, `gss-stats-budget-donut:both`, for the Both tab) and is clamped to the
   room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);
   without them it renders as before.
+  The wide layout also takes `legendSide` (left, right or below the donut) and `legendPicker` (a Left | Right |
+  Below group at the top of the legend, wide only; Budget shows it on the Spending and Debts tabs and hides it on Both, where the two donuts share one size and a drag resizes both); the choice is kept per device and chart under
+  `gss-stats-budget-legend:<spending|debts>`.
 - **Privacy.** The repo is public: no real transactions, merchants, balances, account numbers or addresses
   are ever committed. The seed and the import requests live in a private folder outside the repo, and the
   SQL file the tool writes goes there too. Tests use only the made-up data in

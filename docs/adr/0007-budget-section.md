@@ -96,7 +96,9 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
    (as in point 7); no route writes them. Rollback is the commented block at the end of the migration (drop
    the two tables, then the two columns), with the pre-migration Time Travel bookmark as the last resort.
    Layout: an open loan replaces the facts row and the list at every width (the same on phone and desktop;
-   "← Loans" and Back return to the list), instead of keeping them above the open loan on wide screens.
+   a breadcrumb trail and Back return to the list), instead of keeping them above the open loan on wide screens.
+   The trail is the shared `nav/Crumbs.vue` with its opt-in `wrap` prop (long names wrap, nothing clips); the
+   origin (`from`: the debt drill or the debt list) rides in `history.state` beside the loan id, never in the URL.
 10. **A purchase is excluded with a flag, not a category (`0003_included.sql`).** `transactions.included` (1 = counts,
    the default; 0 = a person took it out) is an additive column; `category_edits` gains the NULLable `old_included` and
    `new_included`, so the one audit log also records an include change. A category would have lost the purchase's real
@@ -159,37 +161,58 @@ mistake in the budget code must not be able to reach the traffic stores (or the 
 
 ## Layout, debt drill and donut size (amendment)
 
-- **Layout is a per-device choice.** From 1024 px a picker switches Side by side and Tabs; it is kept in one
-  `localStorage` key per device (not per login, not in KV): it describes this screen, like the column widths and the
-  phone's Cards | Table switch. Below 1024 px the tabs always apply.
+- **Layout: three tabs at every width (0.83.0).** The first cut had a per-device Side by side | Tabs picker and a
+  Show toggle; both are replaced by the tabs Spending, Debts and Both (Both is the two charts together, side by side
+  from 1024 px, stacked below). Which tab is open is part of the saved view (below), so it follows the login, and a
+  link can name it (`b_tab`). A window opens on Both from 1024 px and on Spending below. The old per-device choices are
+  read once and removed: a hidden chart becomes the other chart's tab, and Side by side becomes Both (also over a saved
+  0.82.0 view that hid nothing, which the prefs `GET` marks `viewLegacy`). To reverse: restore the picker and Show from
+  0.82.0; the saved `tab` field already accepts all three values. A rolled-back 0.82.0 reader reads a saved tab
+  `both` as Spending and a block without `hidden` as `hidden: null` (nothing hidden), so a rollback loses only the
+  Both choice. A missing layout key counts as side by side (as 0.82.0's `readDesktopLayout` does), so a wide screen
+  with no key keeps Both over a 0.82.0 view.
+- **Navigation: one Back per crumb, one top-bar label (0.83.0).** `backToOverview` takes a one-second lock so a
+  double click is one `history.back()`, and the "close the open debt" intent is kept in `sessionStorage`
+  (`gss-stats-budget-leave-debt`, ten-second life, no personal data) so it survives a full page load as well as a
+  popstate. `BudgetSection` emits `fromOverview` while a loan opened from the debt drill is showing, and the top bar
+  shows only "Budget" then, because the in-page trail already carries the rest; a loan opened from the Loans list
+  keeps "Budget › Loans". To reverse: drop the `fromOverview` listener in `App.vue` and the lock and storage key in
+  `viewState.ts`.
 - **A debt drills in place.** The Debts pie replaces its slices with that debt's balance and history (a crumb, Back,
   and a "Loan details" link to the Loans page) rather than navigating away. The id is kept in `history.state` only,
   never the URL, so a shared link cannot name a debt; the history is fetched once per debt and cached.
-- **Donut size is per device, chart and mode.** One `localStorage` key per chart and per mode (solo: one chart has
-  the width; split: two side by side), because a size that suits one chart alone is too big beside the other. When a
+- **Donut size is per device, chart and mode.** One `localStorage` key per chart for solo (one chart has the width)
+  and one shared key for Both (two charts together; the old split sizes carry over to it), because a size that suits one chart alone is too big beside the other. When a
   chart is alone and its box is 640 px or more, the donut sits beside an auto-filling legend.
 - **Shared-component rule.** `DrillPie` stays free of Budget words: `resizable`, `wide` and `sizeKey` are opt-in
   props that default off (other callers render exactly as before), and the caller builds the storage key
   (`donutSizeKey` in `lib/budget/panelVisibility.ts`). A saved size is clamped to the room it has now.
+- **Legend side and shared size (amendment, 2026-11-23).** `DrillPie` also takes `legendSide` and `legendPicker`
+  (both opt-in, `update:legendSide` out); the panel keeps the side per device and chart
+  (`readLegendSide`/`writeLegendSide`, key `gss-stats-budget-legend:<chart>`, no personal data, `right` when the
+  stored value is invalid). Pies that name the same `sizeKey` share one live size (a module store re-read from
+  `localStorage` when a pie appears), so they resize together. A pie whose own box has no width (`display: contents`
+  in a parent grid) never takes the wide layout, and the resize drag locks text selection (body `user-select`,
+  `selectstart`) until the pointer is released, cancelled or the pie unmounts.
 
 ## Remembered view (amendment, 2026-11-23)
 
-- **Saved per login, in its own KV key.** The Show choice and the drill location (tab, page, range, person, review
+- **Saved per login, in its own KV key.** The tab and the drill location (page, range, person, review
   filter, the spending path of at most two steps, the open debt) are saved as `{ view }` under
   `budget:prefs-view:<sha256 hex of the lowercased login>`, through the same `GET`/`PUT /api/budget/prefs` route. It is
   a key of its own, not a field of the toolbar's `budget:prefs:*` blob: the two save independently when both flush as
   the page closes (no read-modify-write that could lose one), and each has its own 4 KB cap. Strict on write, lenient on
   read (a bad or old block is treated as nothing saved).
 - **Precedence.** A link (`b_*` parameters) or Back/Forward state (`history.state` drill, loan or debt mark) always
-  wins; the saved view is applied once, on a plain open, before the first data fetch (so there is no double fetch). The
-  Show choice is not part of a link, so it applies either way.
+  wins; the saved view is applied once, on a plain open, before the first data fetch (so there is no double fetch). A
+  link with no `b_tab` opens on the width's default tab.
 - **Stale parts fall back quietly, never an error.** A category that is gone drops the drill to the top; a person that
   is gone is "All"; a custom range the server would refuse is the default; a preset is recomputed from today; the
   second drill step is checked against the first level's slices when they load; an unknown debt returns to the pie.
-- **Migration.** `localStorage` keeps the Show choice as the first-paint cache. With nothing saved on the server, the
-  device's old choice is sent once; an untouched view writes nothing. The GET is raced against a 3 s timeout; when the
+- **Migration.** With nothing saved on the server, the device's old Show choice (mapped to a tab) is sent once; an
+  untouched view writes nothing. The GET is raced against a 3 s timeout; when the
   server does not answer nothing is restored, and nothing is written until the person changes something.
-- **Stays per device.** The layout picker and donut sizes (above): they describe this screen.
+- **Stays per device.** The donut sizes (above): they describe this screen.
 - To reverse: stop restoring (remove the call in `BudgetSection.vue`) and delete the `budget:prefs-view:*` KV keys.
 
 ## Transactions table interaction (amendment)

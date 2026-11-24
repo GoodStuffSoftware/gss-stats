@@ -56,14 +56,15 @@ export async function putServerPrefs(prefs: TxnViewPrefs, fetchImpl: typeof fetc
 
 /** The saved Budget view (where the person left the section): `ok` is false when the server did not answer (nothing is known),
  *  true with `view: null` when it answered and nothing is saved. Never throws. */
-export async function fetchServerView(fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; view: SavedView | null }> {
+export async function fetchServerView(fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; view: SavedView | null; legacyOpen: boolean }> {
   try {
     const res = await fetchImpl('/api/budget/prefs', { cache: 'no-store', headers: { Accept: 'application/json' } })
-    if (!res.ok) return { ok: false, view: null }
-    const body = (await res.json()) as { view?: unknown } | null
-    return { ok: true, view: body?.view ? parseSavedView(body.view) : null }
+    if (!res.ok) return { ok: false, view: null, legacyOpen: false }
+    const body = (await res.json()) as { view?: unknown; viewLegacy?: unknown } | null
+    const view = body?.view ? parseSavedView(body.view) : null
+    return { ok: true, view, legacyOpen: !!view && body?.viewLegacy === true }
   } catch {
-    return { ok: false, view: null }
+    return { ok: false, view: null, legacyOpen: false }
   }
 }
 

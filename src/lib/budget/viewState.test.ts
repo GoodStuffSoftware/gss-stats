@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { MARK_KEY, readMark, readSteps } from './drillHistory'
 import {
-  DEBT_MARK_KEY, LOAN_MARK_KEY, defaultViewState, parseDebtSteps, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
+  DEBT_MARK_KEY, LOAN_MARK_KEY, defaultTabFor, defaultViewState, parseDebtSteps, parseDrillSteps, parseLoanSteps, monthsLabel, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, searchWithoutPath, searchWithState, stateFromSearch, summaryQueryOf, todayIso, txnQueryOf,
   hasExplicitViewState, restorePatch, savedViewOfState, useBudgetViewState, type BudgetViewState,
 } from './viewState'
 import { parseSavedView, type SavedView } from './savedView'
@@ -75,7 +75,7 @@ describe('URL round trip', () => {
     expect(stateFromSearch(searchWithState('', acct), TODAY)).toEqual(acct)
   })
 
-  it('writes defaults out except the range, keeps other params, replaces old b_* params', () => {
+  it('writes defaults out except the range and the tab, keeps other params, replaces old b_* params', () => {
     const d = defaultViewState(TODAY)
     const p = new URLSearchParams(searchWithState('?page=p1&section=budget&utm_source=x&b_person=old&b_tab=debts', d))
     expect(p.get('page')).toBe('p1')
@@ -83,7 +83,26 @@ describe('URL round trip', () => {
     expect(p.get('utm_source')).toBe('x')
     expect(p.get('b_from')).toBe('2026-11-01')
     expect(p.get('b_to')).toBe('2026-11-20')
-    expect([...p.keys()].filter((k) => k.startsWith('b_')).sort()).toEqual(['b_from', 'b_to'])
+    expect([...p.keys()].filter((k) => k.startsWith('b_')).sort()).toEqual(['b_from', 'b_tab', 'b_to'])
+    expect(p.get('b_tab')).toBe('spending') // always written: the default depends on the width, so a reload must not change it
+  })
+
+  it('names all three tabs in the address, and a missing or unknown tab takes the width\'s default', () => {
+    for (const tab of ['spending', 'debts', 'both'] as const) {
+      const s = { ...defaultViewState(TODAY), tab }
+      expect(new URLSearchParams(searchWithState('', s)).get('b_tab')).toBe(tab)
+      expect(stateFromSearch(searchWithState('', s), TODAY, 'spending').tab).toBe(tab)
+    }
+    expect(stateFromSearch('', TODAY, 'both').tab).toBe('both')
+    expect(stateFromSearch('?b_tab=weird', TODAY, 'both').tab).toBe('both')
+    expect(stateFromSearch('?b_tab=debts', TODAY, 'both').tab).toBe('debts') // a link beats the default
+    expect(stateFromSearch('', TODAY).tab).toBe('spending')
+  })
+
+  it('defaultTabFor: Both where the charts fit side by side, Spending below', () => {
+    expect(defaultTabFor(true)).toBe('both')
+    expect(defaultTabFor(false)).toBe('spending')
+    expect(defaultViewState(TODAY, 'both').tab).toBe('both')
   })
 
   it('malformed values fall back to the defaults', () => {
@@ -447,6 +466,25 @@ describe('Budget pages: Overview and Loans', () => {
     expect(parseLoanSteps('x')).toBeNull()
   })
 
+  it('parseLoanSteps keeps a valid `from` and refuses any other', () => {
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'drill' }])).toEqual([{ level: 'loan', key: 'acct-1', label: 'acct-1', from: 'drill' }])
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'debts' }])?.[0].from).toBe('debts')
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1' }])?.[0].from).toBeUndefined() // an older entry still parses
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 'elsewhere' }])).toBeNull()
+    expect(parseLoanSteps([{ level: 'loan', key: 'acct-1', from: 7 }])).toBeNull()
+  })
+
+  it('opening a loan from the Overview records where it came from, in history.state only', async () => {
+    const { view, w } = mountSection()
+    await nextTick()
+    view.setPage('loans', 'acct-1') // no debt drill open: the debt list's Details
+    await nextTick()
+    expect(view.loanFrom.value).toBe('debts')
+    expect(readSteps(history.state, parseLoanSteps, LOAN_MARK_KEY)?.[0].from).toBe('debts')
+    expect(location.href).not.toMatch(/acct-1|debts/)
+    w.unmount()
+  })
+
   it('setPage pushes exactly one entry with b_page in the address, and Back returns to Overview', async () => {
     const push = vi.spyOn(history, 'pushState')
     const { view, w } = mountSection()
@@ -470,6 +508,113 @@ describe('Budget pages: Overview and Loans', () => {
     view.setPage('overview')
     expect(push).not.toHaveBeenCalled()
     w.unmount()
+  })
+
+  describe('backToOverview: one Back per crumb, and the close-the-debt intent', () => {
+    const LEAVE = 'gss-stats-budget-leave-debt'
+    beforeEach(() => {
+      sessionStorage.clear()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      sessionStorage.clear()
+    })
+
+    it('a second call before the first Back lands does nothing (a double click goes back once)', async () => {
+      const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.backToOverview(false)
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(1)
+      pop(null) // the first Back landed
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(2)
+      w.unmount()
+    })
+
+    it('a Back that never lands (nothing to go back to) does not lock the crumb for good', () => {
+      const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.backToOverview(false)
+      vi.advanceTimersByTime(1500)
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(2)
+      w.unmount()
+    })
+
+    it('the landing closes the open debt once, and nothing is left in storage', async () => {
+      vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.setDebt('acct-1')
+      view.backToOverview(true)
+      expect(sessionStorage.getItem(LEAVE)).not.toBeNull()
+      pop(null)
+      vi.advanceTimersByTime(5)
+      expect(view.state.debt).toBeNull()
+      expect(sessionStorage.getItem(LEAVE)).toBeNull() // taken: a later Back onto Overview closes nothing
+      w.unmount()
+    })
+
+    it('a popstate that does not land on Overview drops the intent (it never reaches a later Back)', () => {
+      vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.setDebt('acct-1')
+      view.backToOverview(true)
+      history.replaceState(null, '', '/?section=budget&page=p1&b_page=loans') // Forward onto the Loans page instead
+      pop(null)
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      expect(view.state.page).toBe('loans')
+      w.unmount()
+    })
+
+    it('a full page load onto the Overview entry (the in-memory flag is gone) still closes the debt, once, if the intent is fresh', () => {
+      const first = mountSection()
+      first.view.setDebt('acct-1')
+      const kept = history.state
+      first.w.unmount()
+      sessionStorage.setItem(LEAVE, String(Date.now()))
+      history.replaceState(kept, '', '/?section=budget&page=p1')
+      const second = mountSection()
+      vi.advanceTimersByTime(5)
+      expect(second.view.state.debt).toBeNull()
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      second.w.unmount()
+    })
+
+    it('an intent older than ten seconds is ignored (a Back that never landed does not leak into a later visit)', () => {
+      const first = mountSection()
+      first.view.setDebt('acct-1')
+      const kept = history.state
+      first.w.unmount()
+      sessionStorage.setItem(LEAVE, String(Date.now()))
+      vi.advanceTimersByTime(11_000)
+      history.replaceState(kept, '', '/?section=budget&page=p1')
+      const second = mountSection()
+      vi.advanceTimersByTime(5)
+      expect(second.view.state.debt).toBe('acct-1')
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      second.w.unmount()
+    })
+
+    it('without history to go back through it opens Overview directly, closing the debt when asked', () => {
+      vi.stubGlobal('history', undefined)
+      try {
+        const view = useBudgetViewState(TODAY) // a bare call: no component, no history
+        view.setPage('loans', 'acct-1')
+        view.setDebt('acct-1')
+        view.backToOverview(true)
+        expect(view.state.page).toBe('overview')
+        expect(view.state.debt).toBeNull()
+        view.setPage('loans', 'acct-1')
+        view.setDebt('acct-1')
+        view.backToOverview(false)
+        expect(view.state.page).toBe('overview')
+        expect(view.state.debt).toBe('acct-1') // not asked to close it
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
   })
 
   it('opening a loan from Overview is ONE entry: page and loan together; the loan is in history.state, not the URL', async () => {
@@ -887,7 +1032,6 @@ describe('Budget pages: Overview and Loans', () => {
 // The saved view: what it is built from, what a restore does and never does. All values are made up.
 describe('saved view: build and restore patch', () => {
   const saved: SavedView = {
-    hidden: 'debts',
     tab: 'debts',
     page: 'overview',
     path: [
@@ -902,20 +1046,21 @@ describe('saved view: build and restore patch', () => {
   }
   const ctx = { today: TODAY, categoryIds: ['fun', '__none__'], personIds: ['pat', 'sam'] }
 
-  it('savedViewOfState carries the state and the Show choice; a preset range stays a preset', () => {
+  it('savedViewOfState carries the state (the tab among it, Both included); a preset range stays a preset', () => {
     const state: BudgetViewState = { ...defaultViewState(TODAY), tab: 'debts', person: 'pat', debt: 'acct-1', path: [{ level: 'category', key: 'fun', label: 'Fun' }], reviewOnly: true }
-    expect(savedViewOfState(state, 'spending', TODAY)).toEqual({
-      hidden: 'spending', tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: true, debt: 'acct-1', range: { preset: 'this-month' }, person: 'pat',
+    expect(savedViewOfState({ ...state, tab: 'both' }, TODAY).tab).toBe('both')
+    expect(savedViewOfState(state, TODAY)).toEqual({
+      tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: true, debt: 'acct-1', range: { preset: 'this-month' }, person: 'pat',
     })
   })
   it('savedViewOfState keeps a custom range with its dates, trims long labels and drops a path it cannot save', () => {
     const r = { ...defaultViewState(TODAY), from: '2026-01-05', to: '2026-02-09', path: [{ level: 'category' as const, key: 'fun', label: 'L'.repeat(100) }] }
-    const v = savedViewOfState(r, null, TODAY)
+    const v = savedViewOfState(r, TODAY)
     expect(v.range).toEqual({ preset: 'custom', from: '2026-01-05', to: '2026-02-09' })
     expect(v.path[0].label).toHaveLength(60)
     const long = { ...defaultViewState(TODAY), path: [{ level: 'category' as const, key: 'k'.repeat(121), label: 'x' }] }
-    expect(savedViewOfState(long, null, TODAY).path).toEqual([])
-    expect(parseSavedView(savedViewOfState(r, null, TODAY), true)).not.toBeNull()
+    expect(savedViewOfState(long, TODAY).path).toEqual([])
+    expect(parseSavedView(savedViewOfState(r, TODAY), true)).not.toBeNull()
   })
   it('restorePatch: preset recomputed on today, the first step now and the second held back', () => {
     expect(restorePatch(saved, ctx)).toEqual({
@@ -940,7 +1085,7 @@ describe('saved view: build and restore patch', () => {
 
 describe('saved view: precedence (a link or Back/Forward always wins)', () => {
   const saved: SavedView = {
-    hidden: null, tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: false, debt: null, range: { preset: '3-months' }, person: 'pat',
+    tab: 'debts', page: 'overview', path: [{ level: 'category', key: 'fun', label: 'Fun' }], groupBy: 'merchant', review: false, debt: null, range: { preset: '3-months' }, person: 'pat',
   }
   const ctx = { categoryIds: ['fun'], personIds: ['pat'] }
   afterEach(() => history.replaceState(null, '', '/'))
@@ -985,6 +1130,40 @@ describe('saved view: precedence (a link or Back/Forward always wins)', () => {
     expect(v.restoreView(saved, ctx).applied).toBe(true)
     expect(v.state).toMatchObject({ page: 'loans', tab: 'debts', person: 'pat' })
     expect(v.state.path).toEqual([]) // the drill is Overview's
+  })
+  it('a saved Both tab is restored, and the width\'s default applies to a bare open with nothing saved', () => {
+    history.replaceState(null, '', '/?section=budget')
+    const v = useBudgetViewState(TODAY, () => 'both')
+    expect(v.state.tab).toBe('both')
+    v.restoreView({ ...saved, tab: 'spending' }, ctx)
+    expect(v.state.tab).toBe('spending')
+    history.replaceState(null, '', '/?section=budget')
+    const w = useBudgetViewState(TODAY, () => 'spending')
+    w.restoreView({ ...saved, tab: 'both' }, ctx)
+    expect(w.state.tab).toBe('both')
+  })
+  it('applyLegacyTab: used on a bare open with no saved view, never over a link or a restored view', () => {
+    history.replaceState(null, '', '/?section=budget')
+    const a = useBudgetViewState(TODAY)
+    expect(a.applyLegacyTab('debts')).toBe(true)
+    expect(a.state.tab).toBe('debts')
+    history.replaceState(null, '', '/?section=budget')
+    const b = useBudgetViewState(TODAY)
+    b.restoreView(saved, ctx)
+    expect(b.applyLegacyTab('both')).toBe(false)
+    expect(b.state.tab).toBe('debts')
+    history.replaceState(null, '', '/?section=budget&b_tab=spending')
+    const c = useBudgetViewState(TODAY)
+    expect(c.applyLegacyTab('both')).toBe(false)
+    expect(c.applyLegacyTab('both', true)).toBe(false) // a link beats even the over-saved form
+    expect(c.state.tab).toBe('spending')
+  })
+  it('applyLegacyTab over a saved legacy view (side by side, hidden null) lands on Both', () => {
+    history.replaceState(null, '', '/?section=budget')
+    const v = useBudgetViewState(TODAY)
+    v.restoreView({ ...saved, tab: 'debts' }, ctx)
+    expect(v.applyLegacyTab('both', true)).toBe(true)
+    expect(v.state.tab).toBe('both')
   })
   it('a saved Loans page is restored and the debt is not', () => {
     history.replaceState(null, '', '/?section=budget')
