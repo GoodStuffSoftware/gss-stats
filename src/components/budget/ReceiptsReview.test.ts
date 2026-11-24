@@ -70,6 +70,12 @@ describe('ReceiptsReview', () => {
     expect(text()).not.toContain('92')
   })
 
+  it('says up front that a person-set category will be kept, and only then', async () => {
+    await mountList([receipt(1, [match(1, { categoryProtectedBy: 'manual', proposedCategoryId: null })]), receipt(2)])
+    expect(all('rr-kept')).toHaveLength(1)
+    expect(byId('rr-kept').text()).toContain('Category will be kept')
+  })
+
   it('never shows a Gmail message id as text', async () => {
     await mountList([receipt(1)])
     expect(wrapper!.html()).not.toContain(GMAIL_ID)

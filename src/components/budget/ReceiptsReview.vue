@@ -354,6 +354,8 @@ const emptyText = computed(() =>
         </template>
         <template #editor-category="{ row, disabled, label, commit }">
           <CategorySelect v-if="bestOf(row)" :value="chosenFor(row)" :options="options" color="transparent" :label="label" :disabled="disabled || busy" @change="commit" />
+          <!-- A person set this row's category: Apply links the receipt and leaves it (the server keeps it either way). -->
+          <span v-if="bestOf(row)?.categoryProtectedBy" class="rr-sub rr-kept" data-testid="rr-kept">Category will be kept</span>
         </template>
         <template #cell-actions="{ row }">
           <span class="rr-actions">
@@ -460,6 +462,9 @@ const emptyText = computed(() =>
 .rr-sub {
   color: rgb(var(--ink-2));
   font-size: 12px;
+}
+.rr-kept {
+  display: block;
 }
 .rr-muted {
   margin: 0;

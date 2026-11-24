@@ -421,9 +421,10 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
              faint "Add note" (desktop: on hover or focus; touch and phone cards: always, one small muted line); a click on it
              opens the editor. -->
         <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note"><MarkdownText :text="row.note" inline /></span>
-        <span v-else-if="!receiptOf(row.id)" class="bt-note-empty">Add note</span>
         <!-- The receipt line is clamped like the note; a click or tap opens the tip, which shows the whole Receipt block. -->
         <span v-if="receiptOf(row.id)" class="bt-receipt" :class="{ 'bt-receipt-card': cardLayout }" data-testid="row-receipt">{{ receiptSummary(receiptOf(row.id)!) }}</span>
+        <!-- A row with a receipt and no note keeps the faint prompt, under the receipt line (touch has no other way in). -->
+        <span v-if="!row.note" class="bt-note-empty">Add note</span>
       </template>
       <template #cell-category="{ row }">
         <span class="bt-cat">

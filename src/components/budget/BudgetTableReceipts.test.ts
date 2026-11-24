@@ -80,7 +80,10 @@ describe('BudgetTable receipt links', () => {
     expect(rowEl(w, B).get('[data-testid="row-note"]').text()).toBe('weekly shop')
     expect(rowEl(w, C).find('[data-testid="row-receipt"]').exists()).toBe(false)
     expect(rowEl(w, C).get('.bt-note-empty').text()).toBe('Add note')
-    expect(rowEl(w, A).find('.bt-note-empty').exists()).toBe(false)
+    // A receipt row with no note keeps the faint prompt, after the receipt line.
+    const aHtml = rowEl(w, A).html()
+    expect(rowEl(w, A).get('.bt-note-empty').text()).toBe('Add note')
+    expect(aHtml.indexOf('data-testid="row-receipt"')).toBeLessThan(aHtml.indexOf('bt-note-empty'))
   })
   it('never sends more than 200 ids in one request', async () => {
     const rows = Array.from({ length: 450 }, (_, n) => txn(hex(n + 1)))
