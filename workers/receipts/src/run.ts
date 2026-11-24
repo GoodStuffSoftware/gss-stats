@@ -1,0 +1,262 @@
+// One receipts run for one connection (plan sections 5-7): decrypt the token, list new Gmail ids, get, extract, store,
+// re-match, mark stale, auto-apply when RECEIPTS_AUTO_APPLY is "1", and close the run row with counts and one code.
+// Every error is a fixed code (never Google, mail or model text). Nothing here logs except through ./log (counts, codes).
+import { matchReceipts } from '../../../src/lib/budget/receiptMatch'
+import { extractBodyText } from './bodyText'
+import { extractReceipt, type ExtractedReceipt } from './extract'
+import { GmailError, RETRY_NEXT_RUN, afterBound, buildReceiptQuery, createGmailClient } from './gmail'
+import { log } from './log'
+import * as S from './store'
+import { TokenCryptoError, decryptToken, reencryptToken } from './tokenCrypto'
+
+/** A Secrets Store binding (`await env.X.get()`); a plain string is accepted too (tests, a var). */
+export interface SecretBinding { get(): Promise<string> }
+export interface Env {
+  BUDGET_DB: D1Database
+  RECEIPTS_GMAIL_CLIENT_ID?: SecretBinding
+  RECEIPTS_GMAIL_CLIENT_SECRET?: SecretBinding
+  RECEIPTS_TOKEN_KEY?: SecretBinding
+  RECEIPTS_TOKEN_KEY_OLD?: SecretBinding
+  RECEIPTS_ANTHROPIC_KEY?: SecretBinding
+  /** Comma-separated copy of the Budget list. */
+  RECEIPTS_ALLOWED_EMAILS?: SecretBinding
+  RECEIPTS_MODEL?: string
+  RECEIPTS_MAX_PER_RUN?: string
+  RECEIPTS_DAILY_CAP?: string
+  RECEIPTS_BACKFILL_DAYS?: string
+  RECEIPTS_AUTO_APPLY?: string
+  RECEIPTS_AUTO_MIN_SCORE?: string
+}
+
+export interface RunDeps {
+  fetch?: typeof fetch
+  now?: () => Date
+  /** Wall-clock budget (ms): past it the run ends cleanly between messages (the next run continues). A manual run sets one because waitUntil is time-limited. */
+  budgetMs?: number
+}
+
+/** Budget of a manual (/sync) run: Workers keep waitUntil work alive about 30 s after the response. */
+export const MANUAL_BUDGET_MS = 25_000
+
+export function jsonResponse(status: number, body: Record<string, unknown>): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+}
+
+/** The secret's value, or null when the binding is missing, unreadable or empty. Never throws. */
+export async function readSecret(b: SecretBinding | string | undefined | null): Promise<string | null> {
+  try {
+    const v = typeof b === 'string' ? b : b ? await b.get() : null
+    return typeof v === 'string' && v.trim() !== '' ? v.trim() : null
+  } catch {
+    return null
+  }
+}
+
+export async function allowedEmails(env: Env): Promise<Set<string> | null> {
+  const raw = await readSecret(env.RECEIPTS_ALLOWED_EMAILS)
+  return raw === null ? null : new Set(raw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean))
+}
+
+const intVar = (v: string | undefined, dflt: number): number => {
+  const n = Number(v)
+  return v !== undefined && v.trim() !== '' && Number.isFinite(n) ? n : dflt
+}
+
+export interface RunOutcome { errorCode: string | null; counts: S.RunCounts }
+
+const SKIPPED: ExtractedReceipt = {
+  status: 'skipped', kind: null, merchant: null, paymentVia: null, cardLast4: null, orderRef: null, receiptDate: null, relatedDate: null,
+  currency: null, totalCents: null, taxCents: null, shippingCents: null, charges: [], chargesJson: '[]', items: [],
+}
+
+function senderDomain(payload: { headers?: Array<{ name?: string; value?: string }> }): string | null {
+  const from = payload.headers?.find((h) => h.name?.toLowerCase() === 'from')?.value ?? ''
+  const m = /@([A-Za-z0-9.-]{1,80})>?\s*$/.exec(from.trim())
+  return m ? m[1].toLowerCase() : null
+}
+
+const CATEGORIES_SQL = `SELECT id FROM categories WHERE archived = 0 ORDER BY id`
+const RUN_OPEN_SQL = `SELECT 1 AS ok FROM receipt_sync_runs WHERE id = ?1 AND connection_id = ?2 AND finished_at IS NULL`
+/** Re-encrypted token: only the row still holding the ciphertext we read, still active. */
+const REKEY_SQL = `UPDATE email_connections SET token_ct = ?3, token_iv = ?4, key_id = ?5, updated_at = ?6 WHERE id = ?1 AND token_ct = ?2 AND status = 'active'`
+
+/** True when run `runId` exists for the connection and is still open (the /sync route checks this before answering 202). */
+export async function runIsOpen(db: D1Database, runId: number, connectionId: string): Promise<boolean> {
+  return (await db.prepare(RUN_OPEN_SQL).bind(runId, connectionId).first()) !== null
+}
+
+/** Run one connection into run row `runId` (or a new cron row). Never throws: the row is always closed with counts and one code. */
+export async function runConnection(env: Env, connectionId: string, runId: number | null, trigger: 'cron' | 'manual', deps: RunDeps = {}): Promise<RunOutcome> {
+  const clock = deps.now ?? (() => new Date())
+  const db = env.BUDGET_DB
+  const counts: S.RunCounts = { ...S.ZERO_COUNTS }
+  let code: string | null = null
+  let watermarkAt: string | null = null
+  let id = runId
+  try {
+    if (id === null) id = await S.createRun(db, connectionId, trigger, clock())
+    const r = await runInner(env, connectionId, counts, deps, clock)
+    code = r.code
+    watermarkAt = r.watermarkAt
+  } catch {
+    code = 'run_failed'
+  }
+  try {
+    const at = clock()
+    if (id !== null) await S.finishRun(db, id, counts, code, at)
+    await S.recordConnectionResult(db, connectionId, { runAtIso: at.toISOString(), ok: code === null, watermarkAt, lastError: code })
+    await S.pruneRuns(db, connectionId)
+  } catch {
+    code = code ?? 'run_failed'
+  }
+  log('run_done', { listed: counts.listed, fetched: counts.fetched, extracted: counts.extracted, skipped: counts.skipped, matched: counts.matched, auto_applied: counts.autoApplied }, code)
+  return { errorCode: code, counts }
+}
+
+async function runInner(env: Env, connectionId: string, counts: S.RunCounts, deps: RunDeps, clock: () => Date): Promise<{ code: string | null; watermarkAt: string | null }> {
+  const db = env.BUDGET_DB
+  const doFetch = deps.fetch ?? fetch
+  const startedMs = clock().getTime()
+  const conn = await S.loadConnection(db, connectionId)
+  if (!conn || conn.status !== 'active' || !conn.tokenCt || !conn.tokenIv) return { code: 'not_active', watermarkAt: null }
+
+  // The owner must still be on the Budget list (a removed person's mailbox stops syncing; no Gmail call).
+  const allowed = await allowedEmails(env)
+  if (allowed === null) return { code: 'secrets_missing', watermarkAt: null }
+  if (!allowed.has(conn.ownerEmail)) {
+    await S.setConnectionStatus(db, connectionId, 'paused', 'not_allowed', clock())
+    return { code: 'not_allowed', watermarkAt: null }
+  }
+
+  const [clientId, clientSecret, keyCurrent, keyOld, apiKey] = await Promise.all([
+    readSecret(env.RECEIPTS_GMAIL_CLIENT_ID), readSecret(env.RECEIPTS_GMAIL_CLIENT_SECRET), readSecret(env.RECEIPTS_TOKEN_KEY),
+    readSecret(env.RECEIPTS_TOKEN_KEY_OLD), readSecret(env.RECEIPTS_ANTHROPIC_KEY),
+  ])
+  if (!clientId || !clientSecret || !keyCurrent || !apiKey) return { code: 'secrets_missing', watermarkAt: null }
+
+  // Decrypt (AAD = connection id). A token that will not decrypt is a reconnect, never a retry loop.
+  let refreshToken: string
+  try {
+    const enc = { token_ct: conn.tokenCt, token_iv: conn.tokenIv, key_id: conn.keyId ?? '' }
+    const d = await decryptToken(enc, connectionId, { current: keyCurrent, old: keyOld })
+    refreshToken = d.plaintext
+    if (d.usedOldKey) {
+      try {
+        const n = await reencryptToken(refreshToken, connectionId, keyCurrent)
+        await db.prepare(REKEY_SQL).bind(connectionId, conn.tokenCt, n.token_ct, n.token_iv, n.key_id, clock().toISOString()).run()
+      } catch {
+        // The next run tries again; the old key still works.
+      }
+    }
+  } catch (e) {
+    if (e instanceof TokenCryptoError && e.code === 'decrypt_failed') {
+      await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'decrypt_failed', clock())
+      return { code: 'decrypt_failed', watermarkAt: null }
+    }
+    return { code: 'key_invalid', watermarkAt: null }
+  }
+
+  const maxPerRun = Math.max(0, Math.floor(intVar(env.RECEIPTS_MAX_PER_RUN, 60)))
+  const remaining = S.capRemaining(intVar(env.RECEIPTS_DAILY_CAP, 150), await S.modelCallsToday(db, connectionId, clock()))
+  let budget = Math.min(maxPerRun, remaining)
+  if (budget === 0) return { code: 'daily_cap', watermarkAt: null }
+
+  const gmail = createGmailClient({ clientId, clientSecret, refreshToken, fetch: doFetch })
+  const model = env.RECEIPTS_MODEL?.trim() || 'claude-haiku-5-5'
+  const categoryIds = (await db.prepare(CATEGORIES_SQL).all<{ id: string }>()).results.map((c) => c.id)
+  const timeUp = (): boolean => deps.budgetMs !== undefined && clock().getTime() - startedMs >= deps.budgetMs
+  let code: string | null = null
+  let newest = 0
+
+  /** Get, extract and store (or complete) one message. Returns a run-ending code, or null to go on. */
+  const handle = async (gmailId: string, retry: { id: string } | null): Promise<string | null> => {
+    let msg
+    try {
+      msg = await gmail.getMessage(gmailId)
+    } catch (e) {
+      if (e instanceof GmailError && (e.code === 'needs_reconnect' || RETRY_NEXT_RUN.has(e.code))) throw e
+      const failure = e instanceof GmailError ? e.code : 'client_error'
+      if (retry) await S.recordFailure(db, retry.id, failure, clock())
+      else await S.insertReceipt(db, { connectionId, gmailMsgId: gmailId, emailDate: clock().toISOString().slice(0, 10), extracted: null, failureCode: failure }, clock())
+      return null
+    }
+    counts.fetched++
+    const emailDate = new Date(msg.internalDateMs).toISOString().slice(0, 10)
+    const text = extractBodyText(msg.payload)
+    let receipt: ExtractedReceipt | null = null
+    if (text === '') {
+      receipt = SKIPPED
+    } else {
+      const r = await extractReceipt({ text, emailDate, categoryIds }, { apiKey, model }, doFetch)
+      if (!r.ok) {
+        if (r.code === 'extract_invalid') {
+          if (retry) await S.recordFailure(db, retry.id, 'extract_invalid', clock())
+          else await S.insertReceipt(db, { connectionId, gmailMsgId: gmailId, emailDate, extracted: null, failureCode: 'extract_invalid', senderDomain: senderDomain(msg.payload) }, clock())
+          return null
+        }
+        return r.reason ?? 'api_unavailable' // stop_run or auth_failed: nothing stored, no attempt used
+      }
+      receipt = r.receipt
+    }
+    const domain = senderDomain(msg.payload)
+    const stored = retry
+      ? await S.completeReceipt(db, retry.id, receipt, model, domain, clock())
+      : (await S.insertReceipt(db, { connectionId, gmailMsgId: gmailId, emailDate, extracted: receipt, senderDomain: domain, model }, clock())).inserted
+    if (stored) {
+      if (receipt.status === 'skipped') counts.skipped++
+      else counts.extracted++
+    }
+    newest = Math.max(newest, msg.internalDateMs)
+    return null
+  }
+
+  try {
+    // Retries first (pending or error rows under the attempt limit), then new messages oldest first.
+    const retries = await S.loadRetryReceipts(db, connectionId, budget)
+    for (const rr of retries) {
+      if (budget <= 0 || timeUp()) break
+      budget--
+      code = await handle(rr.gmailMsgId, { id: rr.id })
+      if (code) break
+    }
+    if (!code && budget > 0 && !timeUp()) {
+      const query = buildReceiptQuery(await S.loadReceiptQueries(db), afterBound(S.watermarkMs(conn), clock().getTime(), intVar(env.RECEIPTS_BACKFILL_DAYS, 14)))
+      const listed = await gmail.listMessageIds(query, { pageSize: 100, maxPages: 2 })
+      counts.listed = listed.ids.length
+      const { fresh } = await S.filterNewMessageIds(db, connectionId, listed.ids)
+      for (const gid of fresh.reverse()) {
+        if (budget <= 0 || timeUp()) break
+        budget--
+        code = await handle(gid, null)
+        if (code) break
+      }
+    }
+  } catch (e) {
+    if (e instanceof GmailError) {
+      code = e.code
+      if (e.code === 'needs_reconnect') await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'needs_reconnect', clock())
+    } else {
+      code = 'run_failed'
+    }
+  }
+
+  // Re-match open receipts, mark stale, then auto-apply (off unless RECEIPTS_AUTO_APPLY is "1"). Runs after a stop too.
+  if (code !== 'needs_reconnect') {
+    try {
+      const now = clock()
+      const enabled = S.autoApplyEnabled(env.RECEIPTS_AUTO_APPLY)
+      const minScore = intVar(env.RECEIPTS_AUTO_MIN_SCORE, 90)
+      const open = await S.loadOpenReceipts(db, connectionId, now)
+      const { rows, takenTxnIds } = await S.loadCandidateRows(db, open)
+      const results = matchReceipts(open, rows, { autoApply: enabled, autoMinScore: minScore }, { takenTxnIds })
+      const written = await S.writeMatchResults(db, results, now)
+      counts.matched = written.suggested
+      await S.markStale(db, connectionId, now)
+      counts.autoApplied = await S.autoApplyMatches(db, written.proposals, now, { enabled, minScore })
+    } catch {
+      code = code ?? 'match_failed'
+    }
+  }
+  return { code, watermarkAt: newest > 0 ? new Date(newest).toISOString() : null }
+}
+
