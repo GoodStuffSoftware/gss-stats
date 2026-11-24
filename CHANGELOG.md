@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.83.1] — 2026-11-23
+
 ### Fixed
 - **Rule review flags reach existing rows** — turning on review for a store rule now flags the purchases it already covers, not only new imports.
 - **Steady review rows** — confirming a review no longer shifts the rows under your finger, and Use for all stays where it was.
