@@ -2792,7 +2792,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   once per debt and cached.
 - **Donut size.** When one chart has the whole width (the Spending or Debts tab, or Both stacked on a narrow screen) and its box is at least
   640 px, its donut is bigger and sits beside a legend, the two as one group centred in the room with 48 px between them.
-  The legend is as many columns as fit, each 300 to 360 px wide so a name, its amount and its share stay together
+  The legend is as many columns as fit, each 280 to 320 px wide so a name, its amount and its share stay together
   (names wrap), and the same columns sit centred under the donut where the legend goes below or the chart is not wide
   (the Both tab). A donut starts square. Every Budget donut has
   a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); a drag changes the

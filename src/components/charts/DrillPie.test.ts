@@ -1063,7 +1063,7 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
       expect(plain.classes()).not.toContain('dp-managed')
     })
 
-    it('are centred and sized to their content: at most 360 px, with the donut and legend 48 px apart', () => {
+    it('are centred and sized to their content: at most 320 px, with the donut and legend 48 px apart', () => {
       expect(source).toMatch(/\.dp-managed \.dp-list\s*\{[^}]*repeat\(var\(--dp-cols, 1\), minmax\(0, 360px\)\)[^}]*justify-content:\s*center/)
       expect(source).toMatch(/\.drill-pie\.dp-wide\s*\{[^}]*column-gap:\s*48px[^}]*justify-content:\s*center/)
       expect(WIDE_GAP_PX).toBe(48)

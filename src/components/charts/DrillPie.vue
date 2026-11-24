@@ -38,8 +38,8 @@ export const DONUT_MIN = 200
 export const WIDE_MIN_PX = 640
 /** The narrowest and the widest a legend column gets (a name, its amount and its share stay close together), the gap
  * between two legend columns, and the gap between the donut and the legend (they sit together as one group). */
-export const LEGEND_COL_PX = 300
-export const LEGEND_COL_MAX_PX = 360
+export const LEGEND_COL_PX = 280
+export const LEGEND_COL_MAX_PX = 320
 export const LEGEND_COL_GAP_PX = 24
 export const WIDE_GAP_PX = 48
 /** How many legend columns fit in `avail` px (at least one, never more than there are `items` to list). */
@@ -191,7 +191,7 @@ export function releaseSelectionLock(): void {
 //                                          step), to make the donut bigger or smaller; double-click or Delete resets
 //   wide:    boolean (false)               when the pie has 640 px or more of width, the donut sits beside the legend
 //                                          (one group, centred, 48 px between them), the donut bigger and the legend in as
-//                                          many columns as fit: each 300 to 360 px wide, so a name, its value and its share
+//                                          many columns as fit: each 280 to 320 px wide, so a name, its value and its share
 //                                          stay together in a row. A resizable or wide pie centres its legend columns the
 //                                          same way when it is not wide (under the donut), and its donut starts square.
 //   sizeKey: string                        where the chosen size is kept on this device (localStorage); the caller names
@@ -528,7 +528,7 @@ watch(
   },
 )
 const canvasStyle = computed(() => (size.value === null ? undefined : { width: `${size.value}px`, height: `${size.value}px`, maxWidth: 'none', maxHeight: 'none' }))
-// A pie with a size to manage centres its legend columns (300 to 360 px each, as many as the room and the slices allow).
+// A pie with a size to manage centres its legend columns (280 to 320 px each, as many as the room and the slices allow).
 const managed = computed(() => props.resizable || props.wide)
 const legendCols = computed(() => {
   if (!managed.value || !(room.value > 0)) return null
@@ -813,14 +813,14 @@ onBeforeUnmount(() => {
   touch-action: pan-y;
 }
 /* Opt-in (resizable or wide): the donut starts square (the shorter side of the old box), and the legend is a centred set
- * of columns, each as wide as its content up to 360 px (a name, its amount and its share stay together), as many as fit
+ * of columns, each as wide as its content up to 320 px (a name, its amount and its share stay together), as many as fit
  * (--dp-cols, counted in the script). Names wrap instead of being cut. */
 .dp-managed .dp-canvas {
   max-height: none;
 }
 .dp-managed .dp-list {
   display: grid;
-  grid-template-columns: repeat(var(--dp-cols, 1), minmax(0, 360px));
+  grid-template-columns: repeat(var(--dp-cols, 1), minmax(0, 320px));
   justify-content: center;
   column-gap: 24px;
   align-items: start;
@@ -833,7 +833,7 @@ onBeforeUnmount(() => {
 /* Wide: the donut and the legend are ONE group, centred in the room, 48 px apart (right is the default; left mirrors it)
  * or the legend under the donut (bottom). The legend's column is as wide as its columns need, never more. */
 .drill-pie.dp-wide {
-  --dp-legend-w: calc(var(--dp-cols, 1) * 360px + (var(--dp-cols, 1) - 1) * 24px);
+  --dp-legend-w: calc(var(--dp-cols, 1) * 320px + (var(--dp-cols, 1) - 1) * 24px);
   display: grid;
   grid-template-columns: var(--dp-size, 320px) minmax(0, var(--dp-legend-w));
   column-gap: 48px;
