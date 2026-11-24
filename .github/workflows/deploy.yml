@@ -24,6 +24,9 @@ on:
 #                    deploy-live fails or is skipped (see its `if`).
 #   deploy-live    - the gss-live Worker (workers/live/, the Durable Object behind live updates),
 #                    only when its inputs changed or on a manual run. Same token as deploy-worker.
+#   deploy-receipts - the gss-budget-receipts Worker (workers/receipts/), only when its inputs changed
+#                    or on a manual run. Pages waits for it (a Pages service binding to it needs the
+#                    Worker to exist first). Same token as deploy-worker.
 #   deploy-worker  - the gss-stats-sync Worker (workers/sync/), only when its inputs changed
 #                    (see "Detect Worker changes" below) or on a manual run. Its Cloudflare token
 #                    uses CLOUDFLARE_WORKERS_API_TOKEN, or CLOUDFLARE_API_TOKEN if that is unset
@@ -32,11 +35,11 @@ on:
 # newer push cancel the Worker job too.
 jobs:
   deploy:
-    # Order Pages after gss-live: Pages binds it as a service binding, and Cloudflare requires the
-    # target Worker to be deployed first. `!cancelled()` is a status function, so it replaces the
-    # implicit `success()`: Pages still runs when deploy-live failed or was skipped (without it a
-    # failed or skipped need skips this job too) and stops only if the whole run is cancelled.
-    needs: deploy-live
+    # Order Pages after gss-live and gss-budget-receipts: Pages binds them as service bindings, and
+    # Cloudflare requires the target Worker to be deployed first. `!cancelled()` is a status function,
+    # so it replaces the implicit `success()`: Pages still runs when a Worker job failed or was skipped
+    # (without it a failed or skipped need skips this job too) and stops only if the whole run is cancelled.
+    needs: [deploy-live, deploy-receipts]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # One Pages deploy at a time; a newer push supersedes an in-flight run.
@@ -127,6 +130,69 @@ jobs:
         if: failure() && steps.deploy.conclusion == 'failure'
         run: |
           echo "::error::gss-live deploy failed. If the error above is an authentication or permission one (401/403, 'Authentication error', 'not authorized'), the token lacks Workers Scripts: Edit. This job authenticates with the repo secret CLOUDFLARE_WORKERS_API_TOKEN when set, otherwise CLOUDFLARE_API_TOKEN (the Pages token). Add or fix either secret (README: Deploy). Pages still deploys, but until gss-live exists a Pages deploy that binds it can fail: fix the token, then use Run workflow (a manual run forces this job)."
+
+  deploy-receipts:
+    if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy its Worker to production
+    runs-on: ubuntu-latest
+    # Pages `deploy` waits on this job (needs), so a hung npm ci or wrangler must not hold it for the
+    # 360-minute default. A job timeout does not cancel the run, so Pages still runs.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # Never cancel a Worker deploy mid-flight; a newer push waits its turn.
+    concurrency:
+      group: deploy-receipts
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
+      # The Worker bundles workers/receipts/ and the repo files it imports: src/lib/budget/receiptMatch.ts
+      # and what that pulls in (dates.ts, types.ts), plus mask.ts. When the Worker gains another import
+      # from outside workers/receipts/, add that file to the pattern below. package-lock.json (the pinned
+      # wrangler) and tsconfig.json are inputs too; this workflow file is one, so editing it also
+      # redeploys. A manual run, a new/forced branch or an unknown base always deploys.
+      - name: Detect receipts Worker changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying the receipts Worker."; exit 0
+          fi
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying the receipts Worker."; exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/receipts/|src/lib/budget/(receiptMatch|dates|types|mask)\.ts$|package-lock\.json$|tsconfig\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.(test|spec)\.[cm]?[jt]s$' || true)
+          if [ -n "$changed" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Receipts Worker inputs changed:"; echo "$changed"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "No receipts Worker inputs changed: skipping the receipts Worker deploy."
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.deploy == 'true'
+        with:
+          node-version: 24 # current LTS; wrangler 4.x requires Node >= 22
+          cache: npm
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npm ci
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npx vitest run workers/receipts src/lib/budget # a red receipts or matcher test stops its deploy too
+      # The D1 and Secrets Store bindings, the cron and the vars are declared in workers/receipts/wrangler.toml;
+      # no secret value is needed here. The six Secrets Store secrets must exist before this first runs.
+      - name: Deploy gss-budget-receipts
+        id: deploy
+        if: steps.changes.outputs.deploy == 'true'
+        run: npx wrangler deploy -c workers/receipts/wrangler.toml
+        env:
+          # A Worker-capable token can be added without touching the Pages secret.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Explain a failed receipts Worker deploy
+        if: failure() && steps.deploy.conclusion == 'failure'
+        run: |
+          echo "::error::gss-budget-receipts deploy failed. Likely causes: (1) a Secrets Store secret named in workers/receipts/wrangler.toml does not exist yet (RECEIPTS_GMAIL_CLIENT_ID, RECEIPTS_GMAIL_CLIENT_SECRET, RECEIPTS_TOKEN_KEY, RECEIPTS_TOKEN_KEY_OLD, RECEIPTS_ANTHROPIC_KEY, RECEIPTS_ALLOWED_EMAILS); (2) an authentication or permission error (401/403, code 10021): the token needs Workers Scripts: Edit and Secrets Store: Edit. This job authenticates with CLOUDFLARE_WORKERS_API_TOKEN when set, otherwise CLOUDFLARE_API_TOKEN. Until the Worker exists a Pages deploy that binds it can fail: fix the cause, then use Run workflow (a manual run forces this job)."
 
   deploy-worker:
     if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy its Worker to production

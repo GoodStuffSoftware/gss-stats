@@ -1,0 +1,81 @@
+# gss-budget-receipts: reads the connected Budget people's Gmail receipts on a cron, extracts the fields
+# with Claude, and matches them to transactions (suggest-only until RECEIPTS_AUTO_APPLY is "1"). It is
+# also the only place that holds the Gmail client secret, the token AES key and the Anthropic key; the
+# gss-stats Pages project reaches it through the RECEIPTS Service Binding (/exchange, /sync, /disconnect).
+# See src/index.ts and the email receipts plan (ADR 0008).
+#
+# Deploy (from the repo root):  npx wrangler deploy -c workers/receipts/wrangler.toml
+# CI deploys it (deploy-receipts in .github/workflows/deploy.yml) before the Pages deploy that binds it.
+# Secrets (Secrets Store, never printed, created BEFORE the first deploy): see the bindings below.
+name = "gss-budget-receipts"
+main = "src/index.ts"
+compatibility_date = "2026-09-26"
+
+# NOT public: no workers.dev URL, no preview URLs, no route. The only way in is the gss-stats Pages
+# project's Service Binding (binding RECEIPTS in the root wrangler.toml).
+workers_dev = false
+preview_urls = false
+
+# Hourly at :23 UTC.
+[triggers]
+crons = ["23 * * * *"]
+
+# Counts and codes only in logs, never message content (plan section 9).
+[observability]
+enabled = true
+
+# CPU headroom for HTML-to-text and parsing; the Gmail and model calls are I/O wait, not CPU time.
+[limits]
+cpu_ms = 60000
+
+# The Budget database (ADR 0007), the same one the Pages Functions bind. This Worker reads the
+# transactions and writes the receipt tables plus the apply path (ADR 0008 amends "nothing else binds it").
+[[d1_databases]]
+binding = "BUDGET_DB"
+database_name = "gss-budget"
+database_id = "1194bb36-100d-480e-baed-61d545e7873c"
+
+# Account-level Secrets Store (store "default_secrets_store", the same store workers/sync uses);
+# secret name = binding name = the Bitwarden key name where one exists.
+[[secrets_store_secrets]]
+binding = "RECEIPTS_GMAIL_CLIENT_ID"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_GMAIL_CLIENT_ID"
+
+[[secrets_store_secrets]]
+binding = "RECEIPTS_GMAIL_CLIENT_SECRET"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_GMAIL_CLIENT_SECRET"
+
+# Current AES-256 key, base64. Generated straight into the store, never printed.
+[[secrets_store_secrets]]
+binding = "RECEIPTS_TOKEN_KEY"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_TOKEN_KEY"
+
+# Optional, key rotation only: the previous key, so old refresh tokens still decrypt. The secret must
+# exist once this binding is declared (a placeholder value is fine until a rotation).
+[[secrets_store_secrets]]
+binding = "RECEIPTS_TOKEN_KEY_OLD"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_TOKEN_KEY_OLD"
+
+# This Worker only: never a Pages secret, never a var.
+[[secrets_store_secrets]]
+binding = "RECEIPTS_ANTHROPIC_KEY"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_ANTHROPIC_KEY"
+
+# A copy of the Budget list (comma-separated), so a removed person's mailbox stops syncing.
+[[secrets_store_secrets]]
+binding = "RECEIPTS_ALLOWED_EMAILS"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_ALLOWED_EMAILS"
+
+[vars]
+RECEIPTS_MODEL = "claude-haiku-5-5"
+RECEIPTS_MAX_PER_RUN = "60" # messages per connection per run
+RECEIPTS_DAILY_CAP = "150" # model calls per connection per day
+RECEIPTS_BACKFILL_DAYS = "14" # the dry run; raise to 90 after Mike checks the suggestions
+RECEIPTS_AUTO_APPLY = "0" # "1" only after the precision check (plan section 12 step 8)
+RECEIPTS_AUTO_MIN_SCORE = "90"

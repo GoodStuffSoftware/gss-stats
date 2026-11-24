@@ -53,7 +53,22 @@ service = "gss-stats-sync"
 binding = "LIVE"
 service = "gss-live"
 
-# Secrets (NOT here): BUDGET_ALLOWED_EMAILS (comma-separated; who may open /api/budget/*, set
+# The gss-budget-receipts Worker (workers/receipts/), reachable ONLY through this Service Binding: no
+# workers.dev URL, no route. functions/api/budget/email/* hand it the Gmail code exchange, a manual sync
+# and a disconnect. Without it (or without the RECEIPTS_GMAIL_CLIENT_ID Pages secret) the email routes
+# answer "not configured" and Budget works as before. The Worker must exist before a Pages deploy binds it.
+[[services]]
+binding = "RECEIPTS"
+service = "gss-budget-receipts"
+
+# Receipts sharing (functions/api/budget/email/links.ts): "fields" = each listed Budget person sees the
+# other's receipt fields (never the Gmail link); "none" (the code default) = owner only. Mike chose
+# "fields" on 2026-11-23. Not a secret.
+[vars]
+RECEIPTS_SHARE = "fields"
+
+# Secrets (NOT here): RECEIPTS_GMAIL_CLIENT_ID (the Gmail OAuth client id, a Pages secret:
+# `npx wrangler pages secret put RECEIPTS_GMAIL_CLIENT_ID`), BUDGET_ALLOWED_EMAILS (comma-separated; who may open /api/budget/*, set
 # per environment with `npx wrangler pages secret put BUDGET_ALLOWED_EMAILS`, locally in .dev.vars;
 # unset or empty locks everyone out) and CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
@@ -104,7 +119,13 @@ service = "gss-stats-sync"
 binding = "LIVE"
 service = "gss-live"
 
+# The gss-budget-receipts Worker, as above.
+[[env.preview.services]]
+binding = "RECEIPTS"
+service = "gss-budget-receipts"
+
 # The one extra hostname the host guard (functions/_middleware.ts) serves, and only
 # where this var is set: preview deployments. Production never has it.
 [env.preview.vars]
 PREVIEW_HOST = "dev.gss-stats.pages.dev"
+RECEIPTS_SHARE = "fields"
