@@ -936,10 +936,10 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
       const add = vi.spyOn(window, 'addEventListener')
       const remove = vi.spyOn(window, 'removeEventListener')
       const { h } = await held()
-      const blurAdded = add.mock.calls.filter((c) => c[0] === 'blur').length
+      const blurAdded = add.mock.calls.filter((c) => (c[0] as string) === 'blur').length
       expect(blurAdded).toBe(1)
       await h.trigger('pointerup', ev(100))
-      expect(remove.mock.calls.filter((c) => c[0] === 'blur')).toHaveLength(1)
+      expect(remove.mock.calls.filter((c) => (c[0] as string) === 'blur')).toHaveLength(1)
     })
 
     describe('two pies held at once', () => {
