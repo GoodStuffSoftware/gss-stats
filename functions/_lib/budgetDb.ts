@@ -538,8 +538,15 @@ export async function loadActiveRules(db: D1Database, merchantKeys: string[] | n
   return (await stmt.all<Row>()).results.map(mapRule)
 }
 
+/**
+ * 1 when a person's edit is the row's latest word: `updated_by` is an address ('@') and the newest category_edits row is not a rule's.
+ * `alias` is the transactions table's name or alias in the query (idx_edits_txn serves the subselect).
+ */
+export const personEditSql = (alias = 'transactions'): string =>
+  `(instr(${alias}.updated_by, '@') > 0 AND COALESCE((SELECT e.rule_id IS NOT NULL FROM category_edits e WHERE e.txn_id = ${alias}.id ORDER BY e.edited_at DESC, e.id DESC LIMIT 1), 0) = 0)`
+
 const APPLY_COLUMNS = 'id, account_id, merchant_key, store_no, amount_cents, kind, kind_source, category_id, category_source, rule_id, debt_account_id, confidence, needs_review, review_reason, updated_at, '
-  + "(instr(updated_by, '@') > 0 AND COALESCE((SELECT e.rule_id IS NOT NULL FROM category_edits e WHERE e.txn_id = transactions.id ORDER BY e.edited_at DESC, e.id DESC LIMIT 1), 0) = 0) AS person_edit"
+  + `${personEditSql()} AS person_edit`
 
 /**
  * The rows a rule re-apply reads: a merchant's whole history, on purpose. A rule says what a merchant IS,
@@ -630,7 +637,7 @@ export function chunkBySize<T>(items: T[], maxBytes = CHUNK_BYTES, maxRows = CHU
   return out
 }
 
-const EDITS_FROM_JSON_SQL = `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
+export const EDITS_FROM_JSON_SQL = `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
 SELECT t.id, json_extract(j.value, '$.old_cat'), json_extract(j.value, '$.cat'), json_extract(j.value, '$.old_kind'), json_extract(j.value, '$.kind'),
   json_extract(j.value, '$.rule_id'), json_extract(j.value, '$.stamp'), ?2
 FROM json_each(?1) j JOIN transactions t ON t.id = json_extract(j.value, '$.id') AND t.updated_at = json_extract(j.value, '$.prev')`

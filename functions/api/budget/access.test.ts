@@ -325,3 +325,57 @@ describe('receipts: email/connect and email/callback, each method x identity', (
     }
   })
 })
+
+// ── receipts stage 10: review list, dismiss and apply, every method x identity ─────────────────────
+// Own block so rebases merge cleanly with the other receipts stages' rows. Reads are gated too: an identity off the allowlist gets 403 on GET.
+import { onRequest as emailApply } from './email/apply'
+import { onRequest as emailReceipts } from './email/receipts/index'
+import { onRequest as emailReceiptById } from './email/receipts/[id]'
+import { createBudgetDb } from '../../_lib/testing/budgetDb'
+
+describe('receipts: email/receipts, email/receipts/<id> and email/apply, each method x identity', () => {
+  const RECEIPT_PATHS = ['/api/budget/email/receipts', '/api/budget/email/receipts/r0123456789abcdef', '/api/budget/email/apply']
+  const leaf = (ctx: Parameters<typeof access>[0]) => {
+    const p = new URL(ctx.request.url).pathname
+    if (p.endsWith('/apply')) return emailApply(ctx as never)
+    if (p.endsWith('/receipts')) return emailReceipts(ctx as never)
+    return emailReceiptById({ ...ctx, params: { id: p.split('/').pop() } } as never)
+  }
+  for (const method of METHODS) {
+    for (const path of RECEIPT_PATHS) {
+      it(`${method} ${path}`, async () => {
+        const env = { ...ENV, BUDGET_DB: (await createBudgetDb()).d1 }
+        for (const who of WHO) {
+          const label = `${who} ${method} ${path}`
+          const req = request(path, method, await cookieFor(who, env))
+          const mw = runMiddleware(req, env, leaf)
+          const res = await authGate(req, env, () => Promise.resolve(mw.run()) as Promise<Response>)
+          if (who === 'signedOut') expect(res.status, label).toBe(401)
+          else if (who === 'ownerUnlisted' || who === 'viewerUnlisted') expect(res.status, label).toBe(403)
+          else {
+            // Reached the route: 200 (list), 400 (empty body), 404 (no such receipt), 405 (wrong method).
+            expect([200, 400, 404, 405], label).toContain(res.status)
+            expect(mw.reached, label).toHaveBeenCalledOnce()
+          }
+          if (res.status === 401 || res.status === 403) {
+            expect(mw.reached, label).not.toHaveBeenCalled()
+            expect(res.headers.get('Set-Cookie'), label).toBeNull()
+          }
+        }
+      })
+    }
+  }
+
+  it('a handler that runs without the middleware (no identity) answers 403, reads included', async () => {
+    const env = { ...ENV, BUDGET_DB: (await createBudgetDb()).d1 }
+    const cases: Array<[typeof emailReceipts, string, string]> = [
+      [emailReceipts, 'GET', '/api/budget/email/receipts'],
+      [emailReceiptById, 'PATCH', '/api/budget/email/receipts/r0123456789abcdef'],
+      [emailApply, 'POST', '/api/budget/email/apply'],
+    ]
+    for (const [h, method, path] of cases) {
+      const ctx = { request: new Request(`${ORIGIN}${path}`, { method }), env, data: {}, params: { id: 'r0123456789abcdef' } } as never
+      expect((await h(ctx)).status, `${method} ${path}`).toBe(403)
+    }
+  })
+})
