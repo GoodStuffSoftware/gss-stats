@@ -89,8 +89,8 @@ export async function loadConnection(db: Db, id: string): Promise<ConnectionRow 
   }
 }
 
-/** The cron's list: ids of active connections (idx_conn_status). */
-export const ACTIVE_CONNECTIONS_SQL = `SELECT id FROM email_connections WHERE status = 'active' ORDER BY id`
+/** The cron's list: ids of active connections. email_connections has one row per Budget login (two people), so a scan reads two rows; the migration has no status index. */
+export const ACTIVE_CONNECTIONS_SQL = `SELECT id FROM email_connections WHERE status = 'active'`
 
 export async function loadActiveConnectionIds(db: Db): Promise<string[]> {
   const { results } = await db.prepare(ACTIVE_CONNECTIONS_SQL).all<{ id: string }>()
@@ -371,7 +371,7 @@ export const CANDIDATE_ROWS_SQL = `SELECT t.id, t.account_id, a.last4 AS account
   ${personEditedSql('t')} AS person_edited,
   EXISTS (SELECT 1 FROM receipt_matches m WHERE m.txn_id = t.id AND m.status = 'applied') AS taken
 FROM json_each(?1) w
-JOIN transactions t ON t.posted_date >= json_extract(w.value, '$[0]') AND t.posted_date <= json_extract(w.value, '$[1]')
+JOIN transactions t INDEXED BY idx_txn_date ON t.posted_date >= json_extract(w.value, '$[0]') AND t.posted_date <= json_extract(w.value, '$[1]')
 JOIN accounts a ON a.id = t.account_id
 WHERE t.kind IN (${CANDIDATE_KINDS})`
 
