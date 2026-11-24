@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.83.0] — 2026-11-23
+
 ### Added
 - **A Both tab on Budget** — Spending, Debts and Both tabs sit above the charts, and Both shows the two together, opening on a wide screen by default.
 - **Legend position** — a wide donut has a Legend picker (Left, Right, Below) at the top of its list on the Spending and Debts tabs; the choice is kept per device and chart.
