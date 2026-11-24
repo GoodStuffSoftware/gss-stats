@@ -42,10 +42,12 @@ export const LEGEND_COL_PX = 280
 export const LEGEND_COL_MAX_PX = 320
 export const LEGEND_COL_GAP_PX = 24
 export const WIDE_GAP_PX = 48
-/** How many legend columns fit in `avail` px (at least one, never more than there are `items` to list). */
-export function legendColumns(avail: number, items: number): number {
+/** Beside the donut the legend keeps to this many columns, so the donut and the legend stay one compact group. */
+export const LEGEND_BESIDE_MAX_COLS = 2
+/** How many legend columns fit in `avail` px (at least one, never more than there are `items` to list or `cap`). */
+export function legendColumns(avail: number, items: number, cap = Infinity): number {
   const fit = Math.floor((avail + LEGEND_COL_GAP_PX) / (LEGEND_COL_PX + LEGEND_COL_GAP_PX))
-  return Math.max(1, Math.min(Math.max(1, items), fit))
+  return Math.max(1, Math.min(Math.max(1, items), fit, cap))
 }
 /** Step of an arrow key on the resize handle. */
 export const DONUT_STEP = 16
@@ -534,7 +536,7 @@ const legendCols = computed(() => {
   if (!managed.value || !(room.value > 0)) return null
   const beside = layout.value.wideOn && side.value !== 'bottom'
   const avail = beside ? room.value - (size.value ?? 0) - WIDE_GAP_PX : room.value
-  return legendColumns(avail, drawn.value.length)
+  return legendColumns(avail, drawn.value.length, beside ? LEGEND_BESIDE_MAX_COLS : Infinity)
 })
 const rootStyle = computed(() => {
   const st: Record<string, string> = {}

@@ -4,7 +4,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { Chart } from 'chart.js'
 import { defineComponent, nextTick } from 'vue'
 import BaseChart from './BaseChart.vue'
-import DrillPie, { DONUT_MIN, DONUT_STEP, LEGEND_COL_PX, WIDE_GAP_PX, clampDonutSize, donutLayout, dragDiameter, holdSelectionLock, legendColumns, releaseSelectionLock, readDonutSize, sliceLabelParts, writeDonutSize, type PieSlice } from './DrillPie.vue'
+import DrillPie, { DONUT_MIN, DONUT_STEP, LEGEND_BESIDE_MAX_COLS, LEGEND_COL_PX, WIDE_GAP_PX, clampDonutSize, donutLayout, dragDiameter, holdSelectionLock, legendColumns, releaseSelectionLock, readDonutSize, sliceLabelParts, writeDonutSize, type PieSlice } from './DrillPie.vue'
 import source from './DrillPie.vue?raw'
 
 const SLICES: PieSlice[] = [
@@ -1053,10 +1053,23 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
       expect(legendColumns(2 * LEGEND_COL_PX + 24, 5)).toBe(2)
     })
 
+    it('beside the donut keep to two columns, so the donut and legend stay one compact group; below keeps them all', async () => {
+      expect(legendColumns(2000, 20, LEGEND_BESIDE_MAX_COLS)).toBe(2)
+      expect(legendColumns(2000, 1, LEGEND_BESIDE_MAX_COLS)).toBe(1)
+      expect(legendColumns(100, 20, LEGEND_BESIDE_MAX_COLS)).toBe(1)
+      roomWidth = 2000
+      const many: PieSlice[] = Array.from({ length: 9 }, (_, i) => ({ key: `k${i}`, label: `Slice ${i}`, value: 100 + i, color: '#888' }))
+      const cols = async (legendSide: 'left' | 'right' | 'bottom') =>
+        (await sized({ slices: many, wide: true, resizable: true, legendSide, sizeKey: `test-cap-${legendSide}` })).element as HTMLElement
+      expect((await cols('left')).style.getPropertyValue('--dp-cols')).toBe('2')
+      expect((await cols('right')).style.getPropertyValue('--dp-cols')).toBe('2')
+      expect(Number((await cols('bottom')).style.getPropertyValue('--dp-cols'))).toBeGreaterThan(2)
+    })
+
     it('hands the column count to the stylesheet only for a pie that manages its size', async () => {
       roomWidth = 2000
-      const w = await sized({ wide: true, resizable: true, sizeKey: 'test-cols' })
-      expect((w.element as HTMLElement).style.getPropertyValue('--dp-cols')).toBe('3') // 3 drawn slices
+      const w = await sized({ wide: true, resizable: true, legendSide: 'bottom', sizeKey: 'test-cols' })
+      expect((w.element as HTMLElement).style.getPropertyValue('--dp-cols')).toBe('3') // 3 drawn slices (below the donut: no cap)
       expect(w.classes()).toContain('dp-managed')
       const plain = await sized({})
       expect((plain.element as HTMLElement).style.getPropertyValue('--dp-cols')).toBe('')

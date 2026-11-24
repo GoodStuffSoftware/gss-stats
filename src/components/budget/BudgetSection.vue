@@ -547,13 +547,13 @@ onBeforeUnmount(() => {
 }
 @media (min-width: 1024px) {
   /* Both side by side. The grid has shared rows and each panel takes them as a subgrid, so the same part of each panel
-   * sits in the same row whatever height the other has: 1 header (the spending crumbs / review / total stack, the
-   * debt total), 2 the donut, 3 the hint line, 4 the list, 5 whatever follows the list (the debts without a
-   * balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the spacing is
-   * margins on the items, so a row with nothing in it (no hint) costs nothing. */
+   * sits in the same row whatever height the other has: 1 heading (the crumbs), 2 controls (group by, needs review;
+   * empty on the debt side), 3 the total, 4 the donut, 5 the hint line, 6 the list, 7 whatever follows the list (the
+   * debts without a balance; the last row takes any spare height). Layout only: no pixel offsets. Row gaps are 0; the
+   * spacing is margins on the items, so a row with nothing in it (no hint) costs nothing. */
   .is-both .b-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto 1fr;
+    grid-template-rows: auto auto auto auto auto auto auto 1fr;
     column-gap: 16px;
     row-gap: 0;
     align-items: start;
@@ -567,8 +567,8 @@ onBeforeUnmount(() => {
     align-self: stretch;
   }
 
-  /* The panels' own parts, placed in those rows (the DrillPie wrapper dissolves so its donut, hint and list are
-   * placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
+  /* The panels' own parts, placed in those rows (the header stacks and the DrillPie wrapper dissolve so their parts
+   * are placed directly). The panels are drawn by SpendingPanel / DebtPanel / DrillPie, hence :deep. */
   .is-both .b-grid .b-pane.has-panel :deep(.spending-panel),
   .is-both .b-grid .b-pane.has-panel :deep(.debt-panel) {
     display: grid;
@@ -577,44 +577,54 @@ onBeforeUnmount(() => {
     row-gap: 0;
     align-items: start;
   }
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-top),
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-head),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-top),
   .is-both .b-grid .b-pane.has-panel :deep(.sp-body),
   .is-both .b-grid .b-pane.has-panel :deep(.drill-pie) {
     display: contents;
   }
-  .is-both .b-grid .b-pane.has-panel :deep(.sp-top),
-  .is-both .b-grid .b-pane.has-panel :deep(.dp-top),
+  .is-both .b-grid .b-pane.has-panel :deep(.crumbs),
   .is-both .b-grid .b-pane.has-panel :deep(.dp-crumbhead) {
     grid-row: 1;
-    align-self: end; /* the two totals share a line at the bottom of the header row */
+  }
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-controls) {
+    grid-row: 2;
+    margin-top: 4px;
+  }
+  .is-both .b-grid .b-pane.has-panel :deep(.sp-total),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-top .dp-total) {
+    grid-row: 3;
+    margin-top: 8px;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.dp-canvas) {
-    grid-row: 2;
+    grid-row: 4;
     justify-self: center;
     align-self: start;
     margin-top: 8px;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.dp-hint) {
-    grid-row: 3;
+    grid-row: 5;
     margin: 12px 0 0;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.dp-list) {
-    grid-row: 4 / 6; /* spans the row after it, so a longer list than the other panel's does not stretch row 4 */
+    grid-row: 6 / 8; /* spans the row after it, so a longer list than the other panel's does not stretch row 6 */
     margin-top: 12px;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.debt-panel .dp-list) {
-    grid-row: 4;
+    grid-row: 6;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.sp-none),
   .is-both .b-grid .b-pane.has-panel :deep(.dp-none) {
-    grid-row: 4;
+    grid-row: 6;
     margin-top: 12px;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.dp-others) {
-    grid-row: 5;
+    grid-row: 7;
     margin-top: 12px;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.dp-drilled) {
-    grid-row: 2 / 6; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
+    grid-row: 4 / 8; /* a drilled debt: its balance line takes the rows the pie, hint and list had */
     margin-top: 8px;
   }
 }
