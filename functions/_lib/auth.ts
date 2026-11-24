@@ -326,7 +326,7 @@ export function b64urlDecode(s: string): Uint8Array<ArrayBuffer> | null {
   }
 }
 
-function randomToken(byteLength: number): string {
+export function randomToken(byteLength: number): string {
   const bytes = new Uint8Array(byteLength)
   crypto.getRandomValues(bytes)
   return b64urlEncode(bytes)
@@ -366,7 +366,7 @@ export async function verifyToken(secret: string, purpose: string, token: unknow
   }
 }
 
-function sameString(a: string, b: string): boolean {
+export function sameString(a: string, b: string): boolean {
   // Length leaks nothing useful here (both sides are fixed-length random tokens).
   if (a.length !== b.length) return false
   let diff = 0
@@ -397,13 +397,13 @@ export function getCookie(request: Request, name: string): string | null {
   return null
 }
 
-function setCookie(url: URL, name: string, value: string, maxAgeSeconds: number): string {
+export function setCookie(url: URL, name: string, value: string, maxAgeSeconds: number): string {
   const attrs = [`${name}=${value}`, 'Path=/', `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`, 'HttpOnly', 'SameSite=Lax']
   if (url.protocol === 'https:') attrs.push('Secure')
   return attrs.join('; ')
 }
 
-function clearCookie(url: URL, name: string): string {
+export function clearCookie(url: URL, name: string): string {
   return setCookie(url, name, '', 0)
 }
 

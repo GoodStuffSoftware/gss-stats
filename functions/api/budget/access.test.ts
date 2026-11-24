@@ -274,3 +274,46 @@ describe('the dev bypass in the middleware', () => {
     expect(res.status).toBe(503)
   })
 })
+
+// ── receipts stage 8: Gmail connect and callback, every method x identity ──────────────────────────
+// Own block so rebases merge cleanly with the other receipts stages' rows.
+import { onRequest as emailConnect } from './email/connect'
+import { onRequest as emailCallback } from './email/callback'
+
+describe('receipts: email/connect and email/callback, each method x identity', () => {
+  const EMAIL_PATHS = ['/api/budget/email/connect', '/api/budget/email/callback']
+  const leaf = (ctx: Parameters<typeof access>[0]) => {
+    const p = new URL(ctx.request.url).pathname
+    return (p === '/api/budget/email/connect' ? emailConnect : emailCallback)(ctx as never)
+  }
+  for (const method of METHODS) {
+    for (const path of EMAIL_PATHS) {
+      it(`${method} ${path}`, async () => {
+        for (const who of WHO) {
+          const label = `${who} ${method} ${path}`
+          const req = request(path, method, await cookieFor(who))
+          const mw = runMiddleware(req, ENV, leaf)
+          const res = await authGate(req, ENV, () => Promise.resolve(mw.run()) as Promise<Response>)
+          if (who === 'signedOut') expect(res.status, label).toBe(401)
+          else if (who === 'ownerUnlisted' || who === 'viewerUnlisted') expect(res.status, label).toBe(403)
+          else {
+            // Reached the route: 405 (wrong method), 400 or 503 (connect), 302 (callback).
+            expect([302, 400, 405, 503], label).toContain(res.status)
+            expect(mw.reached, label).toHaveBeenCalledOnce()
+          }
+          if (res.status === 401 || res.status === 403) {
+            expect(mw.reached, label).not.toHaveBeenCalled()
+            expect(res.headers.get('Set-Cookie'), label).toBeNull()
+          }
+        }
+      })
+    }
+  }
+
+  it('a handler that runs without the middleware (no identity) answers 403', async () => {
+    for (const h of [emailConnect, emailCallback]) {
+      const ctx = { request: new Request(`${ORIGIN}/api/budget/email/connect`, { method: 'POST' }), env: ENV, data: {} } as never
+      expect((await h(ctx)).status).toBe(403)
+    }
+  })
+})
