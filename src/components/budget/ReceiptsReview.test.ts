@@ -48,7 +48,7 @@ const META = { people: [], accounts: [], categories: [{ id: 'groceries', label: 
 async function mountList(receipts: unknown[], nextCursor: string | null = null, status = 'suggested') {
   routes[`GET /api/budget/email/receipts?status=${status}`] = [{ body: { receipts, nextCursor } }]
   routes['GET /api/budget/meta'] = [{ body: META }]
-  wrapper = mount(ReceiptsReview as never, { attachTo: document.body } as never) as unknown as VueWrapper
+  wrapper = mount(ReceiptsReview as never, { attachTo: document.body, props: { categories: META.categories } } as never) as unknown as VueWrapper
   await flushPromises()
   return wrapper
 }
@@ -122,7 +122,7 @@ describe('ReceiptsReview', () => {
     ['txn_linked', 'already has a receipt'],
     ['incomplete_group', 'Part of a split purchase is missing'],
     ['group_blocked', 'Another part of this split'],
-    ['conflict', 'linked to this row meanwhile'],
+    ['conflict', 'already linked to another bank row'],
     ['not_found', 'no longer there'],
     ['not_suggested', 'no longer a suggestion'],
   ])('skip reason %s is shown in plain words and the row stays', async (reason, words) => {

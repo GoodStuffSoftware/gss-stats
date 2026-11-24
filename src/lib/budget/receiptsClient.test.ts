@@ -9,6 +9,7 @@ import {
   fetchReceipts,
   fetchReceiptsStatus,
   receiptsMessage,
+  receiptsRunMessage,
   ReceiptsApiError,
   startReceiptsConnect,
   syncReceiptsNow,
@@ -104,6 +105,9 @@ describe('receiptsClient errors', () => {
     'no_refresh_token', 'token_invalid', 'not_allowed', 'exchange_failed', 'receipts_not_configured', 'consent_required',
     'receipts_unavailable', 'receipts_failed', 'worker_failed', 'rate_limited', 'not_connected', 'reconnect_needed', 'paused',
     'needs_reconnect', 'api_rejected', 'api_limited', 'bad_state', 'conflict', 'bad_request',
+    'api_unavailable', 'daily_cap', 'secrets_missing', 'decrypt_failed', 'key_invalid', 'not_active', 'match_failed', 'run_failed',
+    'run_invalid', 'too_large', 'method_not_allowed', 'server_error', 'unauthorized', 'network_error', 'client_error', 'bad_response',
+    'auth_failed', 'extract_invalid', 'stop_run', 'run_busy',
   ]
   it.each(CODES)('has its own message for %s', (code) => {
     const m = receiptsMessage(code)
@@ -114,6 +118,11 @@ describe('receiptsClient errors', () => {
   it('uses the exact paused wording', () => {
     expect(receiptsMessage('api_rejected')).toBe('Receipts paused: the API rejected the request')
     expect(receiptsMessage('api_limited')).toBe('Receipts paused: API limit reached, retrying next hour')
+  })
+  it('run wording differs for not_allowed and rate_limited', () => {
+    expect(receiptsRunMessage('not_allowed')).not.toBe(receiptsMessage('not_allowed'))
+    expect(receiptsRunMessage('rate_limited')).not.toBe(receiptsMessage('rate_limited'))
+    expect(receiptsRunMessage('daily_cap')).toBe(receiptsMessage('daily_cap'))
   })
   it('an unknown or prototype-named code gets the generic line', () => {
     expect(receiptsMessage('constructor')).toBe(receiptsMessage(null))

@@ -363,6 +363,7 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <BudgetFilters
+          v-if="state.page !== 'receipts'"
           :from="state.from"
           :to="state.to"
           :person="state.person"
@@ -386,7 +387,7 @@ onBeforeUnmount(() => {
           @saved="onDebtSaved"
         />
 
-        <ReceiptsPage v-else-if="state.page === 'receipts'" />
+        <ReceiptsPage v-else-if="state.page === 'receipts'" :categories="meta.categories" />
 
         <template v-else>
         <div class="b-tabs" role="tablist" aria-label="Budget view">

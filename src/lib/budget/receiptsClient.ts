@@ -14,8 +14,8 @@ export interface ReceiptsConnection {
   lastOkAt: string | null
   lastError: string | null
   consentVersion: number
-  /** The connected Gmail address, when the server sends one. */
-  email?: string | null
+  /** The connected Gmail address; the server sends it to the person who connected only, and null when it has none. */
+  googleEmail?: string | null
 }
 export interface ReceiptsRun {
   trigger: string
@@ -149,10 +149,31 @@ const MESSAGES: Record<string, string> = {
   not_connected: 'Gmail is not connected.',
   reconnect_needed: 'Gmail needs to be reconnected first.',
   paused: 'Receipts are paused.',
-  // run / connection codes
+  // run / connection codes (the sync Worker's `lastError` and a run's `errorCode`)
   needs_reconnect: 'Gmail needs to be reconnected.',
+  decrypt_failed: 'Gmail needs to be reconnected.',
+  key_invalid: 'Gmail needs to be reconnected.',
   api_rejected: 'Receipts paused: the API rejected the request',
+  auth_failed: 'Receipts paused: the API rejected the request',
   api_limited: 'Receipts paused: API limit reached, retrying next hour',
+  api_unavailable: 'Receipts paused: the reading service is unavailable, retrying next hour',
+  stop_run: 'Receipts paused: the reading service is unavailable, retrying next hour',
+  daily_cap: 'Receipts paused: the daily reading limit was reached, resuming tomorrow',
+  secrets_missing: 'Receipts are not fully set up on the server, so no check can run yet.',
+  not_active: 'No check ran: receipts are paused or Gmail is not connected.',
+  match_failed: 'Receipts were read, but matching them to bank rows failed. Retrying next hour.',
+  run_failed: 'The last check failed. Retrying next hour.',
+  run_invalid: 'The last check failed. Retrying next hour.',
+  run_busy: 'A check is already running.',
+  network_error: 'Gmail could not be reached. Retrying next hour.',
+  client_error: 'Gmail refused a request, which points to a setup problem. Retrying next hour.',
+  bad_response: 'Gmail sent back something unexpected. Retrying next hour.',
+  extract_invalid: 'One receipt could not be read.',
+  // sync route errors
+  too_large: 'That request was too large.',
+  method_not_allowed: 'That request was not accepted. Reload and try again.',
+  server_error: 'The receipt service had a problem. Please try again in a few minutes.',
+  unauthorized: 'Your sign-in expired. Sign in again.',
   // generic
   bad_state: 'That receipt cannot be changed that way.',
   conflict: 'A receipt was linked to one of these rows meanwhile. Reload and try again.',
@@ -166,6 +187,20 @@ const MESSAGES: Record<string, string> = {
 export function receiptsMessage(code: string | null | undefined): string {
   if (code && Object.prototype.hasOwnProperty.call(MESSAGES, code)) return MESSAGES[code]
   return 'Something went wrong. Please try again.'
+}
+
+/** Run codes that mean the Gmail connection must be made again (the Reconnect button shows for these). */
+export const RECONNECT_CODES: ReadonlySet<string> = new Set(['needs_reconnect', 'decrypt_failed', 'key_invalid'])
+
+/**
+ * Plain words for a code that came from a run or the connection (`lastError`, a run's `errorCode`). Two codes read
+ * differently there than as a route or connect answer: `not_allowed` (the mailbox left the allow list) and `rate_limited`
+ * (Gmail's own limit).
+ */
+export function receiptsRunMessage(code: string | null | undefined): string {
+  if (code === 'not_allowed') return 'Receipts paused: this Google account is no longer allowed to use receipts.'
+  if (code === 'rate_limited') return 'Gmail asked us to slow down. Retrying next hour.'
+  return receiptsMessage(code)
 }
 
 export class ReceiptsApiError extends Error {

@@ -66,6 +66,8 @@ const href = computed(() => gmailUrl(props.link.gmailMsgId))
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
   cursor: auto;
 }
 .rb-head {
@@ -86,7 +88,7 @@ const href = computed(() => gmailUrl(props.link.gmailMsgId))
 }
 .rb-facts {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 1px 8px;
   margin: 4px 0 0;
 }
@@ -109,6 +111,7 @@ const href = computed(() => gmailUrl(props.link.gmailMsgId))
 }
 .rb-iname {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .rb-iamt {
   flex: 0 0 auto;

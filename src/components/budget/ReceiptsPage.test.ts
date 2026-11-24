@@ -35,7 +35,7 @@ const run = (over: Record<string, unknown> = {}) => ({
 })
 const connected = (conn: Record<string, unknown> = {}, runs: unknown[] = [run()]) => ({
   configured: true,
-  connection: { status: 'active', lastRunAt: '2026-11-23T15:23:00Z', lastOkAt: '2026-11-23T15:24:00Z', lastError: null, consentVersion: 1, email: 'pat@example.com', ...conn },
+  connection: { status: 'active', lastRunAt: '2026-11-23T15:23:00Z', lastOkAt: '2026-11-23T15:24:00Z', lastError: null, consentVersion: 1, googleEmail: 'pat@example.com', ...conn },
   lastRuns: runs,
   nextRunAt: '2026-11-23T16:23:00Z',
 })
@@ -86,12 +86,12 @@ describe('ReceiptsPage states', () => {
     const btn = byId('receipts-connect')
     expect(btn.attributes('disabled')).toBeDefined()
     await byId('receipts-agree').setValue(true)
-    routes['POST /api/budget/email/connect'] = [{ body: { url: 'https://accounts.example.com/consent' } }]
+    routes['POST /api/budget/email/connect'] = [{ body: { url: 'https://accounts.google.com/consent' } }]
     await btn.trigger('click')
     await flushPromises()
     const call = fetchMock.mock.calls.find((c) => c[0] === '/api/budget/email/connect')!
     expect(JSON.parse(call[1].body)).toEqual({ consent: 1 })
-    expect(assign).toHaveBeenCalledWith('https://accounts.example.com/consent')
+    expect(assign).toHaveBeenCalledWith('https://accounts.google.com/consent')
   })
 
   it('a revoked connection shows the consent card again', async () => {
@@ -153,10 +153,10 @@ describe('ReceiptsPage states', () => {
     expect(byId('receipts-reconnect').exists()).toBe(true)
     const assign = vi.fn()
     vi.stubGlobal('location', { ...window.location, href: window.location.href, assign })
-    routes['POST /api/budget/email/connect'] = [{ body: { url: 'https://accounts.example.com/again' } }]
+    routes['POST /api/budget/email/connect'] = [{ body: { url: 'https://accounts.google.com/again' } }]
     await byId('receipts-reconnect').trigger('click')
     await flushPromises()
-    expect(assign).toHaveBeenCalledWith('https://accounts.example.com/again')
+    expect(assign).toHaveBeenCalledWith('https://accounts.google.com/again')
   })
 })
 

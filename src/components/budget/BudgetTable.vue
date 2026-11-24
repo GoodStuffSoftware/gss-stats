@@ -559,6 +559,11 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
   font-size: 13px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  /* Taller than the room (a many-item receipt on a phone): it scrolls inside itself; the inline max-height from the placement sets the limit. */
+  max-height: calc(100dvh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .bt-tip-desc {
   font-size: 12px;

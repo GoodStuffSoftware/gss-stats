@@ -19,8 +19,14 @@ export function tipPlacement(r: { left: number; top: number; bottom: number }, v
   const width = Math.max(120, Math.min(TIP_WIDTH, vw - TIP_MARGIN * 2))
   const left = Math.max(TIP_MARGIN, Math.min(r.left, vw - TIP_MARGIN - width))
   const style: Record<string, string> = { left: `${left}px`, width: `${width}px` }
-  if (r.bottom > vh * 0.6) style.bottom = `${Math.max(TIP_MARGIN, vh - r.top + 6)}px`
-  else style.top = `${r.bottom + 6}px`
+  // The tip scrolls inside itself when it is taller than the room on its side, so its last line stays reachable.
+  if (r.bottom > vh * 0.6) {
+    style.bottom = `${Math.max(TIP_MARGIN, vh - r.top + 6)}px`
+    style.maxHeight = `${Math.max(80, r.top - 6 - TIP_MARGIN)}px`
+  } else {
+    style.top = `${r.bottom + 6}px`
+    style.maxHeight = `${Math.max(80, vh - r.bottom - 6 - TIP_MARGIN)}px`
+  }
   return style
 }
 
@@ -60,16 +66,22 @@ export function useToggletip<T>(insideSelector: string) {
   function onDocKey(e: KeyboardEvent) {
     if (e.key === 'Escape') close()
   }
+  /** A scroll inside the tip itself (it has its own max-height) must not close it; any other scroll does. */
+  function onScroll(e: Event) {
+    const t = e.target as Element | null
+    if (t && typeof t.closest === 'function' && t.closest(insideSelector)) return
+    close()
+  }
   function add() {
     document.addEventListener('pointerdown', onDocPointer, true)
     document.addEventListener('keydown', onDocKey)
-    window.addEventListener('scroll', close, true)
+    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
   }
   function remove() {
     document.removeEventListener('pointerdown', onDocPointer, true)
     document.removeEventListener('keydown', onDocKey)
-    window.removeEventListener('scroll', close, true)
+    window.removeEventListener('scroll', onScroll, true)
     window.removeEventListener('resize', close)
   }
   watch(

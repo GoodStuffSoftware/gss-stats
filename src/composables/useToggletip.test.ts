@@ -6,11 +6,16 @@ import { tipPlacement, useToggletip } from './useToggletip'
 
 describe('tipPlacement', () => {
   it('sits under a trigger in the upper part of the screen, inside the margins', () => {
-    expect(tipPlacement({ left: 10, top: 100, bottom: 120 }, 400, 800)).toEqual({ left: '10px', width: '320px', top: '126px' })
+    expect(tipPlacement({ left: 10, top: 100, bottom: 120 }, 400, 800)).toEqual({ left: '10px', width: '320px', top: '126px', maxHeight: '666px' })
   })
   it('goes above a trigger in the lower part, and stays inside a narrow screen', () => {
-    expect(tipPlacement({ left: 300, top: 700, bottom: 720 }, 360, 800)).toEqual({ left: '32px', width: '320px', bottom: '106px' })
+    expect(tipPlacement({ left: 300, top: 700, bottom: 720 }, 360, 800)).toEqual({ left: '32px', width: '320px', bottom: '106px', maxHeight: '686px' })
     expect(tipPlacement({ left: 0, top: 700, bottom: 720 }, 200, 800).width).toBe('184px')
+  })
+  it('caps the height to the room on the side it sits, so a tall tip scrolls inside itself', () => {
+    expect(tipPlacement({ left: 10, top: 300, bottom: 320 }, 375, 667).maxHeight).toBe('333px')
+    expect(tipPlacement({ left: 10, top: 500, bottom: 520 }, 320, 568).maxHeight).toBe('486px')
+    expect(tipPlacement({ left: 10, top: 10, bottom: 330 }, 320, 568).maxHeight).toBe('224px')
   })
 })
 
@@ -68,6 +73,19 @@ describe('useToggletip', () => {
     await open()
     window.dispatchEvent(new Event('resize'))
     expect(api.tip.value).toBeNull()
+  })
+  it('a scroll inside the tip keeps it open; a scroll elsewhere closes it', async () => {
+    const { api, el } = setup()
+    const inner = document.createElement('div')
+    inner.className = 'tipbox'
+    document.body.appendChild(inner)
+    api.openAt('a', 'A', el)
+    await tick()
+    inner.dispatchEvent(new Event('scroll'))
+    expect(api.tip.value).not.toBeNull()
+    wrapper!.get('.other').element.dispatchEvent(new Event('scroll'))
+    expect(api.tip.value).toBeNull()
+    inner.remove()
   })
   it('keyboard focus opens only for :focus-visible', () => {
     const { api, el } = setup()

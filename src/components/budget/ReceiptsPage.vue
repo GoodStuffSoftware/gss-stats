@@ -5,8 +5,9 @@
 // (lib/budget/receiptsClient.ts); the page never shows a Gmail message id.
 //
 // States: loading / failed (Retry); not configured (one calm line, no button); not connected (the consent card);
-// connected (address, last run and counts, Check now, Disconnect), with a paused line for `api_rejected` /
-// `api_limited` and a Reconnect button for `needs_reconnect`.
+// connected (address for the person who connected, last run and counts, Check now, Disconnect). Any run or connection
+// error code shows in plain words (receiptsRunMessage) and dims the dot; the codes that need the connection made again
+// (RECONNECT_CODES) also swap Check now for a Reconnect button.
 //
 // The connect callback redirects to `?section=budget&b_page=receipts&email=<code>`: its message shows once, then
 // `email` is removed from the URL with history.replaceState.
@@ -17,16 +18,21 @@ import {
   disconnectReceipts,
   fetchReceiptsStatus,
   receiptsMessage,
+  receiptsRunMessage,
   ReceiptsApiError,
+  RECONNECT_CODES,
   startReceiptsConnect,
   syncReceiptsNow,
   type ReceiptsRun,
   type ReceiptsStatus,
 } from '../../lib/budget/receiptsClient'
+import { receiptText } from '../../lib/budget/tableModel'
+import type { Category } from '../../lib/budget/types'
 import ModalPanel from '../ui/ModalPanel.vue'
 import ReceiptsReview from './ReceiptsReview.vue'
 
-const emit = defineEmits<{ connected: [] }>()
+/** The Budget categories, as BudgetSection already holds them; the review list picks from them. */
+withDefaults(defineProps<{ categories?: Category[] }>(), { categories: () => [] })
 
 const status = ref<ReceiptsStatus | null>(null)
 const loading = ref(true)
@@ -69,22 +75,28 @@ function takeCallbackCode() {
 
 onMounted(() => {
   takeCallbackCode()
-  void load().then(() => {
-    if (isConnected.value) emit('connected')
-  })
+  void load()
 })
 
 const connection = computed(() => status.value?.connection ?? null)
 const lastRun = computed<ReceiptsRun | null>(() => status.value?.lastRuns[0] ?? null)
-const needsReconnect = computed(
-  () => connection.value?.status === 'needs_reconnect' || connection.value?.lastError === 'needs_reconnect' || lastRun.value?.errorCode === 'needs_reconnect',
-)
-const isConnected = computed(() => !!connection.value && connection.value.status !== 'revoked')
-/** The paused code to show plainly, from the connection or the newest run. */
-const pausedCode = computed(() => {
-  for (const c of [connection.value?.lastError, lastRun.value?.errorCode]) if (c === 'api_rejected' || c === 'api_limited') return c
+/** The error code to show: the connection's, else the newest run's. `run_busy` is not a failure. */
+const problemCode = computed<string | null>(() => {
+  for (const c of [connection.value?.lastError, lastRun.value?.errorCode]) if (c && c !== 'run_busy') return c
   return null
 })
+const needsReconnect = computed(() => connection.value?.status === 'needs_reconnect' || (!!problemCode.value && RECONNECT_CODES.has(problemCode.value)))
+const isConnected = computed(() => !!connection.value && connection.value.status !== 'revoked')
+/** The line under the status: the reconnect words, the code's words, or the plain paused line for a paused connection with no code. */
+const problemText = computed(() => {
+  if (needsReconnect.value) return receiptsRunMessage('needs_reconnect')
+  if (problemCode.value) return receiptsRunMessage(problemCode.value)
+  return connection.value && connection.value.status !== 'active' ? receiptsRunMessage('paused') : ''
+})
+/** The green dot is only for a connection that is active and whose last check did not fail. */
+const healthy = computed(() => !!connection.value && connection.value.status === 'active' && !problemCode.value)
+/** Shown to the person who connected only (the server leaves it out for anyone else), drawn through receiptText. */
+const connectedAs = computed(() => receiptText(connection.value?.googleEmail, 120))
 
 function when(iso: string | null | undefined): string {
   if (!iso) return 'never'
@@ -95,6 +107,7 @@ const lastRunLine = computed(() => {
   const r = lastRun.value
   if (!r) return connection.value?.lastRunAt ? `Last check ${when(connection.value.lastRunAt)}.` : 'No check has run yet. The first one runs within the hour.'
   if (!r.finishedAt) return `Check started ${when(r.startedAt)}, still running.`
+  if (r.errorCode && r.errorCode !== 'run_busy') return `Last check ${when(r.startedAt)} stopped before it finished.`
   return `Last check ${when(r.startedAt)}: ${r.fetched} emails read, ${r.extracted} receipts found, ${r.matched} matched.`
 })
 
@@ -112,6 +125,8 @@ async function connect() {
   notice.value = null
   try {
     const { url } = await startReceiptsConnect()
+    // Only Google's own consent address; anything else from the server is not followed.
+    if (typeof url !== 'string' || !url.startsWith('https://accounts.google.com/')) throw new ReceiptsApiError(502, 'receipts_failed')
     window.location.assign(url)
   } catch (e) {
     notice.value = { text: errText(e), tone: 'bad' }
@@ -199,13 +214,12 @@ async function disconnect() {
     <template v-else-if="status && connection">
       <section class="card rp-card" data-testid="receipts-status">
         <p class="rp-lead" data-testid="receipts-conn-line">
-          <span class="rp-dot" :class="{ off: needsReconnect || !!pausedCode }" aria-hidden="true"></span>
-          <template v-if="connection.email">Connected: {{ connection.email }}</template>
+          <span class="rp-dot" :class="{ off: !healthy }" aria-hidden="true"></span>
+          <template v-if="connectedAs">Connected as {{ connectedAs }}</template>
           <template v-else>Gmail connected</template>
         </p>
         <p class="rp-muted" data-testid="receipts-last-run">{{ lastRunLine }}</p>
-        <p v-if="pausedCode" class="rp-bad-text" data-testid="receipts-paused">{{ receiptsMessage(pausedCode) }}</p>
-        <p v-if="needsReconnect" class="rp-bad-text" data-testid="receipts-reconnect-note">{{ receiptsMessage('needs_reconnect') }}</p>
+        <p v-if="problemText" class="rp-bad-text" :data-testid="needsReconnect ? 'receipts-reconnect-note' : 'receipts-paused'">{{ problemText }}</p>
         <div class="rp-row">
           <button v-if="needsReconnect" type="button" class="btn btn-primary rp-btn" :disabled="!!busy" data-testid="receipts-reconnect" @click="connect">Reconnect</button>
           <button v-else type="button" class="btn rp-btn" :disabled="!!busy" data-testid="receipts-check" @click="checkNow">
@@ -214,7 +228,7 @@ async function disconnect() {
           <button ref="disconnectBtn" type="button" class="btn btn-ghost rp-btn" :disabled="!!busy" data-testid="receipts-disconnect" @click="openDisconnect">Disconnect</button>
         </div>
       </section>
-      <ReceiptsReview />
+      <ReceiptsReview :categories="categories" />
     </template>
 
     <ModalPanel :open="modalOpen" title="Disconnect Gmail?" title-id="rp-dc-title" described-by="rp-dc-desc" :return-to="disconnectBtn" initial-focus="input:checked" @close="modalOpen = false">
@@ -255,6 +269,7 @@ async function disconnect() {
 }
 .rp-lead {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .rp-muted {
   margin: 0;
@@ -274,7 +289,16 @@ async function disconnect() {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 44px;
+}
+/* The tick box and the radios are 24px with a 6px margin: a 36px tap area, and the whole label row taps too. */
+.rp-agree input,
+.rp-choice input {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 6px;
+  accent-color: rgb(var(--amber));
 }
 .rp-notice {
   margin: 0;
@@ -309,6 +333,6 @@ async function disconnect() {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 44px;
 }
 </style>
