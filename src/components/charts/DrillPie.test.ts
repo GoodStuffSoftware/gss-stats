@@ -4,7 +4,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { Chart } from 'chart.js'
 import { defineComponent, nextTick } from 'vue'
 import BaseChart from './BaseChart.vue'
-import DrillPie, { DONUT_MIN, DONUT_STEP, clampDonutSize, donutLayout, readDonutSize, sliceLabelParts, writeDonutSize, type PieSlice } from './DrillPie.vue'
+import DrillPie, { DONUT_MIN, DONUT_STEP, LEGEND_COL_PX, WIDE_GAP_PX, clampDonutSize, donutLayout, dragDiameter, holdSelectionLock, legendColumns, releaseSelectionLock, readDonutSize, sliceLabelParts, writeDonutSize, type PieSlice } from './DrillPie.vue'
 import source from './DrillPie.vue?raw'
 
 const SLICES: PieSlice[] = [
@@ -513,7 +513,7 @@ describe('donut size helpers', () => {
     expect(donutLayout(900, false)).toMatchObject({ wideOn: false, max: 900, auto: null })
     const l = donutLayout(900, true)
     expect(l.wideOn).toBe(true)
-    expect(l.max).toBe(900 - 240 - 24)
+    expect(l.max).toBe(900 - LEGEND_COL_PX - WIDE_GAP_PX)
     expect(l.auto).toBe(360)
     expect(donutLayout(2000, true).auto).toBe(680) // the automatic size stops growing
   })
@@ -604,7 +604,7 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
     for (let i = 0; i < 60; i++) await h.trigger('keydown', { key: 'ArrowLeft' })
     expect(sizeOf(w)).toBe(DONUT_MIN)
     for (let i = 0; i < 80; i++) await h.trigger('keydown', { key: 'ArrowUp' })
-    expect(sizeOf(w)).toBe(900 - 240 - 24)
+    expect(sizeOf(w)).toBe(900 - LEGEND_COL_PX - WIDE_GAP_PX)
   })
 
   it('applies a saved size, clamped to the room it has now', async () => {
@@ -612,7 +612,7 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
     window.localStorage.setItem(KEY, '450')
     expect(sizeOf(await sized({ wide: true, resizable: true, sizeKey: KEY }))).toBe(450)
     window.localStorage.setItem(KEY, '5000')
-    expect(sizeOf(await sized({ wide: true, resizable: true, sizeKey: KEY }))).toBe(636)
+    expect(sizeOf(await sized({ wide: true, resizable: true, sizeKey: KEY }))).toBe(900 - LEGEND_COL_PX - WIDE_GAP_PX)
     roomWidth = 0
     window.localStorage.setItem(KEY, '300')
     expect(sizeOf(await sized({ resizable: true, sizeKey: KEY }))).toBe(300) // not measured: used as saved
@@ -900,6 +900,203 @@ describe('DrillPie size (resizable, wide, sizeKey)', () => {
       expect(document.body.style.userSelect).toBe('none')
       await h.trigger('pointerup', ev(100))
       expect(document.body.style.userSelect).toBe('')
+    })
+
+    it('puts it back when pointer capture is lost, and keeps the size reached', async () => {
+      const { h } = await held()
+      await h.trigger('pointermove', ev(130))
+      await h.trigger('lostpointercapture', ev(130))
+      expect(document.body.style.userSelect).toBe('')
+      expect(selectStart()).toBe(false)
+      expect(window.localStorage.getItem('test-select')).toBe('390')
+    })
+
+    it('puts it back when the window loses focus mid-drag', async () => {
+      const { h } = await held()
+      window.dispatchEvent(new Event('blur'))
+      expect(document.body.style.userSelect).toBe('')
+      expect(selectStart()).toBe(false)
+      await h.trigger('pointermove', ev(300)) // the drag is over: no longer followed
+      expect(document.body.style.userSelect).toBe('')
+    })
+
+    it('puts it back when the page is hidden mid-drag, but not when it becomes visible', async () => {
+      const state = vi.spyOn(document, 'visibilityState', 'get')
+      state.mockReturnValue('visible')
+      await held()
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(document.body.style.userSelect).toBe('none')
+      state.mockReturnValue('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(document.body.style.userSelect).toBe('')
+      expect(selectStart()).toBe(false)
+    })
+
+    it('removes its blur and visibility listeners when the drag ends', async () => {
+      const add = vi.spyOn(window, 'addEventListener')
+      const remove = vi.spyOn(window, 'removeEventListener')
+      const { h } = await held()
+      const blurAdded = add.mock.calls.filter((c) => c[0] === 'blur').length
+      expect(blurAdded).toBe(1)
+      await h.trigger('pointerup', ev(100))
+      expect(remove.mock.calls.filter((c) => c[0] === 'blur')).toHaveLength(1)
+    })
+
+    describe('two pies held at once', () => {
+      const evOn = (id: number) => ({ pointerId: id, pointerType: 'touch', button: 0, clientX: 100, clientY: 0 })
+      const two = async () => {
+        roomWidth = 900
+        const a = await sized({ wide: true, resizable: true, sizeKey: 'test-two-a' })
+        const b = await sized({ wide: true, resizable: true, sizeKey: 'test-two-b' })
+        return { ha: a.get('[data-testid="pie-resize"]'), hb: b.get('[data-testid="pie-resize"]') }
+      }
+      it.each([
+        ['first pressed, first released', 'a', 'b'],
+        ['first pressed, last released', 'b', 'a'],
+      ])('the page text lock comes back to what it was after both let go (%s)', async (_n, firstOff, lastOff) => {
+        document.body.style.userSelect = 'text'
+        const { ha, hb } = await two()
+        await ha.trigger('pointerdown', evOn(1))
+        await hb.trigger('pointerdown', evOn(2))
+        expect(document.body.style.userSelect).toBe('none')
+        const up = (which: string) => (which === 'a' ? ha.trigger('pointerup', evOn(1)) : hb.trigger('pointerup', evOn(2)))
+        await up(firstOff)
+        expect(document.body.style.userSelect).toBe('none') // the other is still held
+        expect(selectStart()).toBe(true)
+        await up(lastOff)
+        expect(document.body.style.userSelect).toBe('text')
+        expect(selectStart()).toBe(false)
+        document.body.style.userSelect = ''
+      })
+      it('one pie going away mid-drag does not release the other one', async () => {
+        const { ha, hb } = await two()
+        await ha.trigger('pointerdown', evOn(1))
+        await hb.trigger('pointerdown', evOn(2))
+        const first = mounted[mounted.length - 2]
+        first.unmount()
+        mounted.splice(mounted.indexOf(first), 1)
+        expect(document.body.style.userSelect).toBe('none')
+        await hb.trigger('pointerup', evOn(2))
+        expect(document.body.style.userSelect).toBe('')
+      })
+    })
+
+    it('the module lock counts its holders and restores the page value once', () => {
+      document.body.style.userSelect = 'text'
+      expect(holdSelectionLock()).toBe(true)
+      expect(holdSelectionLock()).toBe(true) // the second holder sees "none" but must not save it
+      releaseSelectionLock()
+      expect(document.body.style.userSelect).toBe('none')
+      releaseSelectionLock()
+      expect(document.body.style.userSelect).toBe('text')
+      releaseSelectionLock() // an extra release is harmless
+      expect(document.body.style.userSelect).toBe('text')
+      document.body.style.userSelect = ''
+    })
+  })
+
+  describe('the donut diameter while dragging', () => {
+    it('maps the handle movement to the diameter: one to one beside the legend, twice when centred', () => {
+      expect(dragDiameter(400, 50, true)).toBe(450)
+      expect(dragDiameter(400, -50, true)).toBe(350)
+      expect(dragDiameter(400, 50, false)).toBe(500)
+      expect(dragDiameter(400, 0, false)).toBe(400) // no movement: no change
+    })
+
+    it('starts from the diameter the donut shows (its shorter side), so the first movement does not jump', async () => {
+      // a box wider than tall (520 x 372) as the stylesheet used to make it: the drag starts from 372, not 520
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const w = this.style.width ? parseFloat(this.style.width) : 520
+        const h = this.style.height ? parseFloat(this.style.height) : 372
+        return { width: w, height: h, top: 0, left: 0, right: w, bottom: h, x: 0, y: 0, toJSON: () => ({}) }
+      })
+      const w = await sized({ resizable: true, sizeKey: 'test-diam' })
+      const h = w.get('[data-testid="pie-resize"]')
+      const ev = (x: number) => ({ pointerId: 4, pointerType: 'mouse', button: 0, clientX: x, clientY: 0 })
+      await h.trigger('pointerdown', ev(100))
+      await h.trigger('pointermove', ev(110))
+      expect(sizeOf(w)).toBe(372 + 2 * 10) // not 520 + 20
+      await h.trigger('pointermove', ev(220))
+      expect(sizeOf(w)).toBe(372 + 2 * 120)
+      await h.trigger('pointerup', ev(220))
+    })
+
+    it('grows in proportion to the movement, with no jump between steps, and both pies of one key follow', async () => {
+      roomWidth = 1000
+      const props = { resizable: true, sizeKey: 'test-diam-both' }
+      const a = await sized(props)
+      const b = await sized(props)
+      const h = a.get('[data-testid="pie-resize"]')
+      const ev = (x: number) => ({ pointerId: 6, pointerType: 'mouse', button: 0, clientX: x, clientY: 0 })
+      await h.trigger('pointerdown', ev(0))
+      let last = 300
+      for (const x of [10, 20, 40, 80, 120]) {
+        await h.trigger('pointermove', ev(x))
+        await nextTick()
+        expect(sizeOf(a)).toBe(300 + 2 * x)
+        expect(sizeOf(b)).toBe(sizeOf(a))
+        expect(sizeOf(a) - last).toBeLessThanOrEqual(2 * 40)
+        last = sizeOf(a)
+      }
+      await h.trigger('pointerup', ev(120))
+    })
+  })
+
+  describe('legend columns', () => {
+    it('fit as many 300 px columns as the room has, at least one, never more than the slices', () => {
+      expect(legendColumns(2000, 3)).toBe(3)
+      expect(legendColumns(2000, 20)).toBe(6)
+      expect(legendColumns(700, 9)).toBe(2)
+      expect(legendColumns(100, 4)).toBe(1)
+      expect(legendColumns(2000, 0)).toBe(1)
+      expect(legendColumns(LEGEND_COL_PX, 5)).toBe(1)
+      expect(legendColumns(2 * LEGEND_COL_PX + 24, 5)).toBe(2)
+    })
+
+    it('hands the column count to the stylesheet only for a pie that manages its size', async () => {
+      roomWidth = 2000
+      const w = await sized({ wide: true, resizable: true, sizeKey: 'test-cols' })
+      expect((w.element as HTMLElement).style.getPropertyValue('--dp-cols')).toBe('3') // 3 drawn slices
+      expect(w.classes()).toContain('dp-managed')
+      const plain = await sized({})
+      expect((plain.element as HTMLElement).style.getPropertyValue('--dp-cols')).toBe('')
+      expect(plain.classes()).not.toContain('dp-managed')
+    })
+
+    it('are centred and sized to their content: at most 360 px, with the donut and legend 48 px apart', () => {
+      expect(source).toMatch(/\.dp-managed \.dp-list\s*\{[^}]*repeat\(var\(--dp-cols, 1\), minmax\(0, 360px\)\)[^}]*justify-content:\s*center/)
+      expect(source).toMatch(/\.drill-pie\.dp-wide\s*\{[^}]*column-gap:\s*48px[^}]*justify-content:\s*center/)
+      expect(WIDE_GAP_PX).toBe(48)
+    })
+
+    it('a pie mounted in a hidden pane goes wide and shows the picker once it becomes visible, with no resize', async () => {
+      let hidden = true
+      const callbacks: Array<() => void> = []
+      const seen: Element[] = []
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(cb: () => void) {
+            callbacks.push(cb)
+          }
+          observe = (el: Element) => void seen.push(el)
+          unobserve = () => {}
+          disconnect = () => {}
+        },
+      )
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('drill-pie') && hidden ? 0 : 900
+      })
+      const w = await sized({ wide: true, legendPicker: true })
+      expect(w.classes()).not.toContain('dp-wide') // measured while hidden: no room of its own
+      expect(w.find('[data-testid="legend-picker"]').exists()).toBe(false)
+      expect(seen).toContain(w.element) // its own box is watched, not only an ancestor
+      hidden = false
+      callbacks.forEach((cb) => cb()) // the pane became visible: the box went from no size to a size
+      await nextTick()
+      expect(w.classes()).toContain('dp-wide')
+      expect(w.find('[data-testid="legend-picker"]').exists()).toBe(true)
+      vi.unstubAllGlobals()
     })
   })
 })
