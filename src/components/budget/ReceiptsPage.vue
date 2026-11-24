@@ -11,7 +11,7 @@
 // The connect callback redirects to `?section=budget&b_page=receipts&email=<code>`: its message shows once, then
 // `email` is removed from the URL with history.replaceState.
 //
-// Slot `review`: where stage 13 mounts the review list. Rendered only while connected.
+// The review list (ReceiptsReview) is mounted below the status card, only while connected.
 import { computed, onMounted, ref } from 'vue'
 import {
   disconnectReceipts,
@@ -24,6 +24,7 @@ import {
   type ReceiptsStatus,
 } from '../../lib/budget/receiptsClient'
 import ModalPanel from '../ui/ModalPanel.vue'
+import ReceiptsReview from './ReceiptsReview.vue'
 
 const emit = defineEmits<{ connected: [] }>()
 
@@ -213,8 +214,7 @@ async function disconnect() {
           <button ref="disconnectBtn" type="button" class="btn btn-ghost rp-btn" :disabled="!!busy" data-testid="receipts-disconnect" @click="openDisconnect">Disconnect</button>
         </div>
       </section>
-      <!-- Stage 13 mounts the review list here. -->
-      <slot name="review" />
+      <ReceiptsReview />
     </template>
 
     <ModalPanel :open="modalOpen" title="Disconnect Gmail?" title-id="rp-dc-title" described-by="rp-dc-desc" :return-to="disconnectBtn" initial-focus="input:checked" @close="modalOpen = false">

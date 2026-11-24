@@ -67,9 +67,14 @@ describe('receiptsClient requests', () => {
     expect(lastCall()).toMatchObject({ url: '/api/budget/email/receipts/r1', method: 'PATCH', body: { dismissed: true } })
   })
   it('apply posts items and rejects', async () => {
-    reply({ applied: [], rejected: ['m2'], skipped: [] })
-    await applyReceipts([{ matchId: 'm1', expectedUpdatedAt: '2026-01-01T00:00:00Z', categoryId: 'c1' }], ['m2'])
-    expect(lastCall().body).toEqual({ items: [{ matchId: 'm1', expectedUpdatedAt: '2026-01-01T00:00:00Z', categoryId: 'c1' }], reject: ['m2'] })
+    reply({ applied: [], rejected: [2], skipped: [] })
+    await applyReceipts([{ matchId: 1, expectedUpdatedAt: '2026-01-01T00:00:00Z', categoryId: 'c1' }], [2])
+    expect(lastCall().body).toEqual({ items: [{ matchId: 1, expectedUpdatedAt: '2026-01-01T00:00:00Z', categoryId: 'c1' }], reject: [2] })
+  })
+  it('a reject-only apply sends an empty items list and numeric ids', async () => {
+    reply({ applied: [], rejected: [3], skipped: [] })
+    await applyReceipts([], [3])
+    expect(lastCall().body).toEqual({ items: [], reject: [3] })
   })
   it('links post the ids and return the map', async () => {
     reply({ links: { t1: { merchant: 'Acme Hardware', items: [] } } })
@@ -98,7 +103,7 @@ describe('receiptsClient errors', () => {
     'connected', 'denied', 'google_error', 'state_invalid', 'state_used', 'not_configured', 'invalid_grant', 'scope_missing',
     'no_refresh_token', 'token_invalid', 'not_allowed', 'exchange_failed', 'receipts_not_configured', 'consent_required',
     'receipts_unavailable', 'receipts_failed', 'worker_failed', 'rate_limited', 'not_connected', 'reconnect_needed', 'paused',
-    'needs_reconnect', 'api_rejected', 'api_limited',
+    'needs_reconnect', 'api_rejected', 'api_limited', 'bad_state', 'conflict', 'bad_request',
   ]
   it.each(CODES)('has its own message for %s', (code) => {
     const m = receiptsMessage(code)

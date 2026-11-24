@@ -36,42 +36,73 @@ export interface ReceiptsStatus {
   nextRunAt: string | null
 }
 export interface ReceiptMatchTxn {
+  postedDate: string
+  amountCents: number
+  merchantName: string | null
+  accountLabel: string | null
+  categoryId: string | null
+  categorySource: string | null
+  needsReview: boolean
   updatedAt: string
-  [k: string]: unknown
 }
 export interface ReceiptMatch {
-  matchId: string
+  /** The server's numeric match id (apply and reject take it as a number). */
+  matchId: number
   txnId: string
+  /** Matches of one split (several charges of one receipt, or several receipts of one charge) share a key. */
+  groupKey: string | null
   rule: string
+  shareCents: number | null
   score: number
+  status: string
   proposedCategoryId: string | null
   linkedOther: boolean
   categoryProtectedBy: string | null
   txn: ReceiptMatchTxn
 }
+export interface ReceiptItem {
+  seq: number
+  description: string
+  amountCents: number | null
+  quantity: number | null
+  categoryHint: string | null
+}
 export interface ReceiptRow {
   id: string
+  emailDate: string | null
   status: string
+  kind: string
   merchant: string | null
+  paymentVia: string | null
+  cardLast4: string | null
+  orderRef: string | null
+  receiptDate: string | null
+  relatedDate: string | null
+  currency: string | null
   totalCents: number | null
+  taxCents: number | null
+  shippingCents: number | null
+  /** Sent by the server so a receipt can be opened in Gmail; the review list never shows it as text. */
   gmailMsgId?: string
-  items: unknown[]
+  items: ReceiptItem[]
   matches: ReceiptMatch[]
-  [k: string]: unknown
 }
 export interface ReceiptsPage {
   receipts: ReceiptRow[]
   nextCursor: string | null
 }
 export interface ApplyItem {
-  matchId: string
+  matchId: number
   expectedUpdatedAt: string
-  categoryId?: string
+  categoryId?: string | null
 }
+/** Why a linked row kept its category: set by hand ('manual') or by a person's edit ('person_edit'); null when nothing was kept. */
+export type CategoryKept = 'manual' | 'person_edit' | null
+export type SkipReason = 'not_found' | 'not_suggested' | 'stale' | 'txn_linked' | 'incomplete_group' | 'group_blocked' | 'conflict'
 export interface ApplyResponse {
-  applied: { matchId: string; txnId: string; categorySet: boolean; categoryKept: boolean; updatedAt: string }[]
-  rejected: string[]
-  skipped: { matchId: string; reason: string; currentUpdatedAt?: string }[]
+  applied: { matchId: number; txnId: string; categorySet: boolean; categoryKept: CategoryKept; updatedAt: string }[]
+  rejected: number[]
+  skipped: { matchId: number; reason: SkipReason | string; currentUpdatedAt?: string }[]
 }
 export interface ReceiptLinkItem {
   description: string
@@ -123,6 +154,9 @@ const MESSAGES: Record<string, string> = {
   api_rejected: 'Receipts paused: the API rejected the request',
   api_limited: 'Receipts paused: API limit reached, retrying next hour',
   // generic
+  bad_state: 'That receipt cannot be changed that way.',
+  conflict: 'A receipt was linked to one of these rows meanwhile. Reload and try again.',
+  bad_request: 'That request was not accepted. Reload and try again.',
   not_found: 'That receipt is no longer there.',
   stale: 'That row changed meanwhile. Reload and try again.',
   forbidden: 'Budget access is needed for receipts.',
@@ -201,7 +235,7 @@ export function dismissReceipt(id: string, dismissed = true): Promise<{ id: stri
 }
 
 /** Apply up to 50 chosen matches and/or reject others, in one batch. */
-export function applyReceipts(items: ApplyItem[], reject: string[] = []): Promise<ApplyResponse> {
+export function applyReceipts(items: ApplyItem[], reject: number[] = []): Promise<ApplyResponse> {
   return call<ApplyResponse>('/apply', post({ items, ...(reject.length ? { reject } : {}) }))
 }
 

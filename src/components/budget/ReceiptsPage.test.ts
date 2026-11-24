@@ -99,18 +99,20 @@ describe('ReceiptsPage states', () => {
     expect(byId('receipts-consent').exists()).toBe(true)
   })
 
-  it('connected: address, last run counts, Check now, and the review slot', async () => {
-    await mountPage(connected(), { review: '<div data-testid="slot-review">list</div>' })
+  it('connected: address, last run counts, Check now, and the review list', async () => {
+    routes['GET /api/budget/email/receipts?status=suggested'] = [{ body: { receipts: [], nextCursor: null } }]
+    routes['GET /api/budget/meta'] = [{ body: { people: [], accounts: [], categories: [], range: { min: null, max: null } } }]
+    await mountPage(connected())
     expect(byId('receipts-conn-line').text()).toContain('pat@example.com')
     expect(byId('receipts-last-run').text()).toContain('7 emails read, 5 receipts found, 3 matched')
     expect(byId('receipts-check').exists()).toBe(true)
     expect(byId('receipts-consent').exists()).toBe(false)
-    expect(byId('slot-review').exists()).toBe(true)
+    expect(byId('receipts-review').exists()).toBe(true)
   })
 
-  it('the review slot is not drawn while not connected', async () => {
-    await mountPage(notConnected, { review: '<div data-testid="slot-review">list</div>' })
-    expect(byId('slot-review').exists()).toBe(false)
+  it('the review list is not drawn while not connected', async () => {
+    await mountPage(notConnected)
+    expect(byId('receipts-review').exists()).toBe(false)
   })
 
   it('Check now posts, then reloads the status', async () => {
