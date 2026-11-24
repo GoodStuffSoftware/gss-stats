@@ -5,7 +5,7 @@
 // URL (`?section=budget` plus `b_*` params; every other param is left alone, see sectionLink.ts):
 //   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_group=account (omitted = merchant),
 //   b_review=1, b_tab=spending|debts|both (always written; absent reads as the width's default tab),
-//   b_page=loans (Overview is the default and writes nothing; anything but `loans` reads as Overview).
+//   b_page=loans|receipts (Overview is the default and writes nothing; anything else reads as Overview).
 // The drill path (category and store names) is NOT in the URL: the repo is public and URLs reach logs and synced
 // history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
 // still carries a `b_path` has it ignored and removed (searchWithoutPath). Likewise the open loan on the Loans
@@ -237,7 +237,7 @@ export function searchWithState(search: string, state: BudgetViewState): string 
   if (state.groupBy === 'account') q.set(`${P}group`, 'account')
   if (state.reviewOnly) q.set(`${P}review`, '1')
   q.set(`${P}tab`, state.tab) // always written: the default depends on the width, so an omitted tab would not survive a reload
-  if (state.page === 'loans') q.set(PAGE_PARAM, 'loans')
+  if (state.page !== 'overview') q.set(PAGE_PARAM, state.page)
   const s = q.toString()
   return s ? `?${s}` : ''
 }
@@ -263,7 +263,7 @@ export function savedViewOfState(state: BudgetViewState, today: IsoDate): SavedV
   const preset = presetOf(state.from, state.to, today)
   return fitSavedView({
     tab: state.tab,
-    page: state.page,
+    page: state.page === 'loans' ? 'loans' : 'overview', // Receipts is not part of the saved view (the page is remembered by lastPage.ts)
     path: pathOk ? steps.map((s) => ({ level: s.level, key: s.key, label: s.label.slice(0, VIEW_STEP_LABEL_MAX) })) : [],
     groupBy: state.groupBy,
     review: state.reviewOnly,

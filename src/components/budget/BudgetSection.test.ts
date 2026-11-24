@@ -15,6 +15,7 @@ import DrillPie from '../charts/DrillPie.vue'
 import DebtPanel from './DebtPanel.vue'
 import LoansList from './LoansList.vue'
 import LoansPage from './LoansPage.vue'
+import ReceiptsPage from './ReceiptsPage.vue'
 import SpendingPanel from './SpendingPanel.vue'
 import { installHistoryStub, type HistoryStub } from '../../testing/historyStub'
 
@@ -322,6 +323,37 @@ describe('BudgetSection: data', () => {
     expect(w.findComponent(SpendingPanel).exists()).toBe(false)
     expect(w.findComponent(BudgetTable).exists()).toBe(false)
     expect(w.emitted('page')?.[0]).toEqual(['loans'])
+  })
+
+  it('opens on the Receipts page from a deep link with email: no range, no overview table; page reported', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_page=receipts&email=connected')
+    expect(w.findComponent(ReceiptsPage).exists()).toBe(true)
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(false)
+    expect(w.findComponent(BudgetTable).exists()).toBe(false)
+    expect(w.findComponent(LoansPage).exists()).toBe(false)
+    expect(w.emitted('page')?.[0]).toEqual(['receipts'])
+  })
+
+  it('goPage reaches Receipts and back, and writes b_page=receipts', async () => {
+    route()
+    const w = await mountSection()
+    const vm = w.vm as unknown as { goPage: (p: 'overview' | 'loans' | 'receipts') => void }
+    vm.goPage('receipts')
+    await flushPromises()
+    expect(w.findComponent(ReceiptsPage).exists()).toBe(true)
+    expect(new URLSearchParams(location.search).get('b_page')).toBe('receipts')
+    vm.goPage('overview')
+    await flushPromises()
+    expect(w.findComponent(ReceiptsPage).exists()).toBe(false)
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(true)
+  })
+
+  it('an unknown b_page still opens Overview', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_page=nope')
+    expect(w.findComponent(ReceiptsPage).exists()).toBe(false)
+    expect(w.emitted('page')?.[0]).toEqual(['overview'])
   })
 
   it('goPage switches page both ways and reports it', async () => {

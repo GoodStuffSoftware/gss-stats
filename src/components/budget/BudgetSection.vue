@@ -22,6 +22,7 @@ import { createPrefsSaver, fetchServerView, putServerView, VIEW_SAVE_DELAY_MS } 
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
 import LoansPage from './LoansPage.vue'
+import ReceiptsPage from './ReceiptsPage.vue'
 import DebtPanel from './DebtPanel.vue'
 import SpendingPanel from './SpendingPanel.vue'
 
@@ -367,7 +368,7 @@ onBeforeUnmount(() => {
           :person="state.person"
           :people="meta.people"
           :today="today"
-          :range-hidden="state.page === 'loans'"
+          :range-hidden="state.page !== 'overview'"
           @range="(r) => setRange(r.from, r.to)"
           @person="setPerson"
         />
@@ -384,6 +385,8 @@ onBeforeUnmount(() => {
           @leave="backToOverview"
           @saved="onDebtSaved"
         />
+
+        <ReceiptsPage v-else-if="state.page === 'receipts'" />
 
         <template v-else>
         <div class="b-tabs" role="tablist" aria-label="Budget view">

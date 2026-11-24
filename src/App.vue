@@ -29,7 +29,7 @@ import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import { accessibleSections, type NavSection } from './lib/codeSections'
-import { BUDGET_SECTION, budgetPageOf, budgetSectionOpen, searchWithSection, type BudgetPage } from './lib/budget/sectionLink'
+import { BUDGET_SECTION, budgetPageOf, parseBudgetPage, budgetSectionOpen, searchWithSection, type BudgetPage } from './lib/budget/sectionLink'
 import { readLastPage, writeLastPage } from './lib/budget/lastPage'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
@@ -220,7 +220,9 @@ const budgetSectionRef = ref<{ goPage: (page: BudgetPage) => void } | null>(null
 // just "Budget"; a loan opened from the Loans list keeps "Budget > Loans" (BudgetSection `fromOverview`).
 const budgetLoanFromOverview = ref(false)
 const budgetCrumbs = computed(() =>
-  budgetPage.value === 'loans' && !budgetLoanFromOverview.value ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
+  budgetPage.value === 'receipts'
+    ? [{ key: 'budget', label: 'Budget' }, { key: 'receipts', label: 'Receipts' }]
+    : budgetPage.value === 'loans' && !budgetLoanFromOverview.value ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
 )
 function onBudgetPage(page: BudgetPage) {
   budgetPage.value = page
@@ -254,7 +256,7 @@ onMounted(async () => {
 function pickSection(id: string, pageId?: string) {
   drawerOpen.value = false
   if (id !== BUDGET_SECTION) return
-  const page: BudgetPage = pageId ? (pageId === 'loans' ? 'loans' : 'overview') : readLastPage(signedInEmail.value)
+  const page: BudgetPage = pageId ? parseBudgetPage(pageId) : readLastPage(signedInEmail.value)
   goBudgetPage(page)
 }
 function onBudgetPopState() {

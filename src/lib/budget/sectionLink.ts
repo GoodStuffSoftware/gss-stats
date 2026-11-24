@@ -9,16 +9,17 @@ export const BUDGET_SECTION = 'budget'
 export const BUDGET_PARAM_PREFIX = 'b_'
 
 /** The section's pages. `b_page=loans` names the Loans page; Overview is the default and writes nothing. */
-export type BudgetPage = 'overview' | 'loans'
+export type BudgetPage = 'overview' | 'loans' | 'receipts'
 export const BUDGET_PAGES: ReadonlyArray<{ id: BudgetPage; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'loans', label: 'Loans' },
+  { id: 'receipts', label: 'Receipts' },
 ]
 export const PAGE_PARAM = `${BUDGET_PARAM_PREFIX}page`
 
 /** A page id read from outside (URL, storage): only a known page is kept, anything else is Overview. */
 export function parseBudgetPage(raw: unknown): BudgetPage {
-  return raw === 'loans' ? 'loans' : 'overview'
+  return raw === 'loans' || raw === 'receipts' ? raw : 'overview'
 }
 /** The page a query string names. */
 export function budgetPageOf(search: string): BudgetPage {
@@ -38,14 +39,13 @@ export function budgetSectionOpen(search: string): boolean {
   }
 }
 
-/** The query string with the Budget section opened (`section=budget`, plus `b_page=loans` when `page` is the
- * Loans page) or closed (`section` and the section's `b_*` params removed, `b_page` included), every other param
+/** The query string with the Budget section opened (`section=budget`, plus `b_page=<page>` when `page` is not Overview) or closed (`section` and the section's `b_*` params removed, `b_page` included), every other param
  * kept. Returns '' or a string starting with '?'. */
 export function searchWithSection(search: string, open: boolean, page: BudgetPage = 'overview'): string {
   const params = new URLSearchParams(search)
   if (open) {
     params.set(SECTION_PARAM, BUDGET_SECTION)
-    if (page === 'loans') params.set(PAGE_PARAM, 'loans')
+    if (page !== 'overview') params.set(PAGE_PARAM, page)
   } else {
     params.delete(SECTION_PARAM)
     for (const k of Array.from(params.keys())) if (k.startsWith(BUDGET_PARAM_PREFIX)) params.delete(k)

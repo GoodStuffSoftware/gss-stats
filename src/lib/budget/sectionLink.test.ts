@@ -41,6 +41,13 @@ describe('the Budget page param', () => {
     expect(budgetPageOf('?b_page=nope')).toBe('overview')
     expect(budgetPageOf('')).toBe('overview')
   })
+  it('receipts is a page: parsed, read from b_page, written when opening; an unknown page is still Overview', () => {
+    expect(parseBudgetPage('receipts')).toBe('receipts')
+    expect(budgetPageOf('?section=budget&b_page=receipts&email=connected')).toBe('receipts')
+    expect(budgetPageOf('?section=budget&b_page=Receipts')).toBe('overview')
+    expect(searchWithSection('?page=p1', true, 'receipts')).toBe('?page=p1&section=budget&b_page=receipts')
+    expect(searchWithSection('?section=budget&b_page=receipts&email=connected', false)).toBe('?email=connected')
+  })
   it('opening on Loans writes b_page=loans; Overview writes nothing; closing drops it', () => {
     expect(searchWithSection('?page=p1', true, 'loans')).toBe('?page=p1&section=budget&b_page=loans')
     expect(searchWithSection('', true)).toBe('?section=budget')
