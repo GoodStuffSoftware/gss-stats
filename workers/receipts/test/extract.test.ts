@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { extractReceipt, luhnValid, type ExtractInput } from '../src/extract'
+import { extractReceipt, luhnValid, MAX_EMAIL_CHARS, type ExtractInput } from '../src/extract'
 
 // All fixtures are made up: example.com, fake merchants and amounts. No real API is called.
 const ENV = { apiKey: 'test-key-not-real', model: 'test-model' }
@@ -84,6 +84,22 @@ describe('extractReceipt', () => {
     const g: Record<string, unknown> = good()
     delete g.items
     expect(await extractReceipt(INPUT, ENV, mockFetch(reply(g)))).toEqual({ ok: false, code: 'extract_invalid' })
+  })
+
+  it('cuts the email text at MAX_EMAIL_CHARS without splitting an emoji pair', async () => {
+    const f = mockFetch(reply(good()))
+    await extractReceipt({ ...INPUT, text: `${'a'.repeat(MAX_EMAIL_CHARS - 1)}\u{1F600}\u{1F600}` }, ENV, f)
+    const [, init] = f.mock.calls[0] as [string, RequestInit]
+    const user = JSON.parse(init.body as string).messages[0].content as string
+    expect(user.isWellFormed()).toBe(true)
+  })
+
+  it('reads the API usage block into the result, with or without a receipt', async () => {
+    const usage = { input_tokens: 321, output_tokens: 45 }
+    const ok = await extractReceipt(INPUT, ENV, mockFetch(new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(good()) }], usage }))))
+    expect(ok).toMatchObject({ ok: true, usage: { inputTokens: 321, outputTokens: 45 } })
+    const bad = await extractReceipt(INPUT, ENV, mockFetch(new Response(JSON.stringify({ content: [{ type: 'text', text: 'nope' }], usage }))))
+    expect(bad).toEqual({ ok: false, code: 'extract_invalid', usage: { inputTokens: 321, outputTokens: 45 } })
   })
 
   it('maps malformed JSON, prose and a non-object to extract_invalid', async () => {

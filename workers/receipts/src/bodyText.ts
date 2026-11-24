@@ -45,7 +45,7 @@ function b64urlToBytes(data: string): Uint8Array {
 
 function header(part: GmailPart, name: string): string {
   const h = part.headers?.find((x) => (x.name ?? '').toLowerCase() === name)
-  return (h?.value ?? '').slice(0, 500)
+  return (h?.value ?? '').slice(0, 500).toWellFormed()
 }
 
 function charsetOf(part: GmailPart): string {
@@ -360,5 +360,6 @@ export function extractBodyText(payload: GmailPart | null | undefined): string {
   text = collapse(text.slice(0, PRE_MASK_CHARS * 2))
   text = cutAtMarkers(text).slice(0, PRE_MASK_CHARS)
   text = collapse(maskDigits(text))
-  return text.length > BODY_TEXT_MAX_CHARS ? text.slice(0, BODY_TEXT_MAX_CHARS) : text
+  // Every cut above counts UTF-16 units and can split an emoji pair; a lone surrogate makes a strict JSON parser reject the whole request.
+  return (text.length > BODY_TEXT_MAX_CHARS ? text.slice(0, BODY_TEXT_MAX_CHARS) : text).toWellFormed()
 }

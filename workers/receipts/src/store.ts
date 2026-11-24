@@ -536,6 +536,22 @@ export async function createRun(db: Db, connectionId: string, trigger: 'cron' | 
   return r.id
 }
 
+/** A run still open and younger than this blocks another run on the same connection (a crashed run row ages out). */
+export const OPEN_RUN_WINDOW_MS = 2 * 60_000
+/** Like CREATE_RUN_SQL, but inserts nothing while the connection's newest run is open and under OPEN_RUN_WINDOW_MS old (?4 is that cutoff). */
+export const CREATE_RUN_IF_IDLE_SQL = `INSERT INTO receipt_sync_runs (connection_id, run_trigger, started_at)
+SELECT ?1, ?2, ?3 WHERE NOT EXISTS (
+  SELECT 1 FROM (SELECT finished_at, started_at FROM receipt_sync_runs WHERE connection_id = ?1 ORDER BY id DESC LIMIT 1) last
+  WHERE last.finished_at IS NULL AND last.started_at > ?4)
+RETURNING id`
+
+/** Start a cron run row unless another run of the connection is going (a manual run, or an earlier cron run still working).
+ *  Returns the run id, or null when one is: the caller skips, so two runs never spend on the same mailbox at once. */
+export async function createRunIfIdle(db: Db, connectionId: string, trigger: 'cron' | 'manual' | 'backfill', now: Date): Promise<number | null> {
+  const r = await db.prepare(CREATE_RUN_IF_IDLE_SQL).bind(connectionId, trigger, iso(now), iso(new Date(now.getTime() - OPEN_RUN_WINDOW_MS))).first<{ id: number }>()
+  return r?.id ?? null
+}
+
 export const FINISH_RUN_SQL = `UPDATE receipt_sync_runs SET finished_at = ?2, listed = ?3, fetched = ?4, extracted = ?5, skipped = ?6, matched = ?7, auto_applied = ?8,
   model_in_tokens = ?9, model_out_tokens = ?10, error_code = ?11 WHERE id = ?1 AND finished_at IS NULL`
 
@@ -554,8 +570,9 @@ export async function pruneRuns(db: Db, connectionId: string): Promise<void> {
   await db.prepare(PRUNE_RUNS_SQL).bind(connectionId).run()
 }
 
-/** Model calls made today (UTC) by the connection: each extracted or skipped email was one call. A day's rows are at most KEEP_RUNS. */
-export const DAILY_CALLS_SQL = `SELECT coalesce(sum(extracted + skipped), 0) AS calls FROM receipt_sync_runs WHERE connection_id = ?1 AND started_at >= ?2`
+/** Model calls made today (UTC) by the connection: each fetched email was at most one call, including the ones whose answer was
+ *  invalid or that another run stored first (extracted + skipped would miss those). A day's rows are at most KEEP_RUNS. */
+export const DAILY_CALLS_SQL = `SELECT coalesce(sum(fetched), 0) AS calls FROM receipt_sync_runs WHERE connection_id = ?1 AND started_at >= ?2`
 
 export async function modelCallsToday(db: Db, connectionId: string, now: Date): Promise<number> {
   const r = await db.prepare(DAILY_CALLS_SQL).bind(connectionId, `${dayOf(now)}T00:00:00.000Z`).first<{ calls: number }>()

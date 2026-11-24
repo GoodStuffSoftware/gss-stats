@@ -132,10 +132,12 @@ describe('insert and dedupe', () => {
 describe('daily cap and runs', () => {
   it('counts today\'s model calls from the run rows and computes what is left', async () => {
     const a = await S.createRun(d1(), CONN, 'cron', new Date('2026-12-05T01:00:00.000Z'))
-    await S.finishRun(d1(), a, { ...S.ZERO_COUNTS, extracted: 4, skipped: 3 }, null, NOW)
+    // 9 emails fetched: 4 extracted, 3 skipped, 2 whose answer was invalid (still paid calls)
+    await S.finishRun(d1(), a, { ...S.ZERO_COUNTS, fetched: 9, extracted: 4, skipped: 3 }, null, NOW)
     const old = await S.createRun(d1(), CONN, 'cron', new Date('2026-12-04T23:00:00.000Z'))
-    await S.finishRun(d1(), old, { ...S.ZERO_COUNTS, extracted: 50 }, null, NOW)
-    expect(await S.modelCallsToday(d1(), CONN, NOW)).toBe(7)
+    await S.finishRun(d1(), old, { ...S.ZERO_COUNTS, fetched: 50, extracted: 50 }, null, NOW)
+    expect(await S.modelCallsToday(d1(), CONN, NOW)).toBe(9)
+    expect(S.capRemaining(10, 9)).toBe(1)
     expect(S.capRemaining(10, 7)).toBe(3)
     expect(S.capRemaining(10, 12)).toBe(0)
     expect(S.capRemaining(Number.NaN, 0)).toBe(0)

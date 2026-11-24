@@ -84,7 +84,11 @@ export async function runConnection(env: Env, connectionId: string, runId: numbe
   let watermarkAt: string | null = null
   let id = runId
   try {
-    if (id === null) id = await S.createRun(db, connectionId, trigger, clock())
+    if (id === null) {
+      id = await S.createRunIfIdle(db, connectionId, trigger, clock())
+      // Another run of this mailbox is still going: do nothing (no row, no result), so the two never spend at once.
+      if (id === null) return { errorCode: 'run_busy', counts }
+    }
     const r = await runInner(env, connectionId, id, counts, deps, clock)
     code = r.code
     watermarkAt = r.watermarkAt
@@ -181,6 +185,7 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
       receipt = SKIPPED
     } else {
       const r = await extractReceipt({ text, emailDate, categoryIds }, { apiKey, model }, doFetch)
+      if (r.usage) { counts.modelInTokens += r.usage.inputTokens; counts.modelOutTokens += r.usage.outputTokens }
       if (!r.ok) {
         if (r.code === 'extract_invalid') {
           if (retry) await S.recordFailure(db, retry.id, 'extract_invalid', clock())

@@ -64,7 +64,7 @@ function makeNet(o: NetOpts = {}): Net {
       void init
       const receipt = { is_receipt: true, kind: 'purchase', merchant: 'Fake Mart', payment_via: 'card', card_last4: null, order_ref: `FM-${n}`, receipt_date: '2026-12-01', related_date: null,
         currency: 'USD', total_cents: 1234 + 111 * n, tax_cents: null, shipping_cents: null, charges: [], items: [{ description: 'Widget', amount_cents: 1234 + 111 * n, quantity: 1, category_hint: 'shopping' }] }
-      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(receipt) }] }))
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(receipt) }], usage: { input_tokens: 400, output_tokens: 90 } }))
     }
     const get = /\/messages\/([0-9a-f]+)\?format=full/.exec(u)
     if (get) {
@@ -138,6 +138,37 @@ describe('a run', () => {
     expect(db.all<{ gmail_msg_id: string }>('SELECT gmail_msg_id FROM receipts ORDER BY gmail_msg_id').map((x) => x.gmail_msg_id)).toEqual([hexId(0), hexId(1)])
     await run(makeEnv({ RECEIPTS_MAX_PER_RUN: '2' }), net)
     expect(count('receipts')).toBe(4)
+  })
+
+  it('records the model tokens of each call on the run row', async () => {
+    await run(makeEnv(), makeNet({ messages: 3 }))
+    expect(lastRun()).toMatchObject({ extracted: 3, model_in_tokens: 1200, model_out_tokens: 270 })
+  })
+
+  it('the daily cap counts every fetched email (invalid answers included), not just extracted + skipped', async () => {
+    const earlier = await S.createRun(db.d1, CONN, 'cron', new Date(NOW.getTime() - 3_600_000))
+    await S.finishRun(db.d1, earlier, { ...S.ZERO_COUNTS, fetched: 3, extracted: 1 }, null, new Date(NOW.getTime() - 3_500_000))
+    const net = makeNet({ messages: 2 })
+    const out = await run(makeEnv({ RECEIPTS_DAILY_CAP: '3' }), net)
+    expect(out.errorCode).toBe('daily_cap')
+    expect(net.anthropic).toBe(0)
+  })
+
+  it('a cron run does nothing while another run of the mailbox is open and fresh, and starts again once it is closed or old', async () => {
+    const open = await S.createRun(db.d1, CONN, 'manual', new Date(NOW.getTime() - 30_000))
+    const net = makeNet({ messages: 2 })
+    const skipped = await run(makeEnv(), net)
+    expect(skipped.errorCode).toBe('run_busy')
+    expect(net.urls).toEqual([])
+    expect(count('receipt_sync_runs')).toBe(1)
+    expect(conn().last_run_at).toBeNull()
+    await S.finishRun(db.d1, open, S.ZERO_COUNTS, null, NOW)
+    expect((await run(makeEnv(), net)).errorCode).toBeNull()
+    expect(count('receipt_sync_runs')).toBe(2)
+    // a crashed run row (open for over 2 minutes) never blocks forever
+    db.exec(`UPDATE receipt_sync_runs SET finished_at = NULL, started_at = '${new Date(NOW.getTime() - 5 * 60_000).toISOString()}' WHERE id = ${open}`)
+    db.exec(`DELETE FROM receipt_sync_runs WHERE id <> ${open}`)
+    expect((await run(makeEnv(), makeNet({ messages: 1 }))).errorCode).toBeNull()
   })
 
   it('the daily cap counts extracted + skipped from run rows and ends further runs that day with daily_cap', async () => {

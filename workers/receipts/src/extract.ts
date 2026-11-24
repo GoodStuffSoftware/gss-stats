@@ -47,9 +47,18 @@ export interface ExtractedReceipt {
   items: ExtractedItem[]
 }
 
+/** Token counts the API reported for one call (present when the answer carried a usage block). */
+export interface ExtractUsage { inputTokens: number; outputTokens: number }
 export type ExtractResult =
-  | { ok: true; receipt: ExtractedReceipt; model: string }
-  | { ok: false; code: ExtractCode; reason?: ExtractReason }
+  | { ok: true; receipt: ExtractedReceipt; model: string; usage?: ExtractUsage }
+  | { ok: false; code: ExtractCode; reason?: ExtractReason; usage?: ExtractUsage }
+
+function readUsage(body: Record<string, unknown>): ExtractUsage | undefined {
+  const u = body.usage
+  if (!isObj(u)) return undefined
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0)
+  return { inputTokens: n(u.input_tokens), outputTokens: n(u.output_tokens) }
+}
 
 export interface ExtractEnv { apiKey: string; model: string }
 export interface ExtractInput {
@@ -82,7 +91,7 @@ this list, else null: ${categoryIds.join(', ')}. Never copy addresses, phone num
 
 /** The user turn: the email inside delimiters. A closing delimiter inside the email is defanged. */
 export function buildUserMessage(text: string): string {
-  const safe = text.slice(0, MAX_EMAIL_CHARS).replace(/<\s*\/\s*email\s*>/gi, '<\\/email>')
+  const safe = text.slice(0, MAX_EMAIL_CHARS).toWellFormed().replace(/<\s*\/\s*email\s*>/gi, '<\\/email>')
   return `<email>\n${safe}\n</email>`
 }
 
@@ -148,7 +157,7 @@ function textField(v: unknown, max: number): string | null {
   if (v === null) return null
   if (typeof v !== 'string' || v.length > max) bad()
   const c = cleanText(v)
-  return c === '' ? null : c.slice(0, max)
+  return c === '' ? null : c.slice(0, max).toWellFormed()
 }
 export function luhnValid(digits: string): boolean {
   let sum = 0
@@ -211,7 +220,7 @@ export function validateReceipt(raw: unknown, emailDate: string, categoryIds: re
     if (!isObj(it)) bad()
     exactKeys(it, ['description', 'amount_cents', 'quantity', 'category_hint'])
     if (typeof it.description !== 'string' || it.description.length < 1 || it.description.length > 120) bad()
-    const description = cleanText(it.description).slice(0, 120)
+    const description = cleanText(it.description).slice(0, 120).toWellFormed()
     if (description === '') bad()
     const quantity = cents(it.quantity, 1, 999)
     let hint: string | null = null
@@ -276,6 +285,8 @@ export async function extractReceipt(
     .filter((b): b is { type: string; text: string } => isObj(b) && b.type === 'text' && typeof b.text === 'string')
     .map((b) => b.text)
     .join('')
+  const usage = readUsage(body)
+  const withUsage = usage ? { usage } : {}
   const receipt = parseAndValidate(text, input.emailDate, input.categoryIds)
-  return receipt ? { ok: true, receipt, model: env.model } : { ok: false, code: 'extract_invalid' }
+  return receipt ? { ok: true, receipt, model: env.model, ...withUsage } : { ok: false, code: 'extract_invalid', ...withUsage }
 }
