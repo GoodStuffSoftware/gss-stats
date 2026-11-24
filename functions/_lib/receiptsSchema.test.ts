@@ -47,7 +47,7 @@ const matchDefaults = (receipt: string, txn: string): Row => ({
 })
 const match = (receipt: string, txn: string, over: Row = {}): void => put(db, 'receipt_matches', matchDefaults(receipt, txn), over)
 
-const runDefaults = (connection = CONN): Row => ({ connection_id: connection, trigger: 'cron', started_at: NOW })
+const runDefaults = (connection = CONN): Row => ({ connection_id: connection, run_trigger: 'cron', started_at: NOW })
 
 const count = (d: { sqlite: DatabaseSync }, table: string): number => (d.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
 const firstTxn = (): string => (db.get<{ id: string }>('SELECT id FROM transactions ORDER BY id LIMIT 1') as { id: string }).id
@@ -355,10 +355,10 @@ describe('receipt_sync_runs', () => {
   beforeEach(() => conn())
   const run = (over: Row = {}): void => put(db, 'receipt_sync_runs', runDefaults(), over)
 
-  it('accepts a run and checks trigger, counters, error_code and the parent', () => {
+  it('accepts a run and checks run_trigger, counters, error_code and the parent', () => {
     run()
-    run({ trigger: 'backfill', finished_at: NOW, listed: 40, fetched: 12, extracted: 9, skipped: 3, matched: 4, auto_applied: 0, model_in_tokens: 5000, model_out_tokens: 800, error_code: 'gmail_429' })
-    rejects(() => run({ trigger: 'hand' }))
+    run({ run_trigger: 'backfill', finished_at: NOW, listed: 40, fetched: 12, extracted: 9, skipped: 3, matched: 4, auto_applied: 0, model_in_tokens: 5000, model_out_tokens: 800, error_code: 'gmail_429' })
+    rejects(() => run({ run_trigger: 'hand' }))
     for (const col of ['listed', 'fetched', 'extracted', 'skipped', 'matched', 'auto_applied', 'model_in_tokens', 'model_out_tokens']) rejects(() => run({ [col]: -1 }))
     rejects(() => run({ error_code: 'Bad Code' }))
     rejects(() => run({ connection_id: 'c0000000000000fff' }), 'FOREIGN KEY')
@@ -529,7 +529,7 @@ describe('rollback and re-apply', () => {
     d.exec(`INSERT INTO receipts (id, connection_id, gmail_msg_id, email_date, status, created_at, updated_at, updated_by) VALUES ('r0000000000000001', '${CONN}', '18c3f2a9b7d4e601', '2026-11-10', 'applied', '${NOW}', '${NOW}', 'x')`)
     d.exec(`INSERT INTO receipt_items (receipt_id, seq, description) VALUES ('r0000000000000001', 1, 'Widget')`)
     d.exec(`INSERT INTO receipt_matches (receipt_id, txn_id, group_key, rule, share_cents, score, status, txn_updated_at, created_at) VALUES ('r0000000000000001', '${txn}', 'g', 'exact', 1, 1, 'applied', '${NOW}', '${NOW}')`)
-    d.exec(`INSERT INTO receipt_sync_runs (connection_id, trigger, started_at) VALUES ('${CONN}', 'cron', '${NOW}')`)
+    d.exec(`INSERT INTO receipt_sync_runs (connection_id, run_trigger, started_at) VALUES ('${CONN}', 'cron', '${NOW}')`)
     expect(dropped(d).length).toBe(NEW_TABLES.length + NEW_INDEXES.length + NEW_TRIGGERS.length)
 
     const stmts = rollbackStatements()

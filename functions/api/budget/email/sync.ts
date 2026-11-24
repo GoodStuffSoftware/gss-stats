@@ -16,6 +16,7 @@
 
 import { budgetJson, type BudgetEnv } from '../../../_lib/budgetAccess'
 import { defineRoute } from '../../../_lib/budgetDb'
+import { BINDING_TIMEOUT_MS, bindingFetch } from '../../../_lib/gmailConnect'
 
 interface ReceiptsEnv extends BudgetEnv {
   RECEIPTS?: Fetcher
@@ -40,15 +41,16 @@ export const onRequest = defineRoute({
     const now = Date.now()
     const startedAt = new Date(now).toISOString()
     const cutoff = new Date(now - SYNC_MIN_GAP_MS).toISOString()
-    const ins = await db
+    const run = (await db
       .prepare(
-        `INSERT INTO receipt_sync_runs (connection_id, trigger, started_at)
+        `INSERT INTO receipt_sync_runs (connection_id, run_trigger, started_at)
          SELECT ?1, 'manual', ?2
-          WHERE NOT EXISTS (SELECT 1 FROM receipt_sync_runs WHERE connection_id = ?1 AND started_at > ?3)`,
+          WHERE NOT EXISTS (SELECT 1 FROM receipt_sync_runs WHERE connection_id = ?1 AND started_at > ?3)
+         RETURNING id`,
       )
       .bind(conn.id, startedAt, cutoff)
-      .run()
-    if (!ins.meta.changes) {
+      .first()) as { id: number } | null
+    if (!run) {
       const last = (await db
         .prepare('SELECT started_at FROM receipt_sync_runs WHERE connection_id = ? ORDER BY id DESC LIMIT 1')
         .bind(conn.id)
@@ -56,18 +58,15 @@ export const onRequest = defineRoute({
       const wait = last ? Math.max(1, Math.ceil((Date.parse(last.started_at) + SYNC_MIN_GAP_MS - now) / 1000)) : 1
       return budgetJson(429, { error: 'rate_limited', retryAfterSec: wait }, { 'Retry-After': String(wait) })
     }
-    const run = (await db
-      .prepare('SELECT id FROM receipt_sync_runs WHERE connection_id = ? AND started_at = ? ORDER BY id DESC LIMIT 1')
-      .bind(conn.id, startedAt)
-      .first()) as { id: number }
 
     let accepted = false
     try {
-      const res = await env.RECEIPTS.fetch('https://receipts.internal/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: conn.id, runId: run.id, email }),
-      })
+      const res = await bindingFetch(
+        env.RECEIPTS,
+        'https://receipts.internal/sync',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connectionId: conn.id, runId: run.id, email }) },
+        BINDING_TIMEOUT_MS.sync,
+      )
       accepted = res.status === 202
     } catch {
       accepted = false

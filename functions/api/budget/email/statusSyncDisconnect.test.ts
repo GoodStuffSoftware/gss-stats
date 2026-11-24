@@ -118,7 +118,7 @@ function conn(id: string, owner: string, sub: string, over: Record<string, unkno
   db.sqlite.prepare(`INSERT INTO email_connections (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...(keys.map((k) => row[k]) as never[]))
 }
 function run(connection: string, over: Record<string, unknown> = {}): void {
-  const row: Record<string, unknown> = { connection_id: connection, trigger: 'cron', started_at: NOW, ...over }
+  const row: Record<string, unknown> = { connection_id: connection, run_trigger: 'cron', started_at: NOW, ...over }
   const keys = Object.keys(row)
   db.sqlite.prepare(`INSERT INTO receipt_sync_runs (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...(keys.map((k) => row[k]) as never[]))
 }
@@ -246,9 +246,9 @@ describe('POST sync', () => {
     const sent = JSON.parse(init.body as string) as { connectionId: string; runId: number; email: string }
     expect(sent.connectionId).toBe(CONN_A)
     expect(sent.email).toBe(A)
-    expect(db.get<{ connection_id: string; trigger: string }>('SELECT connection_id, trigger FROM receipt_sync_runs WHERE id = ?', sent.runId)).toEqual({
+    expect(db.get<{ connection_id: string; run_trigger: string }>('SELECT connection_id, run_trigger FROM receipt_sync_runs WHERE id = ?', sent.runId)).toEqual({
       connection_id: CONN_A,
-      trigger: 'manual',
+      run_trigger: 'manual',
     })
     expect(count('receipt_sync_runs', `connection_id = '${CONN_B}'`)).toBe(0)
   })

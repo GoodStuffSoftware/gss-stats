@@ -197,7 +197,7 @@ export async function finishConnect(request: Request, env: ReceiptsConnectEnv, e
 
   let result: unknown
   try {
-    const res = await cfg.binding.fetch(EXCHANGE_URL, {
+    const res = await bindingFetch(cfg.binding, EXCHANGE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -208,7 +208,7 @@ export async function finishConnect(request: Request, env: ReceiptsConnectEnv, e
         consentVersion: pending.cv,
         redirectUri: `${url.origin}${CONNECT_CALLBACK_PATH}`,
       }),
-    })
+    }, BINDING_TIMEOUT_MS.exchange)
     result = await res.json()
   } catch {
     return back(url, 'exchange_failed')
@@ -216,4 +216,24 @@ export async function finishConnect(request: Request, env: ReceiptsConnectEnv, e
   const r = (result ?? {}) as { ok?: unknown; code?: unknown }
   if (r.ok === true) return back(url, 'connected')
   return back(url, typeof r.code === 'string' && CODE_SET.has(r.code) && r.code !== 'connected' ? (r.code as ConnectCode) : 'exchange_failed')
+}
+
+/** Time limits for the Pages-to-Worker calls (ms): sync answers 202 at once; disconnect waits on Google's revoke; the exchange talks to Google twice. */
+export const BINDING_TIMEOUT_MS = { sync: 8_000, disconnect: 10_000, exchange: 20_000 } as const
+
+/** Service Binding fetch with a hard time limit (abort signal plus a race, in case the binding ignores the signal). Rejects on timeout. */
+export async function bindingFetch(binding: { fetch: (url: string, init?: RequestInit) => Promise<Response> }, url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctl = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ctl.abort()
+      reject(new Error('binding_timeout'))
+    }, ms)
+  })
+  try {
+    return await Promise.race([binding.fetch(url, { ...init, signal: ctl.signal }), timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }

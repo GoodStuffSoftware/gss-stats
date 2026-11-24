@@ -526,7 +526,7 @@ export interface RunCounts {
 }
 export const ZERO_COUNTS: RunCounts = { listed: 0, fetched: 0, extracted: 0, skipped: 0, matched: 0, autoApplied: 0, modelInTokens: 0, modelOutTokens: 0 }
 
-export const CREATE_RUN_SQL = `INSERT INTO receipt_sync_runs (connection_id, trigger, started_at) VALUES (?1, ?2, ?3) RETURNING id`
+export const CREATE_RUN_SQL = `INSERT INTO receipt_sync_runs (connection_id, run_trigger, started_at) VALUES (?1, ?2, ?3) RETURNING id`
 
 /** Start a run row (cron or backfill; the manual route inserts its own). Returns the run id. */
 export async function createRun(db: Db, connectionId: string, trigger: 'cron' | 'manual' | 'backfill', now: Date): Promise<number> {

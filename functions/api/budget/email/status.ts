@@ -1,9 +1,11 @@
 /// <reference types="@cloudflare/workers-types" />
 //
 // GET /api/budget/email/status: the signed-in login's OWN Gmail receipts connection, in one batch of two reads
-// (plan section 4). `{configured, connection: {status, lastRunAt, lastOkAt, lastError, consentVersion} | null,
-// lastRuns: [newest 5], nextRunAt}`. Only codes and counts: never the token columns, key_id, the Google sub, an id,
-// or anything about the other Budget person's connection (the owner's email is the lookup key, never selected).
+// (plan section 4). `{configured, connection: {status, lastRunAt, lastOkAt, lastError, consentVersion, googleEmail} | null,
+// lastRuns: [newest 5], nextRunAt}`. Only codes and counts, plus `googleEmail`: the
+// signed-in person's OWN linked Gmail address, returned to them only (the row is found by their session email, so the
+// other Budget person's address can never come back). Never the token columns, key_id, the Google sub, an id, or
+// anything about the other connection (the owner's email is the lookup key, never selected).
 // `lastError` and each run's `errorCode` are the Worker's own codes (for example `api_rejected`, `api_limited`,
 // `rate_limited`, `needs_reconnect`), passed through untouched so a run that keeps failing stays visible.
 
@@ -33,9 +35,10 @@ interface ConnRow {
   last_ok_at: string | null
   last_error: string | null
   consent_version: number
+  google_email: string | null
 }
 interface RunRow {
-  trigger: string
+  run_trigger: string
   started_at: string
   finished_at: string | null
   listed: number
@@ -53,10 +56,10 @@ export const onRequest = defineRoute({
     const db = env.BUDGET_DB!
     const email = ctx.data.budgetEmail!
     const [conn, runs] = await db.batch([
-      db.prepare('SELECT status, last_run_at, last_ok_at, last_error, consent_version FROM email_connections WHERE owner_email = ?').bind(email),
+      db.prepare('SELECT status, last_run_at, last_ok_at, last_error, consent_version, google_email FROM email_connections WHERE owner_email = ?').bind(email),
       db
         .prepare(
-          `SELECT trigger, started_at, finished_at, listed, fetched, extracted, skipped, matched, auto_applied, error_code
+          `SELECT run_trigger, started_at, finished_at, listed, fetched, extracted, skipped, matched, auto_applied, error_code
              FROM receipt_sync_runs
             WHERE connection_id = (SELECT id FROM email_connections WHERE owner_email = ?)
             ORDER BY id DESC LIMIT 5`,
@@ -68,10 +71,10 @@ export const onRequest = defineRoute({
     return budgetJson(200, {
       configured,
       connection: c
-        ? { status: c.status, lastRunAt: c.last_run_at, lastOkAt: c.last_ok_at, lastError: c.last_error, consentVersion: c.consent_version }
+        ? { status: c.status, lastRunAt: c.last_run_at, lastOkAt: c.last_ok_at, lastError: c.last_error, consentVersion: c.consent_version, googleEmail: c.google_email }
         : null,
       lastRuns: (runs.results as RunRow[]).map((r) => ({
-        trigger: r.trigger,
+        trigger: r.run_trigger,
         startedAt: r.started_at,
         finishedAt: r.finished_at,
         listed: r.listed,

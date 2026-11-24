@@ -243,7 +243,7 @@ describe('scheduled', () => {
     } finally {
       vi.unstubAllGlobals()
     }
-    expect(db.all<{ connection_id: string; trigger: string }>('SELECT connection_id, trigger FROM receipt_sync_runs')).toEqual([{ connection_id: CONN, trigger: 'cron' }])
+    expect(db.all<{ connection_id: string; run_trigger: string }>('SELECT connection_id, run_trigger FROM receipt_sync_runs')).toEqual([{ connection_id: CONN, run_trigger: 'cron' }])
     expect(count('receipts')).toBe(1)
   })
 })
@@ -273,7 +273,7 @@ describe('POST /sync', () => {
     } finally {
       vi.unstubAllGlobals()
     }
-    expect(lastRun()).toMatchObject({ id: runId, trigger: 'manual', fetched: 2, extracted: 2, error_code: null })
+    expect(lastRun()).toMatchObject({ id: runId, run_trigger: 'manual', fetched: 2, extracted: 2, error_code: null })
     expect(lastRun().finished_at).not.toBeNull()
     expect(count('receipt_sync_runs')).toBe(1)
   })
