@@ -286,6 +286,43 @@ describe('re-match of open receipts', () => {
   })
 })
 
+describe('currency and repeat emails reach the matcher', () => {
+  it('loadOpenReceipts carries the stated currency, and a EUR receipt is not matched to an equal-cents USD row', async () => {
+    const r = await put({ extracted: extracted({ totalCents: 4321, currency: 'EUR' }) })
+    mk({ posted_date: '2026-12-02', amount_cents: -4321, merchant_name: 'Test Shop' })
+    const open = await S.loadOpenReceipts(d1(), CONN, NOW)
+    expect(open.map((o) => o.currency)).toEqual(['EUR'])
+    const { rows, takenTxnIds } = await S.loadCandidateRows(d1(), open)
+    const written = await S.writeMatchResults(d1(), matchReceipts(open, rows, { autoApply: true }, { takenTxnIds }), NOW)
+    expect(written.suggested).toBe(0)
+    expect(rcptStatus(r.id)).toBe('unmatched')
+  })
+  it('loadAppliedSiblings returns (order_ref, charged amount) of applied receipts of this connection only', async () => {
+    conn(CONN2, 'user-b@example.com')
+    const applied = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
+    const other = await put({ connectionId: CONN2, extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
+    const unrelated = await put({ extracted: extracted({ orderRef: 'ORD-88', totalCents: 700 }) })
+    db.exec(`UPDATE receipts SET status = 'applied' WHERE id IN ('${applied.id}', '${other.id}')`)
+    const open = [{ orderRef: 'ORD-77' }, { orderRef: 'ORD-88' }, { orderRef: null }]
+    expect(await S.loadAppliedSiblings(d1(), CONN, open)).toEqual([{ orderRef: 'ORD-77', amountCents: 5000 }])
+    expect(await S.loadAppliedSiblings(d1(), CONN, [{ orderRef: null }])).toEqual([])
+    expect(rcptStatus(unrelated.id)).not.toBe('applied')
+  })
+  it('a repeat email of an applied order stays unmatched next to a same-amount row', async () => {
+    const applied = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
+    db.exec(`UPDATE receipts SET status = 'applied' WHERE id = '${applied.id}'`)
+    const repeat = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
+    mk({ posted_date: '2026-12-02', amount_cents: -5000, merchant_name: 'Test Shop' })
+    const open = await S.loadOpenReceipts(d1(), CONN, NOW)
+    expect(open.map((o) => o.id)).toEqual([repeat.id])
+    const { rows, takenTxnIds } = await S.loadCandidateRows(d1(), open)
+    const appliedSiblings = await S.loadAppliedSiblings(d1(), CONN, open)
+    const written = await S.writeMatchResults(d1(), matchReceipts(open, rows, { autoApply: true }, { takenTxnIds, appliedSiblings }), NOW)
+    expect(written.suggested).toBe(0)
+    expect(rcptStatus(repeat.id)).toBe('unmatched')
+  })
+})
+
 describe('never writes transactions', () => {
   it('a full receipt run with auto-apply off leaves transactions byte-identical and runs no transactions write', async () => {
     const r = await put({ extracted: extracted({ totalCents: 4321, merchant: 'Test Shop' }) })

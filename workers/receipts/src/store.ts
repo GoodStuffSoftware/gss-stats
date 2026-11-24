@@ -15,6 +15,7 @@ import {
   AUTO_MIN_SCORE,
   STALE_AFTER_DAYS,
   candidateWindow,
+  chargedCents,
   type MatchBankRow,
   type MatchProposal,
   type MatchReceipt,
@@ -304,7 +305,7 @@ export async function markStale(db: Db, connectionId: string, now: Date): Promis
 
 // ---------- open receipts and candidate bank rows ----------
 
-export const OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, email_date, receipt_date, related_date, total_cents, charges_json
+export const OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, currency, email_date, receipt_date, related_date, total_cents, charges_json
 FROM receipts WHERE connection_id = ?1 AND status IN ('unmatched','suggested') AND ${OPEN_BASE} >= ?2
 ORDER BY ${OPEN_BASE} DESC LIMIT ${MAX_OPEN_PER_RUN}`
 export const ITEMS_SQL = `SELECT receipt_id, seq, description, amount_cents, quantity, category_hint FROM receipt_items
@@ -340,10 +341,25 @@ export async function loadOpenReceipts(db: Db, connectionId: string, now: Date):
   }
   return results.map((r) => ({
     id: r.id as string, kind: (r.kind as MatchReceipt['kind']) ?? null, merchant: (r.merchant as string | null) ?? null, paymentVia: (r.payment_via as string | null) ?? null,
-    cardLast4: (r.card_last4 as string | null) ?? null, orderRef: (r.order_ref as string | null) ?? null, emailDate: r.email_date as string,
+    cardLast4: (r.card_last4 as string | null) ?? null, orderRef: (r.order_ref as string | null) ?? null, currency: (r.currency as string | null) ?? null, emailDate: r.email_date as string,
     receiptDate: (r.receipt_date as string | null) ?? null, relatedDate: (r.related_date as string | null) ?? null, totalCents: (r.total_cents as number | null) ?? null,
     charges: parseCharges(r.charges_json), items: byReceipt.get(r.id as string) ?? [],
   }))
+}
+
+/** Applied receipts of the connection that share an order_ref with an open one (?2 = JSON array of order refs). */
+export const APPLIED_SIBLINGS_SQL = `SELECT order_ref, total_cents, charges_json FROM receipts
+WHERE connection_id = ?1 AND status = 'applied' AND order_ref IN (SELECT value FROM json_each(?2))`
+
+/** (order_ref, charged amount) of applied receipts sharing an order with an open receipt: the matcher's repeat-email guard. */
+export async function loadAppliedSiblings(db: Db, connectionId: string, open: ReadonlyArray<Pick<MatchReceipt, 'orderRef'>>): Promise<Array<{ orderRef: string; amountCents: number }>> {
+  const refs = [...new Set(open.flatMap((r) => (r.orderRef ? [r.orderRef] : [])))]
+  if (refs.length === 0) return []
+  const { results } = await db.prepare(APPLIED_SIBLINGS_SQL).bind(connectionId, JSON.stringify(refs)).all<Record<string, unknown>>()
+  return results.flatMap((r) => {
+    const amountCents = chargedCents({ totalCents: (r.total_cents as number | null) ?? null, charges: parseCharges(r.charges_json) })
+    return amountCents === null ? [] : [{ orderRef: r.order_ref as string, amountCents }]
+  })
 }
 
 /** Disjoint, sorted day ranges covering every receipt's candidateWindow (overlapping or touching windows merge). */

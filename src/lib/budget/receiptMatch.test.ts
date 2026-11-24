@@ -145,16 +145,16 @@ describe('cents rounding', () => {
 })
 
 describe('ties and ambiguity', () => {
-  it('two equal rows: both suggested (floored at 60), no single winner, never auto', () => {
+  it('two equal rows: both suggested (60 plus a quarter of the extra evidence), no single winner, never auto', () => {
     const res = matchReceipt(rcpt(), [row({ id: 't1' }), row({ id: 't2', postedDate: '2026-03-13' })], { autoApply: true })
     expect(res.status).toBe('suggested')
     expect(res.winner).toBeNull()
-    expect(res.proposals.map((p) => p.score)).toEqual([60, 60]) // 50 + 20 + 15 - 30 = 55, floored at 60
+    expect(res.proposals.map((p) => p.score)).toEqual([69, 69]) // base 85 (50 + 20 + 15): 60 + round(35 / 4)
     expect(res.proposals.every((p) => !p.unique && !p.autoEligible)).toBe(true)
   })
-  it('a tie with a card_last4 hit scores above the floor', () => {
+  it('a tie with a card_last4 hit scores higher', () => {
     const res = matchReceipt(rcpt({ cardLast4: '1111' }), [row({ id: 't1' }), row({ id: 't2' })])
-    expect(res.proposals.map((p) => p.score)).toEqual([60, 60]) // 50 + 20 + 15 + 5 - 30 = 60
+    expect(res.proposals.map((p) => p.score)).toEqual([70, 70]) // base 90: 60 + round(40 / 4)
     expect(res.winner).toBeNull()
   })
   it('two receipts competing for one row weaken each other and neither wins', () => {
@@ -162,13 +162,94 @@ describe('ties and ambiguity', () => {
     for (const o of out) {
       expect(o.winner).toBeNull()
       expect(o.proposals[0].unique).toBe(false)
-      expect(o.proposals[0].score).toBe(60)
+      expect(o.proposals[0].score).toBe(69)
     }
+  })
+  it('ties rank by evidence, not by hash: the family + card + same-day row lists first', () => {
+    const strong = row({ id: 'z-strong', postedDate: '2026-03-10', amountCents: -1299 })
+    const weak = row({ id: 'a-weak', postedDate: '2026-03-19', amountCents: -1299, merchantKey: 'zzz-other', merchantName: 'ZZZ OTHER' })
+    const r = rcpt({ totalCents: 1299, cardLast4: '1111' })
+    for (const rows of [[strong, weak], [weak, strong]]) {
+      const res = matchReceipt(r, rows)
+      expect(ids(res)).toEqual(['z-strong', 'a-weak'])
+      expect(res.proposals.map((p) => p.score)).toEqual([70, 64]) // 60 + round(40 / 4); base 65 (50 + 10 + 5): 60 + round(15 / 4)
+      expect(res.winner).toBeNull()
+    }
+  })
+  it('equal scores order by bank row id, whatever the input order', () => {
+    const a = row({ id: 'a1' })
+    const b = row({ id: 'b1' })
+    expect(ids(matchReceipt(rcpt(), [b, a]))).toEqual(['a1', 'b1'])
+    expect(ids(matchReceipt(rcpt(), [a, b]))).toEqual(['a1', 'b1'])
   })
   it('different amounts do not compete', () => {
     const out = matchReceipts([rcpt({ id: 'r1' }), rcpt({ id: 'r2', totalCents: 4000 })], [row(), row({ id: 't2', amountCents: -4000 })])
     expect(out[0].winner?.parts[0].txnId).toBe('t1')
     expect(out[1].winner?.parts[0].txnId).toBe('t2')
+  })
+})
+
+describe('currency', () => {
+  it('a receipt in another currency never matches an equal-cents USD row', () => {
+    const res = matchReceipt(rcpt({ currency: 'EUR' }), [row()], { autoApply: true })
+    expect(res.status).toBe('unmatched')
+    expect(res.proposals).toEqual([])
+    expect(res.winner).toBeNull()
+  })
+  it('a foreign receipt takes no split_charges or decline proposals either', () => {
+    const rows = [row({ id: 's1', amountCents: -3000 }), row({ id: 's2', amountCents: -2000 })]
+    expect(matchReceipt(rcpt({ totalCents: 5000, currency: 'EUR' }), rows).status).toBe('unmatched')
+    expect(matchReceipt(rcpt({ kind: 'decline', relatedDate: '2026-03-08', currency: 'GBP' }), [row({ postedDate: '2026-03-12' })]).status).toBe('unmatched')
+  })
+  it('a foreign receipt does not compete with, or join a split of, a USD receipt', () => {
+    const out = matchReceipts([rcpt({ id: 'usd' }), rcpt({ id: 'eur', currency: 'EUR' })], [row()])
+    expect(out[0].winner?.parts[0].txnId).toBe('t1')
+    expect(out[1].status).toBe('unmatched')
+    const a = rcpt({ id: 'ra', orderRef: 'ORD-9', totalCents: 1200 })
+    const b = rcpt({ id: 'rb', orderRef: 'ORD-9', totalCents: 800, currency: 'EUR' })
+    expect(matchReceipts([a, b], [row({ id: 'one', amountCents: -2000 })]).map((o) => o.status)).toEqual(['unmatched', 'unmatched'])
+  })
+  it('null, lower-case or matching currency is the budget currency; the budget currency is an option', () => {
+    expect(matchReceipt(rcpt({ currency: null }), [row()]).status).toBe('suggested')
+    expect(matchReceipt(rcpt({ currency: 'usd' }), [row()]).status).toBe('suggested')
+    expect(matchReceipt(rcpt({ currency: 'EUR' }), [row()], { currency: 'EUR' }).status).toBe('suggested')
+    expect(matchReceipt(rcpt({ currency: 'USD' }), [row()], { currency: 'EUR' }).status).toBe('unmatched')
+  })
+})
+
+describe('repeat emails for one order', () => {
+  it('two same-amount receipts of one order are never summed as split_receipts', () => {
+    const a = rcpt({ id: 'ra', orderRef: 'ORD-5', totalCents: 5000 })
+    const b = rcpt({ id: 'rb', orderRef: 'ORD-5', totalCents: 5000, emailDate: '2026-03-11', receiptDate: '2026-03-11' })
+    const out = matchReceipts([a, b], [row({ id: 'big', amountCents: -10000 })])
+    expect(out.map((o) => o.status)).toEqual(['unmatched', 'unmatched'])
+  })
+  it('both repeats still compete for the real row: no winner for either', () => {
+    const a = rcpt({ id: 'ra', orderRef: 'ORD-5', totalCents: 5000 })
+    const b = rcpt({ id: 'rb', orderRef: 'ORD-5', totalCents: 5000 })
+    const out = matchReceipts([a, b], [row({ amountCents: -5000 })])
+    expect(out.every((o) => o.winner === null && o.status === 'suggested')).toBe(true)
+  })
+  it('a repeat of an applied receipt (same order_ref and amount) gets no proposal and no winner, even on a lone same-amount row', () => {
+    const repeat = rcpt({ id: 'rep', orderRef: 'ORD-5', totalCents: 5000 })
+    const reorder = row({ id: 'again', amountCents: -5000, postedDate: '2026-03-14' })
+    const res = matchReceipt(repeat, [reorder], { autoApply: true }, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000 }] })
+    expect(res.status).toBe('unmatched')
+    expect(res.winner).toBeNull()
+    expect(res.proposals).toEqual([])
+  })
+  it('a different amount or order_ref is not a repeat', () => {
+    const r = rcpt({ id: 'r', orderRef: 'ORD-5', totalCents: 5000 })
+    const rows = [row({ amountCents: -5000 })]
+    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 4000 }] }).status).toBe('suggested')
+    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-6', amountCents: 5000 }] }).status).toBe('suggested')
+  })
+  it('a repeat does not weaken another open receipt competing for the same row', () => {
+    const repeat = rcpt({ id: 'rep', orderRef: 'ORD-5', totalCents: 5000 })
+    const other = rcpt({ id: 'oth', orderRef: null, totalCents: 5000 })
+    const out = matchReceipts([repeat, other], [row({ amountCents: -5000 })], {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000 }] })
+    expect(out[0].status).toBe('unmatched')
+    expect(out[1].winner?.parts[0].txnId).toBe('t1')
   })
 })
 
@@ -272,7 +353,7 @@ describe('splits are suggest-only', () => {
     const rows = [row({ id: 's1', amountCents: -3000 }), row({ id: 's2', amountCents: -2000 }), row({ id: 's3', amountCents: -2000 }), row({ id: 's4', amountCents: -3000 })]
     const res = matchReceipt(rcpt({ totalCents: 5000 }), rows)
     expect(res.proposals.length).toBe(4)
-    expect(res.proposals.every((p) => p.score === 60 && !p.autoEligible)).toBe(true)
+    expect(res.proposals.every((p) => p.score === 64 && !p.autoEligible)).toBe(true) // base 65 (45 + 20): 60 + round(15 / 4)
     expect(res.winner).toBeNull()
   })
   it('a single exact row beats trying a split', () => {

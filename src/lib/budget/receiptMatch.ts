@@ -30,6 +30,8 @@ const MAX_SPLIT_PROPOSALS = 5
 /** Generic payment-service and platform words; no household merchant list lives in the repo. */
 export const FAMILY_WORDS: readonly string[] = ['paypal', 'venmo', 'amazon', 'apple', 'google']
 /** A row in one of these categories (or with none) takes a proposed category; any other is left alone. */
+export const DEFAULT_CURRENCY = 'USD'
+
 export const BROAD_CATEGORY_IDS: readonly string[] = ['other', 'shopping']
 
 const SCORE = { amount: 50, dateNear: 20, dateFar: 10, family: 15, unique: 10, last4: 5, equalOther: -30, split: -20 } as const
@@ -51,6 +53,8 @@ export interface MatchReceipt {
   paymentVia: string | null
   cardLast4: string | null
   orderRef: string | null
+  /** ISO 4217 code as the email states it; null or absent = not stated (treated as the budget currency). */
+  currency?: string | null
   emailDate: string
   receiptDate: string | null
   relatedDate: string | null
@@ -82,6 +86,8 @@ export interface MatchOptions {
   autoMinScore?: number
   /** Row categories that count as broad defaults; default BROAD_CATEGORY_IDS. */
   broadCategoryIds?: readonly string[]
+  /** The budget's currency; default DEFAULT_CURRENCY. A receipt in another currency never matches a bank row. */
+  currency?: string
 }
 
 export interface MatchPart { receiptId: string; txnId: string; shareCents: Cents; txnUpdatedAt: string }
@@ -176,7 +182,7 @@ function baseDate(r: MatchReceipt): IsoDate | null {
 }
 
 /** The amount charged: stated charges (their sum) when present, else total_cents. Null or non-positive = no total. */
-export function chargedCents(r: MatchReceipt): Cents | null {
+export function chargedCents(r: Pick<MatchReceipt, 'charges' | 'totalCents'>): Cents | null {
   const charges = r.charges.map((c) => toCents(c.amountCents))
   if (charges.length > 0 && charges.every((c): c is number => c !== null && c > 0)) return charges.reduce((a, b) => a + b, 0)
   const t = toCents(r.totalCents)
@@ -222,12 +228,20 @@ function dateScore(d: number): number {
 
 /**
  * Adds the uniqueness term to a base score: +10 for a unique candidate, else -30 ("another equal candidate").
- * An ambiguous candidate that would have been shown on its own (>= SHOW_MIN_SCORE with the unique bonus) is floored
- * at SHOW_MIN_SCORE, so ties are still suggested, "both at a lower score" (plan section 7), never dropped.
+ * An ambiguous candidate that would have been shown on its own (>= SHOW_MIN_SCORE with the unique bonus) is still
+ * shown ("both at a lower score", plan section 7, never dropped) at SHOW_MIN_SCORE plus a quarter of the evidence
+ * beyond the amount (date, family, card), so the stronger tie ranks first (60 to 70 for an exact candidate).
  */
 function withUniqueness(base: number, unique: boolean): number {
   if (unique) return base + SCORE.unique
-  return base + SCORE.unique >= SHOW_MIN_SCORE ? Math.max(base + SCORE.equalOther, SHOW_MIN_SCORE) : base + SCORE.equalOther
+  if (base + SCORE.unique >= SHOW_MIN_SCORE) return SHOW_MIN_SCORE + Math.max(0, Math.round((base - SCORE.amount) / 4))
+  return base + SCORE.equalOther
+}
+
+/** True when the receipt states a currency other than the budget's: its cents are not comparable with bank cents. */
+function foreignCurrency(r: MatchReceipt, opts: MatchOptions): boolean {
+  const c = typeof r.currency === 'string' ? r.currency.trim().toUpperCase() : ''
+  return c !== '' && c !== (opts.currency ?? DEFAULT_CURRENCY).toUpperCase()
 }
 
 function clamp(n: number): number { return Math.max(0, Math.min(100, n)) }
@@ -298,8 +312,11 @@ function finish(p: Omit<MatchProposal, 'autoEligible' | 'status'>, rows: MatchBa
   return { ...p, status: 'suggested', autoEligible: auto }
 }
 
+const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** Best score first; ties by the first part's bank row id, then the group key, so the order never depends on input order. */
 function sortProposals(ps: MatchProposal[]): MatchProposal[] {
-  return ps.sort((a, b) => b.score - a.score || (a.groupKey < b.groupKey ? -1 : 1))
+  return ps.sort((a, b) => b.score - a.score || cmpStr(a.parts[0].txnId, b.parts[0].txnId) || cmpStr(a.groupKey, b.groupKey))
 }
 
 /** Subsets of 2-3 rows summing to `target`; when `stated` is given the amounts must equal that multiset. */
@@ -357,13 +374,15 @@ function splitReceiptProposals(receipts: readonly MatchReceipt[], rows: readonly
   const out = new Map<string, MatchProposal[]>()
   const byOrder = new Map<string, MatchReceipt[]>()
   for (const r of receipts) {
-    if (!r.orderRef || isRefund(r) || isDecline(r) || chargedCents(r) === null || !baseDate(r)) continue
+    if (!r.orderRef || isRefund(r) || isDecline(r) || chargedCents(r) === null || !baseDate(r) || foreignCurrency(r, opts)) continue
     const g = byOrder.get(r.orderRef) ?? []
     g.push(r)
     byOrder.set(r.orderRef, g)
   }
   for (const group of byOrder.values()) {
     if (group.length < 2 || group.length > 5) continue
+    // Two receipts of one order with the same amount are a repeat email (a shipping notice), not two parts of a charge.
+    if (new Set(group.map((r) => chargedCents(r))).size < group.length) continue
     const sum = group.reduce((a, r) => a + (chargedCents(r) as number), 0)
     const found: Array<{ row: MatchBankRow; worst: number }> = []
     for (const b of rows) {
@@ -414,6 +433,8 @@ function declineProposals(r: MatchReceipt, rows: readonly MatchBankRow[], taken:
 export interface MatchContext {
   /** Bank row ids already linked (applied) to a receipt: never proposed again. */
   takenTxnIds?: readonly string[]
+  /** Receipts already applied to a bank row: an open receipt with the same order_ref and charged amount is a repeat email. */
+  appliedSiblings?: ReadonlyArray<{ orderRef: string; amountCents: Cents }>
 }
 
 /**
@@ -423,13 +444,17 @@ export interface MatchContext {
 export function matchReceipts(receipts: readonly MatchReceipt[], rows: readonly MatchBankRow[],
   opts: MatchOptions = {}, ctx: MatchContext = {}): ReceiptMatchResult[] {
   const taken = new Set(ctx.takenTxnIds ?? [])
-  const splitRecv = splitReceiptProposals(receipts, rows, taken, opts)
+  const siblings = new Set((ctx.appliedSiblings ?? []).map((s) => `${s.orderRef}|${s.amountCents}`))
+  // Never matched: another currency, or a repeat email of an order that already has an applied receipt.
+  const skip = (r: MatchReceipt): boolean => foreignCurrency(r, opts) ||
+    (r.orderRef !== null && chargedCents(r) !== null && siblings.has(`${r.orderRef}|${chargedCents(r)}`))
+  const splitRecv = splitReceiptProposals(receipts.filter((r) => !skip(r)), rows, taken, opts)
 
   // Which receipts claim each row (for cross-receipt ambiguity).
   const cands = new Map<string, Cand[]>()
   const claims = new Map<string, Set<string>>()
   for (const r of receipts) {
-    if (isDecline(r) || !baseDate(r)) continue
+    if (isDecline(r) || !baseDate(r) || skip(r)) continue
     const cs = exactCandidates(r, rows, taken)
     cands.set(r.id, cs)
     for (const c of cs) {
@@ -441,7 +466,7 @@ export function matchReceipts(receipts: readonly MatchReceipt[], rows: readonly 
 
   return receipts.map((r): ReceiptMatchResult => {
     if (chargedCents(r) === null) return { receiptId: r.id, status: 'no_total', proposals: [], winner: null }
-    if (!baseDate(r)) return { receiptId: r.id, status: 'unmatched', proposals: [], winner: null }
+    if (!baseDate(r) || skip(r)) return { receiptId: r.id, status: 'unmatched', proposals: [], winner: null }
 
     let proposals: MatchProposal[] = []
     if (isDecline(r)) {

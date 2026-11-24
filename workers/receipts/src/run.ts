@@ -282,7 +282,8 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
       const minScore = intVar(env.RECEIPTS_AUTO_MIN_SCORE, 90)
       const open = await S.loadOpenReceipts(db, connectionId, now)
       const { rows, takenTxnIds } = await S.loadCandidateRows(db, open)
-      const results = matchReceipts(open, rows, { autoApply: enabled, autoMinScore: minScore }, { takenTxnIds })
+      const appliedSiblings = await S.loadAppliedSiblings(db, connectionId, open)
+      const results = matchReceipts(open, rows, { autoApply: enabled, autoMinScore: minScore }, { takenTxnIds, appliedSiblings })
       const written = await S.writeMatchResults(db, results, now)
       counts.matched = written.suggested
       await S.markStale(db, connectionId, now)
