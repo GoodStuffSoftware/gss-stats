@@ -31,6 +31,16 @@ describe('DebtPanel', () => {
     expect(w.get('[data-testid="debt-total"]').text()).toContain('$3,400.00')
   })
 
+  it('the pie view has the "All debts" root crumb above the total, as the spending panel has "All spending" (so side by side the totals line up)', () => {
+    const w = mountPanel()
+    const nav = w.get('nav[aria-label="Debts path"]')
+    expect(nav.text()).toBe('All debts')
+    expect(nav.find('[aria-current="page"]').exists()).toBe(true) // the place you are, not a button
+    expect(nav.find('button').exists()).toBe(false)
+    expect(w.get('.dp-top').element.children[0]).toBe(nav.element)
+    expect(w.get('.dp-top').element.children[1]).toBe(w.get('[data-testid="debt-total"]').element)
+  })
+
   it('a slice (or its list row) drills into that debt, in place', async () => {
     const w = mountPanel()
     await w.get('[data-testid="pie-row-a"]').trigger('click')

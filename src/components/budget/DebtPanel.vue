@@ -59,6 +59,7 @@ function onLegendSide(side: LegendSide) {
 }
 const name = (d: DebtSlice) => `${d.label}${d.last4 ? ` ••${d.last4}` : ''}`
 const crumbItems = computed(() => (props.selected ? [{ key: 'all', label: 'All debts' }, { key: props.selected.accountId, label: name(props.selected) }] : []))
+const rootCrumb = [{ key: 'all', label: 'All debts' }]
 const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
 </script>
 
@@ -83,11 +84,15 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   </div>
 
   <div v-else class="debt-panel" data-testid="debt-panel">
-    <p class="dp-total" data-testid="debt-total">
-      <span class="dp-total-label">Total owed</span>
-      <strong class="dp-total-value">{{ formatAmount(totalCents) }}</strong>
-      <span v-if="owed.cosignedCents > 0" class="dp-total-sub" data-testid="debt-cosigned">+ {{ formatAmount(owed.cosignedCents) }} cosigned</span>
-    </p>
+    <!-- The header stack the spending panel has (its root crumb, then the total), so side by side the two totals sit on one line. -->
+    <div class="dp-top">
+      <Crumbs :items="rootCrumb" label="Debts path" />
+      <p class="dp-total" data-testid="debt-total">
+        <span class="dp-total-label">Total owed</span>
+        <strong class="dp-total-value">{{ formatAmount(totalCents) }}</strong>
+        <span v-if="owed.cosignedCents > 0" class="dp-total-sub" data-testid="debt-cosigned">+ {{ formatAmount(owed.cosignedCents) }} cosigned</span>
+      </p>
+    </div>
 
     <DrillPie
       v-if="model.slices.length"
@@ -154,6 +159,17 @@ const asOf = (d: DebtSlice) => (d.asOf ? `as of ${d.asOf}` : '')
   gap: 8px;
   min-height: 44px;
   margin: 0;
+}
+/* Crumb row, then the total: the spending panel's header stack (see SpendingPanel .sp-top). */
+.dp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.dp-top .dp-total {
+  min-height: 0;
+  align-items: baseline;
 }
 .dp-total-sub {
   margin-inline-start: 8px;

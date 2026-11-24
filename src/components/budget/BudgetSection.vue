@@ -582,7 +582,8 @@ onBeforeUnmount(() => {
     display: contents;
   }
   .is-both .b-grid .b-pane.has-panel :deep(.sp-top),
-  .is-both .b-grid .b-pane.has-panel :deep(.dp-total) {
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-top),
+  .is-both .b-grid .b-pane.has-panel :deep(.dp-crumbhead) {
     grid-row: 1;
     align-self: end; /* the two totals share a line at the bottom of the header row */
   }

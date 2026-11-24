@@ -2791,8 +2791,12 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   opens the Loans page for it. The debt id lives in `history.state` only (never the URL), the history is fetched
   once per debt and cached.
 - **Donut size.** When one chart has the whole width (the Spending or Debts tab, or Both stacked on a narrow screen) and its box is at least
-  640 px, its donut is bigger and sits beside a legend in as many 300 px-plus columns as fit. Every Budget donut has
-  a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); the size is kept
+  640 px, its donut is bigger and sits beside a legend, the two as one group centred in the room with 48 px between them.
+  The legend is as many columns as fit, each 300 to 360 px wide so a name, its amount and its share stay together
+  (names wrap), and the same columns sit centred under the donut where the legend goes below or the chart is not wide
+  (the Both tab). A donut starts square. Every Budget donut has
+  a resize handle in its corner (drag, arrow keys 16 px a step, double-click or Delete to reset); a drag changes the
+  diameter in step with the pointer (twice the movement when the donut is centred); the size is kept
   per device in `localStorage` under `gss-stats-budget-donut:<spending|debts>:solo` (one key, `gss-stats-budget-donut:both`, for the Both tab) and is clamped to the
   room it has now. The behaviour is opt-in props of the shared `DrillPie` (`resizable`, `wide`, `sizeKey`);
   without them it renders as before.
