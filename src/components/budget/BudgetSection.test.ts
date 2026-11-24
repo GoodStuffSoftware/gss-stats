@@ -11,6 +11,7 @@ import BudgetFilters from './BudgetFilters.vue'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
 import DebtDetail from './DebtDetail.vue'
+import DrillPie from '../charts/DrillPie.vue'
 import DebtPanel from './DebtPanel.vue'
 import LoansList from './LoansList.vue'
 import LoansPage from './LoansPage.vue'
@@ -522,6 +523,30 @@ describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
     expect(w.findComponent(SpendingPanel).props('both')).toBe(true)
     expect(w.findComponent(DebtPanel).props('both')).toBe(true)
     expect(w.findComponent(SpendingPanel).props('solo')).toBe(false)
+  })
+
+  it('Both: both donuts use the one shared Both size key (a drag resizes both) and hide the legend side picker', async () => {
+    route()
+    const w = await mountSection()
+    const pies = w.findAllComponents(DrillPie)
+    expect(pies).toHaveLength(2)
+    for (const pie of pies) {
+      expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:both')
+      expect(pie.props('legendPicker')).toBe(false)
+    }
+  })
+
+  it('one chart (Spending tab, Debts tab): its own size key and the legend side picker', async () => {
+    route()
+    const w = await mountSection()
+    await w.get('[data-testid="budget-tab-spending"]').trigger('click')
+    let pie = w.findComponent(SpendingPanel).findComponent(DrillPie)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:spending:solo')
+    expect(pie.props('legendPicker')).toBe(true)
+    await w.get('[data-testid="budget-tab-debts"]').trigger('click')
+    pie = w.findComponent(DebtPanel).findComponent(DrillPie)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:debts:solo')
+    expect(pie.props('legendPicker')).toBe(true)
   })
 
   it('opens on Spending below 1024 px', async () => {

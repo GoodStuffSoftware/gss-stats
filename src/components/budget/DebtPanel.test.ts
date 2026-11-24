@@ -132,6 +132,14 @@ describe('debts legend side', () => {
     expect(window.localStorage.getItem('gss-stats-budget-legend:debts')).toBe('bottom')
     expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('bottom') // a later visit restores it
   })
+  it('in Both the picker is hidden and the donut takes the shared Both size key', () => {
+    const pie = mountPanel({ both: true } as never).findComponent(DrillPie)
+    expect(pie.props('legendPicker')).toBe(false)
+    expect(pie.props('sizeKey')).toBe('gss-stats-budget-donut:both')
+  })
+  it('on its own the donut keeps its own size key', () => {
+    expect(mountPanel().findComponent(DrillPie).props('sizeKey')).toBe('gss-stats-budget-donut:debts:solo')
+  })
   it('an invalid saved value is the right side', () => {
     window.localStorage.setItem('gss-stats-budget-legend:debts', 'sideways')
     expect(mountPanel().findComponent(DrillPie).props('legendSide')).toBe('right')
