@@ -122,10 +122,12 @@ export interface ConnectionResult {
   lastError?: string | null
 }
 
+// A disconnect (paused, revoked) that landed while the run was going has already cleared the watermark and the error:
+// the late result must not write them back, so both change only on an active row, or one this run itself sent to needs_reconnect.
 export const CONNECTION_RESULT_SQL = `UPDATE email_connections SET last_run_at = ?2,
   last_ok_at = CASE WHEN ?3 = 1 THEN ?2 ELSE last_ok_at END,
-  watermark_at = CASE WHEN ?4 IS NOT NULL AND (watermark_at IS NULL OR ?4 > watermark_at) THEN ?4 ELSE watermark_at END,
-  last_error = ?5, updated_at = ?2
+  watermark_at = CASE WHEN ?4 IS NOT NULL AND status IN ('active','needs_reconnect') AND (watermark_at IS NULL OR ?4 > watermark_at) THEN ?4 ELSE watermark_at END,
+  last_error = CASE WHEN status IN ('active','needs_reconnect') THEN ?5 ELSE last_error END, updated_at = ?2
 WHERE id = ?1`
 
 export async function recordConnectionResult(db: Db, connectionId: string, r: ConnectionResult): Promise<void> {

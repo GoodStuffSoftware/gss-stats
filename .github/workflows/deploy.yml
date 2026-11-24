@@ -149,7 +149,9 @@ jobs:
           fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
       # The Worker bundles workers/receipts/ and the repo files it imports: src/lib/budget/receiptMatch.ts
       # and what that pulls in (dates.ts, types.ts), plus mask.ts and functions/_lib/auth.ts (the token
-      # exchange's Google helpers; it imports nothing else). When the Worker gains another import
+      # exchange's Google helpers; it imports nothing else). functions/_lib/gmailConnect.ts is imported
+      # for its ConnectCode type only: that import is erased from the bundle, so it is not a trigger; make
+      # it a value import and it must join the pattern. When the Worker gains another import
       # from outside workers/receipts/, add that file to the pattern below. package-lock.json (the pinned
       # wrangler) and tsconfig.json are inputs too; this workflow file is one, so editing it also
       # redeploys. A manual run, a new/forced branch or an unknown base always deploys.

@@ -1766,4 +1766,36 @@ function toggleDark() {
     text-overflow: ellipsis;
   }
 }
+/* Budget on a small phone: the title is the part that must stay whole, so the bar spends less on gaps and crumb
+   padding, the parent crumb ("Budget") keeps its full word, and only the last-resort ellipsis can cut the title. */
+@media (max-width: 420px) {
+  .topbar-budget {
+    gap: 6px;
+  }
+  .topbar-budget .top-actions {
+    gap: 6px;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-btn),
+  .topbar-budget .topbar-crumbs :deep(.cr-here) {
+    padding: 0 6px;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-item:not(:last-child)) {
+    flex: 0 0 auto;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-item:last-child) {
+    flex: 0 1 auto;
+  }
+}
+@media (max-width: 359px) {
+  .topbar {
+    padding: 9px 12px;
+    gap: 4px;
+  }
+  .topbar-budget .top-actions {
+    gap: 4px;
+  }
+  .topbar-budget .topbar-crumbs :deep(.cr-here) {
+    padding: 0 4px;
+  }
+}
 </style>

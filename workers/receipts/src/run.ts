@@ -25,6 +25,8 @@ export interface RunDeps {
   now?: () => Date
   /** Wall-clock budget (ms): past it the run ends cleanly between messages (the next run continues). A manual run sets one because waitUntil is time-limited. */
   budgetMs?: number
+  /** Most list calls one run makes (default 8); only a test needs another value. */
+  maxLists?: number
 }
 
 /** Budget of a manual (/sync) run: Workers keep waitUntil work alive about 30 s after the response. */
@@ -203,8 +205,9 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
     if (stored) {
       if (receipt.status === 'skipped') counts.skipped++
       else counts.extracted++
+      // Only a stored message counts as handled: one the insert guard dropped (a disconnect landed) must not move the watermark.
+      handledMs = msg.internalDateMs
     }
-    handledMs = msg.internalDateMs
     return null
   }
 
@@ -229,7 +232,8 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
       const nowSec = Math.floor(nowMs / 1000)
       let cursor = afterBound(S.watermarkMs(conn), nowMs, intVar(env.RECEIPTS_BACKFILL_DAYS, 14))
       let len = SLICE_S
-      for (let lists = 0; lists < MAX_LISTS_PER_RUN && cursor <= nowSec && budget > 0 && !timeUp();) {
+      const maxLists = deps.maxLists ?? MAX_LISTS_PER_RUN
+      for (let lists = 0; lists < maxLists && cursor <= nowSec && budget > 0 && !timeUp();) {
         const end = cursor + len
         const open = end > nowSec // the last slice has no upper bound
         const listed = await gmail.listMessageIds(buildReceiptQuery(queries, cursor, open ? undefined : end), { pageSize: 100, maxPages: 2 })
@@ -256,13 +260,16 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
             break
           }
         }
-        if (!complete) {
+        // A slice already at the shortest length that still has more pages was listed newest first and cut: its oldest
+        // messages were never seen, so it is not complete and the watermark stays at the newest message handled.
+        if (!complete || listed.more) {
           wmMs = Math.max(wmMs, sliceNewest)
           break
         }
         wmMs = Math.max(wmMs, open ? sliceNewest : end * 1000)
         if (open) break
         cursor = end - 1 // one second of overlap; stored ids are skipped
+        len = Math.min(SLICE_S, len * 2) // a slice that fit says the mail is thinner here: grow back toward a week
       }
     }
   } catch (e) {
@@ -274,8 +281,9 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
     }
   }
 
-  // Re-match open receipts, mark stale, then auto-apply (off unless RECEIPTS_AUTO_APPLY is "1"). Runs after a stop too.
-  if (code !== 'needs_reconnect') {
+  // Re-match open receipts, mark stale, then auto-apply (off unless RECEIPTS_AUTO_APPLY is "1"). Runs after a stop too,
+  // but not after a disconnect (not_active): nothing is suggested or applied for a person who has left.
+  if (code !== 'needs_reconnect' && code !== 'not_active') {
     try {
       const now = clock()
       const enabled = S.autoApplyEnabled(env.RECEIPTS_AUTO_APPLY)

@@ -30,7 +30,7 @@ CREATE TABLE email_connections (
   id               TEXT PRIMARY KEY CHECK (id GLOB 'c[0-9a-f]*' AND length(id) = 17 AND substr(id, 2) NOT GLOB '*[^0-9a-f]*'),   -- opaque, random
   owner_email      TEXT NOT NULL UNIQUE CHECK (owner_email = lower(owner_email) AND instr(owner_email, '@') > 1 AND instr(owner_email, '@') < length(owner_email) AND length(owner_email) <= 254),
   google_sub       TEXT NOT NULL CHECK (length(google_sub) BETWEEN 1 AND 255),                     -- Google allows up to 255 ASCII characters
-  google_email     TEXT CHECK (google_email IS NULL OR (google_email = lower(google_email) AND instr(google_email, '@') > 1 AND length(google_email) <= 254)),   -- the linked Gmail address, shown to its owner only; NULL after a disconnect
+  google_email     TEXT CHECK (google_email IS NULL OR (google_email = lower(google_email) AND instr(google_email, '@') > 1 AND instr(google_email, '@') < length(google_email) AND length(google_email) <= 254)),   -- the linked Gmail address, shown to its owner only; NULL after a disconnect
   person_id        TEXT REFERENCES people(id),                                                     -- NULL = not tied to a person filter
   status           TEXT NOT NULL CHECK (status IN ('active','needs_reconnect','paused','revoked')),
   token_ct         TEXT CHECK (token_ct IS NULL OR (length(token_ct) BETWEEN 1 AND 2048 AND token_ct NOT GLOB '*[^A-Za-z0-9+/=]*')),          -- base64 ciphertext + tag

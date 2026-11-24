@@ -296,6 +296,46 @@ describe('a run', () => {
     expect(out.errorCode).toBe('not_active')
   })
 
+  /** A fetch that runs `onModelCall(n)` (1-based) just before the n-th model answer, to land a disconnect mid-run. */
+  function disconnectAt(net: Net, n: number, sql: string): void {
+    const f = net.fetch
+    let calls = 0
+    net.fetch = (async (u: string | URL | Request, i?: RequestInit) => {
+      if (String(u).startsWith('https://api.anthropic.com/') && ++calls === n) db.exec(sql)
+      return f(u, i)
+    }) as typeof fetch
+  }
+  const REVOKE_SQL = `UPDATE email_connections SET status = 'revoked', token_ct = NULL, token_iv = NULL, key_id = NULL, watermark_at = NULL, last_error = NULL, google_email = NULL WHERE id = '${CONN}'`
+
+  it('a run still going when the person disconnects writes no watermark and no error back onto the disconnected row', async () => {
+    const net = makeNet({ messages: 3 })
+    disconnectAt(net, 2, REVOKE_SQL)
+    const out = await runConnection(makeEnv(), CONN, null, 'cron', { fetch: net.fetch, now: () => NOW })
+    expect(out.errorCode).toBe('not_active')
+    expect(count('receipts')).toBe(1) // the first message, stored before the disconnect; the second was dropped by the insert guard
+    expect(conn()).toMatchObject({ status: 'revoked', watermark_at: null, last_error: null })
+  })
+
+  it('the same for a disconnect that has only paused the row so far', async () => {
+    const net = makeNet({ messages: 3 })
+    disconnectAt(net, 2, `UPDATE email_connections SET status = 'paused', watermark_at = NULL, last_error = NULL WHERE id = '${CONN}'`)
+    await runConnection(makeEnv(), CONN, null, 'cron', { fetch: net.fetch, now: () => NOW })
+    expect(conn()).toMatchObject({ status: 'paused', watermark_at: null, last_error: null })
+  })
+
+  it('a disconnect during a run (no purge) suggests and applies nothing afterwards, even with auto-apply on', async () => {
+    const t1 = insertTxn(db, { posted_date: '2026-12-02', amount_cents: -1234, updated_at: '2026-12-03T00:00:00.000Z' })
+    db.exec(`UPDATE transactions SET updated_by = 'script:load' WHERE id = '${t1}'`)
+    const before = snapshotTxns()
+    const net = makeNet({ messages: 3 })
+    disconnectAt(net, 2, `UPDATE email_connections SET status = 'paused' WHERE id = '${CONN}'`)
+    const out = await runConnection(makeEnv({ RECEIPTS_AUTO_APPLY: '1' }), CONN, null, 'cron', { fetch: net.fetch, now: () => NOW })
+    expect(out.errorCode).toBe('not_active')
+    expect(count('receipts')).toBe(1)
+    expect(count('receipt_matches')).toBe(0)
+    expect(snapshotTxns()).toBe(before)
+  })
+
   it('a token-endpoint failure is a run code and burns no message attempt', async () => {
     await S.insertReceipt(db.d1, { connectionId: CONN, gmailMsgId: hexId(0), emailDate: '2026-12-01', extracted: null, failureCode: 'extract_invalid' }, NOW)
     expect(db.get<{ attempts: number }>('SELECT attempts FROM receipts')?.attempts).toBe(1)
@@ -341,6 +381,24 @@ describe('time slices (a backfill larger than one list loses nothing)', () => {
     await run(big({ RECEIPTS_MAX_PER_RUN: '1' }), net)
     // The oldest message, which a newest-first list of 200 would have dropped, is the one handled.
     expect(idsStored()).toEqual([hexId(0)])
+  })
+
+  it('a slice that fit lets the next slice grow back, so one dense stretch does not spend the whole run on short lists', async () => {
+    const net = makeNet({ times })
+    await run(big(), net)
+    // Halved once (7 d -> 3.5 d), then grown back to a week for the next slice: 3 lists reach 250 matches, not 5.
+    expect(new Set(net.queries).size).toBeLessThanOrEqual(4) // one query per list call (a list may read two pages)
+    expect(count('receipts')).toBe(250)
+  })
+
+  it('a one-hour slice that still has more pages is not complete: the watermark stays at the newest message handled', async () => {
+    const start = NOW.getTime() - 14 * 86_400_000 + 60_000
+    const dense = Array.from({ length: 250 }, (_, i) => start + i * 1_000) // 250 matches inside one hour
+    const net = makeNet({ times: dense })
+    await run(big({ RECEIPTS_BACKFILL_DAYS: '14' }), net, CONN, { maxLists: 20 })
+    const wm = new Date(String(conn().watermark_at)).getTime()
+    expect(wm).toBe(dense[249])
+    expect(wm).toBeLessThan(start - 60_000 + 3_600_000) // not the slice end
   })
 })
 

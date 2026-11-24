@@ -242,6 +242,22 @@ describe('POST /exchange', () => {
     },
   )
 
+  it('a key that is not a 32-byte base64 key -> not_configured before Google is called (the code is not spent)', async () => {
+    const res = await exchange({}, { ...env, RECEIPTS_TOKEN_KEY: secret('placeholder') })
+    expect(await result(res)).toEqual({ ok: false, code: 'not_configured' })
+    expect(calls).toHaveLength(0)
+    expect(rows()).toHaveLength(0)
+  })
+
+  it('google_email: a one-letter local part is kept, a bare "a@" is stored as NULL', async () => {
+    tokenResponse = () => json(goodTokens({ id_token: idToken({ email: 'a@example.com' }) }))
+    await exchange()
+    expect(rows()[0].google_email).toBe('a@example.com')
+    tokenResponse = () => json(goodTokens({ id_token: idToken({ email: 'a@' }) }))
+    await exchange()
+    expect(rows()[0].google_email).toBeNull()
+  })
+
   it('a malformed body or wrong method fails closed', async () => {
     expect(await result(await exchange({ code: '' }))).toEqual({ ok: false, code: 'exchange_failed' })
     expect(await result(await exchange({ consentVersion: 0 }))).toEqual({ ok: false, code: 'exchange_failed' })

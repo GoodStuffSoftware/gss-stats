@@ -140,7 +140,7 @@ describe('email/links: sharing', () => {
 describe('email/links: access and validation', () => {
   it('403 with no identity, for every method', async () => {
     seed()
-    for (const m of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const m of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
       const res = await post(null, { txnIds: [] }, 'fields', m)
       expect(res.status, m).toBe(403)
     }

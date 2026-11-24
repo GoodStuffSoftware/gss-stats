@@ -33,7 +33,7 @@ import {
 import type { ConnectCode } from '../../../functions/_lib/gmailConnect'
 import { GMAIL_SCOPE } from './gmail'
 import { logReceipts, readSecret, revokeAtGoogle, type ReceiptsSecretsEnv } from './disconnect'
-import { encryptToken, TokenCryptoError } from './tokenCrypto'
+import { encryptToken, keyFingerprint, TokenCryptoError } from './tokenCrypto'
 
 const MAX_FIELD = 2048
 const MAX_SCOPES_COLUMN = 512
@@ -95,7 +95,8 @@ function parseBody(raw: unknown): ExchangeBody | null {
 function googleEmailOf(email: unknown): string | null {
   if (typeof email !== 'string') return null
   const e = email.trim().toLowerCase()
-  return e.length <= 254 && e.indexOf('@') > 1 ? e : null
+  const at = e.indexOf('@')
+  return e.length <= 254 && at > 0 && at < e.length - 1 ? e : null
 }
 
 /** Create the owner's connection, or update it in place on a reconnect (same id, so the AAD stays valid). */
@@ -171,6 +172,12 @@ export async function handleExchange(request: Request, env: ReceiptsSecretsEnv):
   ])
   if (!clientId || !clientSecret || !key || !allowedRaw) return fail('not_configured')
   if (!isAllowedEmail(body.ownerEmail, parseAllowedEmails(allowedRaw))) return fail('not_allowed')
+  // Import the key before Google is called: a bad key must not burn the one-time code or issue a token that is revoked a moment later.
+  try {
+    await keyFingerprint(key)
+  } catch {
+    return fail('not_configured')
+  }
 
   // Google token endpoint.
   let tokens: Record<string, unknown>

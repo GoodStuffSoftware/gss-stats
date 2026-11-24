@@ -86,6 +86,15 @@ describe('email_connections', () => {
     for (const e of ['User-A@example.com', 'nobody', '@example.com', `${'a'.repeat(250)}@example.com`, 'a@']) rejects(() => conn({}, CONN, e))
   })
 
+  it('google_email is NULL or a lower-case address with a usable @ and at most 254 characters', () => {
+    conn({ google_email: null })
+    conn({ google_email: 'a@example.com' }, CONN2, 'user-b@example.com')
+    expect(count(db, 'email_connections')).toBe(2)
+    for (const e of ['A@example.com', '@example.com', 'a@', 'nobody', `${'a'.repeat(250)}@example.com`]) {
+      rejects(() => conn({ google_email: e }, 'c1111111111111111', 'user-c@example.com'))
+    }
+  })
+
   it('rejects a second connection for the same owner_email', () => {
     conn()
     rejects(() => conn({}, CONN2), 'UNIQUE')
