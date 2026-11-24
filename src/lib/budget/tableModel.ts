@@ -128,9 +128,10 @@ export function saveTxnView(v: TxnView): void {
 /** The table's width on a phone in Table mode (fixed, wider than the column minimums so cells stay roomy); the page scrolls sideways past the screen. */
 export const PHONE_TABLE_MIN_WIDTH = 880
 
-export function budgetColumns(categories: Category[], accounts: Account[]): EditableColumn<Txn>[] {
+/** `phoneTable`: the phone Table view puts Amount right after Merchant, so it shows without scrolling sideways. */
+export function budgetColumns(categories: Category[], accounts: Account[], opts: { phoneTable?: boolean } = {}): EditableColumn<Txn>[] {
   const accountLabel = (t: Txn) => accounts.find((a) => a.id === t.accountId)?.label ?? ''
-  return [
+  const cols: EditableColumn<Txn>[] = [
     { key: 'postedDate', label: 'Date', editor: null, minWidth: 80, value: (t) => formatDate(t.postedDate) },
     { key: 'merchant', label: 'Merchant', editor: null, minWidth: 140, value: (t) => t.merchantName || t.description },
     // The note (short item descriptions, or what a person typed): text-editable; BudgetTable.vue draws it, clamped.
@@ -142,6 +143,14 @@ export function budgetColumns(categories: Category[], accounts: Account[]): Edit
     // purchase counts in every spending total, pie and trend.
     { key: 'included', label: 'Included', editor: null, minWidth: 80, value: (t) => (t.included === false ? 'Excluded' : 'Included'), cardLine: 1 },
   ]
+  if (!opts.phoneTable) return cols
+  const amount = cols.findIndex((c) => c.key === 'amountCents')
+  const [a] = cols.splice(amount, 1)
+  cols.splice(2, 0, a)
+  // Date, Merchant and Amount ask for their own width, so the wide (880px) table gives its slack to the other columns and
+  // Amount is on screen at 390 px; the other columns scroll sideways.
+  const ask: Record<string, number> = { postedDate: 84, merchant: 176, amountCents: 90 }
+  return cols.map((c) => (ask[c.key] ? { ...c, width: ask[c.key] } : c))
 }
 
 // ---- the model -------------------------------------------------------------------------------------------

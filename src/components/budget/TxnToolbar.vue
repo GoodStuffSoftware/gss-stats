@@ -6,7 +6,8 @@
 // people, shown (rows after the toolbar), bounds (the page's period: the date inputs stay inside it).
 // Emits: update:modelValue (a whole new prefs object).
 // Wide screens: search, five filters and the sort sit on one wrapping row. Phone (<= 700 px): the search field stays, and
-// the filters and sort sit behind one "Filters" button (a count shows how many are on).
+// the filters and sort sit behind one "Filters" button (a count shows how many are on), the line is 36px, and "N of M" and
+// Clear show only with the panel open. Slot `lead` puts the owner's control first on that line (the Cards | Table switch).
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Account, Category, Person, Txn } from '../../lib/budget/types'
 import {
@@ -72,6 +73,14 @@ function buttonText(l: { key: ListKey; label: string }): string {
 const open = ref<ListKey | null>(null)
 const panelOpen = ref(false)
 const root = ref<HTMLElement | null>(null)
+// Phone (<= 700 px, same width as the CSS below): a shorter placeholder, so the view switch, search and Filters fit one line.
+const phoneQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 700px)') : null
+const phone = ref(!!phoneQuery?.matches)
+const onPhone = () => {
+  phone.value = !!phoneQuery?.matches
+}
+phoneQuery?.addEventListener?.('change', onPhone)
+onBeforeUnmount(() => phoneQuery?.removeEventListener?.('change', onPhone))
 function onDocPointer(e: Event) {
   if (open.value && !(e.target as Element | null)?.closest?.('.tt-dd')) open.value = null
 }
@@ -99,11 +108,12 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="txn-toolbar" role="search" aria-label="Search and filter transactions" data-testid="txn-toolbar">
     <div class="tt-top">
+      <slot name="lead" />
       <input
         v-model="search"
         type="search"
         class="tt-search"
-        placeholder="Search transactions"
+        :placeholder="phone ? 'Search' : 'Search transactions'"
         aria-label="Search transactions"
         :maxlength="SEARCH_MAX"
         autocomplete="off"
@@ -114,6 +124,7 @@ onBeforeUnmount(() => {
         class="tt-toggle"
         :aria-expanded="panelOpen"
         aria-controls="txn-tt-panel"
+        :title="`${shown} of ${total} transaction${total === 1 ? '' : 's'}`"
         data-testid="txn-filters-toggle"
         @click="panelOpen = !panelOpen"
       >Filters{{ activeCount ? ` · ${activeCount}` : '' }}</button>
@@ -173,7 +184,7 @@ onBeforeUnmount(() => {
         >{{ modelValue.sortDir === 'asc' ? '↑ Asc' : '↓ Desc' }}</button>
       </span>
     </div>
-    <p class="tt-count" aria-live="polite" data-testid="txn-count">
+    <p class="tt-count" :class="{ 'tt-count-open': panelOpen }" aria-live="polite" data-testid="txn-count">
       <span>{{ shown }} of {{ total }} transaction{{ total === 1 ? '' : 's' }}</span>
       <button v-if="active" type="button" class="tt-clear" data-testid="txn-clear" @click="clearAll">Clear</button>
       <span v-if="partial && active" class="tt-note">(loading the rest of the period…)</span>
@@ -304,17 +315,44 @@ onBeforeUnmount(() => {
   outline-offset: 1px;
 }
 @media (max-width: 700px) {
+  /* The line itself (view switch, search, Filters) is 36px; the controls in the opened panel keep 44px targets. */
   .tt-search,
+  .tt-toggle {
+    min-height: 36px;
+  }
+  .tt-search {
+    flex: 1 1 0;
+    font-size: 16px; /* 16px stops the iOS focus zoom */
+  }
   .tt-select,
   .tt-date,
-  .tt-btn,
-  .tt-toggle {
+  .tt-btn {
     min-height: 44px;
     font-size: 16px;
   }
   .tt-toggle {
     display: inline-block;
     flex: 0 0 auto;
+    font-size: 14px;
+  }
+  .tt-top {
+    align-items: center;
+  }
+  /* "N of M" and Clear belong to the Filters panel: they show only while it is open. */
+  /* Visually hidden, not display:none, so the aria-live count is still read out while the panel is closed. */
+  .tt-count:not(.tt-count-open) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .tt-clear {
+    padding: 10px 8px;
   }
   .tt-panel {
     display: none;

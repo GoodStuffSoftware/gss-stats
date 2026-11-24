@@ -29,6 +29,8 @@ export interface EditableColumn<R> {
   editGesture?: 'click' | 'hold'
   /** Table layout: the narrowest this column is drawn (px); also the width a reset column returns to in a resized table. */
   minWidth?: number
+  /** Table layout, columns not resized by hand: the width this column asks for (px), so the others share the slack of a wide table. */
+  width?: number
 }
 
 /** What a row shows besides its cells. All parts are optional; a row with none shows nothing extra. */
@@ -123,6 +125,9 @@ const props = withDefaults(
     /** Text for the polite live region. */
     status?: string
     rowStatus?: Record<string, RowStatus>
+    /** Opt-in: a row for which this is true gets no extra line; its owner draws the row's error, message and action inside a
+     *  cell, so the row never changes height when they arrive. */
+    statusInline?: (row: R) => boolean
     /** Row to scroll to and mark (the parent clears it by passing null). */
     highlightKey?: string | null
     /** Short name of a row for screen readers (editor labels). Default: its key. */
@@ -262,6 +267,7 @@ function disabledOf(row: R): boolean {
   return !!statusOf(row)?.pending
 }
 function hasExtra(row: R): boolean {
+  if (props.statusInline?.(row)) return false
   const s = statusOf(row)
   return !!(s && (s.error || s.message || s.action))
 }
@@ -453,7 +459,12 @@ function resizeKey(col: EditableColumn<R>, e: KeyboardEvent) {
 // A column without a saved width (reset, or never dragged) gets its default, so it is never left to share what is
 // left over (which can be nothing once the others are wide).
 const colStyle = (col: EditableColumn<R>) => ({ width: `${widths.value[col.key] ?? col.minWidth ?? DEFAULT_COL_WIDTH}px` })
-const thStyle = (col: EditableColumn<R>) => (col.minWidth ? { minWidth: `${col.minWidth}px` } : undefined)
+const thStyle = (col: EditableColumn<R>) => {
+  const s: Record<string, string> = {}
+  if (col.minWidth) s.minWidth = `${col.minWidth}px`
+  if (col.width) s.width = `${col.width}px`
+  return Object.keys(s).length ? s : undefined
+}
 const tableStyle = computed(() => (props.resizable && props.tableMinWidth ? { minWidth: `${props.tableMinWidth}px` } : undefined))
 
 // Scroll to and mark the highlighted row, once per key, as soon as that row is in `rows`.

@@ -75,6 +75,22 @@ describe('helpers', () => {
     expect(cols.map((c) => c.key).indexOf('account')).toBeLessThan(cols.map((c) => c.key).indexOf('category'))
     expect(cols.find((c) => c.key === 'account')?.value?.(txn('t1'))).toBe('Checking A')
   })
+  it('columns: phoneTable puts Amount right after Merchant (index 2); the default order is unchanged', () => {
+    const keys = (o?: { phoneTable?: boolean }) => budgetColumns(CATS, ACCOUNTS, o).map((c) => c.key)
+    expect(keys({ phoneTable: true }).slice(0, 3)).toEqual(['postedDate', 'merchant', 'amountCents'])
+    expect(keys({ phoneTable: true })).toHaveLength(keys().length)
+    expect(keys()).toEqual(['postedDate', 'merchant', 'note', 'account', 'category', 'amountCents', 'included'])
+    expect(keys({ phoneTable: false })).toEqual(keys())
+  })
+  it('columns: the phone table asks for Date, Merchant and Amount widths that fit a 390px screen together (the other columns scroll)', () => {
+    const cols = budgetColumns(CATS, ACCOUNTS, { phoneTable: true })
+    const asked = cols.filter((c) => c.width)
+    expect(asked.map((c) => c.key)).toEqual(['postedDate', 'merchant', 'amountCents'])
+    const sum = asked.reduce((n, c) => n + (c.width ?? 0), 0)
+    expect(sum).toBeLessThanOrEqual(390 - 2 * 16) // 16px page padding each side (widths include the cell padding)
+    expect(asked.every((c) => (c.width ?? 0) >= (c.minWidth ?? 0))).toBe(true)
+    expect(budgetColumns(CATS, ACCOUNTS).some((c) => c.width)).toBe(false) // the wide table is unchanged
+  })
   it('leavesSlice: category, scope and review', () => {
     expect(leavesSlice({ ...Q, category: 'groceries' }, txn('t1'), CATS)).toBeNull()
     expect(leavesSlice({ ...Q, category: 'groceries' }, txn('t1', { categoryId: 'fuel' }), CATS)).toBe('Moved to Fuel')

@@ -5,12 +5,13 @@ export interface SegOption {
   label: string
   testid?: string
 }
-defineProps<{ options: SegOption[]; modelValue: string; label: string }>()
+// `size="compact"` (opt-in) is a 36px control for a crowded line; the default is the 44px touch size.
+defineProps<{ options: SegOption[]; modelValue: string; label: string; size?: 'default' | 'compact' }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 </script>
 
 <template>
-  <div class="seg" role="radiogroup" :aria-label="label">
+  <div class="seg" :class="{ 'seg-compact': size === 'compact' }" role="radiogroup" :aria-label="label">
     <button
       v-for="o in options"
       :key="o.value"
@@ -45,6 +46,11 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
   background: rgb(var(--sunken));
   color: rgb(var(--ink));
   font-weight: 600;
+}
+.seg-compact .seg-btn {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 .seg-btn:focus-visible {
   outline: 2px solid rgb(var(--amber));

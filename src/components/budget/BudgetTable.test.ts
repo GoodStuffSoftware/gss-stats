@@ -522,9 +522,158 @@ describe('BudgetTable review reason and "Looks right"', () => {
     await flushPromises()
     expect(w.get('[role="alert"]').text()).toBe('Couldn’t save (500). The row is back as it was.')
     expect(rowEl(w, 't1').find('.bt-badge').exists()).toBe(true)
-    expect(rowEl(w, 't1').find('.bt-reason').text()).toBe(REASON)
+    // The error takes the reason line's place (no new line); the reason stays in the badge's tooltip.
+    expect(rowEl(w, 't1').get('.bt-reason').text()).toBe('Couldn’t save (500). The row is back as it was.')
+    expect(rowEl(w, 't1').get('.bt-badge').attributes('title')).toBe(REASON)
     expect(rowEl(w, 't1').get('.bt-confirm').attributes('disabled')).toBeUndefined()
     expect(w.emitted('edited')).toBeUndefined()
+  })
+
+  describe('a confirmed row keeps its footprint', () => {
+    // happy-dom has no layout: every element measures 87 px, so what is pinned is that the row is locked to its measured
+    // height at the tap and that nothing is added under the row (no extra line) at the reply or the error.
+    beforeEach(() => {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 87, width: 300, top: 0, left: 0, right: 300, bottom: 87, x: 0, y: 0, toJSON: () => ({}) })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+    })
+    const held = (el: { element: Element }) => (el.element as HTMLElement).style.height || (el.element as HTMLElement).style.minHeight
+    const noExtra = (w: VueWrapper) => w.find('.et-extra-row, .et-extra').exists()
+    const RULE = { id: 'r' + 'b'.repeat(16), merchantKey: 'chain-x', storeNo: null, accountId: null, amountMinCents: null, amountMaxCents: null, setCategoryId: 'dining', setKind: null, debtAccountId: null, displayName: null, confidence: 90, review: false, reviewReason: null, source: 'edit', active: true }
+
+    for (const [name, w0] of [['table', 800], ['cards', 400]] as const) {
+      it(`${name}: the height is locked at the tap and stays the same after the save; no extra line; Use for all sits in the row`, async () => {
+        width = w0
+        let release: (r: Response) => void = () => {}
+        mockFetch((url, init) => {
+          if (init?.method === 'PATCH') return new Promise<Response>((res) => { release = res }) as unknown as Response
+          if (url.pathname === '/api/budget/rules') return json({ rule: RULE, reapplied: 0 })
+          return json({ rows: [flagged(), flagged({ id: 't2' })], nextCursor: null })
+        })
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        const w = await mountTable({ query: { ...QUERY, review: true } })
+        await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+        await flushPromises()
+        const atTap = held(rowEl(w, 't1'))
+        expect(atTap).toBe('87px')
+        expect(rowEl(w, 't1').find('.bt-confirm').exists()).toBe(false)
+        expect(rowEl(w, 't1').get('.bt-reason').text()).toBe('Saving…')
+        expect(noExtra(w)).toBe(false)
+        expect(held(rowEl(w, 't2'))).toBe('')
+        release(json({ txn: reviewed('t1') }))
+        await flushPromises()
+        expect(held(rowEl(w, 't1'))).toBe(atTap)
+        expect(noExtra(w)).toBe(false)
+        expect(rowEl(w, 't1').get('.bt-reason').text()).toBe('Reviewed, so it leaves the review list')
+        const useAll = rowEl(w, 't1').get('[data-testid="review-use-all"]')
+        expect(useAll.text()).toBe('Use for all')
+        expect(useAll.attributes('title')).toBe('Use for all Chain X')
+        expect(useAll.attributes('aria-label')).toBe('Use for all Chain X')
+        // It appears under the finger that tapped the tick: for 600 ms it ignores taps, so a double tap makes no merchant-wide rule.
+        expect(useAll.attributes('disabled')).toBeDefined()
+        await useAll.trigger('click')
+        await flushPromises()
+        expect(calls.some((c) => c.url.pathname === '/api/budget/rules')).toBe(false)
+        await vi.advanceTimersByTimeAsync(599)
+        expect(rowEl(w, 't1').get('[data-testid="review-use-all"]').attributes('disabled')).toBeDefined()
+        await vi.advanceTimersByTimeAsync(2)
+        expect(rowEl(w, 't1').get('[data-testid="review-use-all"]').attributes('disabled')).toBeUndefined()
+        await rowEl(w, 't1').get('[data-testid="review-use-all"]').trigger('click')
+        await flushPromises()
+        expect(calls.some((c) => c.url.pathname === '/api/budget/rules' && c.method === 'POST')).toBe(true)
+        expect(held(rowEl(w, 't1'))).toBe(atTap)
+        expect(noExtra(w)).toBe(false)
+      })
+
+      it(`${name}: a failed save puts the row back at the same height, with the error in the reason line`, async () => {
+        width = w0
+        mockFetch((url, init) => (init?.method === 'PATCH' ? json({ error: 'server_error' }, 500) : json({ rows: [flagged()], nextCursor: null })))
+        const w = await mountTable({ query: { ...QUERY, review: true } })
+        await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+        await flushPromises()
+        expect(held(rowEl(w, 't1'))).toBe('87px')
+        expect(noExtra(w)).toBe(false)
+        expect(rowEl(w, 't1').get('.bt-reason').attributes('role')).toBe('alert')
+        expect(rowEl(w, 't1').find('.bt-badge').exists()).toBe(true)
+        expect(rowEl(w, 't1').get('.bt-confirm').attributes('disabled')).toBeUndefined()
+      })
+
+      it(`${name}: a row with NO reason line gains no line: Reviewed, then Use for all, take the pill and tick line`, async () => {
+        width = w0
+        let release: (r: Response) => void = () => {}
+        mockFetch((url, init) => {
+          if (init?.method === 'PATCH') return new Promise<Response>((res) => { release = res }) as unknown as Response
+          return json({ rows: [flagged({ reviewReason: null })], nextCursor: null })
+        })
+        const w = await mountTable({ query: { ...QUERY, review: true } })
+        expect(rowEl(w, 't1').find('.bt-reason').exists()).toBe(false)
+        await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+        await flushPromises()
+        // At the tap: locked, no reason line added, the note is in the flags line.
+        expect(held(rowEl(w, 't1'))).toBe('87px')
+        expect(rowEl(w, 't1').find('.bt-reason').exists()).toBe(false)
+        expect(rowEl(w, 't1').get('[data-testid="review-held"] .bt-reviewed').text()).toBe('Reviewed')
+        expect(noExtra(w)).toBe(false)
+        release(json({ txn: reviewed('t1') }))
+        await flushPromises()
+        expect(held(rowEl(w, 't1'))).toBe('87px')
+        expect(rowEl(w, 't1').find('.bt-reason').exists()).toBe(false)
+        const flags = rowEl(w, 't1').get('[data-testid="review-held"]')
+        expect(flags.find('.bt-reviewed').exists()).toBe(false) // no room beside the button; the title says it
+        expect(flags.get('[data-testid="review-use-all"]').text()).toBe('Use for all')
+        expect(flags.attributes('title')).toBe('Reviewed, so it leaves the review list')
+        expect(noExtra(w)).toBe(false)
+      })
+
+      it(`${name}: a failed save of a no-reason row shows the error in the badge, with no line added`, async () => {
+        width = w0
+        mockFetch((url, init) => (init?.method === 'PATCH' ? json({ error: 'server_error' }, 500) : json({ rows: [flagged({ reviewReason: null })], nextCursor: null })))
+        const w = await mountTable({ query: { ...QUERY, review: true } })
+        await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+        await flushPromises()
+        expect(held(rowEl(w, 't1'))).toBe('87px')
+        expect(rowEl(w, 't1').find('.bt-reason').exists()).toBe(false)
+        expect(noExtra(w)).toBe(false)
+        const badge = rowEl(w, 't1').get('.bt-badge-error')
+        expect(badge.text()).toBe('Not saved')
+        expect(badge.attributes('title')).toBe('Couldn’t save (500). The row is back as it was.')
+        expect(badge.attributes('role')).toBe('alert')
+        expect(rowEl(w, 't1').get('.bt-confirm').attributes('disabled')).toBeUndefined()
+      })
+
+      it(`${name}: Use for all stays on one line with a long merchant: cut short on screen, the full text in title and aria-label`, async () => {
+        width = w0
+        const LONG = 'Northwest Regional Wholesale Restaurant Supply Cooperative'
+        mockFetch((url, init) => (init?.method === 'PATCH'
+          ? json({ txn: reviewed('t1', { merchantName: LONG }) })
+          : json({ rows: [flagged({ merchantName: LONG })], nextCursor: null })))
+        const w = await mountTable({ query: { ...QUERY, review: true } })
+        await rowEl(w, 't1').get('.bt-confirm').trigger('click')
+        await flushPromises()
+        const btn = rowEl(w, 't1').get('[data-testid="review-use-all"]')
+        expect(btn.attributes('title')).toBe('Use for all ' + LONG)
+        expect(btn.attributes('aria-label')).toBe('Use for all ' + LONG)
+        // The one-line guarantee is in the stylesheet (happy-dom has no layout; the real width is measured in the browser repro).
+        const css = (await import('./BudgetTable.vue?raw')).default as string
+        expect(btn.text()).toBe('Use for all') // the short label; the merchant it applies to is the name beside it
+        const rule = css.match(/\.bt-useall \{[^}]*\}/)![0]
+        expect(rule).toMatch(/white-space: nowrap/)
+        expect(rule).toMatch(/flex: 0 0 auto/)
+        expect(css.match(/\.bt-flags \{[^}]*\}/)![0]).toMatch(/white-space: nowrap/)
+        // The name and the pill / button share one non-wrapping line; the name gives way (it has no padding floor, so the gap to the
+        // Review pill is the same for every name), so a held row never wraps (it grew 1.7px when the button dropped below the name).
+        expect(css.match(/\.bt-mline \{[^}]*\}/)![0]).toMatch(/display: flex/)
+        const name = css.match(/\.bt-merchant \{[^}]*\}/)![0]
+        expect(name).toMatch(/flex: 0 1 auto/)
+        expect(name).toMatch(/min-width: 0/)
+        // Phones: the tick and Use for all get a 36px hit area (a 4px ring) without changing their 28px height.
+        expect(css).toMatch(/@media \(max-width: 700px\) \{\s*\.bt-confirm \{\s*position: relative;\s*\}\s*\.bt-confirm::after,\s*\.bt-useall::after \{[^}]*inset: -4px/)
+        expect(rowEl(w, 't1').find('.bt-mline .bt-merchant').exists()).toBe(true)
+        expect(rowEl(w, 't1').find('.bt-mline .bt-flags').exists()).toBe(true)
+      })
+    }
   })
 
   it('in the review list the confirmed row stays, dimmed, until the list reloads', async () => {
@@ -925,6 +1074,45 @@ describe('BudgetTable phone Cards | Table switch', () => {
     expect(radio(w, 'cards').attributes('aria-checked')).toBe('true')
     await radio(w, 'table').trigger('click')
     expect(w.find('tr[data-row-key="t1"]').exists()).toBe(true)
+  })
+  it('the phone toolbar is one row: switch, search and Filters in .tt-top; N of M and Clear only with the panel open', async () => {
+    width = 390
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    const top = w.get('.tt-top')
+    expect(top.find('[data-testid="txn-view"]').exists()).toBe(true)
+    expect(top.find('[data-testid="txn-search"]').exists()).toBe(true)
+    expect(top.find('[data-testid="txn-filters-toggle"]').exists()).toBe(true)
+    expect(top.element.firstElementChild?.getAttribute('data-testid')).toBe('txn-view') // the switch leads
+    expect(w.findAll('[data-testid="txn-view"]')).toHaveLength(1) // no separate line above the toolbar
+    expect(w.find('.bt-viewbar').exists()).toBe(false)
+    expect(w.get('[data-testid="txn-view"]').classes()).toContain('seg-compact')
+    expect(w.get('.tt-count').classes()).not.toContain('tt-count-open')
+    await w.get('[data-testid="txn-filters-toggle"]').trigger('click')
+    expect(w.get('.tt-count').classes()).toContain('tt-count-open')
+    // Closed, the count is visually hidden (never display:none), so the aria-live "N of M" is still announced.
+    const css = (await import('./TxnToolbar.vue?raw')).default as string
+    const closed = css.match(/\.tt-count:not\(\.tt-count-open\) \{[^}]*\}/)![0]
+    expect(closed).not.toMatch(/display:\s*none/)
+    expect(closed).toMatch(/clip: rect\(0 0 0 0\)/)
+    expect(w.get('.tt-count').attributes('aria-live')).toBe('polite')
+  })
+  it('a wide screen has no switch in the toolbar', async () => {
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const w = await mountTable()
+    expect(w.get('.tt-top').find('[data-testid="txn-view"]').exists()).toBe(false)
+  })
+  it('the phone Table view shows Amount right after Merchant; Cards and wide keep the usual order', async () => {
+    const heads = (w: VueWrapper) => w.findAll('thead th').map((th) => th.text().replace(/\s+/g, ' ').trim()).filter(Boolean)
+    width = 390
+    window.localStorage.setItem('gss-stats-budget-txn-view', 'table')
+    mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
+    const phone = heads(await mountTable())
+    expect(phone.slice(0, 3)).toEqual(['Date', 'Merchant', 'Amount'])
+    wrapper?.unmount()
+    width = 800
+    const wide = heads(await mountTable())
+    expect(wide.indexOf('Amount')).toBeGreaterThan(wide.indexOf('Category'))
   })
   it('in Table mode on a phone the merchant tip opens', async () => {
     width = 390

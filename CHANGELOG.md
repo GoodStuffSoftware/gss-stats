@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Rule review flags reach existing rows** — turning on review for a store rule now flags the purchases it already covers, not only new imports.
+- **Steady review rows** — confirming a review no longer shifts the rows under your finger, and Use for all stays where it was.
+- **Compact phone toolbar** — the Cards | Table switch, search and Filters sit on one short line on phones, with the count and Clear inside Filters.
+- **Amount in view** — the phone Table view shows the amount next to the merchant, without scrolling sideways.
+- **Use for all ignores a double tap** — after you confirm a review, Use for all waits about half a second before it takes a tap, so a second quick tap where the tick was cannot create a rule.
+- **Bigger phone taps** — the tick and Use for all have a 36 px tap area on phones, and the button reads "Use for all" with the full wording kept for screen readers.
+
 ## [0.83.0] — 2026-11-23
 
 ### Added

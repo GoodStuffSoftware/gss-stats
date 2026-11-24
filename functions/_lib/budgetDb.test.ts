@@ -209,6 +209,9 @@ describe('every query shape is index-backed (EXPLAIN QUERY PLAN)', () => {
     const plan = db.explain(APPLY_CANDIDATES_SQL, ['["chain-x"]']).join('\n')
     expect(plan).toContain('idx_txn_merchant')
     expect(plan).not.toMatch(/SCAN transactions/)
+    // The person-edit subquery on category_edits is a key lookup too: a full scan of every edit row per candidate would fail here.
+    expect(plan).toMatch(/SEARCH e USING (COVERING )?INDEX idx_edits_txn/)
+    expect(plan).not.toMatch(/SCAN e\b/)
   })
   it('binds every value: a hostile merchant or category never reaches the SQL text', () => {
     const evil = "x'; DROP TABLE transactions; --"
@@ -440,6 +443,71 @@ describe('applyRules', () => {
     const c = insertTxn(db, { merchant_key: 'paws-and-claws', category_id: null, category_source: 'none' })
     expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
     expect(txnRow(c).category_id).toBeNull()
+  })
+  describe('a review-only rule change', () => {
+    const flagRule = () => db.exec("UPDATE merchant_rules SET review = 1, review_reason = 'low_confidence' WHERE merchant_key = 'paws-and-claws'")
+    // 'import' stamps no person; an edit row with a rule id is what an earlier rule apply leaves behind.
+    const ruleRow = (extra: Record<string, unknown> = {}) => {
+      const rid = db.get<{ id: string }>("SELECT id FROM merchant_rules WHERE merchant_key = 'paws-and-claws'")!.id
+      const id = insertTxn(db, { merchant_key: 'paws-and-claws', category_id: 'pets', category_source: 'rule', rule_id: rid, ...extra })
+      db.exec(`UPDATE transactions SET updated_by = 'import' WHERE id = '${id}'`)
+      return id
+    }
+    it('flags a row already in the rule category, once', async () => {
+      const id = ruleRow()
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
+      flagRule()
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(1)
+      expect(txnRow(id)).toMatchObject({ category_id: 'pets', needs_review: 1, review_reason: 'low_confidence', updated_by: 'user-a@example.com' })
+      expect(db.all('SELECT old_category_id, new_category_id, rule_id FROM category_edits WHERE txn_id = ?', id)).toHaveLength(1)
+    })
+    it('does not rewrite a row already flagged with the same reason', async () => {
+      flagRule()
+      const id = ruleRow({ needs_review: 1, review_reason: 'low_confidence' })
+      const before = txnRow(id)
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
+      expect(txnRow(id)).toEqual(before)
+      expect(db.all('SELECT id FROM category_edits WHERE txn_id = ?', id)).toHaveLength(0)
+    })
+    it('leaves manual rows and rows whose latest edit is a person alone', async () => {
+      flagRule()
+      const manual = insertTxn(db, { merchant_key: 'paws-and-claws', category_id: 'pets', category_source: 'manual' })
+      const person = ruleRow()
+      db.exec(`UPDATE transactions SET updated_by = 'user-b@example.com' WHERE id = '${person}'`)
+      db.exec(`INSERT INTO category_edits (txn_id, old_category_id, new_category_id, rule_id, edited_at, edited_by) VALUES ('${person}', 'pets', 'pets', NULL, '2026-12-05T10:00:00.000Z', 'user-b@example.com')`)
+      const before = { manual: txnRow(manual), person: txnRow(person) }
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
+      expect(txnRow(manual)).toEqual(before.manual)
+      expect(txnRow(person)).toEqual(before.person)
+    })
+    // Any person edit counts, not only a category change: a note-only edit leaves no category_edits row, an include toggle leaves one with no
+    // rule id. Both rows are skipped (the review flag under-flags; it never moves or rewrites a row a person touched).
+    it('a note-only edit (a person address, no edit row) counts as a person edit: the row is skipped', async () => {
+      flagRule()
+      const id = ruleRow({ note: 'bought for the dog' })
+      db.exec(`UPDATE transactions SET updated_by = 'user-b@example.com' WHERE id = '${id}'`)
+      expect(db.all('SELECT id FROM category_edits WHERE txn_id = ?', id)).toHaveLength(0)
+      const before = txnRow(id)
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
+      expect(txnRow(id)).toEqual(before)
+    })
+    it('an include/exclude toggle (an edit row with no rule id) counts as a person edit: the row is skipped', async () => {
+      flagRule()
+      const id = ruleRow()
+      db.exec(`UPDATE transactions SET updated_by = 'user-b@example.com', included = 0 WHERE id = '${id}'`)
+      db.exec(`INSERT INTO category_edits (txn_id, old_category_id, new_category_id, rule_id, edited_at, edited_by) VALUES ('${id}', 'pets', 'pets', NULL, '2026-12-05T10:00:00.000Z', 'user-b@example.com')`)
+      const before = txnRow(id)
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(0)
+      expect(txnRow(id)).toEqual(before)
+    })
+    it('flags a row an earlier rule apply stamped with an address', async () => {
+      flagRule()
+      const id = ruleRow()
+      db.exec(`UPDATE transactions SET updated_by = 'user-b@example.com' WHERE id = '${id}'`)
+      db.exec(`INSERT INTO category_edits (txn_id, old_category_id, new_category_id, rule_id, edited_at, edited_by) VALUES ('${id}', 'shopping', 'pets', 'r1', '2026-12-05T10:00:00.000Z', 'user-b@example.com')`)
+      expect(await applyRules(db.d1, ['paws-and-claws'], 'user-a@example.com')).toBe(1)
+      expect(txnRow(id)).toMatchObject({ needs_review: 1, review_reason: 'low_confidence' })
+    })
   })
   it('chunks big applies by size, inside one batch (a failure leaves nothing written)', async () => {
     const ids: string[] = []

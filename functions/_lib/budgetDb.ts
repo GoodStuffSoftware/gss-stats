@@ -511,6 +511,7 @@ interface ApplyRow {
   needs_review: number
   review_reason: string | null
   updated_at: string
+  person_edit: number
 }
 
 interface Change {
@@ -537,7 +538,8 @@ export async function loadActiveRules(db: D1Database, merchantKeys: string[] | n
   return (await stmt.all<Row>()).results.map(mapRule)
 }
 
-const APPLY_COLUMNS = 'id, account_id, merchant_key, store_no, amount_cents, kind, kind_source, category_id, category_source, rule_id, debt_account_id, confidence, needs_review, review_reason, updated_at'
+const APPLY_COLUMNS = 'id, account_id, merchant_key, store_no, amount_cents, kind, kind_source, category_id, category_source, rule_id, debt_account_id, confidence, needs_review, review_reason, updated_at, '
+  + "(instr(updated_by, '@') > 0 AND COALESCE((SELECT e.rule_id IS NOT NULL FROM category_edits e WHERE e.txn_id = transactions.id ORDER BY e.edited_at DESC, e.id DESC LIMIT 1), 0) = 0) AS person_edit"
 
 /**
  * The rows a rule re-apply reads: a merchant's whole history, on purpose. A rule says what a merchant IS,
@@ -582,12 +584,18 @@ export async function applyRules(db: D1Database, merchantKeys: string[] | null, 
     if (!res.rule || (!res.rule.setCategoryId && !res.rule.setKind)) continue
     const sameFields = res.kind === r.kind && res.kindSource === r.kind_source && res.categoryId === r.category_id
       && res.categorySource === r.category_source && res.ruleId === r.rule_id && res.debtAccountId === r.debt_account_id
-    if (sameFields) continue
+    // A review-only rule change: nothing else differs, but the rule now asks for review and the row is not yet flagged
+    // with its reason. A row whose latest edit is a person's ('@' in updated_by) is never touched this way.
+    const wantReason = res.rule.reviewReason ?? 'rule'
+    const needsFlag = sameFields && res.rule.review && Number(r.person_edit) !== 1
+      && (Number(r.needs_review) !== 1 || r.review_reason !== wantReason)
+    if (sameFields && !needsFlag) continue
     const categoryMoved = res.categoryId !== r.category_id || res.categorySource !== r.category_source || res.ruleId !== r.rule_id
     let review = Number(r.needs_review)
     let reason = r.review_reason
-    if (categoryMoved) {
-      if (res.rule.review) { review = 1; reason = res.rule.reviewReason ?? 'rule' }
+    if (needsFlag) { review = 1; reason = wantReason }
+    else if (categoryMoved) {
+      if (res.rule.review) { review = 1; reason = wantReason }
       else if (review === 1 && (reason === null || SETTLED_BY_RULE.has(reason))) { review = 0; reason = null }
     }
     changes.push({
