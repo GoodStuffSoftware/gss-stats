@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.84.0] — 2026-11-23
+
+### Added
+- **Notes can use simple formatting** — bold, italic, lists and web links show formatted in Budget notes, and the note editor takes several lines (Enter adds a line, Ctrl+Enter saves).
+- **Save and Cancel on the note editor** — two buttons sit under the note while you edit, with a 36 px tap area on phones, so a phone can save or cancel without tapping away.
+
 ## [0.83.1] — 2026-11-23
 
 ### Fixed

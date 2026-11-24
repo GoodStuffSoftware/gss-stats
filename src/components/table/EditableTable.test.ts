@@ -515,3 +515,170 @@ describe('EditableTable selectable', () => {
     expect([...(w.emitted('update:selected')?.at(-1)?.[0] as Set<string>)]).toEqual(['r2'])
   })
 })
+
+describe('EditableTable markdown notes (opt-ins markdown, multiline, hasPeek)', () => {
+  const MD_ROWS: Row[] = [
+    { id: 'r1', name: 'Alpha', size: 'small', note: 'see **bold** and [site](https://example.com/a)' },
+    { id: 'r2', name: 'Beta', size: 'large', note: '[bad](javascript:alert(1)) <b>x</b>' },
+  ]
+  const withNote = (extra: Partial<EditableColumn<Row>>): EditableColumn<Row>[] => COLUMNS.map((c) => (c.key === 'note' ? { ...c, ...extra } : c))
+  const btn = (w: VueWrapper, id: string) => w.get(`tr[data-row-key="${id}"] button.et-text-btn`)
+
+  it('a column with markdown shows formatted text, inline', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true }), rows: MD_ROWS })
+    const cell = btn(w, 'r1')
+    expect(cell.find('span.md.md-inline strong').text()).toBe('bold')
+    const a = cell.get('a')
+    expect(a.attributes('href')).toBe('https://example.com/a')
+    expect(a.attributes('rel')).toBe('noopener noreferrer')
+  })
+  it('an unsafe link and raw HTML stay inert text', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true }), rows: MD_ROWS })
+    const cell = btn(w, 'r2')
+    expect(cell.find('a').exists()).toBe(false)
+    expect(cell.find('b').exists()).toBe(false)
+    expect(cell.text()).toContain('<b>x</b>')
+  })
+  it('a read-only markdown column renders too', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true, editor: null }), rows: MD_ROWS, editable: false })
+    expect(w.get('tr[data-row-key="r1"] td:nth-child(3) strong').text()).toBe('bold')
+  })
+  it('a column without the opt-ins is unchanged: exact text, no markdown element, an input editor', async () => {
+    const w = await mountTable({ rows: MD_ROWS })
+    expect(btn(w, 'r1').html()).not.toContain('class="md')
+    expect(btn(w, 'r1').text()).toBe('see **bold** and [site](https://example.com/a)')
+    expect(btn(w, 'r1').find('a').exists()).toBe(false)
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('textarea').exists()).toBe(false)
+    expect(w.find('input.et-input').exists()).toBe(true)
+  })
+  it('multiline: a textarea editor, Enter adds a line, Ctrl+Enter saves plain text', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true }) })
+    await btn(w, 'r1').trigger('click')
+    const ta = w.get('textarea.et-input')
+    expect(w.find('input.et-input').exists()).toBe(false)
+    await ta.setValue('line one\n- item')
+    await ta.trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('edit')).toBeUndefined()
+    expect(w.find('textarea').exists()).toBe(true)
+    await ta.trigger('keydown', { key: 'Enter', ctrlKey: true })
+    expect(w.emitted('edit')![0]).toEqual(['r1', 'note', 'line one\n- item'])
+    expect(w.find('textarea').exists()).toBe(false)
+  })
+  it('multiline: leaving the field saves, Esc cancels', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true }) })
+    await btn(w, 'r1').trigger('click')
+    await w.get('textarea').setValue('changed')
+    await w.get('textarea').trigger('blur')
+    expect(w.emitted('edit')![0]).toEqual(['r1', 'note', 'changed'])
+    await btn(w, 'r2').trigger('click')
+    await w.get('textarea').setValue('nope')
+    await w.get('textarea').trigger('keydown', { key: 'Escape' })
+    expect(w.find('textarea').exists()).toBe(false)
+    expect(w.emitted('edit')).toHaveLength(1)
+  })
+  it('multiline + markdown shows a live preview of the draft', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true, markdown: true }) })
+    await btn(w, 'r1').trigger('click')
+    await w.get('textarea').setValue('**hi**')
+    expect(w.get('[data-testid="md-preview"] strong').text()).toBe('hi')
+  })
+  it('hasPeek: an empty hold cell peeks when the row has something else to show', async () => {
+    const rows = [{ id: 'r1', name: 'Alpha', size: 'small', note: '' }]
+    const w = await mountTable({ columns: withNote({ editGesture: 'hold', hasPeek: () => true }), rows })
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('input.et-input').exists()).toBe(false)
+    expect(w.emitted('peek')![0][0]).toBe('r1')
+  })
+
+  describe('links inside a note cell', () => {
+    const HOLD_MD = () => withNote({ editGesture: 'hold', markdown: true, multiline: true })
+    it('a click on a link neither peeks nor edits', async () => {
+      const w = await mountTable({ columns: HOLD_MD(), rows: MD_ROWS })
+      await btn(w, 'r1').get('a').trigger('click')
+      expect(w.emitted('peek')).toBeUndefined()
+      expect(w.emitted('edit-start')).toBeUndefined()
+      expect(w.find('textarea').exists()).toBe(false)
+    })
+    it('Enter on a link does not open the editor', async () => {
+      const w = await mountTable({ columns: HOLD_MD(), rows: MD_ROWS })
+      await btn(w, 'r1').get('a').trigger('keydown', { key: 'Enter' })
+      expect(w.emitted('edit-start')).toBeUndefined()
+      expect(w.find('textarea').exists()).toBe(false)
+    })
+    it('a hold on a link does not open the editor', async () => {
+      vi.useFakeTimers()
+      try {
+        const w = await mountTable({ columns: HOLD_MD(), rows: MD_ROWS })
+        await btn(w, 'r1').get('a').trigger('pointerdown', { button: 0, clientX: 5, clientY: 5, pointerType: 'touch' })
+        vi.advanceTimersByTime(700)
+        expect(w.emitted('edit-start')).toBeUndefined()
+        expect(w.find('textarea').exists()).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+    it('Enter on the cell itself (not on a link) still opens the editor', async () => {
+      const w = await mountTable({ columns: HOLD_MD(), rows: MD_ROWS })
+      await btn(w, 'r1').trigger('keydown', { key: 'Enter' })
+      expect(w.find('textarea').exists()).toBe(true)
+    })
+  })
+
+  describe('multiline Save and Cancel buttons', () => {
+    const open = async (note = 'first') => {
+      const w = await mountTable({ columns: withNote({ multiline: true, maxLength: 500 }) })
+      await btn(w, 'r1').trigger('click')
+      await w.get('textarea').setValue(note)
+      return w
+    }
+    it('Save saves exactly once, even when the field then blurs', async () => {
+      const w = await open('changed')
+      const save = w.get('[data-testid="note-save"]')
+      await save.trigger('mousedown') // @mousedown.prevent keeps the textarea from blurring first
+      await save.trigger('click')
+      await w.vm.$nextTick()
+      expect(w.emitted('edit')).toEqual([['r1', 'note', 'changed']])
+      expect(w.find('textarea').exists()).toBe(false)
+    })
+    it('Save does not blur the field on mousedown', async () => {
+      const w = await open('changed')
+      const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      w.get('[data-testid="note-save"]').element.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(w.find('textarea').exists()).toBe(true)
+    })
+    it('Cancel discards the draft and saves nothing, even if a blur follows', async () => {
+      const w = await open('changed')
+      const ta = w.get('textarea')
+      await w.get('[data-testid="note-cancel"]').trigger('click')
+      expect(w.find('textarea').exists()).toBe(false)
+      ta.element.dispatchEvent(new Event('blur'))
+      expect(w.emitted('edit')).toBeUndefined()
+    })
+    it('the buttons are only on the multiline editor', async () => {
+      const w = await mountTable()
+      await btn(w, 'r1').trigger('click')
+      expect(w.find('[data-testid="note-save"]').exists()).toBe(false)
+    })
+    it('the textarea is capped at the column maxLength', async () => {
+      const w = await open()
+      expect(w.get('textarea').attributes('maxlength')).toBe('500')
+    })
+  })
+
+  describe('IME composition', () => {
+    it('Ctrl+Enter and Esc during composition neither save nor cancel', async () => {
+      const w = await mountTable({ columns: withNote({ multiline: true }) })
+      await btn(w, 'r1').trigger('click')
+      const ta = w.get('textarea')
+      await ta.setValue('changed')
+      await ta.trigger('keydown', { key: 'Enter', ctrlKey: true, isComposing: true })
+      await ta.trigger('keydown', { key: 'Escape', isComposing: true })
+      expect(w.emitted('edit')).toBeUndefined()
+      expect(w.find('textarea').exists()).toBe(true)
+      await ta.trigger('keydown', { key: 'Enter', ctrlKey: true })
+      expect(w.emitted('edit')).toEqual([['r1', 'note', 'changed']])
+    })
+  })
+})

@@ -63,7 +63,7 @@ const columns: EditableColumn<SimilarRow>[] = [
   { key: 'amountCents', label: 'Amount', editor: null, align: 'end', value: (r) => formatAmount(r.amountCents), cardLine: 1, minWidth: 90 },
   { key: 'merchantName', label: 'Merchant', editor: null, value: (r) => r.merchantName, cardLine: 2, minWidth: 140 },
   { key: 'categoryId', label: 'Now in', editor: null, value: (r) => catName(r.categoryId), cardLine: 2, minWidth: 140 },
-  { key: 'note', label: 'Note', editor: null, value: (r) => r.note ?? '', cardLine: 0, minWidth: 120 },
+  { key: 'note', label: 'Note', editor: null, markdown: true, value: (r) => r.note ?? '', cardLine: 0, minWidth: 120 },
 ]
 
 function onSelected(next: Set<string>) {

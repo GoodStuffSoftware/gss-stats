@@ -325,9 +325,9 @@ describe('BudgetTable note', () => {
   const noteBtn = (w: VueWrapper, id: string) => rowEl(w, id).get('button.et-text-btn')
   async function editNote(w: VueWrapper, id: string, text: string) {
     await noteBtn(w, id).trigger('keydown', { key: 'Enter' }) // a plain click shows the tip; Enter (or a hold) edits
-    const input = rowEl(w, id).get('input.et-input')
+    const input = rowEl(w, id).get('textarea.et-input')
     await input.setValue(text)
-    await input.trigger('keydown', { key: 'Enter' })
+    await input.trigger('keydown', { key: 'Enter', ctrlKey: true })
     await flushPromises()
   }
 
@@ -354,7 +354,7 @@ describe('BudgetTable note', () => {
     const w = await mountTable()
     await noteBtn(w, 't1').trigger('click')
     expect(w.get('[data-testid="note-tip"]').text()).toBe(NOTE)
-    expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(false)
+    expect(rowEl(w, 't1').find('.et-input').exists()).toBe(false)
     await noteBtn(w, 't1').trigger('click')
     expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
   })
@@ -380,7 +380,7 @@ describe('BudgetTable note', () => {
       await noteBtn(w, 't1').trigger('pointerdown', { button: 0, clientX: 10, clientY: 10, pointerType: 'mouse' })
       vi.advanceTimersByTime(500)
       await flushPromises()
-      expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(true)
+      expect(rowEl(w, 't1').find('textarea.et-input').exists()).toBe(true)
       expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
     } finally {
       vi.useRealTimers()
@@ -390,14 +390,25 @@ describe('BudgetTable note', () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
     const w = await mountTable()
     await noteBtn(w, 't2').trigger('click')
-    expect(rowEl(w, 't2').find('input.et-input').exists()).toBe(true)
+    expect(rowEl(w, 't2').find('textarea.et-input').exists()).toBe(true)
     expect(w.find('[data-testid="note-tip"]').exists()).toBe(false)
   })
   it('F2 edits too', async () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
     const w = await mountTable()
     await noteBtn(w, 't1').trigger('keydown', { key: 'F2' })
-    expect(rowEl(w, 't1').find('input.et-input').exists()).toBe(true)
+    expect(rowEl(w, 't1').find('textarea.et-input').exists()).toBe(true)
+  })
+  it('a note with markdown shows formatted in the cell and the tip; an unsafe link stays text', async () => {
+    mockFetch(() => json({ rows: [txn('t1', { note: '**Paid** [receipt](https://example.com/r) [x](javascript:alert(1))' })], nextCursor: null }))
+    const w = await mountTable()
+    expect(w.get('[data-row-key="t1"] [data-testid="row-note"] strong').text()).toBe('Paid')
+    await noteBtn(w, 't1').trigger('click')
+    const tip = w.get('[data-testid="note-tip"]')
+    expect(tip.get('strong').text()).toBe('Paid')
+    expect(tip.findAll('a')).toHaveLength(1)
+    expect(tip.get('a').attributes('href')).toBe('https://example.com/r')
+    expect(tip.text()).toBe('Paid receipt x')
   })
   it('the merchant tip also shows the note, and no note line without one', async () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))
