@@ -2815,8 +2815,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   [ADR 0008](docs/adr/0008-email-receipts.md); this is only how to run it.
   - **Connect.** A Budget person opens the connect step in Budget, reads the consent text, and approves on Google's
     screen. The owner can disconnect at any time (the grant is revoked at Google).
-  - **Who sees what.** `RECEIPTS_SHARE=fields` (a var in `wrangler.toml`): both Budget people see each other's receipt
-    fields on a transaction; only the owner gets the Gmail link. Review, apply and dismiss are per owner.
+  - **Who sees what.** See [ADR 0008](docs/adr/0008-email-receipts.md) (`RECEIPTS_SHARE` is a var in `wrangler.toml`).
   - **Names (values never in the repo).** Secrets Store, read by the Worker `gss-budget-receipts` only:
     `RECEIPTS_GMAIL_CLIENT_ID`, `RECEIPTS_GMAIL_CLIENT_SECRET`, `RECEIPTS_TOKEN_KEY`, `RECEIPTS_TOKEN_KEY_OLD`,
     `RECEIPTS_ANTHROPIC_KEY`, `RECEIPTS_ALLOWED_EMAILS`. Pages secret: `RECEIPTS_GMAIL_CLIENT_ID`. Worker vars
