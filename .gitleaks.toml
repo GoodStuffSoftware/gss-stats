@@ -16,6 +16,7 @@ regexes = [
   '''dGhlIHNhbXBsZSBub25jZQ==''',             # the RFC 6455 sample Sec-WebSocket-Key
   '''keyAlgorithm: 'KEY_ALG_RSA_2048'(?:\W|$)''', # an IAM API enum
   '''const ids = \['bsk\.pageviews',''',      # metric ids in a test
+  '''const TOKEN_CT = 'Q0lQSEVSVEVYVC1BLVNFQ1JFVA=='$''',  # a made-up ciphertext (base64 of a placeholder phrase) in the receipts tests
 ]
 
 [[rules]]
