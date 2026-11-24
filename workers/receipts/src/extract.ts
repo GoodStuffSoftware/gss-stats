@@ -13,10 +13,13 @@ export const MAX_EMAIL_CHARS = 16000
 /**
  * Codes this module reports.
  * - extract_invalid: the model's output failed validation (counts as an attempt, no retry).
- * - stop_run: limit, overload, 5xx, network: stop this run, retry next run, no attempt used.
+ * - stop_run: 400, limit, overload, 5xx, network: stop this run, retry next run, no attempt used.
  * - auth_failed: 401/403: stop the run; the key needs fixing.
+ * A stop_run or auth_failed result also carries a reason: the code the Worker records as the run's error_code.
  */
 export type ExtractCode = 'extract_invalid' | 'stop_run' | 'auth_failed'
+/** api_rejected = 400 (a bad request that retrying cannot fix); api_limited = 429/529; api_unavailable = 5xx or network. */
+export type ExtractReason = 'api_rejected' | 'api_limited' | 'api_unavailable' | 'auth_failed'
 
 export type ReceiptKind = 'purchase' | 'refund' | 'subscription' | 'payment_sent' | 'payment_received' | 'decline' | 'other'
 export type PaymentVia = 'card' | 'paypal' | 'venmo' | 'apple' | 'amazon' | 'google' | 'bank' | 'other'
@@ -46,7 +49,7 @@ export interface ExtractedReceipt {
 
 export type ExtractResult =
   | { ok: true; receipt: ExtractedReceipt; model: string }
-  | { ok: false; code: ExtractCode }
+  | { ok: false; code: ExtractCode; reason?: ExtractReason }
 
 export interface ExtractEnv { apiKey: string; model: string }
 export interface ExtractInput {
@@ -88,8 +91,6 @@ export function buildRequestBody(model: string, input: ExtractInput): Record<str
     model,
     max_tokens: MAX_TOKENS,
     temperature: 0,
-    // Haiku 5.5 thinks by default and thinking tokens bill as output; keep the effort low.
-    output_config: { effort: 'low' },
     system: buildSystemPrompt(input.categoryIds),
     messages: [{ role: 'user', content: buildUserMessage(input.text) }],
   }
@@ -160,12 +161,19 @@ export function luhnValid(digits: string): boolean {
   }
   return sum % 10 === 0
 }
-/** Keep the order number whole, but drop a 12-19 digit Luhn-valid value: that is a card number. */
+/**
+ * Keep the order number whole, but drop a card number: 12-19 digits that are Luhn-valid once spaces and dashes are
+ * removed. The Amazon order shape (3-7-7 digits) is exempt: it is 17 digits and would pass Luhn about once in ten.
+ * A value outside the column's charset or length is dropped (null), not an error, so one odd value cannot fail the row.
+ */
 function orderRefField(v: unknown): string | null {
   if (v === null) return null
-  if (typeof v !== 'string' || !/^[A-Za-z0-9#-]{1,64}$/.test(v)) bad()
-  if (/^\d{12,19}$/.test(v) && luhnValid(v)) return null
-  return v
+  if (typeof v !== 'string') bad()
+  const ref = v.trim()
+  const digits = ref.replace(/[ -]/g, '')
+  if (/^\d{12,19}$/.test(digits) && luhnValid(digits) && !/^\d{3}-\d{7}-\d{7}$/.test(ref)) return null
+  if (!/^[A-Za-z0-9#-]{1,64}$/.test(ref)) return null
+  return ref
 }
 function dayShift(s: string, days: number): string {
   const d = new Date(s + 'T00:00:00Z')
@@ -236,10 +244,12 @@ export function parseAndValidate(text: string, emailDate: string, categoryIds: r
 
 // ---- call ---------------------------------------------------------------------------------------------------
 
-/** HTTP status to code. Limit errors (429, 400 invalid_request_error), 529/overload and 5xx stop the run. */
-export function codeForStatus(status: number): ExtractCode {
-  if (status === 401 || status === 403) return 'auth_failed'
-  return 'stop_run'
+/** HTTP status to result. 400, 429, 529/overload and 5xx stop the run; 401/403 stop it as auth_failed. */
+export function failureForStatus(status: number): { ok: false; code: ExtractCode; reason: ExtractReason } {
+  if (status === 401 || status === 403) return { ok: false, code: 'auth_failed', reason: 'auth_failed' }
+  if (status === 400) return { ok: false, code: 'stop_run', reason: 'api_rejected' }
+  if (status === 429 || status === 529) return { ok: false, code: 'stop_run', reason: 'api_limited' }
+  return { ok: false, code: 'stop_run', reason: 'api_unavailable' }
 }
 
 export async function extractReceipt(
@@ -255,9 +265,9 @@ export async function extractReceipt(
       body: JSON.stringify(buildRequestBody(env.model, input)),
     })
   } catch {
-    return { ok: false, code: 'stop_run' }
+    return { ok: false, code: 'stop_run', reason: 'api_unavailable' }
   }
-  if (!res.ok) return { ok: false, code: codeForStatus(res.status) }
+  if (!res.ok) return failureForStatus(res.status)
 
   let body: unknown
   try { body = await res.json() } catch { return { ok: false, code: 'extract_invalid' } }

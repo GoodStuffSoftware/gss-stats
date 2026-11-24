@@ -47,6 +47,8 @@ describe('extractReceipt', () => {
     expect(body.tools).toBeUndefined()
     expect(body.tool_choice).toBeUndefined()
     expect(body.temperature).toBe(0)
+    expect(body.output_config).toBeUndefined()
+    expect(body.thinking).toBeUndefined()
     expect(body.max_tokens).toBe(800)
     expect(body.model).toBe('test-model')
     expect(body.system).toContain('untrusted data')
@@ -69,7 +71,7 @@ describe('extractReceipt', () => {
       { items: [{ description: 'y'.repeat(121), amount_cents: 1, quantity: 1, category_hint: null }] },
       { items: Array.from({ length: 21 }, () => ({ description: 'a', amount_cents: 1, quantity: 1, category_hint: null })) },
       { charges: Array.from({ length: 6 }, () => ({ amount_cents: 1, last4: null })) },
-      { kind: 'wire_money' }, { currency: 'usd' }, { receipt_date: '2026-13-40' }, { order_ref: 'a b;DROP' },
+      { kind: 'wire_money' }, { currency: 'usd' }, { receipt_date: '2026-13-40' }, { order_ref: 12345 },
       { card_last4: '12345' }, { items: [{ description: 'a', amount_cents: 1, quantity: 1, category_hint: null, extra: 1 }] },
       { total_cents: '1234' },
     ]) {
@@ -92,21 +94,22 @@ describe('extractReceipt', () => {
   })
 
   it('maps each error status to its code', async () => {
-    const cases: Array<[number, string]> = [
-      [429, 'stop_run'], [400, 'stop_run'], [529, 'stop_run'], [500, 'stop_run'], [503, 'stop_run'],
-      [401, 'auth_failed'], [403, 'auth_failed'],
+    const cases: Array<[number, string, string]> = [
+      [400, 'stop_run', 'api_rejected'], [429, 'stop_run', 'api_limited'], [529, 'stop_run', 'api_limited'],
+      [500, 'stop_run', 'api_unavailable'], [503, 'stop_run', 'api_unavailable'],
+      [401, 'auth_failed', 'auth_failed'], [403, 'auth_failed', 'auth_failed'],
     ]
-    for (const [status, code] of cases) {
+    for (const [status, code, reason] of cases) {
       const body = JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'secret email text' } })
       const r = await extractReceipt(INPUT, ENV, mockFetch(new Response(body, { status })))
-      expect(r, String(status)).toEqual({ ok: false, code })
+      expect(r, String(status)).toEqual({ ok: false, code, reason })
     }
   })
 
   it('maps a network failure to stop_run', async () => {
     const f = vi.fn(async () => { throw new Error('boom ' + ENV.apiKey) }) as unknown as typeof fetch
     const r = await extractReceipt(INPUT, ENV, f)
-    expect(r).toEqual({ ok: false, code: 'stop_run' })
+    expect(r).toEqual({ ok: false, code: 'stop_run', reason: 'api_unavailable' })
     expect(JSON.stringify(r)).not.toContain(ENV.apiKey)
   })
 
@@ -124,6 +127,21 @@ describe('extractReceipt', () => {
     expect(r.receipt.items[0].description).toContain('•1111')
     expect(r.receipt.items[0].categoryHint).toBeNull()
     expect(r.receipt.orderRef).toBeNull()
+  })
+
+  it('drops a card number with spaces or dashes, and any order_ref outside the allowed charset', async () => {
+    for (const ref of ['4111-1111-1111-1111', '4111 1111 1111 1111', ' 4111111111111111 ', 'a b;DROP', 'x'.repeat(65), '', '   ']) {
+      const r = await extractReceipt(INPUT, ENV, mockFetch(reply(good({ order_ref: ref }))))
+      expect(r.ok && r.receipt.orderRef, JSON.stringify(ref)).toBeNull()
+    }
+  })
+
+  it('keeps an Amazon-style order number even when its digits pass Luhn, and a dashed number that fails it', async () => {
+    expect(luhnValid('11212345671234573')).toBe(true)
+    for (const ref of ['112-1234567-1234573', '112-1234567-1234567', 'FM-1001', '#A1B2']) {
+      const r = await extractReceipt(INPUT, ENV, mockFetch(reply(good({ order_ref: ref }))))
+      expect(r.ok && r.receipt.orderRef, ref).toBe(ref)
+    }
   })
 
   it('keeps a long numeric order number that fails Luhn', async () => {
