@@ -274,7 +274,7 @@ export function dominantHint(items: readonly ReceiptItem[]): string | null {
 }
 
 function proposedCategory(hint: string | null, row: MatchBankRow, opts: MatchOptions): string | null {
-  if (!hint) return null
+  if (!hint || row.personEdited) return null
   const broad = opts.broadCategoryIds ?? BROAD_CATEGORY_IDS
   if (row.categoryId === null || broad.includes(row.categoryId)) return hint === row.categoryId ? null : hint
   return null

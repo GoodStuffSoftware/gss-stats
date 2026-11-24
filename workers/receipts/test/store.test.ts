@@ -153,6 +153,12 @@ describe('daily cap and runs', () => {
     expect(db.get<{ n: number }>('SELECT count(*) n FROM receipt_sync_runs')?.n).toBe(S.KEEP_RUNS)
     expect(db.get<{ n: number }>('SELECT count(*) n FROM receipt_sync_runs WHERE id = ?', id)?.n).toBe(0)
   })
+  it('needs_reconnect with a stale token ciphertext leaves a freshly reconnected token alone', async () => {
+    await S.setConnectionStatus(d1(), CONN, 'needs_reconnect', 'invalid_grant', NOW, 'b2xkLWNpcGhlcg==')
+    expect(db.get<{ status: string }>('SELECT status FROM email_connections WHERE id = ?', CONN)?.status).toBe('active')
+    await S.setConnectionStatus(d1(), CONN, 'needs_reconnect', 'invalid_grant', NOW, 'Y2lwaGVydGV4dA==')
+    expect(db.get<{ status: string }>('SELECT status FROM email_connections WHERE id = ?', CONN)?.status).toBe('needs_reconnect')
+  })
   it('a connection set to needs_reconnect holds no token', async () => {
     await S.setConnectionStatus(d1(), CONN, 'needs_reconnect', 'invalid_grant', NOW)
     expect(db.get('SELECT status, token_ct, token_iv, key_id, last_error FROM email_connections WHERE id = ?', CONN)).toEqual(

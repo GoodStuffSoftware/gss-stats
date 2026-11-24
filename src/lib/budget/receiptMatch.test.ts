@@ -189,6 +189,14 @@ describe('ties and ambiguity', () => {
   })
 })
 
+describe('proposed category on a person-edited row', () => {
+  it('proposes nothing for a row a person edited', () => {
+    const items = [{ description: 'Gas', amountCents: 2599, quantity: 1, categoryHint: 'fuel' }]
+    expect(matchReceipt(rcpt({ items }), [row({ personEdited: true })]).winner?.proposedCategoryId).toBeNull()
+    expect(matchReceipt(rcpt({ items }), [row()]).winner?.proposedCategoryId).toBe('fuel')
+  })
+})
+
 describe('currency', () => {
   it('a receipt in another currency never matches an equal-cents USD row', () => {
     const res = matchReceipt(rcpt({ currency: 'EUR' }), [row()], { autoApply: true })

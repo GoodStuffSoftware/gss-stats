@@ -144,7 +144,7 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
     }
   } catch (e) {
     if (e instanceof TokenCryptoError && e.code === 'decrypt_failed') {
-      await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'decrypt_failed', clock())
+      await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'decrypt_failed', clock(), conn.tokenCt)
       return { code: 'decrypt_failed', watermarkAt: null }
     }
     return { code: 'key_invalid', watermarkAt: null }
@@ -268,7 +268,7 @@ async function runInner(env: Env, connectionId: string, runId: number | null, co
   } catch (e) {
     if (e instanceof GmailError) {
       code = e.code
-      if (e.code === 'needs_reconnect') await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'needs_reconnect', clock())
+      if (e.code === 'needs_reconnect') await S.setConnectionStatus(db, connectionId, 'needs_reconnect', 'needs_reconnect', clock(), conn.tokenCt)
     } else {
       code = 'run_failed'
     }

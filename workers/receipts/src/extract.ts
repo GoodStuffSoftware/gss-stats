@@ -179,7 +179,7 @@ function orderRefField(v: unknown): string | null {
   if (v === null) return null
   if (typeof v !== 'string') bad()
   const ref = v.trim()
-  const digits = ref.replace(/[ -]/g, '')
+  const digits = ref.replace(/[ #-]/g, '')
   if (/^\d{12,19}$/.test(digits) && luhnValid(digits) && !/^\d{3}-\d{7}-\d{7}$/.test(ref)) return null
   if (!/^[A-Za-z0-9#-]{1,64}$/.test(ref)) return null
   return ref

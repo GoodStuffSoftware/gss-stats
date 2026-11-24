@@ -139,11 +139,13 @@ export async function recordConnectionResult(db: Db, connectionId: string, r: Co
 export const SET_STATUS_SQL = {
   paused: `UPDATE email_connections SET status = 'paused', last_error = ?3, updated_at = ?2 WHERE id = ?1 AND status IN ('active','paused')`,
   needs_reconnect: `UPDATE email_connections SET status = 'needs_reconnect', token_ct = NULL, token_iv = NULL, key_id = NULL, last_error = ?3, updated_at = ?2
-WHERE id = ?1 AND status IN ('active','paused')`,
+WHERE id = ?1 AND status IN ('active','paused') AND (?4 IS NULL OR token_ct = ?4)`,
 } as const
 
-export async function setConnectionStatus(db: Db, connectionId: string, status: 'paused' | 'needs_reconnect', code: string, now: Date): Promise<void> {
-  await db.prepare(SET_STATUS_SQL[status]).bind(connectionId, iso(now), code).run()
+export async function setConnectionStatus(db: Db, connectionId: string, status: 'paused' | 'needs_reconnect', code: string, now: Date, tokenCt: string | null = null): Promise<void> {
+  // tokenCt (needs_reconnect): only the token this run loaded is cleared; a reconnect that stored a fresh one is left alone.
+  const q = db.prepare(SET_STATUS_SQL[status])
+  await (status === 'paused' ? q.bind(connectionId, iso(now), code) : q.bind(connectionId, iso(now), code, tokenCt)).run()
 }
 
 // ---------- listed ids: dedupe pre-check ----------

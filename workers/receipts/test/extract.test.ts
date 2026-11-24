@@ -129,6 +129,11 @@ describe('extractReceipt', () => {
     expect(JSON.stringify(r)).not.toContain(ENV.apiKey)
   })
 
+  it('drops a card number written with a leading hash', async () => {
+    const r = await extractReceipt(INPUT, ENV, mockFetch(reply(good({ order_ref: '#4111-1111-1111-1111' }))))
+    expect(r.ok && r.receipt.orderRef).toBeNull()
+  })
+
   it('masks digit runs in free text and drops card-like order refs', async () => {
     const r = await extractReceipt(INPUT, ENV, mockFetch(reply(good({
       merchant: 'Fake Mart 1234567890123',
