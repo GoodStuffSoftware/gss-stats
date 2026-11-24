@@ -408,7 +408,7 @@ describe('BudgetTable note', () => {
     expect(tip.get('strong').text()).toBe('Paid')
     expect(tip.findAll('a')).toHaveLength(1)
     expect(tip.get('a').attributes('href')).toBe('https://example.com/r')
-    expect(tip.text()).toContain('x')
+    expect(tip.text()).toBe('Paid receipt x')
   })
   it('the merchant tip also shows the note, and no note line without one', async () => {
     mockFetch(() => json({ rows: rows(), nextCursor: null }))

@@ -4,7 +4,7 @@ import { parseNoteInline, parseNoteMarkdown, safeNoteHref } from './noteMarkdown
 const text = (s: string) => parseNoteInline(s).map((t) => t.value).join('')
 
 describe('old one-line notes', () => {
-  const corpus = ['*', '#1', '# not a heading', '5 * 3', '2*3*4', 'a_b_c', '<b>x</b>', '[x]', '- x', '1. x', '**', '_', 'snake_case_name here']
+  const corpus = ['*', '#1', '# not a heading', '5 * 3', '2*3*4', 'a_b_c', '<b>x</b>', '[x]', '- x', '1. x', '**', '_', 'snake_case_name here', '2**3**4', '2**3**4 and 4**5', 'a**b**c']
   for (const note of corpus) {
     it(`stays literal: ${note}`, () => {
       expect(parseNoteMarkdown(note)).toEqual([{ type: 'p', lines: [[{ type: 'text', value: note }]] }])

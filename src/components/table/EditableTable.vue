@@ -31,6 +31,8 @@ export interface EditableColumn<R> {
   markdown?: boolean
   /** Opt-in, `text` editor: edit in a textarea (Enter adds a line; Ctrl/Cmd+Enter or leaving the field saves; Esc cancels), with a live preview when `markdown`. */
   multiline?: boolean
+  /** `text` editor: the longest text the field takes (the server's limit), so a paste can't run past it. */
+  maxLength?: number
   /** Opt-in, `editGesture: 'hold'`: a click on an EMPTY cell also peeks (instead of editing) when this says the row has something to show. */
   hasPeek?: (row: R) => boolean
   /** Table layout: the narrowest this column is drawn (px); also the width a reset column returns to in a resized table. */
@@ -335,10 +337,17 @@ function commitText(row: R, col: EditableColumn<R>) {
 }
 /** Multiline editor keys: Enter adds a line (the default), Ctrl/Cmd+Enter saves. */
 function onMultilineEnter(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
+  if (e.isComposing) return // Enter that ends an IME composition is not a save
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault()
     commitText(row, col)
   }
+}
+/** Esc in the multiline editor: during an IME composition it only aborts the composition. */
+function onMultilineEsc(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
+  if (e.isComposing) return
+  e.preventDefault()
+  cancelText(row, col)
 }
 function cancelText(row: R, col: EditableColumn<R>) {
   const key = keyOf(row)
@@ -365,6 +374,7 @@ function onHoldMove(e: PointerEvent) {
 }
 function holdStart(row: R, col: EditableColumn<R>, e: PointerEvent) {
   suppressClick = false
+  if ((e.target as HTMLElement | null)?.closest?.('a')) return // a link follows itself; it never starts an edit
   if (!isHold(col) || disabledOf(row)) return
   if (e.pointerType === 'mouse' && e.button !== 0) return
   holdCancel()
@@ -397,6 +407,7 @@ function onTextClick(row: R, col: EditableColumn<R>, e: MouseEvent) {
   emit('peek', keyOf(row), col.key, e.currentTarget as HTMLElement, 'click')
 }
 function onTextKey(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
+  if ((e.target as HTMLElement | null)?.closest?.('a')) return // Enter on a link follows it
   if (!isHold(col) || e.altKey || e.ctrlKey || e.metaKey) return
   if (e.key === 'Enter' || e.key === 'F2') {
     e.preventDefault() // Enter would otherwise click the button, which only peeks
@@ -594,9 +605,10 @@ function rowClass(row: R) {
                     v-model="draft"
                     class="et-input et-multiline"
                     rows="4"
-                                    :aria-label="labelOf(row, col)"
+                    :maxlength="col.maxLength"
+                    :aria-label="labelOf(row, col)"
                     @keydown.enter="onMultilineEnter(row, col, $event)"
-                    @keydown.esc.prevent="cancelText(row, col)"
+                    @keydown.esc="onMultilineEsc(row, col, $event)"
                     @blur="commitText(row, col)"
                   />
                   <input
@@ -610,6 +622,10 @@ function rowClass(row: R) {
                     @blur="commitText(row, col)"
                   />
                   <MarkdownText v-if="col.multiline && col.markdown && draft" class="et-preview" :text="draft" data-testid="md-preview" />
+                  <div v-if="col.multiline" class="et-edit-actions">
+                    <button type="button" class="btn btn-primary et-act" data-testid="note-save" @mousedown.prevent @click="commitText(row, col)">Save</button>
+                    <button type="button" class="btn et-act" data-testid="note-cancel" @mousedown.prevent @click="cancelText(row, col)">Cancel</button>
+                  </div>
                 </template>
                 <button
                   v-else
@@ -706,9 +722,10 @@ function rowClass(row: R) {
                   v-model="draft"
                   class="et-input et-multiline"
                   rows="4"
-                                :aria-label="labelOf(row, col)"
+                  :maxlength="col.maxLength"
+                  :aria-label="labelOf(row, col)"
                   @keydown.enter="onMultilineEnter(row, col, $event)"
-                  @keydown.esc.prevent="cancelText(row, col)"
+                  @keydown.esc="onMultilineEsc(row, col, $event)"
                   @blur="commitText(row, col)"
                 />
                 <input
@@ -722,6 +739,10 @@ function rowClass(row: R) {
                   @blur="commitText(row, col)"
                 />
                 <MarkdownText v-if="col.multiline && col.markdown && draft" class="et-preview" :text="draft" data-testid="md-preview" />
+                <div v-if="col.multiline" class="et-edit-actions">
+                  <button type="button" class="btn btn-primary et-act" data-testid="note-save" @mousedown.prevent @click="commitText(row, col)">Save</button>
+                  <button type="button" class="btn et-act" data-testid="note-cancel" @mousedown.prevent @click="cancelText(row, col)">Cancel</button>
+                </div>
               </template>
               <button
                 v-else
@@ -827,7 +848,22 @@ function rowClass(row: R) {
   -webkit-user-select: none;
   user-select: none;
 }
+.et-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.et-act {
+  padding: 4px 10px;
+}
 /* A finger needs a wider target than a mouse. */
+@media (pointer: coarse), (max-width: 640px) {
+  .et-act {
+    min-height: 36px;
+    min-width: 72px;
+    justify-content: center;
+  }
+}
 @media (pointer: coarse) {
   .et-resizer {
     right: -12px;

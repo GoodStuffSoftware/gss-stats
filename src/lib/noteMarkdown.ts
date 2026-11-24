@@ -74,8 +74,8 @@ export function parseNoteInline(input: string): NoteInline[] {
       }
     }
 
-    if (c === '*' && input[i + 1] === '*') {
-      const m = /^\*\*(?=\S)([^\n]+?)(?<=\S)\*\*/.exec(input.slice(i))
+    if (c === '*' && input[i + 1] === '*' && !isWord(input[i - 1])) {
+      const m = /^\*\*(?=\S)([^\n]+?)(?<=\S)\*\*(?![\p{L}\p{N}_])/u.exec(input.slice(i))
       if (m && !m[1].startsWith('*')) {
         flush()
         out.push({ type: 'bold', value: m[1] })
