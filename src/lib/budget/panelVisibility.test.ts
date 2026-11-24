@@ -61,11 +61,13 @@ describe('migrateLegacyTab', () => {
     b.setItem(panelsKey(EMAIL), JSON.stringify({ hidden: ['debts'] }))
     expect(migrateLegacyTab(EMAIL, b)).toEqual({ tab: 'spending', side: true })
   })
-  it('tabs, nothing, or both hidden is no opinion', () => {
+  it('a missing layout key was Side by side in 0.82.0: no tab of its own, but reported as side', () => {
+    expect(migrateLegacyTab(EMAIL, memory())).toEqual({ tab: null, side: true })
+  })
+  it('tabs, or both hidden, is no opinion', () => {
     const a = memory()
     a.setItem(LAYOUT_KEY, 'tabs')
     expect(migrateLegacyTab(EMAIL, a)).toEqual({ tab: null, side: false })
-    expect(migrateLegacyTab(EMAIL, memory())).toEqual({ tab: null, side: false })
     const b = memory()
     b.setItem(panelsKey(EMAIL), JSON.stringify({ hidden: ['spending', 'debts'] }))
     expect(migrateLegacyTab(EMAIL, b).tab).toBeNull()
@@ -85,7 +87,7 @@ describe('migrateLegacyTab', () => {
     migrateLegacyTab(EMAIL, a)
     expect([...a.data.keys()].sort()).toEqual([`${DONUT_KEY_PREFIX}:both`, `${DONUT_KEY_PREFIX}:spending:solo`].sort())
     expect(a.data.get(`${DONUT_KEY_PREFIX}:both`)).toBe('320')
-    expect(migrateLegacyTab(EMAIL, a)).toEqual({ tab: null, side: false })
+    expect(migrateLegacyTab(EMAIL, a).tab).toBeNull()
   })
   it('keeps a Both size that already exists', () => {
     const a = memory()
@@ -103,7 +105,7 @@ describe('migrateLegacyTab', () => {
   })
   it('never throws when storage is missing or blocked', () => {
     expect(migrateLegacyTab(EMAIL, null)).toEqual({ tab: null, side: false })
-    expect(migrateLegacyTab(EMAIL, throwing)).toEqual({ tab: null, side: false })
+    expect(migrateLegacyTab(EMAIL, throwing).tab).toBeNull()
   })
 })
 

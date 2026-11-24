@@ -74,8 +74,9 @@ export interface LegacyChoice {
  *  - a hidden chart is the other chart's tab (hide Spending = Debts, hide Debts = Spending);
  *  - else the layout "Side by side" chosen on purpose is Both;
  *  - else (Tabs, or nothing was ever chosen) no opinion: null, and the saved or default tab applies.
- * `side` also reports the layout choice alone: a 0.82.0 saved view that hid nothing is the phone tab only, so a person
- * who was on Side by side lands on Both over it (BudgetSection `settleView`).
+ * `side` also reports what 0.82.0 showed on a wide screen: Side by side, chosen or by default (any layout but a saved
+ * 'tabs'). A 0.82.0 saved view that hid nothing is the phone tab only, so a person who was on Side by side lands on Both
+ * over it on a wide screen (BudgetSection `settleView`).
  * The side-by-side donut size becomes the Both size (if there is none yet). Never throws.
  */
 export function migrateLegacyTab(email: string | null | undefined, storage: PanelStorage | null = defaultStorage()): LegacyChoice {
@@ -105,10 +106,11 @@ export function migrateLegacyTab(email: string | null | undefined, storage: Pane
     hidden = []
   }
   const layout = get(LAYOUT_KEY)
-  const side = layout === 'side'
+  // 0.82.0 read a missing key as Side by side (`readDesktopLayout`) and wrote the key only when the picker was used
+  const side = layout !== 'tabs'
   let tab: BudgetTab | null = null
   if (hidden.length === 1) tab = hidden[0] === 'spending' ? 'debts' : 'spending'
-  else if (side) tab = 'both'
+  else if (layout === 'side') tab = 'both'
 
   const bothKey = donutSizeKey('spending', true)
   if (get(bothKey) === null) {

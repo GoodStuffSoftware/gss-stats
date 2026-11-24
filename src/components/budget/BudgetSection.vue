@@ -105,7 +105,7 @@ async function settleView(m: MetaResponse) {
   // over it. A legacy view that hid a chart already folded into its single tab; a new view keeps its saved tab.
   const baseline = sv.view ?? currentView.value
   if (!sv.view && legacy.tab) applyLegacyTab(legacy.tab)
-  else if (sv.view && sv.legacyOpen && legacy.side) applyLegacyTab('both', true)
+  else if (sv.view && sv.legacyOpen && legacy.side && !narrow.value) applyLegacyTab('both', true)
   viewSaver.setBaseline(sv.ok ? baseline : null)
   viewSaverArmed = true
   if (sv.ok) viewSaver.schedule(currentView.value)

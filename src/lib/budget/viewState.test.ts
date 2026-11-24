@@ -510,6 +510,113 @@ describe('Budget pages: Overview and Loans', () => {
     w.unmount()
   })
 
+  describe('backToOverview: one Back per crumb, and the close-the-debt intent', () => {
+    const LEAVE = 'gss-stats-budget-leave-debt'
+    beforeEach(() => {
+      sessionStorage.clear()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      sessionStorage.clear()
+    })
+
+    it('a second call before the first Back lands does nothing (a double click goes back once)', async () => {
+      const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.backToOverview(false)
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(1)
+      pop(null) // the first Back landed
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(2)
+      w.unmount()
+    })
+
+    it('a Back that never lands (nothing to go back to) does not lock the crumb for good', () => {
+      const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.backToOverview(false)
+      vi.advanceTimersByTime(1500)
+      view.backToOverview(false)
+      expect(back).toHaveBeenCalledTimes(2)
+      w.unmount()
+    })
+
+    it('the landing closes the open debt once, and nothing is left in storage', async () => {
+      vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.setDebt('acct-1')
+      view.backToOverview(true)
+      expect(sessionStorage.getItem(LEAVE)).not.toBeNull()
+      pop(null)
+      vi.advanceTimersByTime(5)
+      expect(view.state.debt).toBeNull()
+      expect(sessionStorage.getItem(LEAVE)).toBeNull() // taken: a later Back onto Overview closes nothing
+      w.unmount()
+    })
+
+    it('a popstate that does not land on Overview drops the intent (it never reaches a later Back)', () => {
+      vi.spyOn(history, 'back').mockImplementation(() => {})
+      const { view, w } = mountSection()
+      view.setDebt('acct-1')
+      view.backToOverview(true)
+      history.replaceState(null, '', '/?section=budget&page=p1&b_page=loans') // Forward onto the Loans page instead
+      pop(null)
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      expect(view.state.page).toBe('loans')
+      w.unmount()
+    })
+
+    it('a full page load onto the Overview entry (the in-memory flag is gone) still closes the debt, once, if the intent is fresh', () => {
+      const first = mountSection()
+      first.view.setDebt('acct-1')
+      const kept = history.state
+      first.w.unmount()
+      sessionStorage.setItem(LEAVE, String(Date.now()))
+      history.replaceState(kept, '', '/?section=budget&page=p1')
+      const second = mountSection()
+      vi.advanceTimersByTime(5)
+      expect(second.view.state.debt).toBeNull()
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      second.w.unmount()
+    })
+
+    it('an intent older than ten seconds is ignored (a Back that never landed does not leak into a later visit)', () => {
+      const first = mountSection()
+      first.view.setDebt('acct-1')
+      const kept = history.state
+      first.w.unmount()
+      sessionStorage.setItem(LEAVE, String(Date.now()))
+      vi.advanceTimersByTime(11_000)
+      history.replaceState(kept, '', '/?section=budget&page=p1')
+      const second = mountSection()
+      vi.advanceTimersByTime(5)
+      expect(second.view.state.debt).toBe('acct-1')
+      expect(sessionStorage.getItem(LEAVE)).toBeNull()
+      second.w.unmount()
+    })
+
+    it('without history to go back through it opens Overview directly, closing the debt when asked', () => {
+      vi.stubGlobal('history', undefined)
+      try {
+        const view = useBudgetViewState(TODAY) // a bare call: no component, no history
+        view.setPage('loans', 'acct-1')
+        view.setDebt('acct-1')
+        view.backToOverview(true)
+        expect(view.state.page).toBe('overview')
+        expect(view.state.debt).toBeNull()
+        view.setPage('loans', 'acct-1')
+        view.setDebt('acct-1')
+        view.backToOverview(false)
+        expect(view.state.page).toBe('overview')
+        expect(view.state.debt).toBe('acct-1') // not asked to close it
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+  })
+
   it('opening a loan from Overview is ONE entry: page and loan together; the loan is in history.state, not the URL', async () => {
     const push = vi.spyOn(history, 'pushState')
     const { view, w } = mountSection()

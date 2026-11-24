@@ -345,6 +345,32 @@ export function txnQueryOf(state: BudgetViewState): TxnQuery {
   return q
 }
 
+// ── The loan trail's "close the debt too" intent (backToOverview) ────────────────────────────────────────────
+// Kept in sessionStorage with a time stamp: a Back onto an entry of an earlier visit reloads the page, and a flag in
+// memory would be lost. The time limit keeps a Back that never landed from reaching a later, unrelated one.
+const LEAVE_KEY = 'gss-stats-budget-leave-debt'
+const LEAVE_TTL_MS = 10_000
+/** How long a second "back" click is ignored when the first one never lands (nothing to go back to). */
+const LEAVE_LOCK_MS = 1_000
+function markLeaveDebt(on: boolean) {
+  try {
+    if (on) globalThis.sessionStorage.setItem(LEAVE_KEY, String(Date.now()))
+    else globalThis.sessionStorage.removeItem(LEAVE_KEY)
+  } catch {
+    // storage unavailable: the crumb still goes back, the debt just stays open on a full page load
+  }
+}
+/** True once, and only within the time limit; always clears the mark. */
+function takeLeaveDebt(): boolean {
+  try {
+    const at = Number(globalThis.sessionStorage.getItem(LEAVE_KEY))
+    globalThis.sessionStorage.removeItem(LEAVE_KEY)
+    return Number.isFinite(at) && at > 0 && Date.now() - at <= LEAVE_TTL_MS
+  } catch {
+    return false
+  }
+}
+
 // ── The live state ────────────────────────────────────────────────────────────────────────────────────────
 /** `defaultTab` names the tab for a link or entry that does not carry one (the width decides: `defaultTabFor`). */
 export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () => BudgetTab = () => 'spending') {
@@ -508,8 +534,12 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
       globalThis.addEventListener('popstate', onPop)
       globalThis.addEventListener('popstate', onLoanPop)
       globalThis.addEventListener('popstate', onDebtPop)
+      // landed by a full page load (a Back onto an entry of an earlier visit): the crumb's intent is still waiting
+      if (takeLeaveDebt() && state.page === 'overview') setTimeout(() => setDebt(null), 0)
     })
     onBeforeUnmount(() => {
+      endLeaving()
+      takeLeaveDebt()
       globalThis.removeEventListener('popstate', onPop)
       globalThis.removeEventListener('popstate', onLoanPop)
       globalThis.removeEventListener('popstate', onDebtPop)
@@ -524,10 +554,9 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
    * entry's address would also roll back the range or person chosen since. */
   function readUrl(e?: PopStateEvent) {
     readAddress(e)
-    if (clearDebtOnLanding && state.page === 'overview') {
-      clearDebtOnLanding = false
-      setTimeout(() => setDebt(null), 0)
-    }
+    endLeaving()
+    // every popstate takes the intent: one that does not land on Overview drops it instead of leaving it for a later Back
+    if (takeLeaveDebt() && state.page === 'overview') setTimeout(() => setDebt(null), 0)
   }
   function readAddress(e?: PopStateEvent) {
     syncPage(e ? e.state : globalThis.history?.state)
@@ -595,7 +624,11 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
    * is browser Back), and with `clearDebt` also out of the open debt to the debt list. The open debt is closed after the
    * landing has been settled (drillHistory.ts adopts an entry of an earlier visit a tick later), through its own history
    * step, so Back afterwards goes where the crumb said. Without history to go back through, a new Overview entry. */
-  let clearDebtOnLanding = false
+  let leaving: ReturnType<typeof setTimeout> | null = null // a back() is in flight: a second click must not go back again
+  function endLeaving() {
+    if (leaving !== null) clearTimeout(leaving)
+    leaving = null
+  }
   function backToOverview(clearDebt: boolean) {
     const h = globalThis.history
     if (!h || !globalThis.window) {
@@ -603,7 +636,12 @@ export function useBudgetViewState(today: IsoDate = todayIso(), defaultTab: () =
       if (clearDebt) setDebt(null)
       return
     }
-    clearDebtOnLanding = clearDebt
+    if (leaving !== null) return // a double click: the first back() has not landed yet
+    // The intent to close the debt lives in sessionStorage, not in memory: a traversal onto an entry of an earlier visit
+    // is a full page load (the flag would be lost). Any popstate and every start takes it, so it never outlives one Back.
+    markLeaveDebt(clearDebt)
+    // no popstate when there is nothing to go back to: do not stay locked
+    leaving = setTimeout(endLeaving, LEAVE_LOCK_MS)
     h.back()
   }
   /** False (and nothing changes) for a range the server would refuse. */
