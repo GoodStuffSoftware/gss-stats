@@ -85,7 +85,21 @@ describe('tokenCrypto', () => {
     const good = makeKey()
     const enc = await encryptToken('x', CONN, good)
     expect(await codeOf(decryptToken(enc, CONN, { current: makeKey(16) }))).toBe('key_invalid')
-    expect(await codeOf(decryptToken(enc, CONN, { current: good, old: makeKey(8) }))).toBe('key_invalid')
+  })
+
+  it('tries the current key first; an invalid old key counts as absent', async () => {
+    const good = makeKey()
+    const plain = makePlain()
+    const enc = await encryptToken(plain, CONN, good)
+    // A placeholder or wrong-length old key never breaks a decrypt the current key can serve.
+    for (const bad of [makeKey(8), 'placeholder', 'not base64 !!']) {
+      expect(await decryptToken(enc, CONN, { current: good, old: bad })).toEqual({ plaintext: plain, usedOldKey: false })
+    }
+    // When the current key cannot decrypt, an invalid old key is absent: decrypt_failed, not key_invalid.
+    const other = makeKey()
+    expect(await codeOf(decryptToken(enc, CONN, { current: other, old: 'placeholder' }))).toBe('decrypt_failed')
+    // A valid old key still serves rows written under it.
+    expect(await decryptToken(enc, CONN, { current: other, old: good })).toEqual({ plaintext: plain, usedOldKey: true })
   })
 
   it('uses a fresh IV, so two encryptions of the same text differ', async () => {

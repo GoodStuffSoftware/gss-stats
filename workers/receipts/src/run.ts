@@ -57,8 +57,16 @@ function senderDomain(payload: { headers?: Array<{ name?: string; value?: string
   return m ? m[1].toLowerCase() : null
 }
 
-const CATEGORIES_SQL = `SELECT id FROM categories WHERE archived = 0 ORDER BY id`
-const RUN_OPEN_SQL = `SELECT 1 AS ok FROM receipt_sync_runs WHERE id = ?1 AND connection_id = ?2 AND finished_at IS NULL`
+/** New-message listing: slice length (seconds), floor for halving, and the most list calls one run makes. */
+const SLICE_S = 7 * 86_400
+const MIN_SLICE_S = 3_600
+const MAX_LISTS_PER_RUN = 8
+
+const CATEGORIES_SQL =`SELECT id FROM categories WHERE archived = 0 ORDER BY id`
+/** The run is still open and its connection still active (a disconnect pauses or revokes the connection first). */
+const RUN_ACTIVE_SQL = `SELECT 1 AS ok FROM receipt_sync_runs r JOIN email_connections c ON c.id = r.connection_id
+WHERE r.id = ?1 AND r.connection_id = ?2 AND r.finished_at IS NULL AND c.status = 'active'`
+const RUN_OPEN_SQL =`SELECT 1 AS ok FROM receipt_sync_runs WHERE id = ?1 AND connection_id = ?2 AND finished_at IS NULL`
 /** Re-encrypted token: only the row still holding the ciphertext we read, still active. */
 const REKEY_SQL = `UPDATE email_connections SET token_ct = ?3, token_iv = ?4, key_id = ?5, updated_at = ?6 WHERE id = ?1 AND token_ct = ?2 AND status = 'active'`
 
@@ -77,7 +85,7 @@ export async function runConnection(env: Env, connectionId: string, runId: numbe
   let id = runId
   try {
     if (id === null) id = await S.createRun(db, connectionId, trigger, clock())
-    const r = await runInner(env, connectionId, counts, deps, clock)
+    const r = await runInner(env, connectionId, id, counts, deps, clock)
     code = r.code
     watermarkAt = r.watermarkAt
   } catch {
@@ -95,7 +103,7 @@ export async function runConnection(env: Env, connectionId: string, runId: numbe
   return { errorCode: code, counts }
 }
 
-async function runInner(env: Env, connectionId: string, counts: S.RunCounts, deps: RunDeps, clock: () => Date): Promise<{ code: string | null; watermarkAt: string | null }> {
+async function runInner(env: Env, connectionId: string, runId: number | null, counts: S.RunCounts, deps: RunDeps, clock: () => Date): Promise<{ code: string | null; watermarkAt: string | null }> {
   const db = env.BUDGET_DB
   const doFetch = deps.fetch ?? fetch
   const startedMs = clock().getTime()
@@ -148,10 +156,13 @@ async function runInner(env: Env, connectionId: string, counts: S.RunCounts, dep
   const categoryIds = (await db.prepare(CATEGORIES_SQL).all<{ id: string }>()).results.map((c) => c.id)
   const timeUp = (): boolean => deps.budgetMs !== undefined && clock().getTime() - startedMs >= deps.budgetMs
   let code: string | null = null
-  let newest = 0
+  let handledMs = 0 // internalDate of the message the last handle() stored (0 when it stored none)
+  let wmMs = 0 // the watermark this run may move to (see the slice loop)
 
   /** Get, extract and store (or complete) one message. Returns a run-ending code, or null to go on. */
   const handle = async (gmailId: string, retry: { id: string } | null): Promise<string | null> => {
+    // A disconnect (pause, revoke, purge) while this run is going ends it before the next message is read or paid for.
+    if (runId !== null && !(await db.prepare(RUN_ACTIVE_SQL).bind(runId, connectionId).first())) return 'not_active'
     let msg
     try {
       msg = await gmail.getMessage(gmailId)
@@ -188,11 +199,14 @@ async function runInner(env: Env, connectionId: string, counts: S.RunCounts, dep
       if (receipt.status === 'skipped') counts.skipped++
       else counts.extracted++
     }
-    newest = Math.max(newest, msg.internalDateMs)
+    handledMs = msg.internalDateMs
     return null
   }
 
   try {
+    // One token refresh up front: a token-endpoint failure (invalid_client, bad answer) is a run code, never a charge
+    // against a message's attempts.
+    await gmail.refreshAccessToken()
     // Retries first (pending or error rows under the attempt limit), then new messages oldest first.
     const retries = await S.loadRetryReceipts(db, connectionId, budget)
     for (const rr of retries) {
@@ -202,15 +216,48 @@ async function runInner(env: Env, connectionId: string, counts: S.RunCounts, dep
       if (code) break
     }
     if (!code && budget > 0 && !timeUp()) {
-      const query = buildReceiptQuery(await S.loadReceiptQueries(db), afterBound(S.watermarkMs(conn), clock().getTime(), intVar(env.RECEIPTS_BACKFILL_DAYS, 14)))
-      const listed = await gmail.listMessageIds(query, { pageSize: 100, maxPages: 2 })
-      counts.listed = listed.ids.length
-      const { fresh } = await S.filterNewMessageIds(db, connectionId, listed.ids)
-      for (const gid of fresh.reverse()) {
-        if (budget <= 0 || timeUp()) break
-        budget--
-        code = await handle(gid, null)
-        if (code) break
+      // New messages in oldest-first time slices. Gmail lists newest first and a list is capped (2 pages), so a slice that
+      // still has more pages is halved until it fits; the watermark moves to a slice's end only when that slice was listed
+      // completely and every fresh message in it was handled, otherwise only to the newest message handled (a prefix).
+      const queries = await S.loadReceiptQueries(db)
+      const nowMs = clock().getTime()
+      const nowSec = Math.floor(nowMs / 1000)
+      let cursor = afterBound(S.watermarkMs(conn), nowMs, intVar(env.RECEIPTS_BACKFILL_DAYS, 14))
+      let len = SLICE_S
+      for (let lists = 0; lists < MAX_LISTS_PER_RUN && cursor <= nowSec && budget > 0 && !timeUp();) {
+        const end = cursor + len
+        const open = end > nowSec // the last slice has no upper bound
+        const listed = await gmail.listMessageIds(buildReceiptQuery(queries, cursor, open ? undefined : end), { pageSize: 100, maxPages: 2 })
+        lists++
+        if (listed.more && len > MIN_SLICE_S) {
+          len = Math.max(MIN_SLICE_S, Math.floor(len / 2))
+          continue
+        }
+        counts.listed += listed.ids.length
+        const { fresh } = await S.filterNewMessageIds(db, connectionId, listed.ids)
+        let complete = true
+        let sliceNewest = 0
+        for (const gid of fresh.reverse()) {
+          if (budget <= 0 || timeUp()) {
+            complete = false
+            break
+          }
+          budget--
+          handledMs = 0
+          code = await handle(gid, null)
+          sliceNewest = Math.max(sliceNewest, handledMs)
+          if (code) {
+            complete = false
+            break
+          }
+        }
+        if (!complete) {
+          wmMs = Math.max(wmMs, sliceNewest)
+          break
+        }
+        wmMs = Math.max(wmMs, open ? sliceNewest : end * 1000)
+        if (open) break
+        cursor = end - 1 // one second of overlap; stored ids are skipped
       }
     }
   } catch (e) {
@@ -239,6 +286,6 @@ async function runInner(env: Env, connectionId: string, counts: S.RunCounts, dep
       code = code ?? 'match_failed'
     }
   }
-  return { code, watermarkAt: newest > 0 ? new Date(newest).toISOString() : null }
+  return { code, watermarkAt: wmMs > 0 ? new Date(wmMs).toISOString() : null }
 }
 

@@ -43,16 +43,19 @@ async function addConn(id = CONN, email = OWNER, key = KEY): Promise<void> {
     .run(id, email, e.token_ct, e.token_iv, e.key_id)
 }
 
-interface Net { fetch: typeof fetch; urls: string[]; anthropic: number; gets: number }
-interface NetOpts { messages?: number; anthropicStatus?: number; tokenError?: boolean }
+interface Net { fetch: typeof fetch; urls: string[]; anthropic: number; gets: number; queries: string[] }
+interface NetOpts { messages?: number; anthropicStatus?: number; tokenError?: boolean; times?: number[]; tokenStatus?: number }
+const pageToken = (n: number): string => `pt-${n}`
 /** Google token + Gmail list/get + Anthropic. Message i (0 = oldest) has internalDate one hour after the previous; receipt n totals 1234 + 111n cents. */
 function makeNet(o: NetOpts = {}): Net {
-  const count = o.messages ?? 2
-  const net: Net = { urls: [], anthropic: 0, gets: 0, fetch: undefined as never }
+  const count = o.times ? o.times.length : (o.messages ?? 2)
+  const timeOf = (i: number): number => (o.times ? o.times[i] : MSG_DAY + i * 3_600_000)
+  const net: Net = { urls: [], queries: [], anthropic: 0, gets: 0, fetch: undefined as never }
   net.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url)
     net.urls.push(u)
     if (u.startsWith('https://oauth2.googleapis.com/token')) {
+      if (o.tokenStatus) return new Response(JSON.stringify({ error: 'invalid_client' }), { status: o.tokenStatus })
       return o.tokenError ? new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }) : new Response(JSON.stringify({ access_token: 'fake-access-token-1111' }))
     }
     if (u.startsWith('https://api.anthropic.com/')) {
@@ -68,10 +71,19 @@ function makeNet(o: NetOpts = {}): Net {
       net.gets++
       const i = Number(BigInt(`0x${get[1]}`) - 0x18c3f2a9b7d4e600n)
       const text = 'Thanks for your order from Fake Mart. Your order has shipped.'
-      return new Response(JSON.stringify({ id: get[1], internalDate: String(MSG_DAY + i * 3_600_000), payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Fake Mart <orders@shop.example.com>' }], body: { data: b64url(text) } } }))
+      return new Response(JSON.stringify({ id: get[1], internalDate: String(timeOf(i)), payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Fake Mart <orders@shop.example.com>' }], body: { data: b64url(text) } } }))
     }
-    // messages.list: newest first
-    return new Response(JSON.stringify({ messages: Array.from({ length: count }, (_, i) => ({ id: hexId(count - 1 - i) })) }))
+    // messages.list: newest first, filtered by after:/before: (epoch seconds), paged by maxResults and pageToken
+    const lu = new URL(u)
+    const q = lu.searchParams.get('q') ?? ''
+    net.queries.push(q)
+    const after = Number(/after:(\d+)/.exec(q)?.[1] ?? 0) * 1000
+    const before = /before:(\d+)/.exec(q) ? Number(/before:(\d+)/.exec(q)?.[1]) * 1000 : Infinity
+    const all = Array.from({ length: count }, (_, i) => i).filter((i) => timeOf(i) > after && timeOf(i) < before).reverse()
+    const size = Number(lu.searchParams.get('maxResults') ?? 100)
+    const off = lu.searchParams.get('pageToken') ? Number(lu.searchParams.get('pageToken')!.slice(3)) : 0
+    const page = all.slice(off, off + size)
+    return new Response(JSON.stringify({ messages: page.map((i) => ({ id: hexId(i) })), ...(off + size < all.length ? { nextPageToken: pageToken(off + size) } : {}) }))
   }) as unknown as typeof fetch
   return net
 }
@@ -103,12 +115,12 @@ describe('a run', () => {
     expect(db.get<{ sender_domain: string }>('SELECT sender_domain FROM receipts LIMIT 1')?.sender_domain).toBe('shop.example.com')
     expect(db.all<{ status: string }>('SELECT status FROM receipt_matches').map((x) => x.status)).toEqual(['suggested'])
     expect(snapshotTxns()).toBe(before)
-    expect(conn()).toMatchObject({ last_run_at: NOW.toISOString(), last_ok_at: NOW.toISOString(), last_error: null, watermark_at: new Date(MSG_DAY + 3_600_000).toISOString() })
+    expect(conn()).toMatchObject({ last_run_at: NOW.toISOString(), last_ok_at: NOW.toISOString(), last_error: null, watermark_at: new Date(NOW.getTime() - 1000).toISOString() })
     expect(net.urls.some((u) => u.includes('/messages/') && !u.includes('format=full'))).toBe(false)
   })
 
   it('a second run dedupes: no new gets, no model calls, no new receipts', async () => {
-    const net = makeNet({ messages: 2 })
+    const net = makeNet({ times: [NOW.getTime() - 26 * 3_600_000, NOW.getTime() - 25 * 3_600_000] })
     await run(makeEnv(), net)
     const calls = net.anthropic
     const gets = net.gets
@@ -223,12 +235,81 @@ describe('a run', () => {
   it('a manual run past its time budget ends cleanly between messages and the next run continues', async () => {
     let t = NOW.getTime()
     const net = makeNet({ messages: 5 })
-    const out = await run(makeEnv(), net, CONN, { now: () => new Date((t += 400)), budgetMs: 2_000 })
+    const out = await run(makeEnv(), net, CONN, { now: () => new Date((t += 200)), budgetMs: 2_000 })
     expect(out.errorCode).toBeNull()
     expect(count('receipts')).toBeGreaterThan(0)
     expect(count('receipts')).toBeLessThan(5)
     await run(makeEnv(), net)
     expect(count('receipts')).toBe(5)
+  })
+
+  it('a placeholder (invalid) old key counts as absent: runs still work on the current key', async () => {
+    const net = makeNet({ messages: 1 })
+    const out = await run(makeEnv({ RECEIPTS_TOKEN_KEY_OLD: sec('placeholder') }), net)
+    expect(out.errorCode).toBeNull()
+    expect(count('receipts')).toBe(1)
+    expect(conn()).toMatchObject({ status: 'active' })
+  })
+
+  it('a disconnect during a run stores no receipt and stops the loop before the next message', async () => {
+    const net = makeNet({ messages: 3 })
+    const f = net.fetch
+    net.fetch = (async (u: string | URL | Request, i?: RequestInit) => {
+      if (String(u).startsWith('https://api.anthropic.com/')) db.exec(`UPDATE email_connections SET status = 'paused' WHERE id = '${CONN}'`)
+      return f(u, i)
+    }) as typeof fetch
+    const out = await runConnection(makeEnv(), CONN, null, 'cron', { fetch: net.fetch, now: () => NOW })
+    expect(count('receipts')).toBe(0)
+    expect(count('receipt_items')).toBe(0)
+    expect(net.anthropic).toBe(1)
+    expect(out.errorCode).toBe('not_active')
+  })
+
+  it('a token-endpoint failure is a run code and burns no message attempt', async () => {
+    await S.insertReceipt(db.d1, { connectionId: CONN, gmailMsgId: hexId(0), emailDate: '2026-12-01', extracted: null, failureCode: 'extract_invalid' }, NOW)
+    expect(db.get<{ attempts: number }>('SELECT attempts FROM receipts')?.attempts).toBe(1)
+    const out = await run(makeEnv(), makeNet({ messages: 1, tokenStatus: 401 }))
+    expect(out.errorCode).toBe('client_error')
+    expect(db.get<{ attempts: number }>('SELECT attempts FROM receipts')?.attempts).toBe(1)
+  })
+})
+
+describe('time slices (a backfill larger than one list loses nothing)', () => {
+  const T0 = NOW.getTime() - 13 * 86_400_000
+  const times = Array.from({ length: 250 }, (_, i) => T0 + i * 1_800_000) // 250 matches, 30 minutes apart, about 5 days
+  const idsStored = (): string[] => db.all<{ gmail_msg_id: string }>('SELECT gmail_msg_id FROM receipts ORDER BY gmail_msg_id').map((r) => r.gmail_msg_id)
+  const big = (over: Partial<Env> = {}): Env => makeEnv({ RECEIPTS_MAX_PER_RUN: '1000', RECEIPTS_DAILY_CAP: '1000', ...over })
+
+  it('250 matches (more than the 200 one list can hold) are all handled, oldest first', async () => {
+    const net = makeNet({ times })
+    const out = await run(big(), net)
+    expect(out.errorCode).toBeNull()
+    expect(count('receipts')).toBe(250)
+    expect(idsStored()).toEqual(Array.from({ length: 250 }, (_, i) => hexId(i)))
+    // The first list (7-day slice) had more pages, so a smaller slice was listed after it.
+    expect(net.queries.length).toBeGreaterThan(1)
+    expect(net.queries.every((q) => /after:\d+/.test(q))).toBe(true)
+    expect(net.queries.some((q) => /before:\d+/.test(q))).toBe(true)
+  })
+
+  it('with a small per-run cap the watermark never passes an unhandled message and later runs finish the list', async () => {
+    const net = makeNet({ times })
+    const env = big({ RECEIPTS_MAX_PER_RUN: '100' })
+    await run(env, net)
+    expect(idsStored()).toEqual(Array.from({ length: 100 }, (_, i) => hexId(i)))
+    expect(conn().watermark_at).toBe(new Date(times[99]).toISOString())
+    await run(env, net)
+    expect(idsStored()).toEqual(Array.from({ length: 200 }, (_, i) => hexId(i)))
+    expect(new Date(String(conn().watermark_at)).getTime()).toBeLessThanOrEqual(times[199])
+    await run(env, net)
+    expect(idsStored()).toEqual(Array.from({ length: 250 }, (_, i) => hexId(i)))
+  })
+
+  it('a slice that had more pages than one list holds is halved, not truncated to its newest 200', async () => {
+    const net = makeNet({ times })
+    await run(big({ RECEIPTS_MAX_PER_RUN: '1' }), net)
+    // The oldest message, which a newest-first list of 200 would have dropped, is the one handled.
+    expect(idsStored()).toEqual([hexId(0)])
   })
 })
 

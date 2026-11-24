@@ -2,7 +2,26 @@
 // is generated at run time. The Worker behind the RECEIPTS binding is faked.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { pkceVerifier, b64urlEncode, signToken } from './auth'
-import { finishConnect, startConnect, connectCookieName, type ReceiptsConnectEnv } from './gmailConnect'
+import { bindingFetch, BINDING_TIMEOUT_MS, finishConnect, startConnect, connectCookieName, type ReceiptsConnectEnv } from './gmailConnect'
+
+describe('bindingFetch', () => {
+  it('rejects after the time limit and aborts the call; a quick answer passes through', async () => {
+    vi.useFakeTimers()
+    try {
+      let aborted = false
+      const slow = { fetch: (_u: string, init?: RequestInit) => new Promise<Response>(() => { init?.signal?.addEventListener('abort', () => { aborted = true }) }) }
+      const p = bindingFetch(slow, 'https://receipts.internal/sync', {}, BINDING_TIMEOUT_MS.sync)
+      const caught = p.catch((e: Error) => e.message)
+      await vi.advanceTimersByTimeAsync(BINDING_TIMEOUT_MS.sync + 1)
+      expect(await caught).toBe('binding_timeout')
+      expect(aborted).toBe(true)
+      const fast = { fetch: async () => new Response('ok') }
+      expect(await (await bindingFetch(fast, 'https://receipts.internal/sync', {}, 1000)).text()).toBe('ok')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 const ORIGIN = 'https://stats.goodstuff.software'
 const ME = 'kristen@example.com'

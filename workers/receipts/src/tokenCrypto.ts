@@ -123,19 +123,31 @@ export async function decryptToken(
   const iv = fromB64(row.token_iv, 'decrypt_failed')
   if (iv.length !== IV_BYTES) throw new TokenCryptoError('decrypt_failed')
 
+  // The current key is tried first and must be valid (an invalid current key is a configuration fault: key_invalid).
+  // The old key is loaded lazily, only when the current key fails; an invalid old key (for example a placeholder
+  // secret) counts as absent, so it can never break runs or revokes that the current key can serve.
   const current = await loadKey(keys.current)
-  const candidates: { k: LoadedKey; old: boolean }[] = [{ k: current, old: false }]
-  if (keys.old) candidates.push({ k: await loadKey(keys.old), old: true })
-  // Prefer the key whose fingerprint matches the row.
-  candidates.sort((a, b) => Number(b.k.keyId === row.key_id) - Number(a.k.keyId === row.key_id))
-
   const aad = new TextEncoder().encode(connectionId)
-  for (const { k, old } of candidates) {
+  const attempt = async (k: LoadedKey, old: boolean): Promise<DecryptResult | null> => {
     try {
       const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, k.key, ct)
       return { plaintext: new TextDecoder().decode(pt), usedOldKey: old }
     } catch {
-      // try the next key
+      return null
+    }
+  }
+  const first = await attempt(current, false)
+  if (first) return first
+  if (keys.old) {
+    let oldKey: LoadedKey | null = null
+    try {
+      oldKey = await loadKey(keys.old)
+    } catch {
+      oldKey = null
+    }
+    if (oldKey) {
+      const second = await attempt(oldKey, true)
+      if (second) return second
     }
   }
   throw new TokenCryptoError('decrypt_failed')

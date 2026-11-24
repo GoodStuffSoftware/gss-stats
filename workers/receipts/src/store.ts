@@ -197,7 +197,8 @@ function itemsJson(e: ExtractedReceipt | null): string {
 
 export const INSERT_RECEIPT_SQL = `INSERT OR IGNORE INTO receipts (id, connection_id, gmail_msg_id, email_date, status, attempts, error_code, kind, sender_domain, merchant,
   payment_via, card_last4, order_ref, receipt_date, related_date, currency, total_cents, tax_cents, shipping_cents, charges_json, extract_model, created_at, updated_at, updated_by)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?22, '${ACTOR}')`
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?22, '${ACTOR}'
+WHERE EXISTS (SELECT 1 FROM email_connections WHERE id = ?2 AND status = 'active')`
 
 /** Items of one receipt from one JSON array. The category hint must be a real category (else NULL), so a bad hint never fails the batch. */
 export const INSERT_ITEMS_SQL = `INSERT INTO receipt_items (receipt_id, seq, description, amount_cents, quantity, category_hint)

@@ -193,7 +193,7 @@ describe('GET status', () => {
     }
     const body = JSON.parse(text) as { configured: boolean; connection: Record<string, unknown>; lastRuns: Record<string, unknown>[]; nextRunAt: string }
     expect(body.configured).toBe(true)
-    expect(body.connection).toEqual({ status: 'active', lastRunAt: NOW, lastOkAt: NOW, lastError: MARKER_ERR, consentVersion: 1 })
+    expect(body.connection).toEqual({ status: 'active', lastRunAt: NOW, lastOkAt: NOW, lastError: MARKER_ERR, consentVersion: 1, googleEmail: null })
     expect(body.lastRuns).toHaveLength(5)
     expect(body.lastRuns[0].errorCode).toBe('api_limited') // newest first; a distinct code is surfaced
     expect(body.lastRuns.every((r) => (r.listed as number) < 99)).toBe(true) // none of B's runs
@@ -201,6 +201,18 @@ describe('GET status', () => {
       ['autoApplied', 'errorCode', 'extracted', 'fetched', 'finishedAt', 'listed', 'matched', 'skipped', 'startedAt', 'trigger'],
     )
     expect(Date.parse(body.nextRunAt)).toBeGreaterThan(Date.now())
+  })
+
+  it('googleEmail goes to the owner only: the other Budget person never gets it', async () => {
+    conn(CONN_A, A, SUB_A, { google_email: 'linked-a@example.com' })
+    conn(CONN_B, B, SUB_B, { google_email: 'linked-b@example.com' })
+    const e = env(db, { RECEIPTS: okBinding(), RECEIPTS_GMAIL_CLIENT_ID: 'x' })
+    const a = await (await call(e, A, 'status', 'GET')).res.text()
+    const b = await (await call(e, B, 'status', 'GET')).res.text()
+    expect(JSON.parse(a).connection.googleEmail).toBe('linked-a@example.com')
+    expect(a).not.toContain('linked-b@example.com')
+    expect(JSON.parse(b).connection.googleEmail).toBe('linked-b@example.com')
+    expect(b).not.toContain('linked-a@example.com')
   })
 
   it('says not connected, and not configured when the binding or client id is missing', async () => {
@@ -340,6 +352,19 @@ describe('POST disconnect', () => {
     expect(JSON.parse(init.body as string)).toEqual({ connectionId: CONN_A })
     expect(db.get(`SELECT status, token_ct, token_iv, key_id FROM email_connections WHERE id = '${CONN_A}'`)).toEqual({ status: 'revoked', token_ct: null, token_iv: null, key_id: null })
     expect(count('receipts', `connection_id = '${CONN_A}'`)).toBe(1)
+  })
+
+  it('pauses the connection before the revoke call, then clears google_email and watermark_at', async () => {
+    conn(CONN_A, A, SUB_A, { google_email: 'linked-a@example.com', watermark_at: NOW })
+    let statusAtRevoke = ''
+    const rb = binding(() => {
+      statusAtRevoke = (db.get(`SELECT status FROM email_connections WHERE id = '${CONN_A}'`) as { status: string }).status
+      return new Response('{"revoked":true}', { status: 200 })
+    })
+    const { res } = await call(env(db, { RECEIPTS: rb }), A, 'disconnect', 'POST', { purge: false })
+    expect(res.status).toBe(200)
+    expect(statusAtRevoke).toBe('paused')
+    expect(db.get(`SELECT status, google_email, watermark_at FROM email_connections WHERE id = '${CONN_A}'`)).toEqual({ status: 'revoked', google_email: null, watermark_at: null })
   })
 
   it('purge:true cascades receipts, items, matches and runs for the caller only', async () => {

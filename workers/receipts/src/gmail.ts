@@ -220,12 +220,14 @@ const SAFE_VALUE = /^[^\s(){}"\\\x00-\x1f\x7f][^(){}"\\\x00-\x1f\x7f]{0,99}$/
 const SAFE_FROM = /^[A-Za-z0-9@._+*-]{1,100}$/
 
 /** Gmail search string. `afterEpochSec` is the lower bound (watermark minus overlap, or now minus the backfill). */
-export function buildReceiptQuery(q: ReceiptQueries, afterEpochSec: number): string {
+export function buildReceiptQuery(q: ReceiptQueries, afterEpochSec: number, beforeEpochSec?: number): string {
   if (!Number.isFinite(afterEpochSec) || afterEpochSec <= 0) throw new GmailError('client_error')
+  if (beforeEpochSec !== undefined && (!Number.isFinite(beforeEpochSec) || beforeEpochSec <= afterEpochSec)) throw new GmailError('client_error')
   const from = q.from.filter((v) => SAFE_FROM.test(v)).map((v) => `from:${v}`)
   const subject = q.subject.filter((v) => SAFE_VALUE.test(v)).map((v) => `"${v}"`)
   const exclude = q.excludeFrom.filter((v) => SAFE_FROM.test(v)).map((v) => `from:${v}`)
   const parts: string[] = [`after:${Math.floor(afterEpochSec)}`]
+  if (beforeEpochSec !== undefined) parts.push(`before:${Math.floor(beforeEpochSec)}`)
   const matchers: string[] = []
   if (from.length) matchers.push(`{${from.join(' ')}}`)
   if (subject.length) matchers.push(`subject:(${subject.join(' OR ')})`)

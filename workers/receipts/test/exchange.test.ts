@@ -135,9 +135,28 @@ describe('POST /exchange', () => {
     expect(rows()).toHaveLength(1)
     const row = rows()[0]
     expect(row.id).toBe(first.id)
-    expect(row).toMatchObject({ status: 'active', google_sub: 'google-sub-2', consent_version: 2, last_error: null, watermark_at: '2026-11-01T00:00:00.000Z' })
+    // A different Google account (sub changed) starts fresh: the watermark is reset.
+    expect(row).toMatchObject({ status: 'active', google_sub: 'google-sub-2', consent_version: 2, last_error: null, watermark_at: null })
     const dec = await decryptToken({ token_ct: row.token_ct, token_iv: row.token_iv, key_id: row.key_id }, row.id, { current: KEY })
     expect(dec.plaintext).toBe('fake-refresh-token-9999')
+  })
+
+  it('writes google_email from the verified id_token on connect and on reconnect', async () => {
+    await exchange()
+    expect(rows()[0].google_email).toBe('gmail-user@example.com')
+    tokenResponse = () => json(goodTokens({ id_token: idToken({ email: 'Second-User@Example.com' }) }))
+    await exchange()
+    expect(rows()[0].google_email).toBe('second-user@example.com')
+  })
+
+  it('a reconnect of the same account that needs a reconnect keeps the watermark; after a revoke it starts fresh', async () => {
+    await exchange()
+    db.exec(`UPDATE email_connections SET status='needs_reconnect', token_ct=NULL, token_iv=NULL, key_id=NULL, last_error='token_revoked', watermark_at='2026-11-01T00:00:00.000Z'`)
+    await exchange()
+    expect(rows()[0].watermark_at).toBe('2026-11-01T00:00:00.000Z')
+    db.exec(`UPDATE email_connections SET status='revoked', token_ct=NULL, token_iv=NULL, key_id=NULL, google_email=NULL, watermark_at='2026-11-01T00:00:00.000Z'`)
+    await exchange()
+    expect(rows()[0]).toMatchObject({ status: 'active', watermark_at: null, google_email: 'gmail-user@example.com' })
   })
 
   it.each([
@@ -257,6 +276,14 @@ describe('POST /disconnect', () => {
     expectNoLeak(logs.join('\n'))
     // the Pages route does the D1 writes: the row is untouched here
     expect(rows()[0].status).toBe('active')
+  })
+
+  it('a placeholder old key counts as absent: the revoke still happens', async () => {
+    await exchange()
+    calls.length = 0
+    const res = await disconnect({ connectionId: rows()[0].id }, { ...env, RECEIPTS_TOKEN_KEY_OLD: secret('placeholder') })
+    expect(await res.json()).toEqual({ revoked: true })
+    expect(new URLSearchParams(calls[0].body).get('token')).toBe(REFRESH)
   })
 
   it('a revoke failure (500 or network error) still replies 200 {revoked:false}', async () => {

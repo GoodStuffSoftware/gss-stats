@@ -91,6 +91,13 @@ function parseBody(raw: unknown): ExchangeBody | null {
   return o as unknown as ExchangeBody
 }
 
+/** The verified Google address as the column's CHECK wants it (lower case, has an @, at most 254 characters); anything else is NULL. */
+function googleEmailOf(email: unknown): string | null {
+  if (typeof email !== 'string') return null
+  const e = email.trim().toLowerCase()
+  return e.length <= 254 && e.indexOf('@') > 1 ? e : null
+}
+
 /** Create the owner's connection, or update it in place on a reconnect (same id, so the AAD stays valid). */
 async function storeConnection(
   env: ReceiptsSecretsEnv,
@@ -100,6 +107,7 @@ async function storeConnection(
   scopes: string,
   refreshToken: string,
   now: Date,
+  googleEmail: string | null,
 ): Promise<void> {
   const ownerEmail = b.ownerEmail.toLowerCase()
   const stamp = now.toISOString()
@@ -113,10 +121,12 @@ async function storeConnection(
       const enc = await encryptToken(refreshToken, existing.id, key)
       await db
         .prepare(
-          `UPDATE email_connections SET google_sub = ?2, status = 'active', token_ct = ?3, token_iv = ?4, key_id = ?5, scopes = ?6,
-             consent_version = ?7, consented_at = ?8, last_error = NULL, updated_at = ?8 WHERE id = ?1`,
+          // A revoked row, or a different Google account, starts fresh (no watermark): the backfill window applies again.
+          `UPDATE email_connections SET watermark_at = CASE WHEN google_sub = ?2 AND status IN ('needs_reconnect','paused','active') THEN watermark_at ELSE NULL END,
+             google_sub = ?2, status = 'active', token_ct = ?3, token_iv = ?4, key_id = ?5, scopes = ?6,
+             consent_version = ?7, consented_at = ?8, last_error = NULL, updated_at = ?8, google_email = ?9 WHERE id = ?1`,
         )
-        .bind(existing.id, googleSub, enc.token_ct, enc.token_iv, enc.key_id, scopes, b.consentVersion, stamp)
+        .bind(existing.id, googleSub, enc.token_ct, enc.token_iv, enc.key_id, scopes, b.consentVersion, stamp, googleEmail)
         .run()
       return
     }
@@ -125,10 +135,10 @@ async function storeConnection(
     try {
       await db
         .prepare(
-          `INSERT INTO email_connections (id, owner_email, google_sub, status, token_ct, token_iv, key_id, scopes, consent_version, consented_at, created_at, updated_at)
-           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9)`,
+          `INSERT INTO email_connections (id, owner_email, google_sub, status, token_ct, token_iv, key_id, scopes, consent_version, consented_at, created_at, updated_at, google_email)
+           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?9, ?10)`,
         )
-        .bind(id, ownerEmail, googleSub, enc.token_ct, enc.token_iv, enc.key_id, scopes, b.consentVersion, stamp)
+        .bind(id, ownerEmail, googleSub, enc.token_ct, enc.token_iv, enc.key_id, scopes, b.consentVersion, stamp, googleEmail)
         .run()
       return
     } catch (err) {
@@ -217,6 +227,7 @@ export async function handleExchange(request: Request, env: ReceiptsSecretsEnv):
       scopeText.length <= MAX_SCOPES_COLUMN ? scopeText : GMAIL_SCOPE,
       refreshToken,
       new Date(),
+      googleEmailOf(verdict.email),
     )
   } catch (err) {
     if (err instanceof TokenCryptoError) return failAndRevoke('not_configured')
