@@ -355,11 +355,12 @@ function onKeydown(e: KeyboardEvent) {
   border: 0;
 }
 /* Phone card layout: full width, 44 px tall, 16 px text (a smaller font makes iOS zoom the page on focus). */
-:global(.et-cards) .cs-input {
+/* Written as one :global() selector: with `:global(.et-cards) .cs-input` the build left these two rules out, so cards got the 32px desktop size. */
+:global(.et-cards .cs .cs-input) {
   min-height: 44px;
   font-size: 16px;
 }
-:global(.et-cards) .cs-opt {
+:global(.et-cards .cs .cs-opt) {
   min-height: 44px;
   font-size: 16px;
 }

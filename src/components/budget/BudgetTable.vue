@@ -625,6 +625,8 @@ tr:hover .bt-note-empty,
 }
 .budget-table :deep(.et-cards .et-text-btn:has(.bt-note-empty)) {
   width: auto;
+  /* Never wider than the card: the receipt line under the prompt is one nowrap line and clamps (ellipsis) inside it. */
+  max-width: 100%;
   min-height: 32px;
   padding: 0 4px;
 }
