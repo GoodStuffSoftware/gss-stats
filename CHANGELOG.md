@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Notes can use simple formatting** — bold, italic, lists and web links show formatted in Budget notes, and the note editor takes several lines (Enter adds a line, Ctrl+Enter saves).
+
 ## [0.83.1] — 2026-11-23
 
 ### Fixed

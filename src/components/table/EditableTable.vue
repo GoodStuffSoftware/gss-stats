@@ -27,6 +27,12 @@ export interface EditableColumn<R> {
    * and focusing it by keyboard emits `peek` too; a click on an EMPTY cell opens the editor, since there is nothing to peek at.
    */
   editGesture?: 'click' | 'hold'
+  /** Opt-in: the cell shows its text as simple markdown (bold, lists, http(s) links), flattened for a clamped line. The value stays plain text. */
+  markdown?: boolean
+  /** Opt-in, `text` editor: edit in a textarea (Enter adds a line; Ctrl/Cmd+Enter or leaving the field saves; Esc cancels), with a live preview when `markdown`. */
+  multiline?: boolean
+  /** Opt-in, `editGesture: 'hold'`: a click on an EMPTY cell also peeks (instead of editing) when this says the row has something to show. */
+  hasPeek?: (row: R) => boolean
   /** Table layout: the narrowest this column is drawn (px); also the width a reset column returns to in a resized table. */
   minWidth?: number
   /** Table layout, columns not resized by hand: the width this column asks for (px), so the others share the slack of a wide table. */
@@ -112,6 +118,7 @@ export function clampColumnWidth(w: number): number {
 //
 // Accessibility: `status` is announced through a polite live region; each editor has an aria-label of the column
 // and the row; a row with an error shows it with role="alert".
+import MarkdownText from '../MarkdownText.vue'
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch, type FunctionalComponent } from 'vue'
 
 const props = withDefaults(
@@ -305,7 +312,7 @@ function openText(row: R, col: EditableColumn<R>) {
   draft.value = textOf(row, col)
   emit('edit-start', keyOf(row), col.key)
   void nextTick(() => {
-    const input = rootRef.value?.querySelector<HTMLInputElement>('input.et-input')
+    const input = rootRef.value?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.et-input')
     input?.focus()
     input?.select()
   })
@@ -326,6 +333,13 @@ function commitText(row: R, col: EditableColumn<R>) {
   editing.value = null
   if (changed) emit('edit', key, col.key, draft.value)
 }
+/** Multiline editor keys: Enter adds a line (the default), Ctrl/Cmd+Enter saves. */
+function onMultilineEnter(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    commitText(row, col)
+  }
+}
 function cancelText(row: R, col: EditableColumn<R>) {
   const key = keyOf(row)
   editing.value = null
@@ -333,6 +347,7 @@ function cancelText(row: R, col: EditableColumn<R>) {
 }
 
 // Text-cell gestures (see EditableColumn.editGesture).
+const hasText = (row: R, col: EditableColumn<R>) => !!textOf(row, col) || !!col.hasPeek?.(row)
 const isHold = (col: EditableColumn<R>) => col.editGesture === 'hold'
 let holdTimer: ReturnType<typeof setTimeout> | null = null
 let holdFrom = { x: 0, y: 0 }
@@ -373,7 +388,9 @@ function onTextClick(row: R, col: EditableColumn<R>, e: MouseEvent) {
     suppressClick = false
     return
   }
-  if (!isHold(col) || !textOf(row, col)) {
+  // A link inside a markdown cell opens the link; it neither peeks nor edits.
+  if ((e.target as HTMLElement | null)?.closest?.('a')) return
+  if (!isHold(col) || !hasText(row, col)) {
     openText(row, col)
     return
   }
@@ -387,7 +404,7 @@ function onTextKey(row: R, col: EditableColumn<R>, e: KeyboardEvent) {
   }
 }
 function onTextFocus(row: R, col: EditableColumn<R>, e: FocusEvent) {
-  if (isHold(col) && textOf(row, col)) emit('peek', keyOf(row), col.key, e.currentTarget as HTMLElement, 'focus')
+  if (isHold(col) && hasText(row, col)) emit('peek', keyOf(row), col.key, e.currentTarget as HTMLElement, 'focus')
 }
 function onTextContext(col: EditableColumn<R>, e: Event) {
   if (isHold(col)) e.preventDefault() // a hold on touch must not open the browser's menu
@@ -571,16 +588,29 @@ function rowClass(row: R) {
                 </template>
               </select>
               <template v-else-if="isEditable(col) && col.editor === 'text'">
-                <input
-                  v-if="isEditing(row, col)"
-                  v-model="draft"
-                  class="et-input"
-                  type="text"
-                  :aria-label="labelOf(row, col)"
-                  @keydown.enter.prevent="commitText(row, col)"
-                  @keydown.esc.prevent="cancelText(row, col)"
-                  @blur="commitText(row, col)"
-                />
+                <template v-if="isEditing(row, col)">
+                  <textarea
+                    v-if="col.multiline"
+                    v-model="draft"
+                    class="et-input et-multiline"
+                    rows="4"
+                                    :aria-label="labelOf(row, col)"
+                    @keydown.enter="onMultilineEnter(row, col, $event)"
+                    @keydown.esc.prevent="cancelText(row, col)"
+                    @blur="commitText(row, col)"
+                  />
+                  <input
+                    v-else
+                    v-model="draft"
+                    class="et-input"
+                    type="text"
+                    :aria-label="labelOf(row, col)"
+                    @keydown.enter.prevent="commitText(row, col)"
+                    @keydown.esc.prevent="cancelText(row, col)"
+                    @blur="commitText(row, col)"
+                  />
+                  <MarkdownText v-if="col.multiline && col.markdown && draft" class="et-preview" :text="draft" data-testid="md-preview" />
+                </template>
                 <button
                   v-else
                   type="button"
@@ -595,10 +625,14 @@ function rowClass(row: R) {
                   @focus="onTextFocus(row, col, $event)"
                   @contextmenu="onTextContext(col, $event)"
                 >
-                  <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) || '—' }}</slot>
+                  <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)"
+                    ><MarkdownText v-if="col.markdown && shownOf(row, col)" :text="shownOf(row, col)" inline /><template v-else>{{ shownOf(row, col) || '—' }}</template></slot
+                  >
                 </button>
               </template>
-              <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) }}</slot>
+              <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)"
+                ><MarkdownText v-if="col.markdown && shownOf(row, col)" :text="shownOf(row, col)" inline /><template v-else>{{ shownOf(row, col) }}</template></slot
+              >
             </td>
           </tr>
           <tr v-if="hasExtra(row)" class="et-extra-row" :class="rowClass(row)">
@@ -639,7 +673,9 @@ function rowClass(row: R) {
           <span v-for="col in cardColumns(1)" :key="col.key" class="et-part" :class="{ 'et-end': col.align === 'end' }">
             <span v-if="cardLabels" class="et-lab" data-testid="card-label">{{ col.label }}</span>
             <slot v-if="isEditable(col) && $slots['editor-' + col.key]" :name="'editor-' + col.key" v-bind="scopeOf(row, col)" />
-            <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) }}</slot>
+            <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)"
+                ><MarkdownText v-if="col.markdown && shownOf(row, col)" :text="shownOf(row, col)" inline /><template v-else>{{ shownOf(row, col) }}</template></slot
+              >
           </span>
         </div>
         <div v-if="cardColumns(2).length" class="et-line et-line2">
@@ -664,16 +700,29 @@ function rowClass(row: R) {
               </template>
             </select>
             <template v-else-if="isEditable(col) && col.editor === 'text'">
-              <input
-                v-if="isEditing(row, col)"
-                v-model="draft"
-                class="et-input"
-                type="text"
-                :aria-label="labelOf(row, col)"
-                @keydown.enter.prevent="commitText(row, col)"
-                @keydown.esc.prevent="cancelText(row, col)"
-                @blur="commitText(row, col)"
-              />
+              <template v-if="isEditing(row, col)">
+                <textarea
+                  v-if="col.multiline"
+                  v-model="draft"
+                  class="et-input et-multiline"
+                  rows="4"
+                                :aria-label="labelOf(row, col)"
+                  @keydown.enter="onMultilineEnter(row, col, $event)"
+                  @keydown.esc.prevent="cancelText(row, col)"
+                  @blur="commitText(row, col)"
+                />
+                <input
+                  v-else
+                  v-model="draft"
+                  class="et-input"
+                  type="text"
+                  :aria-label="labelOf(row, col)"
+                  @keydown.enter.prevent="commitText(row, col)"
+                  @keydown.esc.prevent="cancelText(row, col)"
+                  @blur="commitText(row, col)"
+                />
+                <MarkdownText v-if="col.multiline && col.markdown && draft" class="et-preview" :text="draft" data-testid="md-preview" />
+              </template>
               <button
                 v-else
                 type="button"
@@ -688,10 +737,14 @@ function rowClass(row: R) {
                 @focus="onTextFocus(row, col, $event)"
                 @contextmenu="onTextContext(col, $event)"
               >
-                <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) || '—' }}</slot>
+                <slot :name="'cell-' + col.key" v-bind="scopeOf(row, col)"
+                    ><MarkdownText v-if="col.markdown && shownOf(row, col)" :text="shownOf(row, col)" inline /><template v-else>{{ shownOf(row, col) || '—' }}</template></slot
+                  >
               </button>
             </template>
-            <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)">{{ shownOf(row, col) }}</slot>
+            <slot v-else :name="'cell-' + col.key" v-bind="scopeOf(row, col)"
+                ><MarkdownText v-if="col.markdown && shownOf(row, col)" :text="shownOf(row, col)" inline /><template v-else>{{ shownOf(row, col) }}</template></slot
+              >
           </div>
         </div>
         <div v-if="hasExtra(row)" class="et-extra">
@@ -830,6 +883,21 @@ function rowClass(row: R) {
   border-radius: 6px;
   padding: 4px 6px;
   max-width: 100%;
+}
+.et-multiline {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  line-height: 1.35;
+}
+.et-preview {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+  border-left: 2px solid rgb(var(--line-2));
 }
 .et-text-btn {
   font: inherit;

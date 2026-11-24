@@ -16,6 +16,7 @@
 // - `highlightId` scrolls to that row and marks it; when it is not on the loaded pages, more pages are loaded
 //   (up to MAX_HIGHLIGHT_PAGES) to find it.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import MarkdownText from '../MarkdownText.vue'
 import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import SegmentedControl, { type SegOption } from '../ui/SegmentedControl.vue'
@@ -416,7 +417,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         <!-- Clamped to a few lines; a click or tap shows the full text in a tip, a hold edits. A row without a note shows a
              faint "Add note" (desktop: on hover or focus; touch and phone cards: always, one small muted line); a click on it
              opens the editor. -->
-        <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note">{{ row.note }}</span>
+        <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note"><MarkdownText :text="row.note" inline /></span>
         <span v-else class="bt-note-empty">Add note</span>
       </template>
       <template #cell-category="{ row }">
@@ -486,9 +487,9 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       <template v-if="tip.data.kind === 'merchant'">
         <span class="bt-tip-name">{{ tip.data.name }}</span>
         <span v-if="tip.data.description && tip.data.description !== tip.data.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.data.description }}</span>
-        <span v-if="tip.data.note" class="bt-tip-note" data-testid="merchant-tip-note">{{ tip.data.note }}</span>
+        <span v-if="tip.data.note" class="bt-tip-note" data-testid="merchant-tip-note"><MarkdownText :text="tip.data.note" /></span>
       </template>
-      <span v-else class="bt-tip-fullnote" data-testid="note-tip">{{ tip.data.note }}</span>
+      <span v-else class="bt-tip-fullnote" data-testid="note-tip"><MarkdownText :text="tip.data.note" /></span>
     </div>
   </section>
 </template>
@@ -555,10 +556,10 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
   color: rgb(var(--ink-2));
 }
 .bt-tip-note {
+  display: block;
   margin-top: 4px;
   padding-top: 4px;
   border-top: 1px solid rgb(var(--line-2));
-  white-space: pre-wrap;
 }
 /* Long notes wrap and stop at three lines (two on the wide table); the merchant tip has the whole text. */
 .bt-note {
@@ -603,7 +604,7 @@ tr:hover .bt-note-empty,
   font-size: 13px;
 }
 .bt-tip-fullnote {
-  white-space: pre-wrap;
+  display: block;
 }
 .bt-reason {
   display: block;

@@ -515,3 +515,79 @@ describe('EditableTable selectable', () => {
     expect([...(w.emitted('update:selected')?.at(-1)?.[0] as Set<string>)]).toEqual(['r2'])
   })
 })
+
+describe('EditableTable markdown notes (opt-ins markdown, multiline, hasPeek)', () => {
+  const MD_ROWS: Row[] = [
+    { id: 'r1', name: 'Alpha', size: 'small', note: 'see **bold** and [site](https://example.com/a)' },
+    { id: 'r2', name: 'Beta', size: 'large', note: '[bad](javascript:alert(1)) <b>x</b>' },
+  ]
+  const withNote = (extra: Partial<EditableColumn<Row>>): EditableColumn<Row>[] => COLUMNS.map((c) => (c.key === 'note' ? { ...c, ...extra } : c))
+  const btn = (w: VueWrapper, id: string) => w.get(`tr[data-row-key="${id}"] button.et-text-btn`)
+
+  it('a column with markdown shows formatted text, inline', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true }), rows: MD_ROWS })
+    const cell = btn(w, 'r1')
+    expect(cell.find('span.md.md-inline strong').text()).toBe('bold')
+    const a = cell.get('a')
+    expect(a.attributes('href')).toBe('https://example.com/a')
+    expect(a.attributes('rel')).toBe('noopener noreferrer')
+  })
+  it('an unsafe link and raw HTML stay inert text', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true }), rows: MD_ROWS })
+    const cell = btn(w, 'r2')
+    expect(cell.find('a').exists()).toBe(false)
+    expect(cell.find('b').exists()).toBe(false)
+    expect(cell.text()).toContain('<b>x</b>')
+  })
+  it('a read-only markdown column renders too', async () => {
+    const w = await mountTable({ columns: withNote({ markdown: true, editor: null }), rows: MD_ROWS, editable: false })
+    expect(w.get('tr[data-row-key="r1"] td:nth-child(3) strong').text()).toBe('bold')
+  })
+  it('a column without the opt-ins is unchanged: exact text, no markdown element, an input editor', async () => {
+    const w = await mountTable({ rows: MD_ROWS })
+    expect(btn(w, 'r1').html()).not.toContain('class="md')
+    expect(btn(w, 'r1').text()).toBe('see **bold** and [site](https://example.com/a)')
+    expect(btn(w, 'r1').find('a').exists()).toBe(false)
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('textarea').exists()).toBe(false)
+    expect(w.find('input.et-input').exists()).toBe(true)
+  })
+  it('multiline: a textarea editor, Enter adds a line, Ctrl+Enter saves plain text', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true }) })
+    await btn(w, 'r1').trigger('click')
+    const ta = w.get('textarea.et-input')
+    expect(w.find('input.et-input').exists()).toBe(false)
+    await ta.setValue('line one\n- item')
+    await ta.trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('edit')).toBeUndefined()
+    expect(w.find('textarea').exists()).toBe(true)
+    await ta.trigger('keydown', { key: 'Enter', ctrlKey: true })
+    expect(w.emitted('edit')![0]).toEqual(['r1', 'note', 'line one\n- item'])
+    expect(w.find('textarea').exists()).toBe(false)
+  })
+  it('multiline: leaving the field saves, Esc cancels', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true }) })
+    await btn(w, 'r1').trigger('click')
+    await w.get('textarea').setValue('changed')
+    await w.get('textarea').trigger('blur')
+    expect(w.emitted('edit')![0]).toEqual(['r1', 'note', 'changed'])
+    await btn(w, 'r2').trigger('click')
+    await w.get('textarea').setValue('nope')
+    await w.get('textarea').trigger('keydown', { key: 'Escape' })
+    expect(w.find('textarea').exists()).toBe(false)
+    expect(w.emitted('edit')).toHaveLength(1)
+  })
+  it('multiline + markdown shows a live preview of the draft', async () => {
+    const w = await mountTable({ columns: withNote({ multiline: true, markdown: true }) })
+    await btn(w, 'r1').trigger('click')
+    await w.get('textarea').setValue('**hi**')
+    expect(w.get('[data-testid="md-preview"] strong').text()).toBe('hi')
+  })
+  it('hasPeek: an empty hold cell peeks when the row has something else to show', async () => {
+    const rows = [{ id: 'r1', name: 'Alpha', size: 'small', note: '' }]
+    const w = await mountTable({ columns: withNote({ editGesture: 'hold', hasPeek: () => true }), rows })
+    await btn(w, 'r1').trigger('click')
+    expect(w.find('input.et-input').exists()).toBe(false)
+    expect(w.emitted('peek')![0][0]).toBe('r1')
+  })
+})
