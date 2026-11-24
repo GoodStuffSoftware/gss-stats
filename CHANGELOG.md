@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.85.0] — 2026-11-24
+
 ### Added
 - **Connect Gmail for receipts** — each Budget person can connect Gmail read-only from Budget, and receipt emails are then read and matched to transactions automatically.
 - **Review and apply receipts** — a review list shows each matched receipt with its suggested category, to apply or dismiss one at a time or in a batch; a category you set yourself is never changed.
