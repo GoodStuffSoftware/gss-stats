@@ -101,7 +101,7 @@ describe('LoansPage', () => {
     await w.get('[data-testid="crumb-0"]').trigger('click')
     expect(w.emitted('leave')).toEqual([[false]])
   })
-  it('every earlier crumb is a real button the keyboard reaches and activates (Enter and Space click it)', async () => {
+  it('every earlier crumb is a native button the keyboard can focus (no tabindex or key handler: the browser clicks a button on Enter and Space)', async () => {
     const w = mount(LoansPage, { props: { person: null, loanId: 'acct-1', from: 'drill' }, attachTo: document.body })
     await flushPromises()
     const buttons = w.findAll('.cr-item button')

@@ -309,8 +309,11 @@ function onCategoryAdded(c: Category) {
 // ── Pages ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Overview or Loans (lib/budget/viewState.ts keeps it in `b_page`). The shell tells App when it changes (the top
 // bar crumbs and the remembered page) and App asks for a page through `goPage` (the ☰ menu, the crumbs).
-const emit = defineEmits<{ page: [page: BudgetPage] }>()
+// `fromOverview`: the open loan was reached from the Overview debt views, so the page's own trail starts at "All debts"
+// and the top bar reads just "Budget" (one trail, not two that disagree). The Loans list's detail keeps "Budget > Loans".
+const emit = defineEmits<{ page: [page: BudgetPage]; fromOverview: [on: boolean] }>()
 watch(() => state.page, (p) => emit('page', p), { immediate: true })
+watch(() => state.page === 'loans' && !!state.loan && !!loanFrom.value, (on) => emit('fromOverview', on), { immediate: true })
 function goPage(page: BudgetPage) {
   setPage(page)
 }

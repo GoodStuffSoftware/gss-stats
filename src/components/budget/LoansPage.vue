@@ -56,7 +56,7 @@ watch(() => props.person, load, { immediate: true })
 const recentPayments = computed(() =>
   data.value?.debts.find((d) => d.accountId === props.loanId)?.payments.map((p) => p.amountCents))
 
-/** "Mortgage ••8714": the open loan's name, once the list has loaded. */
+/** "Mortgage ••1234" (made-up digits): the open loan's name, once the list has loaded. */
 const loanName = computed(() => {
   const d = data.value?.debts.find((x) => x.accountId === props.loanId)
   return d ? `${d.label}${d.last4 ? ` ••${d.last4}` : ''}` : 'Loan'

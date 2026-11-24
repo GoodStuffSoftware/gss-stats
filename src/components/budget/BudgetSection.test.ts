@@ -494,15 +494,36 @@ describe('BudgetSection: tabs and URL', () => {
 
 describe('BudgetSection: three tabs (Spending, Debts, Both)', () => {
   beforeEach(() => localStorage.clear())
-  const narrowMedia = () =>
+  // A matchMedia whose width the test sets (the section asks `(max-width: 1023.98px)`); `setNarrow` fires the `change`
+  // event a browser sends when the width crosses 1024 px. Every test names its width: none leans on happy-dom's default.
+  let listeners: Array<() => void> = []
+  let isNarrow = false
+  const setWidth = (narrow: boolean) => {
+    isNarrow = narrow
+    listeners = []
     vi.stubGlobal('matchMedia', (q: string) => ({
-      matches: q.includes('max-width'),
+      get matches() {
+        return q.includes('max-width') && isNarrow
+      },
       media: q,
-      addEventListener: () => {},
-      removeEventListener: () => {},
+      addEventListener: (_t: string, fn: () => void) => {
+        if (q.includes('max-width')) listeners.push(fn)
+      },
+      removeEventListener: (_t: string, fn: () => void) => {
+        listeners = listeners.filter((l) => l !== fn)
+      },
       addListener: () => {},
       removeListener: () => {},
     }))
+  }
+  const crossTo = async (narrow: boolean) => {
+    isNarrow = narrow
+    for (const fn of [...listeners]) fn()
+    await flushPromises()
+  }
+  const narrowMedia = () => setWidth(true)
+  const wideMedia = () => setWidth(false)
+  beforeEach(wideMedia)
 
   it('the bar has Spending, Debts and Both, and there are no Show toggles or layout picker', async () => {
     route()
