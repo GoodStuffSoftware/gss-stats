@@ -3,23 +3,15 @@
 // Every error is a fixed code (never Google, mail or model text). Nothing here logs except through ./log (counts, codes).
 import { matchReceipts } from '../../../src/lib/budget/receiptMatch'
 import { extractBodyText } from './bodyText'
+import { readSecret, type ReceiptsSecretsEnv, type SecretBinding } from './disconnect'
 import { extractReceipt, type ExtractedReceipt } from './extract'
 import { GmailError, RETRY_NEXT_RUN, afterBound, buildReceiptQuery, createGmailClient } from './gmail'
 import { log } from './log'
 import * as S from './store'
 import { TokenCryptoError, decryptToken, reencryptToken } from './tokenCrypto'
 
-/** A Secrets Store binding (`await env.X.get()`); a plain string is accepted too (tests, a var). */
-export interface SecretBinding { get(): Promise<string> }
-export interface Env {
-  BUDGET_DB: D1Database
-  RECEIPTS_GMAIL_CLIENT_ID?: SecretBinding
-  RECEIPTS_GMAIL_CLIENT_SECRET?: SecretBinding
-  RECEIPTS_TOKEN_KEY?: SecretBinding
-  RECEIPTS_TOKEN_KEY_OLD?: SecretBinding
+export interface Env extends ReceiptsSecretsEnv {
   RECEIPTS_ANTHROPIC_KEY?: SecretBinding
-  /** Comma-separated copy of the Budget list. */
-  RECEIPTS_ALLOWED_EMAILS?: SecretBinding
   RECEIPTS_MODEL?: string
   RECEIPTS_MAX_PER_RUN?: string
   RECEIPTS_DAILY_CAP?: string
@@ -42,19 +34,9 @@ export function jsonResponse(status: number, body: Record<string, unknown>): Res
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
 }
 
-/** The secret's value, or null when the binding is missing, unreadable or empty. Never throws. */
-export async function readSecret(b: SecretBinding | string | undefined | null): Promise<string | null> {
-  try {
-    const v = typeof b === 'string' ? b : b ? await b.get() : null
-    return typeof v === 'string' && v.trim() !== '' ? v.trim() : null
-  } catch {
-    return null
-  }
-}
-
 export async function allowedEmails(env: Env): Promise<Set<string> | null> {
   const raw = await readSecret(env.RECEIPTS_ALLOWED_EMAILS)
-  return raw === null ? null : new Set(raw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean))
+  return raw === '' ? null : new Set(raw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean))
 }
 
 const intVar = (v: string | undefined, dflt: number): number => {

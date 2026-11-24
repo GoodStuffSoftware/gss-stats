@@ -117,7 +117,7 @@ describe('POST /exchange', () => {
     expect(calls.filter((c) => c.url === REVOKE_URL)).toHaveLength(0)
     expectNoLeak(text)
     expectNoLeak(logs.join('\n'))
-    expect(logs.join('\n')).toContain('exchange connected')
+    expect(logs.join('\n')).toContain('"code":"connected"')
   })
 
   it('does not require the Google email to equal ownerEmail', async () => {

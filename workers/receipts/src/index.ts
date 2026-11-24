@@ -3,6 +3,8 @@
 // Plan: email receipts sections 1, 5 and 9; ADR 0008.
 import { loadActiveConnectionIds, loadConnection } from './store'
 import { MANUAL_BUDGET_MS, allowedEmails, jsonResponse, runConnection, runIsOpen, type Env } from './run'
+import { handleDisconnect } from './disconnect'
+import { handleExchange } from './exchange'
 import { log } from './log'
 
 export type { Env } from './run'
@@ -45,6 +47,8 @@ export const handleSync: Handler = async (request, env, ctx) => {
 // ---- ROUTE TABLE: one line per route, exact path match. Add a route here and nowhere else. ----
 export const ROUTES: Readonly<Record<string, Handler>> = {
   '/sync': handleSync,
+  '/exchange': (request, env) => handleExchange(request, env),
+  '/disconnect': (request, env) => handleDisconnect(request, env),
 }
 // ---- END ROUTE TABLE ----
 

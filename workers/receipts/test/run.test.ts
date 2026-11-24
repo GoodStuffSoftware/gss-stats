@@ -2,6 +2,7 @@
 // Everything is made up: example.com, fake merchants, fake keys (generated at run time), fake Google and Anthropic answers.
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, insertTxn, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { handleFetch, handleScheduled, ROUTES } from '../src/index'
@@ -65,7 +66,7 @@ function makeNet(o: NetOpts = {}): Net {
     const get = /\/messages\/([0-9a-f]+)\?format=full/.exec(u)
     if (get) {
       net.gets++
-      const i = Number.parseInt(get[1], 16) - Number(0x18c3f2a9b7d4e600n)
+      const i = Number(BigInt(`0x${get[1]}`) - 0x18c3f2a9b7d4e600n)
       const text = 'Thanks for your order from Fake Mart. Your order has shipped.'
       return new Response(JSON.stringify({ id: get[1], internalDate: String(MSG_DAY + i * 3_600_000), payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Fake Mart <orders@shop.example.com>' }], body: { data: b64url(text) } } }))
     }
@@ -309,8 +310,19 @@ describe('POST /sync', () => {
 })
 
 describe('router', () => {
-  it('has exactly the /sync route so far; every other path or method-less probe is a 404 with a fixed body', async () => {
-    expect(Object.keys(ROUTES)).toEqual(['/sync'])
+  it('GET to /exchange and /disconnect is non-2xx, and a POST reaches the handler', async () => {
+    const ctx = { waitUntil() {} } as unknown as ExecutionContext
+    for (const p of ['/exchange', '/disconnect']) {
+      const get = await handleFetch(new Request(`https://receipts.internal${p}`), makeEnv(), ctx)
+      expect(get.status).toBeGreaterThanOrEqual(400)
+      // A bad POST body gets the handler's own fixed answer (never the router's 404): the handler was reached.
+      const post = await handleFetch(new Request(`https://receipts.internal${p}`, { method: 'POST', body: '{}' }), makeEnv(), ctx)
+      expect([post.status, await post.json()]).toEqual(p === '/exchange' ? [200, { ok: false, code: 'exchange_failed' }] : [400, { revoked: false }])
+    }
+  })
+
+  it('has exactly the sync, exchange and disconnect routes; every other path is a 404 with a fixed body', async () => {
+    expect(Object.keys(ROUTES)).toEqual(['/sync', '/exchange', '/disconnect'])
     const ctx = { waitUntil() {} } as unknown as ExecutionContext
     for (const p of ['/', '/sync/', '/SYNC', '/exchange-x', '/__proto__', '/constructor', '/toString', '/sync/../x', '/%73ync']) {
       const res = await handleFetch(new Request(`https://receipts.internal${p}`, { method: 'POST', body: '{}' }), makeEnv(), ctx)
@@ -341,7 +353,7 @@ describe('logging', () => {
   })
 
   it('workers/receipts/src has no console.* except the one in log.ts', () => {
-    const dir = join(__dirname, '..', 'src')
+    const dir = join(fileURLToPath(import.meta.url), '..', '..', 'src')
     const hits: string[] = []
     for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
       const code = readFileSync(join(dir, f), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')

@@ -148,7 +148,8 @@ jobs:
         with:
           fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
       # The Worker bundles workers/receipts/ and the repo files it imports: src/lib/budget/receiptMatch.ts
-      # and what that pulls in (dates.ts, types.ts), plus mask.ts. When the Worker gains another import
+      # and what that pulls in (dates.ts, types.ts), plus mask.ts and functions/_lib/auth.ts (the token
+      # exchange's Google helpers; it imports nothing else). When the Worker gains another import
       # from outside workers/receipts/, add that file to the pattern below. package-lock.json (the pinned
       # wrangler) and tsconfig.json are inputs too; this workflow file is one, so editing it also
       # redeploys. A manual run, a new/forced branch or an unknown base always deploys.
@@ -164,7 +165,7 @@ jobs:
           if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying the receipts Worker."; exit 0
           fi
-          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/receipts/|src/lib/budget/(receiptMatch|dates|types|mask)\.ts$|package-lock\.json$|tsconfig\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.(test|spec)\.[cm]?[jt]s$' || true)
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/receipts/|functions/_lib/auth\.ts$|src/lib/budget/(receiptMatch|dates|types|mask)\.ts$|package-lock\.json$|tsconfig\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.(test|spec)\.[cm]?[jt]s$' || true)
           if [ -n "$changed" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Receipts Worker inputs changed:"; echo "$changed"
           else

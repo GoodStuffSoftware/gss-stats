@@ -4,6 +4,7 @@
 
 import { decryptToken } from './tokenCrypto'
 import { loadConnection } from './store'
+import { log } from './log'
 
 export const GOOGLE_REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
 
@@ -33,7 +34,7 @@ export async function readSecret(b: SecretBinding | undefined): Promise<string> 
 
 /** Counts and codes only. */
 export function logReceipts(event: string, code: string): void {
-  console.info(`receipts: ${event} ${code}`)
+  log(event, {}, code)
 }
 
 /** Revoke a token at Google. True only when Google answers 2xx; any failure is false, never thrown. */
