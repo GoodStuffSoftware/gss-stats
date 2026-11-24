@@ -21,10 +21,12 @@ import { useToggletip } from '../../composables/useToggletip'
 import EditableTable from '../table/EditableTable.vue'
 import SegmentedControl, { type SegOption } from '../ui/SegmentedControl.vue'
 import CategorySelect from './CategorySelect.vue'
+import ReceiptBlock from './ReceiptBlock.vue'
 import SimilarDialog from './SimilarDialog.vue'
 import TxnToolbar from './TxnToolbar.vue'
 import { applySimilar, createCategory, createRule, fetchSimilar, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
-import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
+import { fetchReceiptLinks, type ReceiptLink } from '../../lib/budget/receiptsClient'
+import { PHONE_TABLE_MIN_WIDTH, budgetColumns, categoryOptions, createTxnTable, loadTxnView, saveTxnView, type TxnView, receiptSummary, reviewReasonText, rowDotColor, selectValueFor, type TableDeps } from '../../lib/budget/tableModel'
 import { createFillRunner } from '../../lib/budget/txnFill'
 import { applyTxnView, anythingActive, defaultTxnViewPrefs, fitPrefs, samePrefs, withSameAmount, type TxnViewPrefs } from '../../lib/budget/txnView'
 import { createPrefsSaver, fetchServerPrefs, putServerPrefs, readCachedPrefs, writeCachedPrefs } from '../../lib/budget/txnPrefsStore'
@@ -34,7 +36,7 @@ const props = defineProps<BudgetTableProps>()
 const emit = defineEmits<{ edited: [e: BudgetEditedEvent]; 'category-added': [c: Category] }>()
 
 const MAX_HIGHLIGHT_PAGES = 5
-const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule, createCategory, fetchSimilar, applySimilar }
+const deps: TableDeps = { fetchPage: fetchTxnPage, patch: patchTxn, createRule, createCategory, fetchSimilar, applySimilar, fetchLinks: fetchReceiptLinks }
 
 let ownEdit = false
 function onEdited(e: BudgetEditedEvent) {
@@ -47,7 +49,7 @@ function onEdited(e: BudgetEditedEvent) {
 }
 
 const model = createTxnTable(deps, () => props.categories, onEdited, (c) => emit('category-added', c))
-const { rows, rowState, status, loading, loadingMore, loadError, nextCursor, similar } = model
+const { rows, receiptOf, rowState, status, loading, loadingMore, loadError, nextCursor, similar } = model
 
 // Phone: Cards (the default) or Table (the real table, scrolled sideways). Shown only while the table is narrower than the
 // table layout needs; the choice is kept per device.
@@ -62,7 +64,7 @@ const VIEWS: SegOption[] = [
   { value: 'table', label: 'Table', testid: 'txn-view-table' },
 ]
 
-const columns = computed(() => budgetColumns(props.categories, props.accounts, { phoneTable: narrow.value && view.value === 'table' }))
+const columns = computed(() => budgetColumns(props.categories, props.accounts, { phoneTable: narrow.value && view.value === 'table', hasReceipt: (t) => !!receiptOf(t.id) }))
 
 // A row that leaves the review list under the finger keeps its footprint: the moment it stops needing review (the tap, before
 // the screen redraws) its height is measured and held, and the "Reviewed" text, "Use for all" and any error are drawn in the
@@ -249,9 +251,9 @@ function onAction(rowKey: string, id: string) {
 
 // The merchant tip and the note tip (toggletips: they open on tap or click, so touch has what hover gives a mouse). One
 // implementation (useToggletip); each trigger names its own key.
-type TipData = { kind: 'merchant'; name: string; description: string; note: string } | { kind: 'note'; note: string }
+type TipData = { kind: 'merchant'; name: string; description: string; note: string; receipt: ReceiptLink | null } | { kind: 'note'; note: string; receipt: ReceiptLink | null }
 const { tip, close: closeTip, toggle, openOnKeyboardFocus } = useToggletip<TipData>('.bt-merchant, .et-hold, .bt-tip')
-const merchantTip = (row: Txn): TipData => ({ kind: 'merchant', name: row.merchantName || row.description, description: row.description, note: row.note ?? '' })
+const merchantTip = (row: Txn): TipData => ({ kind: 'merchant', name: row.merchantName || row.description, description: row.description, note: row.note ?? '', receipt: receiptOf(row.id) })
 const merchantKey = (row: Txn) => `merchant:${row.id}`
 function toggleTip(row: Txn, e: Event) {
   toggle(merchantKey(row), merchantTip(row), e.currentTarget as HTMLElement)
@@ -264,9 +266,10 @@ function focusTip(row: Txn, e: FocusEvent) {
 function onPeek(rowKey: string, field: string, el: HTMLElement, source: 'click' | 'focus') {
   if (field !== 'note') return
   const row = rows.value.find((r) => r.id === rowKey)
-  if (!row?.note) return
+  const receipt = receiptOf(rowKey)
+  if (!row || (!row.note && !receipt)) return
   const key = `note:${rowKey}`
-  const data: TipData = { kind: 'note', note: row.note }
+  const data: TipData = { kind: 'note', note: row.note ?? '', receipt }
   if (source === 'focus') openOnKeyboardFocus(key, data, el)
   else toggle(key, data, el)
 }
@@ -418,7 +421,9 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
              faint "Add note" (desktop: on hover or focus; touch and phone cards: always, one small muted line); a click on it
              opens the editor. -->
         <span v-if="row.note" class="bt-note" :class="{ 'bt-note-card': cardLayout }" data-testid="row-note"><MarkdownText :text="row.note" inline /></span>
-        <span v-else class="bt-note-empty">Add note</span>
+        <span v-else-if="!receiptOf(row.id)" class="bt-note-empty">Add note</span>
+        <!-- The receipt line is clamped like the note; a click or tap opens the tip, which shows the whole Receipt block. -->
+        <span v-if="receiptOf(row.id)" class="bt-receipt" :class="{ 'bt-receipt-card': cardLayout }" data-testid="row-receipt">{{ receiptSummary(receiptOf(row.id)!) }}</span>
       </template>
       <template #cell-category="{ row }">
         <span class="bt-cat">
@@ -488,8 +493,12 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         <span class="bt-tip-name">{{ tip.data.name }}</span>
         <span v-if="tip.data.description && tip.data.description !== tip.data.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.data.description }}</span>
         <span v-if="tip.data.note" class="bt-tip-note" data-testid="merchant-tip-note"><MarkdownText :text="tip.data.note" /></span>
+        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" />
       </template>
-      <span v-else class="bt-tip-fullnote" data-testid="note-tip"><MarkdownText :text="tip.data.note" /></span>
+      <template v-else>
+        <span v-if="tip.data.note" class="bt-tip-fullnote" data-testid="note-tip"><MarkdownText :text="tip.data.note" /></span>
+        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" />
+      </template>
     </div>
   </section>
 </template>
@@ -578,6 +587,20 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
   -webkit-line-clamp: 3;
   line-clamp: 3;
   font-size: 13px;
+}
+/* The receipt line under the note: one muted line, cut with an ellipsis. */
+.bt-receipt {
+  display: block;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgb(var(--ink-2));
+}
+.bt-receipt-card {
+  font-size: 12px;
 }
 .bt-note-empty {
   font-size: 12px;

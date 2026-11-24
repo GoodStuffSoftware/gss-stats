@@ -1,9 +1,10 @@
 // The Budget table's logic, apart from the screen: columns, the category choices (incl. "Not spending"), the
 // optimistic edit with revert, the rule offer and cursor paging. BudgetTable.vue draws it; the tests drive it with
 // fake calls. State is Vue refs so the component can read them directly.
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref, shallowRef } from 'vue'
 import type { EditableColumn, RowStatus, SelectOption } from '../../components/table/EditableTable.vue'
 import { BudgetApiError } from './clientEdit'
+import type { ReceiptLink } from './receiptsClient'
 import { categoryColor, NONE_COLOR } from './colors'
 import {
   SPENDING_KINDS, UNCATEGORIZED,
@@ -128,14 +129,53 @@ export function saveTxnView(v: TxnView): void {
 /** The table's width on a phone in Table mode (fixed, wider than the column minimums so cells stay roomy); the page scrolls sideways past the screen. */
 export const PHONE_TABLE_MIN_WIDTH = 880
 
-/** `phoneTable`: the phone Table view puts Amount right after Merchant, so it shows without scrolling sideways. */
-export function budgetColumns(categories: Category[], accounts: Account[], opts: { phoneTable?: boolean } = {}): EditableColumn<Txn>[] {
+// ---- receipt display (untrusted, email-derived text) ------------------------------------------------------
+
+/** Bidi overrides and isolates, zero-width and other invisible format characters: removed, they can reorder or hide text. */
+const INVISIBLE_RE = /[؜​-‏‪-‮⁠-⁯﻿]/g
+const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F]+/g
+/** Display-safe text from an email-derived value: not a string gives '', control and bidi characters go, whitespace
+ *  collapses, and it is cut at `max` characters. The result is only ever drawn through Vue text interpolation. */
+export function receiptText(v: unknown, max = 120): string {
+  if (typeof v !== 'string') return ''
+  const t = v.slice(0, max * 4).replace(INVISIBLE_RE, '').replace(CONTROL_RE, ' ').replace(/\s+/g, ' ').trim()
+  return t.length > max ? t.slice(0, max - 1) + '…' : t
+}
+/** The id shape the Gmail link needs (the Worker stores Gmail's own hex message id). Anything else gets no link. */
+const GMAIL_ID_RE = /^[0-9a-f]{8,32}$/
+/** `https://mail.google.com/mail/#all/<id>` from a re-checked opaque id, or null. Never carries an address. */
+export function gmailUrl(id: unknown): string | null {
+  return typeof id === 'string' && GMAIL_ID_RE.test(id) ? `https://mail.google.com/mail/#all/${id}` : null
+}
+/** A money amount from cents ('' when not a finite number); another currency goes through Intl, an unknown code falls back to USD. */
+export function receiptMoney(cents: unknown, currency?: unknown): string {
+  if (typeof cents !== 'number' || !Number.isFinite(cents)) return ''
+  const cur = typeof currency === 'string' && /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : 'USD'
+  if (cur === 'USD') return formatAmount(cents)
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(cents / 100)
+  } catch {
+    return formatAmount(cents)
+  }
+}
+/** The one muted line under the note: "Receipt: <store> · <total>". */
+export function receiptSummary(link: ReceiptLink): string {
+  const parts = [receiptText(link.merchant, 40), receiptMoney(link.totalCents, link.currency)].filter(Boolean)
+  return parts.length ? `Receipt: ${parts.join(' · ')}` : 'Receipt'
+}
+/** At most this many ids go in one links request (the route's limit). */
+export const LINK_BATCH = 200
+const TXN_ID_RE = /^[0-9a-f]{32}$/
+
+/** `phoneTable`: the phone Table view puts Amount right after Merchant, so it shows without scrolling sideways.
+ *  `hasReceipt`: a note cell of a row with a receipt still peeks (opens the tip) when its note is empty. */
+export function budgetColumns(categories: Category[], accounts: Account[], opts: { phoneTable?: boolean; hasReceipt?: (t: Txn) => boolean } = {}): EditableColumn<Txn>[] {
   const accountLabel = (t: Txn) => accounts.find((a) => a.id === t.accountId)?.label ?? ''
   const cols: EditableColumn<Txn>[] = [
     { key: 'postedDate', label: 'Date', editor: null, minWidth: 80, value: (t) => formatDate(t.postedDate) },
     { key: 'merchant', label: 'Merchant', editor: null, minWidth: 140, value: (t) => t.merchantName || t.description },
     // The note (short item descriptions, or what a person typed): text-editable; BudgetTable.vue draws it, clamped.
-    { key: 'note', label: 'Note', editor: 'text', editGesture: 'hold', markdown: true, multiline: true, maxLength: NOTE_MAX, minWidth: 130, value: (t) => t.note ?? '', cardLine: 2 },
+    { key: 'note', label: 'Note', editor: 'text', editGesture: 'hold', markdown: true, multiline: true, maxLength: NOTE_MAX, minWidth: 130, value: (t) => t.note ?? '', cardLine: 2, ...(opts.hasReceipt ? { hasPeek: opts.hasReceipt } : {}) },
     { key: 'account', label: 'Account', editor: null, minWidth: 100, value: accountLabel, cardLine: 2 },
     { key: 'category', label: 'Category', editor: 'select', minWidth: 150, value: selectValueFor, options: (t) => categoryOptions(categories, t) },
     { key: 'amountCents', label: 'Amount', editor: null, align: 'end', minWidth: 90, value: (t) => formatAmount(t.amountCents), cardLine: 1 },
@@ -164,6 +204,8 @@ export interface TableDeps {
   /** GET similar: the same merchant's other purchases (the dialog after a category change). Absent = no dialog. */
   fetchSimilar?(id: string): Promise<SimilarResponse>
   applySimilar?(req: SimilarApply): Promise<SimilarApplyResponse>
+  /** The applied receipt of each given transaction id (at most LINK_BATCH per call). Absent = no receipt lines. */
+  fetchLinks?(txnIds: string[]): Promise<Record<string, ReceiptLink>>
 }
 
 /** What the "Change similar purchases?" dialog shows: the row that was just changed, the category it got, and the server's list. */
@@ -207,6 +249,37 @@ export function createTxnTable(
   let query: TxnQuery | null = null
   let token = 0 // a newer load makes older answers stale
 
+  // Receipt links of the loaded rows, by transaction id. Each id is asked for once per load; a failure or an empty
+  // answer (receipts off, or none applied) leaves the table exactly as it was, with no message.
+  const links = shallowRef<Record<string, ReceiptLink>>({})
+  const askedLinks = new Set<string>()
+  let linksToken = 0
+  async function loadLinks(list: Txn[]) {
+    const fetchLinks = deps.fetchLinks
+    if (!fetchLinks) return
+    const ids = list.map((r) => r.id).filter((id) => TXN_ID_RE.test(id) && !askedLinks.has(id))
+    if (!ids.length) return
+    const mine = linksToken
+    for (const id of ids) askedLinks.add(id)
+    for (let i = 0; i < ids.length; i += LINK_BATCH) {
+      const chunk = ids.slice(i, i + LINK_BATCH)
+      try {
+        const got = await fetchLinks(chunk)
+        if (mine !== linksToken) return
+        const next = { ...links.value }
+        for (const id of chunk) {
+          const l = got && Object.prototype.hasOwnProperty.call(got, id) ? got[id] : null
+          if (l && typeof l === 'object' && !Array.isArray(l)) next[id] = l
+        }
+        links.value = next
+      } catch {
+        if (mine !== linksToken) return
+      }
+    }
+  }
+  /** The receipt of a row, or null. */
+  const receiptOf = (id: string): ReceiptLink | null => (Object.prototype.hasOwnProperty.call(links.value, id) ? links.value[id] : null)
+
   function clearStates() {
     for (const k of Object.keys(rowState)) delete rowState[k]
   }
@@ -222,6 +295,9 @@ export function createTxnTable(
     query = { ...q, cursor: undefined }
     rows.value = []
     nextCursor.value = null
+    linksToken++
+    askedLinks.clear()
+    links.value = {}
     clearStates()
     loadError.value = null
     loadingMore.value = false
@@ -231,6 +307,7 @@ export function createTxnTable(
       if (mine !== token) return
       rows.value = page.rows
       nextCursor.value = page.nextCursor
+      void loadLinks(page.rows)
     } catch (e) {
       if (mine !== token) return
       loadError.value = e instanceof Error ? e.message : String(e)
@@ -248,8 +325,10 @@ export function createTxnTable(
       const page = await deps.fetchPage({ ...query, cursor: nextCursor.value })
       if (mine !== token) return
       const have = new Set(rows.value.map((r) => r.id))
-      rows.value = [...rows.value, ...page.rows.filter((r) => !have.has(r.id))]
+      const fresh = page.rows.filter((r) => !have.has(r.id))
+      rows.value = [...rows.value, ...fresh]
       nextCursor.value = page.nextCursor
+      void loadLinks(fresh)
     } catch (e) {
       if (mine !== token) return
       loadError.value = e instanceof Error ? e.message : String(e)
@@ -504,5 +583,5 @@ export function createTxnTable(
     }
   }
 
-  return { rows, nextCursor, loading, loadingMore, loadError, rowState, status, similar, closeSimilar, applySimilar, load, loadMore, setSelection, setIncluded, setNote, addCategoryTo, confirmReview, useForAll }
+  return { rows, links, receiptOf, nextCursor, loading, loadingMore, loadError, rowState, status, similar, closeSimilar, applySimilar, load, loadMore, setSelection, setIncluded, setNote, addCategoryTo, confirmReview, useForAll }
 }
