@@ -306,6 +306,60 @@ describe('apply', () => {
     expect(rcpt(r)).toBe('applied')
   })
 
+  it('one receipt never lands on two rows: two suggested matches of it in one request apply one and skip the other as conflict', async () => {
+    const r = receipt(1, CONN_A)
+    const t1 = autoTxn()
+    const t2 = autoTxn()
+    const m1 = match(r, t1, { group: 'e1' })
+    const m2 = match(r, t2, { group: 'e2' })
+    const body = await json(await post({ items: [{ matchId: m1, expectedUpdatedAt: NOW }, { matchId: m2, expectedUpdatedAt: NOW }] }))
+    expect(body.applied.map((a: { matchId: number }) => a.matchId)).toEqual([m1])
+    expect(body.skipped).toEqual([{ matchId: m2, reason: 'conflict' }])
+    expect(txn(t1).category_id).toBe('shopping')
+    expect(txn(t2).category_id).toBeNull()
+    expect(rcpt(r)).toBe('applied')
+    // the leftover suggestion is superseded, so a later try is not_suggested
+    expect(mstat(m2)).toBe('superseded')
+    const again = await json(await post({ items: [{ matchId: m2, expectedUpdatedAt: NOW }] }))
+    expect(again.skipped).toEqual([{ matchId: m2, reason: 'not_suggested' }])
+  })
+
+  it('one receipt never lands on two rows across requests: a match of the receipt applied after the read makes this one a conflict that writes nothing', async () => {
+    const r = receipt(1, CONN_A)
+    const t1 = autoTxn()
+    const t2 = autoTxn()
+    const m1 = match(r, t1, { group: 'e1' })
+    const m2 = match(r, t2, { group: 'e2' })
+    // another request applies m1 between this one's read and its batch (the receipt row still reads suggested here)
+    const realBatch = db.d1.batch.bind(db.d1)
+    ;(db.d1 as unknown as { batch: unknown }).batch = async (stmts: never[]) => {
+      db.sqlite.prepare(`UPDATE receipt_matches SET status = 'applied' WHERE id = ?`).run(m1)
+      return realBatch(stmts)
+    }
+    const res = await json(await post({ items: [{ matchId: m2, expectedUpdatedAt: NOW }] }))
+    expect(res.applied).toEqual([])
+    expect(res.skipped).toEqual([{ matchId: m2, reason: 'conflict' }])
+    expect(txn(t2).category_id).toBeNull()
+    expect(mstat(m2)).toBe('suggested')
+    expect(db.get<{ n: number }>(`SELECT count(*) AS n FROM receipt_matches WHERE receipt_id = ? AND status = 'applied'`, r)!.n).toBe(1)
+  })
+
+  it('a split_charges group still applies as one, and an alternative suggestion for the same receipt is superseded', async () => {
+    const r = receipt(1, CONN_A)
+    const t1 = autoTxn()
+    const t2 = autoTxn()
+    const t3 = autoTxn()
+    const s1 = match(r, t1, { rule: 'split_charges', group: 'sc' })
+    const s2 = match(r, t2, { rule: 'split_charges', group: 'sc' })
+    const alt = match(r, t3, { rule: 'exact', group: 'e1' })
+    const body = await json(await post({ items: [{ matchId: s1, expectedUpdatedAt: NOW }, { matchId: s2, expectedUpdatedAt: NOW }] }))
+    expect(body.applied.map((a: { matchId: number }) => a.matchId).sort()).toEqual([s1, s2].sort())
+    expect(body.skipped).toEqual([])
+    expect(mstat(alt)).toBe('superseded')
+    expect(txn(t3).category_id).toBeNull()
+    expect(rcpt(r)).toBe('applied')
+  })
+
   it('split_receipts: several receipts on one row, only one applies', async () => {
     const t = autoTxn()
     const r1 = receipt(1, CONN_A)

@@ -151,7 +151,11 @@ export const GROUP_SIBLINGS_SQL = `SELECT id, receipt_id, group_key FROM receipt
 WHERE receipt_id IN (SELECT value FROM json_each(?1)) AND rule = 'split_charges' AND status = 'suggested'`
 
 const NOT_LINKED = `NOT EXISTS (SELECT 1 FROM receipt_matches o WHERE o.txn_id = transactions.id AND o.status = 'applied')`
-const MATCH_OPEN = `EXISTS (SELECT 1 FROM receipt_matches mm WHERE mm.id = json_extract(j.value, '$.mid') AND mm.status = 'suggested')`
+/** One receipt links to one bank row, except the parts of one split_charges group: true when another match of `mm`'s receipt is already applied. */
+const receiptLinkedElsewhere = (mm: string): string => `EXISTS (SELECT 1 FROM receipt_matches o WHERE o.receipt_id = ${mm}.receipt_id AND o.status = 'applied' AND o.id <> ${mm}.id
+    AND NOT (${mm}.rule = 'split_charges' AND o.rule = 'split_charges' AND o.group_key = ${mm}.group_key))`
+const matchOpen = (mid: string): string => `EXISTS (SELECT 1 FROM receipt_matches mm WHERE mm.id = ${mid} AND mm.status = 'suggested' AND NOT ${receiptLinkedElsewhere('mm')})`
+const MATCH_OPEN = matchOpen(`json_extract(j.value, '$.mid')`)
 
 /** The audit insert is the rule engine's own (EDITS_FROM_JSON_SQL), narrowed to rows whose match is still open and unlinked. */
 export const APPLY_EDITS_SQL = `${EDITS_FROM_JSON_SQL}
@@ -163,13 +167,19 @@ export const APPLY_UPDATE_SQL = `WITH ch AS (SELECT json_extract(value, '$.id') 
 UPDATE transactions SET category_id = ch.cat, category_source = 'manual', rule_id = NULL, needs_review = 0, review_reason = NULL, confidence = 100,
   updated_at = ch.stamp, updated_by = ?2
 FROM ch WHERE transactions.id = ch.id AND transactions.updated_at = ch.prev AND ${NOT_LINKED}
-  AND EXISTS (SELECT 1 FROM receipt_matches mm WHERE mm.id = ch.mid AND mm.status = 'suggested')`
+  AND ${matchOpen('ch.mid')}`
 
 export const APPLY_MATCH_SQL = `WITH ch AS (SELECT json_extract(value, '$.mid') AS mid, json_extract(value, '$.want') AS want FROM json_each(?1))
 UPDATE receipt_matches SET status = 'applied', decided_at = ?3, decided_by = ?2
 FROM ch WHERE receipt_matches.id = ch.mid AND receipt_matches.status = 'suggested'
   AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = receipt_matches.txn_id AND t.updated_at = ch.want)
-  AND NOT EXISTS (SELECT 1 FROM receipt_matches o WHERE o.txn_id = receipt_matches.txn_id AND o.status = 'applied')`
+  AND NOT EXISTS (SELECT 1 FROM receipt_matches o WHERE o.txn_id = receipt_matches.txn_id AND o.status = 'applied')
+  AND NOT ${receiptLinkedElsewhere('receipt_matches')}`
+
+/** After an apply, the receipt's other open suggestions (a tie, a second equal charge) are moot: superseded, in the same batch. */
+export const SUPERSEDE_LEFTOVER_SQL = `UPDATE receipt_matches SET status = 'superseded', decided_at = ?3, decided_by = ?2
+WHERE status = 'suggested' AND receipt_id IN (SELECT receipt_id FROM receipt_matches WHERE id IN (SELECT value FROM json_each(?1)) AND status = 'applied')
+  AND ${receiptLinkedElsewhere('receipt_matches')}`
 
 export const APPLY_RECEIPT_SQL = `UPDATE receipts SET status = 'applied', updated_at = ?3, updated_by = ?2
 WHERE id IN (SELECT receipt_id FROM receipt_matches WHERE id IN (SELECT value FROM json_each(?1)) AND status = 'applied') AND status = 'suggested'`
@@ -200,18 +210,24 @@ export async function applyReceipts(
   interface Plan { item: ApplyItem; row: Row; cat: string | null; kept: 'manual' | 'person_edit' | null; stamp: string }
   const plans = new Map<number, Plan>()
   const txnTaken = new Set<string>()
+  const receiptTaken = new Map<string, string>() // receipt id -> 'one' or 'split:<group>' (the match planned for it in this request)
   for (const item of items) {
     const r = by.get(item.matchId)
     if (!r) { skip(item.matchId, 'not_found'); continue }
     if (r.match_status !== 'suggested' || r.receipt_status !== 'suggested') { skip(item.matchId, 'not_suggested'); continue }
     if (String(r.updated_at) !== item.expectedUpdatedAt) { skip(item.matchId, 'stale', String(r.updated_at)); continue }
     if (Number(r.linked) === 1 || txnTaken.has(String(r.txn_id))) { skip(item.matchId, 'txn_linked'); continue }
+    // One receipt, one bank row (split_charges parts of one group excepted): the first request item wins, the rest conflict.
+    const rTag = r.rule === 'split_charges' ? `split:${String(r.group_key)}` : 'one'
+    const rHeld = receiptTaken.get(String(r.receipt_id))
+    if (rHeld !== undefined && !(rTag !== 'one' && rHeld === rTag)) { skip(item.matchId, 'conflict'); continue }
     const kept = r.category_source === 'manual' ? 'manual' : Number(r.person_edit) === 1 ? 'person_edit' : null
     let cat: string | null = item.categoryId === undefined ? s(r.proposed_category_id) : item.categoryId
     if (cat === '' || cat === 'uncategorized') cat = null
     if (kept || cat === s(r.category_id)) cat = null
     if (cat !== null) await validCategory(cat)
     txnTaken.add(String(r.txn_id))
+    receiptTaken.set(String(r.receipt_id), rTag)
     plans.set(item.matchId, { item, row: r, cat, kept, stamp: cat !== null ? nextStamp(String(r.updated_at), now) : String(r.updated_at) })
   }
   // split_charges: drop a part unless every sibling part is requested and still planned (repeat until stable).
@@ -252,6 +268,7 @@ export async function applyReceipts(
   if (plans.size) {
     stmts.push(db.prepare(APPLY_MATCH_SQL).bind(links, email, iso))
     stmts.push(db.prepare(APPLY_RECEIPT_SQL).bind(planIds, email, iso))
+    stmts.push(db.prepare(SUPERSEDE_LEFTOVER_SQL).bind(planIds, email, iso))
   }
   if (rejects.length) {
     const rj = JSON.stringify(rejects)
