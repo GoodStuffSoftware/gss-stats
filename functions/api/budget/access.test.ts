@@ -44,6 +44,11 @@ const PATHS = [
   '/api/%62udget/meta',
   '/api/budget%2Fmeta',
   '/api/budget',
+  // --- receipts stage 9 (status, sync, disconnect): reached through the catch-all here; the real handlers are covered per method in email/statusSyncDisconnect.test.ts
+  '/api/budget/email/status',
+  '/api/budget/email/sync',
+  '/api/budget/email/disconnect',
+  // --- end receipts stage 9
 ]
 
 async function cookieFor(who: Who, env: BudgetEnv = ENV): Promise<string | undefined> {
