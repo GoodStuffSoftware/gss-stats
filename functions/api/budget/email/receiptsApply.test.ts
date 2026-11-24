@@ -180,7 +180,7 @@ describe('apply', () => {
     expect(txn(txns[0]).category_id).toBe('shopping')
     expect(txn(txns[1]).category_id).toBe('dining')
     const reads = db.statements.filter((q) => /\bFROM categories\b/i.test(q))
-    expect(reads.length).toBeLessThanOrEqual(1)
+    expect(reads.length).toBe(1) // 15 of the 30 items carry a category: one read for all of them
   })
 
   it('an archived category on a planned item is still 400, and a skipped item never trips the check', async () => {

@@ -348,7 +348,8 @@ describe('a run', () => {
 describe('time slices (a backfill larger than one list loses nothing)', () => {
   const T0 = NOW.getTime() - 13 * 86_400_000
   const times = Array.from({ length: 250 }, (_, i) => T0 + i * 1_800_000) // 250 matches, 30 minutes apart, about 5 days
-  const idsStored = (): string[] => db.all<{ gmail_msg_id: string }>('SELECT gmail_msg_id FROM receipts ORDER BY gmail_msg_id').map((r) => r.gmail_msg_id)
+  // Insert order, so the tests prove the oldest are handled first (not only that the set is complete).
+  const idsStored = (): string[] => db.all<{ gmail_msg_id: string }>('SELECT gmail_msg_id FROM receipts ORDER BY rowid').map((r) => r.gmail_msg_id)
   const big = (over: Partial<Env> = {}): Env => makeEnv({ RECEIPTS_MAX_PER_RUN: '1000', RECEIPTS_DAILY_CAP: '1000', ...over })
 
   it('250 matches (more than the 200 one list can hold) are all handled, oldest first', async () => {

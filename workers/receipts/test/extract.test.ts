@@ -92,6 +92,8 @@ describe('extractReceipt', () => {
     const [, init] = f.mock.calls[0] as [string, RequestInit]
     const user = JSON.parse(init.body as string).messages[0].content as string
     expect(user.isWellFormed()).toBe(true)
+    // Cut at the limit (second emoji gone), and the half pair left at the cut is replaced, not sent as a lone surrogate.
+    expect(user).toBe(`<email>\n${'a'.repeat(MAX_EMAIL_CHARS - 1)}�\n</email>`)
   })
 
   it('reads the API usage block into the result, with or without a receipt', async () => {

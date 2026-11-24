@@ -53,6 +53,8 @@ export interface MatchReceipt {
   paymentVia: string | null
   cardLast4: string | null
   orderRef: string | null
+  /** Sender domain of the email (the repeat-email guard's key when there is no order_ref). */
+  senderDomain?: string | null
   /** ISO 4217 code as the email states it; null or absent = not stated (treated as the budget currency). */
   currency?: string | null
   emailDate: string
@@ -362,7 +364,8 @@ function splitChargeProposals(r: MatchReceipt, rows: readonly MatchBankRow[], ta
       rule: 'split_charges', groupKey: groupKey('s', [r.id, ...rs.map((b) => b.id)]), score: clamp(score),
       parts: rs.map((b) => ({ receiptId: r.id, txnId: b.id, shareCents: Math.abs(b.amountCents), txnUpdatedAt: b.updatedAt })),
       unique: false, split: true,
-      proposedCategoryId: proposedCategory(hint, rs[0], opts), explainsTxnIds: [],
+      // The one category is stored on every part, so a person-edited row in any part leaves it out.
+      proposedCategoryId: proposedCategory(hint, rs.find((b) => b.personEdited) ?? rs[0], opts), explainsTxnIds: [],
     }, rs, opts))
   }
   return out
@@ -430,11 +433,61 @@ function declineProposals(r: MatchReceipt, rows: readonly MatchBankRow[], taken:
   })
 }
 
+/**
+ * A receipt already applied to a bank row. An open receipt of the same direction (refund or not) and charged amount is
+ * a repeat email when it has the same order_ref within the purchase window, or (both without an order_ref) the same
+ * sender domain within three days.
+ */
+export interface AppliedSibling {
+  orderRef: string | null
+  amountCents: Cents
+  /** True for an applied refund: a refund is only a repeat of a refund, never of its purchase. */
+  refund: boolean
+  /** The applied receipt's base date (receipt_date, else email_date). */
+  baseDate?: string | null
+  senderDomain?: string | null
+}
+
+/** An order_ref repeats only within the span of one purchase window (a reused reference on a later receipt is new). */
+export const REPEAT_SPAN_DAYS = PURCHASE_WINDOW.before + PURCHASE_WINDOW.after
+/** Without an order_ref the same sender and amount repeat only this close together. */
+export const NO_REF_REPEAT_DAYS = 3
+
 export interface MatchContext {
   /** Bank row ids already linked (applied) to a receipt: never proposed again. */
   takenTxnIds?: readonly string[]
-  /** Receipts already applied to a bank row: an open receipt with the same order_ref and charged amount is a repeat email. */
-  appliedSiblings?: ReadonlyArray<{ orderRef: string; amountCents: Cents }>
+  /** Receipts already applied to a bank row: see AppliedSibling. */
+  appliedSiblings?: readonly AppliedSibling[]
+}
+
+function siblingKey(refund: boolean, ref: string, amount: Cents): string { return `${refund ? 'R' : 'P'}|${ref}|${amount}` }
+
+/** Ids of open receipts that repeat an applied one (never matched). */
+function repeatIds(receipts: readonly MatchReceipt[], siblings: readonly AppliedSibling[]): Set<string> {
+  const byKey = new Map<string, Array<IsoDate | null>>()
+  for (const s of siblings) {
+    const ref = s.orderRef !== null ? `o:${s.orderRef}` : s.senderDomain ? `d:${s.senderDomain}` : null
+    if (ref === null) continue
+    const k = siblingKey(s.refund, ref, s.amountCents)
+    const l = byKey.get(k) ?? []
+    l.push(normalizeDate(s.baseDate ?? null))
+    byKey.set(k, l)
+  }
+  const out = new Set<string>()
+  if (byKey.size === 0) return out
+  for (const r of receipts) {
+    const amt = chargedCents(r)
+    if (amt === null) continue
+    const ref = r.orderRef !== null ? `o:${r.orderRef}` : r.senderDomain ? `d:${r.senderDomain}` : null
+    if (ref === null) continue
+    const dates = byKey.get(siblingKey(isRefund(r), ref, amt))
+    if (!dates) continue
+    const base = baseDate(r)
+    const span = r.orderRef !== null ? REPEAT_SPAN_DAYS : NO_REF_REPEAT_DAYS
+    // A sibling without a usable date counts as a repeat only for an order_ref (the weaker fallback key needs the date).
+    if (dates.some((d) => (d === null || base === null ? r.orderRef !== null : Math.abs(daysBetween(d, base)) <= span))) out.add(r.id)
+  }
+  return out
 }
 
 /**
@@ -444,10 +497,9 @@ export interface MatchContext {
 export function matchReceipts(receipts: readonly MatchReceipt[], rows: readonly MatchBankRow[],
   opts: MatchOptions = {}, ctx: MatchContext = {}): ReceiptMatchResult[] {
   const taken = new Set(ctx.takenTxnIds ?? [])
-  const siblings = new Set((ctx.appliedSiblings ?? []).map((s) => `${s.orderRef}|${s.amountCents}`))
-  // Never matched: another currency, or a repeat email of an order that already has an applied receipt.
-  const skip = (r: MatchReceipt): boolean => foreignCurrency(r, opts) ||
-    (r.orderRef !== null && chargedCents(r) !== null && siblings.has(`${r.orderRef}|${chargedCents(r)}`))
+  const repeats = repeatIds(receipts, ctx.appliedSiblings ?? [])
+  // Never matched: another currency, or a repeat email of a receipt that is already applied.
+  const skip = (r: MatchReceipt): boolean => foreignCurrency(r, opts) || repeats.has(r.id)
   const splitRecv = splitReceiptProposals(receipts.filter((r) => !skip(r)), rows, taken, opts)
 
   // Which receipts claim each row (for cross-receipt ambiguity).

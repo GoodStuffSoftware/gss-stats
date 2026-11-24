@@ -13,9 +13,11 @@
 import { addDays } from '../../../src/lib/budget/dates'
 import {
   AUTO_MIN_SCORE,
+  NO_REF_REPEAT_DAYS,
   STALE_AFTER_DAYS,
   candidateWindow,
   chargedCents,
+  type AppliedSibling,
   type MatchBankRow,
   type MatchProposal,
   type MatchReceipt,
@@ -309,7 +311,7 @@ export async function markStale(db: Db, connectionId: string, now: Date): Promis
 
 // ---------- open receipts and candidate bank rows ----------
 
-export const OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, currency, email_date, receipt_date, related_date, total_cents, charges_json
+export const OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, sender_domain, currency, email_date, receipt_date, related_date, total_cents, charges_json
 FROM receipts WHERE connection_id = ?1 AND status IN ('unmatched','suggested') AND ${OPEN_BASE} >= ?2
 ORDER BY ${OPEN_BASE} DESC LIMIT ${MAX_OPEN_PER_RUN}`
 export const ITEMS_SQL = `SELECT receipt_id, seq, description, amount_cents, quantity, category_hint FROM receipt_items
@@ -345,24 +347,39 @@ export async function loadOpenReceipts(db: Db, connectionId: string, now: Date):
   }
   return results.map((r) => ({
     id: r.id as string, kind: (r.kind as MatchReceipt['kind']) ?? null, merchant: (r.merchant as string | null) ?? null, paymentVia: (r.payment_via as string | null) ?? null,
-    cardLast4: (r.card_last4 as string | null) ?? null, orderRef: (r.order_ref as string | null) ?? null, currency: (r.currency as string | null) ?? null, emailDate: r.email_date as string,
+    cardLast4: (r.card_last4 as string | null) ?? null, orderRef: (r.order_ref as string | null) ?? null, senderDomain: (r.sender_domain as string | null) ?? null, currency: (r.currency as string | null) ?? null, emailDate: r.email_date as string,
     receiptDate: (r.receipt_date as string | null) ?? null, relatedDate: (r.related_date as string | null) ?? null, totalCents: (r.total_cents as number | null) ?? null,
     charges: parseCharges(r.charges_json), items: byReceipt.get(r.id as string) ?? [],
   }))
 }
 
-/** Applied receipts of the connection that share an order_ref with an open one (?2 = JSON array of order refs). */
-export const APPLIED_SIBLINGS_SQL = `SELECT order_ref, total_cents, charges_json FROM receipts
-WHERE connection_id = ?1 AND status = 'applied' AND order_ref IN (SELECT value FROM json_each(?2))`
+/**
+ * Applied receipts of the connection the matcher's repeat-email guard can compare with an open one: those sharing an
+ * order_ref (?2 = JSON array of order refs; idx_rcpt_order), and those with no order_ref from a sender domain of an
+ * open receipt without one (?3 = JSON array of domains, ?4 = earliest email_date; idx_rcpt_review).
+ */
+export const APPLIED_SIBLINGS_SQL = `SELECT order_ref, kind, sender_domain, coalesce(receipt_date, email_date) AS base_date, total_cents, charges_json FROM receipts
+WHERE connection_id = ?1 AND status = 'applied' AND order_ref IN (SELECT value FROM json_each(?2))
+UNION ALL
+SELECT order_ref, kind, sender_domain, coalesce(receipt_date, email_date) AS base_date, total_cents, charges_json FROM receipts
+WHERE connection_id = ?1 AND status = 'applied' AND email_date >= ?4 AND order_ref IS NULL AND sender_domain IN (SELECT value FROM json_each(?3))`
 
-/** (order_ref, charged amount) of applied receipts sharing an order with an open receipt: the matcher's repeat-email guard. */
-export async function loadAppliedSiblings(db: Db, connectionId: string, open: ReadonlyArray<Pick<MatchReceipt, 'orderRef'>>): Promise<Array<{ orderRef: string; amountCents: number }>> {
+/** Applied receipts that could be the twin of an open one (see APPLIED_SIBLINGS_SQL): the matcher's repeat-email guard. */
+export async function loadAppliedSiblings(db: Db, connectionId: string,
+  open: ReadonlyArray<Pick<MatchReceipt, 'orderRef' | 'senderDomain' | 'emailDate' | 'receiptDate'>>): Promise<AppliedSibling[]> {
   const refs = [...new Set(open.flatMap((r) => (r.orderRef ? [r.orderRef] : [])))]
-  if (refs.length === 0) return []
-  const { results } = await db.prepare(APPLIED_SIBLINGS_SQL).bind(connectionId, JSON.stringify(refs)).all<Record<string, unknown>>()
+  const noRef = open.filter((r) => !r.orderRef && r.senderDomain)
+  if (refs.length === 0 && noRef.length === 0) return []
+  const domains = [...new Set(noRef.map((r) => r.senderDomain as string))]
+  const earliest = noRef.reduce((m, r) => { const d = r.receiptDate ?? r.emailDate; return d < m ? d : m }, '9999-12-31')
+  const from = noRef.length === 0 ? '9999-12-31' : addDays(earliest, -NO_REF_REPEAT_DAYS)
+  const { results } = await db.prepare(APPLIED_SIBLINGS_SQL).bind(connectionId, JSON.stringify(refs), JSON.stringify(domains), from).all<Record<string, unknown>>()
   return results.flatMap((r) => {
     const amountCents = chargedCents({ totalCents: (r.total_cents as number | null) ?? null, charges: parseCharges(r.charges_json) })
-    return amountCents === null ? [] : [{ orderRef: r.order_ref as string, amountCents }]
+    return amountCents === null ? [] : [{
+      orderRef: (r.order_ref as string | null) ?? null, amountCents, refund: r.kind === 'refund',
+      baseDate: (r.base_date as string | null) ?? null, senderDomain: (r.sender_domain as string | null) ?? null,
+    }]
   })
 }
 

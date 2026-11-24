@@ -195,6 +195,15 @@ describe('proposed category on a person-edited row', () => {
     expect(matchReceipt(rcpt({ items }), [row({ personEdited: true })]).winner?.proposedCategoryId).toBeNull()
     expect(matchReceipt(rcpt({ items }), [row()]).winner?.proposedCategoryId).toBe('fuel')
   })
+  it('split_charges proposes no category when any one of its rows was person-edited (not only the first)', () => {
+    const items = [{ description: 'Gas', amountCents: 5000, quantity: 1, categoryHint: 'fuel' }]
+    const r = rcpt({ totalCents: 5000, items, charges: [{ amountCents: 3000, last4: null }, { amountCents: 2000, last4: null }] })
+    const a = row({ id: 's1', amountCents: -3000 })
+    const b = row({ id: 's2', amountCents: -2000, postedDate: '2026-03-14' })
+    expect(matchReceipt(r, [a, b]).proposals[0].proposedCategoryId).toBe('fuel')
+    expect(matchReceipt(r, [a, { ...b, personEdited: true }]).proposals[0].proposedCategoryId).toBeNull()
+    expect(matchReceipt(r, [{ ...a, personEdited: true }, b]).proposals[0].proposedCategoryId).toBeNull()
+  })
 })
 
 describe('currency', () => {
@@ -241,7 +250,7 @@ describe('repeat emails for one order', () => {
   it('a repeat of an applied receipt (same order_ref and amount) gets no proposal and no winner, even on a lone same-amount row', () => {
     const repeat = rcpt({ id: 'rep', orderRef: 'ORD-5', totalCents: 5000 })
     const reorder = row({ id: 'again', amountCents: -5000, postedDate: '2026-03-14' })
-    const res = matchReceipt(repeat, [reorder], { autoApply: true }, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000 }] })
+    const res = matchReceipt(repeat, [reorder], { autoApply: true }, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000, refund: false }] })
     expect(res.status).toBe('unmatched')
     expect(res.winner).toBeNull()
     expect(res.proposals).toEqual([])
@@ -249,13 +258,49 @@ describe('repeat emails for one order', () => {
   it('a different amount or order_ref is not a repeat', () => {
     const r = rcpt({ id: 'r', orderRef: 'ORD-5', totalCents: 5000 })
     const rows = [row({ amountCents: -5000 })]
-    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 4000 }] }).status).toBe('suggested')
-    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-6', amountCents: 5000 }] }).status).toBe('suggested')
+    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 4000, refund: false }] }).status).toBe('suggested')
+    expect(matchReceipt(r, rows, {}, { appliedSiblings: [{ orderRef: 'ORD-6', amountCents: 5000, refund: false }] }).status).toBe('suggested')
+  })
+  it('a full refund of an applied purchase (same order_ref and amount) still matches its refund row', () => {
+    const refund = rcpt({ id: 'rf', kind: 'refund', orderRef: 'ORD-1', totalCents: 2599 })
+    const credit = row({ id: 'c1', kind: 'refund', amountCents: 2599 })
+    const res = matchReceipt(refund, [credit], {}, { appliedSiblings: [{ orderRef: 'ORD-1', amountCents: 2599, refund: false, baseDate: '2026-03-01' }] })
+    expect(res.status).toBe('suggested')
+    expect(res.winner?.rule).toBe('refund')
+    expect(res.winner?.parts[0].txnId).toBe('c1')
+  })
+  it('a repeat of an applied refund stays unmatched, and a purchase is not a repeat of an applied refund', () => {
+    const credit = row({ id: 'c1', kind: 'refund', amountCents: 2599 })
+    const refund = rcpt({ id: 'rf', kind: 'refund', orderRef: 'ORD-1', totalCents: 2599 })
+    const res = matchReceipt(refund, [credit], {}, { appliedSiblings: [{ orderRef: 'ORD-1', amountCents: 2599, refund: true, baseDate: '2026-03-10' }] })
+    expect(res.status).toBe('unmatched')
+    expect(res.winner).toBeNull()
+    const purchase = rcpt({ id: 'p', orderRef: 'ORD-1', totalCents: 2599 })
+    expect(matchReceipt(purchase, [row()], {}, { appliedSiblings: [{ orderRef: 'ORD-1', amountCents: 2599, refund: true, baseDate: '2026-03-10' }] }).status).toBe('suggested')
+  })
+  it('the same order_ref a month after the applied receipt is a new receipt, not a repeat', () => {
+    const r = rcpt({ id: 'r', orderRef: 'MEMBER-9', totalCents: 5000, emailDate: '2026-03-10', receiptDate: '2026-03-10' })
+    const rows = [row({ amountCents: -5000 })]
+    const at = (baseDate: string) => ({ appliedSiblings: [{ orderRef: 'MEMBER-9', amountCents: 5000, refund: false, baseDate }] })
+    expect(matchReceipt(r, rows, {}, at('2026-02-08')).winner?.parts[0].txnId).toBe('t1')
+    expect(matchReceipt(r, rows, {}, at('2026-03-08')).status).toBe('unmatched')
+  })
+  it('without an order_ref, the same sender and amount within 3 days of an applied receipt is a repeat', () => {
+    const twin = rcpt({ id: 'tw', orderRef: null, senderDomain: 'shop.example.com', totalCents: 5000, emailDate: '2026-03-11', receiptDate: null })
+    const reorder = row({ id: 'later', amountCents: -5000, postedDate: '2026-03-14' })
+    const sib = (baseDate: string, senderDomain = 'shop.example.com') => ({ appliedSiblings: [{ orderRef: null, amountCents: 5000, refund: false, baseDate, senderDomain }] })
+    const res = matchReceipt(twin, [reorder], {}, sib('2026-03-10'))
+    expect(res.status).toBe('unmatched')
+    expect(res.winner).toBeNull()
+    // a week apart, another sender, or no sender on the receipt: not a repeat
+    expect(matchReceipt(twin, [reorder], {}, sib('2026-03-04')).winner?.parts[0].txnId).toBe('later')
+    expect(matchReceipt(twin, [reorder], {}, sib('2026-03-10', 'other.example.com')).winner?.parts[0].txnId).toBe('later')
+    expect(matchReceipt({ ...twin, senderDomain: null }, [reorder], {}, sib('2026-03-10')).winner?.parts[0].txnId).toBe('later')
   })
   it('a repeat does not weaken another open receipt competing for the same row', () => {
     const repeat = rcpt({ id: 'rep', orderRef: 'ORD-5', totalCents: 5000 })
     const other = rcpt({ id: 'oth', orderRef: null, totalCents: 5000 })
-    const out = matchReceipts([repeat, other], [row({ amountCents: -5000 })], {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000 }] })
+    const out = matchReceipts([repeat, other], [row({ amountCents: -5000 })], {}, { appliedSiblings: [{ orderRef: 'ORD-5', amountCents: 5000, refund: false }] })
     expect(out[0].status).toBe('unmatched')
     expect(out[1].winner?.parts[0].txnId).toBe('t1')
   })

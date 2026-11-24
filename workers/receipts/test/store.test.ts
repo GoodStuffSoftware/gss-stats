@@ -303,16 +303,34 @@ describe('currency and repeat emails reach the matcher', () => {
     expect(written.suggested).toBe(0)
     expect(rcptStatus(r.id)).toBe('unmatched')
   })
-  it('loadAppliedSiblings returns (order_ref, charged amount) of applied receipts of this connection only', async () => {
+  const sib = (orderRef: string | null, senderDomain: string | null = null) => ({ orderRef, senderDomain, emailDate: '2026-12-01', receiptDate: null })
+  it('loadAppliedSiblings returns (order_ref, kind, charged amount) of applied receipts of this connection only', async () => {
     conn(CONN2, 'user-b@example.com')
     const applied = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
     const other = await put({ connectionId: CONN2, extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
     const unrelated = await put({ extracted: extracted({ orderRef: 'ORD-88', totalCents: 700 }) })
     db.exec(`UPDATE receipts SET status = 'applied' WHERE id IN ('${applied.id}', '${other.id}')`)
-    const open = [{ orderRef: 'ORD-77' }, { orderRef: 'ORD-88' }, { orderRef: null }]
-    expect(await S.loadAppliedSiblings(d1(), CONN, open)).toEqual([{ orderRef: 'ORD-77', amountCents: 5000 }])
-    expect(await S.loadAppliedSiblings(d1(), CONN, [{ orderRef: null }])).toEqual([])
+    const open = [sib('ORD-77'), sib('ORD-88'), sib(null)]
+    expect(await S.loadAppliedSiblings(d1(), CONN, open)).toEqual([
+      { orderRef: 'ORD-77', amountCents: 5000, refund: false, baseDate: '2026-12-01', senderDomain: 'shop.example.com' },
+    ])
+    expect(await S.loadAppliedSiblings(d1(), CONN, [sib(null)])).toEqual([])
     expect(rcptStatus(unrelated.id)).not.toBe('applied')
+  })
+  it('loadAppliedSiblings uses the stated charges (not the total) and carries a refund as such', async () => {
+    const charged = await put({ extracted: extracted({ orderRef: 'ORD-91', totalCents: 6000, charges: [{ amountCents: 5000, last4: null }], chargesJson: '[{"amountCents":5000}]' }) })
+    const refund = await put({ extracted: extracted({ kind: 'refund', orderRef: 'ORD-92', totalCents: 800 }) })
+    db.exec(`UPDATE receipts SET status = 'applied' WHERE id IN ('${charged.id}', '${refund.id}')`)
+    const out = await S.loadAppliedSiblings(d1(), CONN, [sib('ORD-91'), sib('ORD-92')])
+    expect(out.map((s) => [s.orderRef, s.amountCents, s.refund]).sort()).toEqual([['ORD-91', 5000, false], ['ORD-92', 800, true]])
+  })
+  it('loadAppliedSiblings reads order-less applied receipts only for the open sender domains, from a few days back', async () => {
+    const same = await put({ extracted: extracted({ orderRef: null, totalCents: 900 }) })
+    const otherSender = await put({ senderDomain: 'other.example.com', extracted: extracted({ orderRef: null, totalCents: 900 }) })
+    const old = await put({ emailDate: '2026-11-01', extracted: extracted({ orderRef: null, receiptDate: '2026-11-01', totalCents: 900 }) })
+    db.exec(`UPDATE receipts SET status = 'applied' WHERE id IN ('${same.id}', '${otherSender.id}', '${old.id}')`)
+    const out = await S.loadAppliedSiblings(d1(), CONN, [sib(null, 'shop.example.com')])
+    expect(out).toEqual([{ orderRef: null, amountCents: 900, refund: false, baseDate: '2026-12-01', senderDomain: 'shop.example.com' }])
   })
   it('a repeat email of an applied order stays unmatched next to a same-amount row', async () => {
     const applied = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
@@ -326,6 +344,18 @@ describe('currency and repeat emails reach the matcher', () => {
     const written = await S.writeMatchResults(d1(), matchReceipts(open, rows, { autoApply: true }, { takenTxnIds, appliedSiblings }), NOW)
     expect(written.suggested).toBe(0)
     expect(rcptStatus(repeat.id)).toBe('unmatched')
+  })
+  it('a full refund of an applied order still matches its refund row', async () => {
+    const purchase = await put({ extracted: extracted({ orderRef: 'ORD-77', totalCents: 5000 }) })
+    db.exec(`UPDATE receipts SET status = 'applied' WHERE id = '${purchase.id}'`)
+    const refund = await put({ extracted: extracted({ kind: 'refund', orderRef: 'ORD-77', totalCents: 5000 }) })
+    mk({ posted_date: '2026-12-03', amount_cents: 5000, kind: 'refund', merchant_name: 'Test Shop' })
+    const open = await S.loadOpenReceipts(d1(), CONN, NOW)
+    expect(open.map((o) => o.id)).toEqual([refund.id])
+    const { rows, takenTxnIds } = await S.loadCandidateRows(d1(), open)
+    const appliedSiblings = await S.loadAppliedSiblings(d1(), CONN, open)
+    const written = await S.writeMatchResults(d1(), matchReceipts(open, rows, {}, { takenTxnIds, appliedSiblings }), NOW)
+    expect(written.suggested).toBe(1)
   })
 })
 
