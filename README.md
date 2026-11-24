@@ -2768,7 +2768,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   folder of import requests into one SQL file with
   `npm run budget:load-sql -- --seed <seed.json> --requests <dir> --out <file.sql>`, then run
   `npx wrangler d1 execute gss-budget --local --file <file.sql>`. The tool refuses an output path inside a
-  git work tree. Remote migrations and loads are run by hand by the owner, never by an agent or by CI.
+  git work tree. Remote migrations and loads are run by hand by the owner, never by an agent or by CI. Exception: Mike delegated migration 0004 (email receipts) to the agent lead, who applies it with a Time Travel bookmark first.
 - **Layout.** Three tabs at every width: Spending, Debts and Both (`b_tab=spending|debts|both`, always written to
   the address; with none, 1024 px and wider opens on Both and narrower on Spending, `defaultTabFor` in
   `lib/budget/viewState.ts`). Both shows the two panels on shared grid rows (header, donut, hint, list) from 1024 px
@@ -2810,6 +2810,20 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   SQL file the tool writes goes there too. Tests use only the made-up data in
   `src/lib/budget/__fixtures__/synthetic.ts`, run against an in-memory SQLite stand-in for D1
   (`functions/_lib/testing/budgetDb.ts`, which also enforces D1's 100-parameter and 100 KB statement limits).
+- **Email receipts.** Each listed Budget person can connect Gmail (read-only) so receipt emails are read hourly,
+  matched to transactions and offered as category suggestions. The design, sharing and safety rules are in
+  [ADR 0008](docs/adr/0008-email-receipts.md); this is only how to run it.
+  - **Connect.** A Budget person opens the connect step in Budget, reads the consent text, and approves on Google's
+    screen. The owner can disconnect at any time (the grant is revoked at Google).
+  - **Who sees what.** `RECEIPTS_SHARE=fields` (a var in `wrangler.toml`): both Budget people see each other's receipt
+    fields on a transaction; only the owner gets the Gmail link. Review, apply and dismiss are per owner.
+  - **Names (values never in the repo).** Secrets Store, read by the Worker `gss-budget-receipts` only:
+    `RECEIPTS_GMAIL_CLIENT_ID`, `RECEIPTS_GMAIL_CLIENT_SECRET`, `RECEIPTS_TOKEN_KEY`, `RECEIPTS_TOKEN_KEY_OLD`,
+    `RECEIPTS_ANTHROPIC_KEY`, `RECEIPTS_ALLOWED_EMAILS`. Pages secret: `RECEIPTS_GMAIL_CLIENT_ID`. Worker vars
+    (in `workers/receipts/wrangler.toml`): model, per-run and per-day caps, backfill days, `RECEIPTS_AUTO_APPLY`
+    (`0` by default).
+  - **Deploy order.** The Worker must deploy before Pages, because Pages binds it (`deploy.yml` orders the jobs).
+    All Secrets Store secrets must exist before the Worker's first deploy.
 
 ## Security / hardening
 

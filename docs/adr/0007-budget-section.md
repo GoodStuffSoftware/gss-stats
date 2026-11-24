@@ -4,6 +4,7 @@
 - **Date:** 2026-11-20
 - **Amends:** [ADR 0002](0002-google-auth.md) (a second allowlist, listed-viewer writes under
   `/api/budget/*`); one row added to [ADR 0005](0005-retire-bespoke-widgets.md)'s Exceptions.
+- **Amended by:** [ADR 0008](0008-email-receipts.md) (decision 2 no longer holds: the receipts Worker also binds the budget database).
 
 ## Context
 

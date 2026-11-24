@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Connect Gmail for receipts** — each Budget person can connect Gmail read-only from Budget, and receipt emails are then read and matched to transactions automatically.
+- **Review and apply receipts** — a review list shows each matched receipt with its suggested category, to apply or dismiss one at a time or in a batch; a category you set yourself is never changed.
+- **Receipt details on transactions** — a transaction with a receipt shows the merchant, date, total and items, and the other Budget person sees them too; only the owner gets the link to the email.
+- **Clear messages when receipts pause** — if the reading stops because of a spending limit, a rejected request or a lost Gmail connection, Budget says so and tries again on the next hourly run.
+
 ## [0.84.0] — 2026-11-23
 
 ### Added
