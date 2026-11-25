@@ -165,6 +165,7 @@ function onDocPointer(e: Event) {
 }
 function onDocKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  e.preventDefault() // a search field would otherwise wipe its own text on Escape
   if (open.value) {
     const key = open.value
     open.value = null
@@ -268,7 +269,7 @@ onBeforeUnmount(() => {
           aria-haspopup="true"
           :data-testid="`txn-filter-${l.key}`"
           @click="open = open === l.key ? null : l.key"
-        >{{ buttonText(l) }}<span aria-hidden="true" class="tt-caret">▾</span></button>
+        ><span class="tt-btn-text">{{ buttonText(l) }}</span><span aria-hidden="true" class="tt-caret">▾</span></button>
         <div v-if="open === l.key" class="tt-pop" role="group" :aria-label="`${l.label} filter`">
           <p v-if="!l.choices.length" class="tt-none">Nothing to choose from here.</p>
           <label v-for="c in l.choices" :key="c.value" class="tt-opt">
@@ -427,8 +428,15 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .tt-dd .tt-btn {
+  display: flex;
+  align-items: center;
   width: 100%;
   text-align: left;
+}
+.tt-btn-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis; /* a long label ("Category · 2") shortens; the caret stays */
 }
 .tt-btn {
   cursor: pointer;
@@ -439,6 +447,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--amber));
 }
 .tt-caret {
+  flex: none;
   margin-left: 6px;
   font-size: 11px;
 }

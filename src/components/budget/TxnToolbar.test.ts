@@ -96,7 +96,9 @@ describe('TxnToolbar pop-outs', () => {
     const input = w.get('#txn-tt-search [data-testid="txn-search"]')
     expect(input.attributes('aria-label')).toBe('Search transactions')
     expect(document.activeElement).toBe(input.element)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    document.dispatchEvent(esc)
+    expect(esc.defaultPrevented).toBe(true) // so the browser does not also wipe the search text
     await w.vm.$nextTick()
     expect(w.find('#txn-tt-search').exists()).toBe(false)
     expect(document.activeElement).toBe(btn.element)
