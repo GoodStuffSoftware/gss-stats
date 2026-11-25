@@ -305,12 +305,13 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
       :bounds="bounds"
       @update:model-value="onPrefs"
     >
-      <template v-if="narrow" #lead>
+      <template v-if="narrow" #lead="{ collapsed }">
         <SegmentedControl
           :options="VIEWS"
           :model-value="view"
           label="Transactions view"
           size="compact"
+          :collapsed="collapsed"
           data-testid="txn-view"
           @update:model-value="(v) => setView(v as TxnView)"
         />

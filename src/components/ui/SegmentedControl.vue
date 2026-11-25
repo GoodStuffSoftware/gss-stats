@@ -6,12 +6,24 @@ export interface SegOption {
   testid?: string
 }
 // `size="compact"` (opt-in) is a 36px control for a crowded line; the default is the 44px touch size.
-defineProps<{ options: SegOption[]; modelValue: string; label: string; size?: 'default' | 'compact' }>()
+// `collapsed` (opt-in) folds the options into ONE native dropdown with the same label and choices, for a line with no room:
+// the owner decides when (it measures its own line); left off, the control is the buttons it always was.
+defineProps<{ options: SegOption[]; modelValue: string; label: string; size?: 'default' | 'compact'; collapsed?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 </script>
 
 <template>
-  <div class="seg" :class="{ 'seg-compact': size === 'compact' }" role="radiogroup" :aria-label="label">
+  <select
+    v-if="collapsed"
+    class="seg-select"
+    :class="{ 'seg-compact': size === 'compact' }"
+    :aria-label="label"
+    :value="modelValue"
+    @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
+  >
+    <option v-for="o in options" :key="o.value" :value="o.value" :data-testid="o.testid">{{ o.label }}</option>
+  </select>
+  <div v-else class="seg" :class="{ 'seg-compact': size === 'compact' }" role="radiogroup" :aria-label="label">
     <button
       v-for="o in options"
       :key="o.value"
@@ -55,5 +67,27 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 .seg-btn:focus-visible {
   outline: 2px solid rgb(var(--amber));
   outline-offset: -2px;
+}
+/* The folded form: one dropdown, the same height as the buttons it replaces. */
+.seg-select {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.seg-select.seg-compact {
+  min-height: 36px;
+  font-size: 13px;
+}
+.seg-select:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: 1px;
 }
 </style>

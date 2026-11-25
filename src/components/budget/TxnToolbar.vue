@@ -5,15 +5,19 @@
 // Props: modelValue (the prefs), rows (what the table has loaded: the choices come from them), categories, accounts,
 // people, shown (rows after the toolbar), bounds (the page's period: the date inputs stay inside it).
 // Emits: update:modelValue (a whole new prefs object).
-// Wide screens: search, five filters and the sort sit on one wrapping row. Phone (<= 700 px): the search field stays, and
-// the filters and sort sit behind one "Filters" button (a count shows how many are on), the line is 36px, and "N of M" and
-// Clear show only with the panel open. Slot `lead` puts the owner's control first on that line (the Cards | Table switch).
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+// The row is ONE line at every width: [lead] [search] [Filters]. It measures its own width (ResizeObserver) and folds, in
+// order (lib/budget/toolbarFold.ts): the lead (slot `lead`, the Cards | Table switch; it gets `collapsed` so it can fold into
+// one dropdown), then the search into an icon button that pops its field out under the row. The Filters button (a count shows
+// how many are on) always stays; its panel (the filter lists, dates, sort, "N of M" and Clear) is a pop-out, never in the row.
+// Escape or a tap outside closes a pop-out and Escape returns focus to the button that opened it.
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, useSlots, watch } from 'vue'
 import type { Account, Category, Person, Txn } from '../../lib/budget/types'
 import {
-  TXN_SORT_KEYS, SEARCH_MAX, accountChoices, anythingActive, categoryChoices, defaultTxnViewPrefs, filtersActive, merchantChoices, personChoices, sortChanged,
+  TXN_SORT_KEYS, SEARCH_MAX, accountChoices, anythingActive, categoryChoices, defaultTxnViewPrefs, merchantChoices, personChoices, sortChanged,
   type Choice, type TxnSortKey, type TxnViewPrefs,
 } from '../../lib/budget/txnView'
+import { foldLevel, type FoldLevel } from '../../lib/budget/toolbarFold'
+import { useFlyout } from '../ui/useFlyout'
 
 const props = defineProps<{
   modelValue: TxnViewPrefs
@@ -27,6 +31,7 @@ const props = defineProps<{
   bounds?: { from: string; to: string }
 }>()
 const emit = defineEmits<{ 'update:modelValue': [p: TxnViewPrefs] }>()
+const slots = useSlots()
 
 const SORT_LABELS: Record<TxnSortKey, string> = { date: 'Date', merchant: 'Merchant', category: 'Category', account: 'Account', amount: 'Amount' }
 
@@ -63,43 +68,125 @@ const activeCount = computed(() => {
 })
 const total = computed(() => props.rows.length)
 const active = computed(() => anythingActive(props.modelValue))
+const countText = computed(() => `${props.shown} of ${total.value} transaction${total.value === 1 ? '' : 's'}`)
 
 function buttonText(l: { key: ListKey; label: string }): string {
   const n = props.modelValue[l.key].length
   return n ? `${l.label} · ${n}` : l.label
 }
 
-// One dropdown open at a time; a tap outside or Escape closes it.
+// ---- Fit: how much of the row is folded, from the measured width of the toolbar and of its controls. -----------------
+const GAP = 8
+const SEARCH_MIN = 120 // the least width the inline search field is worth showing at
+const LEAD_GUESS = 124 // until the real widths are measured (the Cards | Table switch inline, and folded)
+const LEAD_FOLDED_GUESS = 76
+const root = ref<HTMLElement | null>(null)
+const rowEl = ref<HTMLElement | null>(null)
+const leadEl = ref<HTMLElement | null>(null)
+const toggleEl = ref<HTMLElement | null>(null)
+const level = ref<FoldLevel>(0)
+const rootWidth = ref(0)
+const seen = { lead: 0, leadFolded: 0 } // the lead's width in each form, remembered once it has been drawn that way
+function measure() {
+  const el = root.value
+  if (!el) return
+  const avail = el.clientWidth
+  rootWidth.value = avail
+  if (avail <= 0) return // not laid out (hidden, or no layout engine): leave the row as it is
+  const lead = leadEl.value
+  if (lead && lead.offsetWidth > 0) {
+    if (level.value === 0) seen.lead = lead.offsetWidth
+    else seen.leadFolded = lead.offsetWidth
+  }
+  const next = foldLevel(avail, {
+    lead: lead ? seen.lead || LEAD_GUESS : 0,
+    leadFolded: lead ? seen.leadFolded || LEAD_FOLDED_GUESS : 0,
+    searchMin: SEARCH_MIN,
+    filters: toggleEl.value?.offsetWidth || 90,
+    gap: GAP,
+  })
+  if (next !== level.value) level.value = next
+}
+let ro: ResizeObserver | null = null
+onMounted(() => {
+  measure()
+  if (typeof ResizeObserver !== 'undefined' && root.value) {
+    ro = new ResizeObserver(() => measure())
+    ro.observe(root.value)
+  }
+})
+onUpdated(measure) // the Filters label (a count) or the lead slot changed
+watch(level, () => nextTick(measure)) // measure the lead in its new form
+watch(() => !!slots.lead, () => {
+  seen.lead = 0
+  seen.leadFolded = 0
+})
+const placeholder = computed(() => (level.value >= 1 || (rootWidth.value > 0 && rootWidth.value < 480) ? 'Search' : 'Search transactions'))
+
+// ---- Pop-outs: the Filters panel, the folded search field, one filter list inside the panel. One open at a time. --------
 const open = ref<ListKey | null>(null)
 const panelOpen = ref(false)
-const root = ref<HTMLElement | null>(null)
-// Phone (<= 700 px, same width as the CSS below): a shorter placeholder, so the view switch, search and Filters fit one line.
-const phoneQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 700px)') : null
-const phone = ref(!!phoneQuery?.matches)
-const onPhone = () => {
-  phone.value = !!phoneQuery?.matches
+const searchOpen = ref(false)
+const searchBtn = ref<HTMLElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+const { style: panelStyle } = useFlyout(rowEl, panelOpen, { maxWidth: 544, align: 'end' })
+const { style: searchStyle } = useFlyout(rowEl, searchOpen)
+const searchFolded = computed(() => level.value >= 2)
+watch(searchFolded, (f) => {
+  if (!f) searchOpen.value = false
+})
+
+function togglePanel() {
+  panelOpen.value = !panelOpen.value
+  if (panelOpen.value) searchOpen.value = false
+  else open.value = null
 }
-phoneQuery?.addEventListener?.('change', onPhone)
-onBeforeUnmount(() => phoneQuery?.removeEventListener?.('change', onPhone))
+async function toggleSearch() {
+  searchOpen.value = !searchOpen.value
+  if (!searchOpen.value) return
+  panelOpen.value = false
+  open.value = null
+  await nextTick()
+  searchInput.value?.focus()
+}
+function closeSearch(refocus: boolean) {
+  searchOpen.value = false
+  if (refocus) searchBtn.value?.focus()
+}
+
+const anyOpen = computed(() => !!open.value || panelOpen.value || searchOpen.value)
 function onDocPointer(e: Event) {
-  if (open.value && !(e.target as Element | null)?.closest?.('.tt-dd')) open.value = null
+  const t = e.target as Element | null
+  if (open.value && !t?.closest?.('.tt-dd')) open.value = null
+  if (!root.value?.contains(t)) {
+    panelOpen.value = false
+    searchOpen.value = false
+  }
 }
 function onDocKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') open.value = null
+  if (e.key !== 'Escape') return
+  if (open.value) {
+    const key = open.value
+    open.value = null
+    root.value?.querySelector<HTMLElement>(`[data-testid="txn-filter-${key}"]`)?.focus()
+  } else if (panelOpen.value) {
+    panelOpen.value = false
+    toggleEl.value?.focus()
+  } else if (searchOpen.value) {
+    closeSearch(true)
+  }
 }
-watch(
-  open,
-  (o) => {
-    if (o) {
-      document.addEventListener('pointerdown', onDocPointer, true)
-      document.addEventListener('keydown', onDocKey)
-    } else {
-      document.removeEventListener('pointerdown', onDocPointer, true)
-      document.removeEventListener('keydown', onDocKey)
-    }
-  },
-)
+watch(anyOpen, (o) => {
+  if (o) {
+    document.addEventListener('pointerdown', onDocPointer, true)
+    document.addEventListener('keydown', onDocKey)
+  } else {
+    document.removeEventListener('pointerdown', onDocPointer, true)
+    document.removeEventListener('keydown', onDocKey)
+  }
+})
 onBeforeUnmount(() => {
+  ro?.disconnect()
   document.removeEventListener('pointerdown', onDocPointer, true)
   document.removeEventListener('keydown', onDocKey)
 })
@@ -107,29 +194,72 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="txn-toolbar" role="search" aria-label="Search and filter transactions" data-testid="txn-toolbar">
-    <div class="tt-top">
-      <slot name="lead" />
+    <div ref="rowEl" class="tt-top">
+      <div v-if="$slots.lead" ref="leadEl" class="tt-lead"><slot name="lead" :collapsed="level >= 1" /></div>
       <input
+        v-if="!searchFolded"
         v-model="search"
         type="search"
         class="tt-search"
-        :placeholder="phone ? 'Search' : 'Search transactions'"
+        :placeholder="placeholder"
         aria-label="Search transactions"
         :maxlength="SEARCH_MAX"
         autocomplete="off"
         data-testid="txn-search"
       />
       <button
+        v-else
+        ref="searchBtn"
+        type="button"
+        class="tt-icon"
+        :class="{ 'tt-icon-on': !!search }"
+        :aria-expanded="searchOpen"
+        aria-controls="txn-tt-search"
+        :aria-label="search ? 'Search transactions (a search is on)' : 'Search transactions'"
+        :title="search ? `Searching for “${search}”` : 'Search transactions'"
+        data-testid="txn-search-toggle"
+        @click="toggleSearch"
+      >
+        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">
+          <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M13 13l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span v-if="search" class="tt-dot" aria-hidden="true" />
+      </button>
+      <button
+        ref="toggleEl"
         type="button"
         class="tt-toggle"
+        :class="{ 'tt-toggle-on': activeCount > 0 }"
         :aria-expanded="panelOpen"
         aria-controls="txn-tt-panel"
-        :title="`${shown} of ${total} transaction${total === 1 ? '' : 's'}`"
+        :title="countText"
         data-testid="txn-filters-toggle"
-        @click="panelOpen = !panelOpen"
+        @click="togglePanel"
       >Filters{{ activeCount ? ` · ${activeCount}` : '' }}</button>
     </div>
-    <div id="txn-tt-panel" class="tt-panel" :class="{ shown: panelOpen }">
+    <!-- The count is announced whether or not the panel is open; the visible copy lives inside the panel. -->
+    <p class="tt-live" aria-live="polite" data-testid="txn-count">{{ countText }}<template v-if="partial && active"> (loading the rest of the period…)</template></p>
+    <div v-if="searchFolded && searchOpen" id="txn-tt-search" class="tt-flyout tt-flyout-search" :style="searchStyle" role="group" aria-label="Search transactions" data-testid="txn-search-pop">
+      <input
+        ref="searchInput"
+        v-model="search"
+        type="search"
+        class="tt-search"
+        placeholder="Search transactions"
+        aria-label="Search transactions"
+        :maxlength="SEARCH_MAX"
+        autocomplete="off"
+        data-testid="txn-search"
+        @keydown.enter.prevent="closeSearch(true)"
+      />
+    </div>
+    <div v-show="panelOpen" id="txn-tt-panel" class="tt-flyout tt-panel" :style="panelStyle" role="group" aria-label="Filters and sort">
+      <p class="tt-count" data-testid="txn-count-panel">
+        <span aria-hidden="true">{{ countText }}</span>
+        <button v-if="active" type="button" class="tt-clear" data-testid="txn-clear" @click="clearAll">Clear</button>
+        <span v-if="partial && active" class="tt-note" aria-hidden="true">(loading the rest of the period…)</span>
+      </p>
       <div v-for="l in lists" :key="l.key" class="tt-dd" :class="{ on: modelValue[l.key].length > 0 }">
         <button
           type="button"
@@ -184,11 +314,6 @@ onBeforeUnmount(() => {
         >{{ modelValue.sortDir === 'asc' ? '↑ Asc' : '↓ Desc' }}</button>
       </span>
     </div>
-    <p class="tt-count" :class="{ 'tt-count-open': panelOpen }" aria-live="polite" data-testid="txn-count">
-      <span>{{ shown }} of {{ total }} transaction{{ total === 1 ? '' : 's' }}</span>
-      <button v-if="active" type="button" class="tt-clear" data-testid="txn-clear" @click="clearAll">Clear</button>
-      <span v-if="partial && active" class="tt-note">(loading the rest of the period…)</span>
-    </p>
   </div>
 </template>
 
@@ -199,16 +324,27 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin: 0 0 8px;
   width: 100%;
+  min-width: 0;
 }
+/* The row: never wraps, never wider than the toolbar; the controls give way (see the script) before they would overflow. */
 .tt-top {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+.tt-lead {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .tt-search,
 .tt-select,
 .tt-date,
 .tt-btn,
-.tt-toggle {
+.tt-toggle,
+.tt-icon {
   min-height: 36px;
   padding: 4px 10px;
   border: 1px solid rgb(var(--line-2));
@@ -219,11 +355,66 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .tt-search {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
 }
 .tt-toggle {
-  display: none;
+  flex: 0 0 auto;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tt-toggle-on,
+.tt-icon-on {
+  border-color: rgb(var(--amber));
+}
+.tt-icon {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+  cursor: pointer;
+}
+.tt-icon-on {
+  color: rgb(var(--amber));
+}
+.tt-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--amber));
+}
+/* Read by a screen reader whether or not the panel is open; never display:none. */
+.tt-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* A pop-out under (or, with no room below, over) the row: placed by useFlyout (fixed, so no card clips it) and scrolling inside itself. */
+.tt-flyout {
+  z-index: 30;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 9px;
+  background: rgb(var(--surface));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.tt-flyout-search {
+  display: flex;
 }
 .tt-panel {
   display: flex;
@@ -232,7 +423,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .tt-dd {
-  position: relative;
+  flex: 1 1 45%;
+  min-width: 0;
+}
+.tt-dd .tt-btn {
+  width: 100%;
+  text-align: left;
 }
 .tt-btn {
   cursor: pointer;
@@ -246,20 +442,15 @@ onBeforeUnmount(() => {
   margin-left: 6px;
   font-size: 11px;
 }
+/* A filter list opens in place inside the panel (the panel scrolls, so nothing here is clipped). */
 .tt-pop {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 220px;
-  max-width: 320px;
-  max-height: 260px;
+  max-height: 200px;
+  margin-top: 4px;
   overflow-y: auto;
   padding: 6px;
   border: 1px solid rgb(var(--line-2));
   border-radius: 9px;
   background: rgb(var(--surface));
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
 }
 .tt-opt {
   display: flex;
@@ -277,8 +468,14 @@ onBeforeUnmount(() => {
 .tt-dates,
 .tt-sort {
   display: inline-flex;
+  flex: 1 1 100%;
   align-items: center;
   gap: 6px;
+}
+.tt-date,
+.tt-select {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .tt-label {
   font-size: 12px;
@@ -286,6 +483,7 @@ onBeforeUnmount(() => {
 }
 .tt-count {
   display: flex;
+  flex: 1 1 100%;
   align-items: center;
   gap: 10px;
   margin: 0;
@@ -310,77 +508,27 @@ onBeforeUnmount(() => {
 .tt-date:focus-visible,
 .tt-btn:focus-visible,
 .tt-toggle:focus-visible,
+.tt-icon:focus-visible,
 .tt-clear:focus-visible {
   outline: 2px solid rgb(var(--amber));
   outline-offset: 1px;
 }
 @media (max-width: 700px) {
-  /* The line itself (view switch, search, Filters) is 36px; the controls in the opened panel keep 44px targets. */
-  .tt-search,
-  .tt-toggle {
-    min-height: 36px;
-  }
+  /* The row itself stays 36px; the controls inside the opened panel keep 44px targets. */
   .tt-search {
-    flex: 1 1 0;
     font-size: 16px; /* 16px stops the iOS focus zoom */
   }
-  .tt-select,
-  .tt-date,
-  .tt-btn {
+  .tt-toggle {
+    font-size: 14px;
+  }
+  .tt-flyout .tt-select,
+  .tt-flyout .tt-date,
+  .tt-flyout .tt-btn {
     min-height: 44px;
     font-size: 16px;
   }
-  .tt-toggle {
-    display: inline-block;
-    flex: 0 0 auto;
-    font-size: 14px;
-  }
-  .tt-top {
-    align-items: center;
-  }
-  /* "N of M" and Clear belong to the Filters panel: they show only while it is open. */
-  /* Visually hidden, not display:none, so the aria-live count is still read out while the panel is closed. */
-  .tt-count:not(.tt-count-open) {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
   .tt-clear {
     padding: 10px 8px;
-  }
-  .tt-panel {
-    display: none;
-  }
-  .tt-panel.shown {
-    display: flex;
-  }
-  .tt-dd {
-    flex: 1 1 45%;
-  }
-  .tt-dd .tt-btn {
-    width: 100%;
-    text-align: left;
-  }
-  .tt-pop {
-    position: static;
-    max-width: none;
-    margin-top: 4px;
-    box-shadow: none;
-  }
-  .tt-dates,
-  .tt-sort {
-    flex: 1 1 100%;
-  }
-  .tt-date,
-  .tt-select {
-    flex: 1 1 auto;
-    min-width: 0;
   }
 }
 </style>

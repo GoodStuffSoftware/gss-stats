@@ -1086,7 +1086,7 @@ describe('BudgetTable phone Cards | Table switch', () => {
     await radio(w, 'table').trigger('click')
     expect(w.find('tr[data-row-key="t1"]').exists()).toBe(true)
   })
-  it('the phone toolbar is one row: switch, search and Filters in .tt-top; N of M and Clear only with the panel open', async () => {
+  it('the toolbar is one row: switch, search and Filters in .tt-top; N of M and Clear only inside the Filters panel', async () => {
     width = 390
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
     const w = await mountTable()
@@ -1094,19 +1094,21 @@ describe('BudgetTable phone Cards | Table switch', () => {
     expect(top.find('[data-testid="txn-view"]').exists()).toBe(true)
     expect(top.find('[data-testid="txn-search"]').exists()).toBe(true)
     expect(top.find('[data-testid="txn-filters-toggle"]').exists()).toBe(true)
-    expect(top.element.firstElementChild?.getAttribute('data-testid')).toBe('txn-view') // the switch leads
+    expect(top.element.firstElementChild?.firstElementChild?.getAttribute('data-testid')).toBe('txn-view') // the switch leads
     expect(w.findAll('[data-testid="txn-view"]')).toHaveLength(1) // no separate line above the toolbar
     expect(w.find('.bt-viewbar').exists()).toBe(false)
     expect(w.get('[data-testid="txn-view"]').classes()).toContain('seg-compact')
-    expect(w.get('.tt-count').classes()).not.toContain('tt-count-open')
+    expect(w.get('#txn-tt-panel').isVisible()).toBe(false)
+    expect(top.find('.tt-count').exists()).toBe(false) // the visible count is not in the row
     await w.get('[data-testid="txn-filters-toggle"]').trigger('click')
-    expect(w.get('.tt-count').classes()).toContain('tt-count-open')
-    // Closed, the count is visually hidden (never display:none), so the aria-live "N of M" is still announced.
+    expect(w.get('#txn-tt-panel').isVisible()).toBe(true)
+    expect(w.get('#txn-tt-panel').find('.tt-count').exists()).toBe(true)
+    // Closed or open, the aria-live "N of M" is announced: visually hidden, never display:none.
     const css = (await import('./TxnToolbar.vue?raw')).default as string
-    const closed = css.match(/\.tt-count:not\(\.tt-count-open\) \{[^}]*\}/)![0]
-    expect(closed).not.toMatch(/display:\s*none/)
-    expect(closed).toMatch(/clip: rect\(0 0 0 0\)/)
-    expect(w.get('.tt-count').attributes('aria-live')).toBe('polite')
+    const live = css.match(/\.tt-live \{[^}]*\}/)![0]
+    expect(live).not.toMatch(/display:\s*none/)
+    expect(live).toMatch(/clip: rect\(0 0 0 0\)/)
+    expect(w.get('.tt-live').attributes('aria-live')).toBe('polite')
   })
   it('a wide screen has no switch in the toolbar', async () => {
     mockFetch(() => json({ rows: [txn('t1')], nextCursor: null }))
