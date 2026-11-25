@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.85.1] — 2026-11-24
+
 ### Fixed
 - **Budget toolbar is always one row** — on any screen from a flip phone to a wide desktop, search and Filters (plus the Cards/Table choice on a phone) stay on one line: the choice folds into a dropdown and the search into a pop-out icon when room runs out, and the Filters panel, which now holds the filters, dates and sort at every width, opens over the page without sideways scroll.
 
