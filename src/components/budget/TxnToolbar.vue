@@ -472,7 +472,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
 }
-.tt-dates {
+.tt-dates,
+.tt-sort {
   flex-wrap: wrap; /* on a very narrow panel the To date drops under the From date instead of running off the edge */
 }
 .tt-date {
@@ -480,7 +481,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .tt-select {
-  flex: 1 1 auto;
+  flex: 1 1 90px;
   min-width: 0;
 }
 .tt-label {
@@ -518,6 +519,12 @@ onBeforeUnmount(() => {
 .tt-clear:focus-visible {
   outline: 2px solid rgb(var(--amber));
   outline-offset: 1px;
+}
+@media (max-width: 250px) {
+  /* Two filter buttons no longer fit side by side in the panel: one per row, so no label is cut off. */
+  .tt-dd {
+    flex-basis: 100%;
+  }
 }
 @media (max-width: 700px) {
   /* The row itself stays 36px; the controls inside the opened panel keep 44px targets. */
