@@ -168,6 +168,7 @@ function onCustom() {
   }
   .bf-range {
     flex-basis: 100%;
+    min-width: 0; /* its select cannot size it past a very narrow page */
   }
   .bf-select {
     flex: 1 1 auto;
