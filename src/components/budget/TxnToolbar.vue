@@ -529,7 +529,7 @@ onBeforeUnmount(() => {
   outline: 2px solid rgb(var(--amber));
   outline-offset: 1px;
 }
-@media (max-width: 250px) {
+@media (max-width: 290px) {
   /* Two filter buttons no longer fit side by side in the panel: one per row, so no label is cut off. */
   .tt-dd {
     flex-basis: 100%;
