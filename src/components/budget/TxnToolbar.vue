@@ -419,7 +419,7 @@ onBeforeUnmount(() => {
 .tt-panel {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start; /* an open filter list grows its own cell; the buttons beside it stay at the top */
   gap: 8px;
 }
 .tt-dd {
@@ -472,7 +472,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
 }
-.tt-date,
+.tt-dates {
+  flex-wrap: wrap; /* on a very narrow panel the To date drops under the From date instead of running off the edge */
+}
+.tt-date {
+  flex: 1 1 140px;
+  min-width: 0;
+}
 .tt-select {
   flex: 1 1 auto;
   min-width: 0;

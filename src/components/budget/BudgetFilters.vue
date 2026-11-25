@@ -171,6 +171,7 @@ function onCustom() {
   }
   .bf-select {
     flex: 1 1 auto;
+    min-width: 0; /* a long range name must not push a very narrow page sideways */
     min-height: 44px;
   }
   .bf-label {
