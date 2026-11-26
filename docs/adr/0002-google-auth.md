@@ -253,3 +253,11 @@ the secret `BUDGET_ALLOWED_EMAILS` (comma-separated, exact and case-insensitive 
 - **Operator note.** Pages secrets are per environment: set `BUDGET_ALLOWED_EMAILS` on Preview first;
   Production's stays unset (budget locked) until a production go. Removing an address takes effect
   on the next deployment, as for `ALLOWED_EMAILS`.
+
+## Amendment 2026-11-26: one public page, /privacy
+
+The gate has one exemption: GET and HEAD of exactly `/privacy` (case-sensitive; `/privacy/`,
+`/privacy.html` and every other method stay gated). It serves the static `public/privacy.html`, never a
+Function or D1, and is checked in `functions/_lib/auth.ts` after the https redirect and CSRF check. It reads
+no session and sets no cookie. Why: publishing the Gmail receipts app through Google OAuth verification
+requires a publicly reachable privacy policy. Everything else still needs a signed-in account.

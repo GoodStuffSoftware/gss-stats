@@ -14,7 +14,8 @@
 //    in docs/adr/0002-google-auth.md.
 //
 // 2. Google sign-in gate (functions/_lib/auth.ts). Every page and every /api/* route
-//    needs a signed-in Google account: the owner (ALLOWED_EMAILS, full access) or a
+//    needs a signed-in Google account (the one exception: GET or HEAD of exactly /privacy, a
+//    static page; see the 2026-11-26 amendment in the ADR): the owner (ALLOWED_EMAILS, full access) or a
 //    view-only account (KV STATS_CONFIG key `auth:viewer:<email>`; reads only, every
 //    write is 403). Fails closed when unconfigured. See docs/adr/0002-google-auth.md and
 //    README "Auth" / "View-only access".

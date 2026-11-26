@@ -32,10 +32,11 @@
 <p>GSS Budget Receipts is part of the Budget section of a private household budgeting tool. It reads receipt emails from a connected Gmail account and matches them to bank transactions, so each purchase can be given a category. Only people on an allowlist can sign in.</p>
 
 <h2>What Google data it accesses</h2>
-<p>It asks for two things from your Google account:</p>
+<p>It asks for these from your Google account:</p>
 <ul>
   <li>Read-only access to your Gmail (the <code>gmail.readonly</code> scope).</li>
   <li>Your email address.</li>
+  <li>Your Google account id (the <code>openid</code> scope), which identifies the account.</li>
 </ul>
 <p>It searches your mail for messages that look like receipts: messages from a list of sender addresses, or with subject words such as "receipt", "order confirmation", "invoice" or "refund". The search skips spam, trash and drafts. It then reads the text of the messages it finds. It never sends, deletes, labels or changes any mail.</p>
 
@@ -48,7 +49,7 @@
   <li>The sender's domain and Gmail's own message id for the email.</li>
   <li>Which bank transaction the receipt matches, and the category suggested for it.</li>
 </ul>
-<p>It also keeps your Google refresh token, encrypted, and some details about the connection: the Gmail address you linked, its status, the scope you granted, when you agreed, and when it last ran. The key that decrypts the token is not stored in the database.</p>
+<p>It also keeps your Google refresh token, encrypted, and some details about the connection: the Gmail address you linked, your Google account id, the Budget login the connection belongs to, its status, the scope you granted, when you agreed, and when it last ran. The key that decrypts the token is not stored in the database.</p>
 <p>It does not keep the email body, the subject line or any attachment.</p>
 
 <h2>How the emails are processed</h2>
@@ -66,11 +67,13 @@
   <li>The app stops reading your mailbox.</li>
   <li>It asks Google to revoke its access, and deletes the stored refresh token.</li>
   <li>If you chose to delete your receipts, the extracted receipts, their items and matches are removed. If you did not, they stay. Categories already applied to transactions stay either way.</li>
+  <li>The connection record stays, marked as revoked. It holds no token and no Gmail address, but it still holds your Google account id, the Budget login, the scope you granted, when you agreed, and when it last ran.</li>
 </ul>
+<p>The app has no way to delete that record yet. To have your stored data deleted, including that record, contact the site owner through <a href="https://goodstuffsoftware.com">goodstuffsoftware.com</a>.</p>
 <p>You can also remove access at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
 
 <h2>Google API Services User Data Policy</h2>
-<p>GSS Budget Receipts' use and transfer of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+<p>GSS Budget Receipts' use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Limited Use requirements</a>.</p>
 
 <h2>Contact</h2>
 <p>Contact the site owner through <a href="https://goodstuffsoftware.com">goodstuffsoftware.com</a>.</p>
