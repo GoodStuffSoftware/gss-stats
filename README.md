@@ -2488,7 +2488,11 @@ static assets, `/api/*` and `/auth/*`.
      afterwards.
    - An account that signs in with Google but is neither the owner nor a viewer gets a
      **403 "Not allowed"** page and no session.
-3. **It fails closed.** If any required setting below is missing, every request gets a
+3. **One public page.** `GET /privacy` (exact path, nothing else) is served without sign-in:
+   the privacy policy for the Gmail receipts app, which Google requires at a public URL. It is
+   a static file (`public/privacy.html`), loads nothing third-party and is not part of the app.
+   `/privacy/`, `/privacy.html`, other letter cases and every other path stay behind sign-in.
+4. **It fails closed.** If any required setting below is missing, every request gets a
    **503 "sign-in not configured"** that names the missing variable, never a value.
 
 Routes:

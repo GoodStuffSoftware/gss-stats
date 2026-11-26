@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Public privacy policy** — a plain page at /privacy, open without signing in, says what the Gmail receipts app reads, keeps and shares and how to disconnect; every other page stays behind sign-in.
+
 ## [0.85.1] — 2026-11-24
 
 ### Fixed

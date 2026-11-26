@@ -104,6 +104,8 @@ export const CALLBACK_PATH = '/auth/google/callback'
 export const LOGOUT_PATH = '/auth/logout'
 export const ME_PATH = '/auth/me'
 export const SIGNED_OUT_PATH = '/auth/signed-out'
+/** The only page served without sign-in (see authGate). */
+export const PRIVACY_PATH = '/privacy'
 
 export const MIN_SESSION_SECRET_LENGTH = 32
 export const DEFAULT_SESSION_TTL_HOURS = 168 // 7 days, deckhand's default
@@ -798,6 +800,12 @@ export async function authGate(
     }
   }
 
+  // The one public page: the privacy policy Google requires for the Gmail receipts app. Exact
+  // pathname match (url.pathname is not decoded or normalised, so /privacy/, /PRIVACY,
+  // /privacy.html, //privacy and /%70rivacy all stay behind sign-in), GET/HEAD only. The query
+  // string is ignored. It is a static file (public/privacy.html); nothing else is exempt.
+  if (path === PRIVACY_PATH && (method === 'GET' || method === 'HEAD')) return publicPage(await next())
+
   // Local-dev bypass (explicit flag + loopback host only).
   const devEmail = devBypassEmail(env, url)
   if (devEmail) {
@@ -889,6 +897,19 @@ function gatedResponse(res: Response): Response {
   const out = new Response(res.body, res)
   out.headers.set('Cache-Control', 'private, no-store')
   denyFraming(out.headers)
+  return out
+}
+
+/** The public privacy page: cacheable for a few minutes, nothing third-party may load, no framing. */
+function publicPage(res: Response): Response {
+  const out = new Response(res.body, res)
+  out.headers.set('Cache-Control', 'public, max-age=300')
+  out.headers.set('X-Content-Type-Options', 'nosniff')
+  out.headers.append(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  )
+  out.headers.set('X-Frame-Options', 'DENY')
   return out
 }
 
