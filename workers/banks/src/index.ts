@@ -5,6 +5,7 @@ import { allowedEmails, type Env } from './env'
 import { log } from './log'
 import { handleLinkToken } from './linkToken'
 import { handleExchange } from './exchange'
+import { handleWebhook } from './webhook'
 
 export type { Env } from './env'
 
@@ -22,6 +23,8 @@ export interface RouteInput {
   env: Env
   ctx: ExecutionContext
   raw: string
+  /** The body exactly as received (the webhook hashes these bytes; no decode and re-encode). */
+  bytes?: Uint8Array<ArrayBuffer>
   body: Record<string, unknown>
   ownerEmail: string
 }
@@ -40,17 +43,17 @@ export const ROUTES: Readonly<Record<string, Route>> = {
   '/exchange': { auth: 'owner', handler: (i) => handleExchange(i) },
   '/unlink': { auth: 'owner', handler: notBuilt },
   '/accounts-refresh': { auth: 'owner', handler: notBuilt },
-  '/webhook': { auth: 'raw', handler: notBuilt },
+  '/webhook': { auth: 'raw', handler: (i) => handleWebhook(i) },
 }
 // ---- END ROUTE TABLE ----
 
 /** Read the body up to the cap; null when it is larger. */
-async function readCapped(request: Request): Promise<string | null> {
+async function readCapped(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
   const declared = Number(request.headers.get('content-length'))
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
   const bytes = new Uint8Array(await request.arrayBuffer())
   if (bytes.byteLength > MAX_BODY_BYTES) return null
-  return new TextDecoder().decode(bytes)
+  return bytes
 }
 
 export async function handleFetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -63,8 +66,9 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
   if (!Object.prototype.hasOwnProperty.call(ROUTES, path) || request.method !== 'POST') return fail(404, 'not_found')
   const route = ROUTES[path]
   try {
-    const raw = await readCapped(request)
-    if (raw === null) return fail(413, 'too_large')
+    const bytes = await readCapped(request)
+    if (bytes === null) return fail(413, 'too_large')
+    const raw = new TextDecoder().decode(bytes)
     let body: Record<string, unknown> = {}
     let ownerEmail = ''
     if (route.auth === 'owner') {
@@ -82,7 +86,7 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
       ownerEmail = email.trim().toLowerCase()
       if (!allowed.has(ownerEmail)) return fail(403, 'not_allowed')
     }
-    return await route.handler({ request, env, ctx, raw, body, ownerEmail })
+    return await route.handler({ request, env, ctx, raw, bytes, body, ownerEmail })
   } catch {
     log('route_failed')
     return fail(500, 'server_error')

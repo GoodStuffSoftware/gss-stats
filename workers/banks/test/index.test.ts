@@ -27,9 +27,9 @@ describe('routing', () => {
     }
   })
 
-  it('answers 501 on the webhook path without an owner check', async () => {
+  it('answers 401 on the webhook path without an owner check or a signature', async () => {
     const r = await post('/webhook', 'not json at all')
-    expect(r.status).toBe(501)
+    expect(r.status).toBe(401)
   })
 
   it('404s an unknown path, a prototype key and a non-POST method', async () => {
