@@ -249,3 +249,135 @@ describe('the SQL against the real migration (local SQLite)', () => {
     expect((db.prepare("SELECT closing_balance_cents AS c FROM statements WHERE account_id = 'card-a'").get() as { c: number }).c).toBe(1)
   })
 })
+
+// The load guard (bank links, plan 4.6): rows a linked bank account already sends are skipped. Invented ids only.
+describe('the bank-link load guard', () => {
+  const CUTOVER = '2026-11-15'
+  const skipped = (t: { accountId: string; postedDate: string }, acct = 'chk-a', from: string | null = CUTOVER): boolean =>
+    t.accountId === acct && (from === null || t.postedDate >= from)
+
+  /** A db with the household's accounts and rules in place (no rows yet), so a bank link can point at them. */
+  const seededDb = (): DatabaseSync => {
+    const db = freshDb()
+    db.exec(renderPlanSql({ ...full, txns: [], statements: [], pairs: [] }))
+    return db
+  }
+  /** Links one Budget account to a made-up bank account (what the Banks page does; here as raw rows). */
+  const link = (db: DatabaseSync, accountId: string, sync: 'on' | 'off' | 'unmapped', syncFrom: string | null, n = 1): void => {
+    const hex = n.toString(16).padStart(16, '0')
+    db.prepare(
+      `INSERT INTO bank_items (id, owner_email, environment, plaid_item_id, status, token_ct, token_iv, key_id, consent_version, consented_at, created_at, updated_at)
+       VALUES (?, 'owner@example.com', 'sandbox', ?, 'active', 'dGVzdA==', 'aXZpdml2aXZpaXZp', '0a1b2c3d', 1, ?, ?, ?)`,
+    ).run(`i${hex}`, `item-test-${n}`, NOW, NOW, NOW)
+    db.prepare(
+      `INSERT INTO bank_accounts (id, item_id, plaid_account_id, account_id, name, mask, type, sync, sync_from, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'Test account', '0001', 'depository', ?, ?, ?, ?)`,
+    ).run(`b${hex}`, `i${hex}`, `acct-test-${n}`, accountId, sync, syncFrom, NOW, NOW)
+  }
+  const ids = (db: DatabaseSync): string[] => (db.prepare('SELECT id FROM transactions ORDER BY id').all() as Array<{ id: string }>).map((r) => r.id)
+
+  it('skips a linked account rows posted on or after sync_from and loads the ones before', () => {
+    const db = seededDb()
+    link(db, 'chk-a', 'on', CUTOVER)
+    db.exec(renderPlanSql(full))
+    const want = full.txns.filter((t) => !skipped(t)).map((t) => t.id).sort()
+    expect(ids(db)).toEqual(want)
+    expect(want.length).toBeLessThan(full.txns.length)
+    // Both sides of the line exist in the fixture: a row on the cutover day itself is skipped, the day before loads.
+    expect(full.txns.some((t) => t.accountId === 'chk-a' && t.postedDate === CUTOVER)).toBe(true)
+    expect(full.txns.some((t) => t.accountId === 'chk-a' && t.postedDate < CUTOVER)).toBe(true)
+    // Other accounts load in full, and the statements still land.
+    expect(count(db, 'statements')).toBe(full.statements.length)
+  })
+
+  it('a linked account whose cutover date is not set yet loads none of its rows', () => {
+    const db = seededDb()
+    link(db, 'chk-a', 'on', null)
+    db.exec(renderPlanSql(full))
+    expect(ids(db)).toEqual(full.txns.filter((t) => !skipped(t, 'chk-a', null)).map((t) => t.id).sort())
+    expect((db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE account_id = 'chk-a'").get() as { n: number }).n).toBe(0)
+  })
+
+  it('loads every row of an unlinked account, and of one linked with sync off or unmapped', () => {
+    for (const sync of ['off', 'unmapped'] as const) {
+      const db = seededDb()
+      link(db, 'chk-a', sync, CUTOVER)
+      db.exec(renderPlanSql(full))
+      expect(ids(db), sync).toEqual(full.txns.map((t) => t.id).sort())
+    }
+    // Linking a different account does not touch this one.
+    const db = seededDb()
+    link(db, 'sav-a', 'on', '2026-01-01')
+    db.exec(renderPlanSql(full))
+    expect((db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE account_id = 'chk-a'").get() as { n: number }).n)
+      .toBe(full.txns.filter((t) => t.accountId === 'chk-a').length)
+    expect((db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE account_id = 'sav-a'").get() as { n: number }).n).toBe(0)
+  })
+
+  it('a row loaded before the link stays (ON CONFLICT keeps it), even when the link now covers its date', () => {
+    const db = seededDb()
+    db.exec(renderPlanSql(full))
+    const before = db.prepare('SELECT * FROM transactions ORDER BY id').all()
+    link(db, 'chk-a', 'on', '2026-01-01')
+    db.exec(renderPlanSql(full))
+    expect(db.prepare('SELECT * FROM transactions ORDER BY id').all()).toEqual(before)
+    expect(before).toHaveLength(full.txns.length)
+  })
+
+  it('a manual category edit survives a re-load, linked or not', () => {
+    const db = seededDb()
+    link(db, 'chk-a', 'on', CUTOVER)
+    db.exec(renderPlanSql(full))
+    const target = full.txns.find((t) => t.accountId === 'chk-a' && t.postedDate < CUTOVER && t.kind === 'spend' && t.pairId === null)!
+    db.prepare("UPDATE transactions SET category_id = 'gifts', category_source = 'manual', note = 'mine' WHERE id = ?").run(target.id)
+    db.exec(renderPlanSql(full))
+    expect(db.prepare('SELECT category_id AS c, category_source AS s, note FROM transactions WHERE id = ?').get(target.id)).toEqual({ c: 'gifts', s: 'manual', note: 'mine' })
+    // The link ends (sync off): the next load still leaves the edited row alone.
+    db.prepare("UPDATE bank_accounts SET sync = 'off'").run()
+    db.exec(renderPlanSql(full))
+    expect(db.prepare('SELECT category_id AS c, category_source AS s, note FROM transactions WHERE id = ?').get(target.id)).toEqual({ c: 'gifts', s: 'manual', note: 'mine' })
+  })
+
+  it('a pair across the cutover loads its open side unpaired, with no pair pointing at a missing row', () => {
+    const db = seededDb()
+    link(db, 'chk-a', 'on', CUTOVER)
+    db.exec(renderPlanSql(full))
+    // The 25th overdraft transfer: the checking side comes from the bank now, the savings side is loaded from the file.
+    const pair = full.pairs.find((p) => p.some((id) => full.txns.find((t) => t.id === id)!.accountId === 'chk-a' && full.txns.find((t) => t.id === id)!.postedDate >= CUTOVER))!
+    expect(pair).toBeDefined()
+    const open = pair.map((id) => full.txns.find((t) => t.id === id)!).find((t) => t.accountId !== 'chk-a')!
+    const r = db.prepare('SELECT kind, pair_id AS p FROM transactions WHERE id = ?').get(open.id) as { kind: string; p: string | null }
+    expect(r.p).toBeNull()
+    expect(r.kind).toBe(open.unpaired ? open.unpaired.kind : open.kind)
+    expect((db.prepare('SELECT COUNT(*) AS n FROM transactions a WHERE a.pair_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM transactions b WHERE b.id = a.pair_id AND b.pair_id = a.id)').get() as { n: number }).n).toBe(0)
+    // A pair wholly before the cutover still pairs both ways.
+    const early = full.pairs.find((p) => p.every((id) => !skipped(full.txns.find((t) => t.id === id)!)))!
+    expect(early).toBeDefined()
+    for (const id of early) expect((db.prepare('SELECT pair_id AS p FROM transactions WHERE id = ?').get(id) as { p: string }).p).toBe(early.find((x) => x !== id))
+  })
+
+  it('parity: with no linked account the guarded load writes exactly the rows the unguarded load wrote', () => {
+    const sql = renderPlanSql(full)
+    const guarded = freshDb()
+    guarded.exec(sql)
+    const plain = freshDb()
+    plain.exec(withoutBankGuard(sql))
+    expect(sql).not.toBe(withoutBankGuard(sql)) // the guard is in the SQL, so the strip did something
+    for (const table of ['transactions', 'statements', 'accounts', 'merchant_rules', 'imports', 'people', 'categories']) {
+      expect(guarded.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all(), table).toEqual(plain.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all())
+    }
+    expect(count(guarded, 'transactions')).toBe(full.txns.length)
+  })
+
+  it('the guard reads one row through idx_bank_acct_on (no table scan)', () => {
+    const db = freshDb()
+    const detail = (sql: string): string => (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{ detail: string }>).map((r) => r.detail).join(' | ')
+    const sub = detail(bankSyncsRowSql('chk-a', '2026-11-15'))
+    expect(sub).toContain('idx_bank_acct_on')
+    expect(sub).not.toMatch(/SCAN bank_accounts/)
+    const insert = planStatements(full).find((s) => s.startsWith('INSERT INTO transactions'))!
+    const whole = detail(insert)
+    expect(whole).toContain('idx_bank_acct_on')
+    expect(whole).not.toMatch(/SCAN bank_accounts/)
+  })
+})
