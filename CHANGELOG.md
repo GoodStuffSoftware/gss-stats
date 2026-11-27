@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.86.1] — 2026-11-27
+
 ### Fixed
 - **Receipt syncing no longer stops with "the API rejected the request"** — reading receipt emails works again with the current model.
 
