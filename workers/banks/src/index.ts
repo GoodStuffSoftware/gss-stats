@@ -6,6 +6,11 @@ import { log } from './log'
 import { handleLinkToken } from './linkToken'
 import { handleExchange } from './exchange'
 import { handleWebhook } from './webhook'
+import { syncTick } from './apply'
+import { reconnectCheck } from './reconnectCheck'
+import { createPlaidClient } from './plaid'
+import { planDeps, type BankDeps } from './exchange'
+import { readKeys } from './store'
 
 export type { Env } from './env'
 
@@ -93,9 +98,25 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
   }
 }
 
-/** The cron (every ten minutes). Leg 5 onward: sync, the daily reconnect check, liabilities. */
-export async function handleScheduled(_env: Env): Promise<void> {
+/** The cron (every ten minutes): sync the due Items, then the daily reconnect check (leg 7 adds liabilities). Plaid is reached only through `deps.fetch`. */
+export async function handleScheduled(env: Env, deps: Partial<BankDeps> = {}): Promise<void> {
+  const d = planDeps(deps)
   log('scheduled_start')
+  const keys = await readKeys(env)
+  if (!keys) {
+    log('scheduled_skip', {}, 'keys_missing')
+    return
+  }
+  try {
+    await syncTick(env, d.fetch, keys, d.now)
+  } catch {
+    log('scheduled_failed', {}, 'sync_tick')
+  }
+  try {
+    await reconnectCheck(env.BUDGET_DB, env, createPlaidClient({ env, fetch: d.fetch, now: d.now }), keys, d.now())
+  } catch {
+    log('scheduled_failed', {}, 'reconnect_check')
+  }
 }
 
 export default {

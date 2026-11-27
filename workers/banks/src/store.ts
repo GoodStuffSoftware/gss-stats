@@ -3,6 +3,7 @@
 import { maskDigits } from '../../../src/lib/budget/mask'
 import { decryptToken, encryptToken, type EncryptedToken } from '../../receipts/src/tokenCrypto'
 import { readSecret, type Env } from './env'
+import { log } from './log'
 
 export const LIVE_STATUSES = ['active', 'needs_reconnect', 'pending_disconnect'] as const
 
@@ -64,6 +65,29 @@ export const sealToken = (token: string, itemId: string, keys: Keys): Promise<En
 export async function openToken(item: ItemRow, keys: Keys): Promise<string> {
   if (!item.token_ct || !item.token_iv || !item.key_id) throw new Error('no_token')
   const r = await decryptToken({ token_ct: item.token_ct, token_iv: item.token_iv, key_id: item.key_id }, item.id, keys)
+  return r.plaintext
+}
+
+/**
+ * openToken for the cron: when the stored token opened only with the OLD key, seal it again with the current key in
+ * the same run (leg 5's open item), so a rotation finishes on its own. The write is keyed on the old key_id, so a
+ * concurrent re-seal is never overwritten; a failed re-seal is logged and the plaintext is still returned.
+ */
+export async function openAndRefreshToken(db: D1Database, item: ItemRow, keys: Keys): Promise<string> {
+  if (!item.token_ct || !item.token_iv || !item.key_id) throw new Error('no_token')
+  const r = await decryptToken({ token_ct: item.token_ct, token_iv: item.token_iv, key_id: item.key_id }, item.id, keys)
+  if (r.usedOldKey) {
+    try {
+      const enc = await sealToken(r.plaintext, item.id, keys)
+      await db
+        .prepare('UPDATE bank_items SET token_ct = ?2, token_iv = ?3, key_id = ?4 WHERE id = ?1 AND key_id = ?5')
+        .bind(item.id, enc.token_ct, enc.token_iv, enc.key_id, item.key_id)
+        .run()
+      log('token_resealed')
+    } catch {
+      log('token_reseal_failed')
+    }
+  }
   return r.plaintext
 }
 
