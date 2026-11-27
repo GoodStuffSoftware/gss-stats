@@ -96,7 +96,7 @@ describe('callBanks', () => {
     await fails(callBanks(env(), '/x', { publicToken: 'public-sandbox-secret-7', ownerEmail: 'user-a@example.com' }, 1000))
     banks.fail('/y')
     await fails(callBanks(env(), '/y', { publicToken: 'public-sandbox-secret-7' }, 1000))
-    const text = errors.mock.calls.map((c) => c.join(' ')).join('\n')
+    const text = errors.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n')
     expect(text).toContain('/x')
     expect(text).not.toMatch(/secret|user-a@example|simulated/)
   })
