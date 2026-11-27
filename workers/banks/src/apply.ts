@@ -297,10 +297,13 @@ export function newCandidates(plan: Plan): PairCandidate[] {
 }
 
 /** The load's pairing step, scoped to the days around the new rows: existing unpaired rows in that range are candidates. */
-export async function planPairs(db: D1Database, plan: Plan, accounts: Account[]): Promise<Array<[string, string]>> {
+export async function planPairs(db: D1Database, plan: Plan, accounts: Account[], rerunDates: string[] = []): Promise<Array<[string, string]>> {
   const fresh = newCandidates(plan)
-  if (fresh.length === 0) return []
-  const dates = fresh.map((c) => c.postedDate).sort()
+  // rerunDates: posted dates of this update's rows that an earlier, interrupted run already inserted (they are mapped, so not in
+  // plan.inserts). The read below finds them as unpaired rows, so a run that died after the insert batch but before the pair batch
+  // still pairs them on the rerun.
+  const dates = [...fresh.map((c) => c.postedDate), ...rerunDates].sort()
+  if (dates.length === 0) return []
   const lo = new Date(Date.parse(`${dates[0]}T00:00:00Z`) - 5 * 86_400_000).toISOString().slice(0, 10)
   const hi = new Date(Date.parse(`${dates[dates.length - 1]}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10)
   const r = await db.prepare(SQL.pairCandidates).bind(lo, hi).all<Row>()
@@ -330,37 +333,41 @@ const DELETE_UNTOUCHED = `DELETE FROM transactions WHERE id = ?1 AND instr(updat
 const UNPAIR_PARTNER = `UPDATE transactions SET pair_id = NULL WHERE id = ?1 AND pair_id = ?2 AND instr(updated_by,'@') = 0
   AND category_source <> 'manual' AND kind_source NOT IN ('manual','rule')`
 
-export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D1PreparedStatement[]; tail: D1PreparedStatement[] } {
+export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D1PreparedStatement[][]; tail: D1PreparedStatement[] } {
   const at = c.now.toISOString()
-  const body: D1PreparedStatement[] = []
+  const body: D1PreparedStatement[][] = []
   const importId = `bank-${c.itemId}-${c.runId}`
   if (plan.inserts.length > 0) {
-    body.push(db.prepare(`INSERT INTO imports (id, source_label, created_at, created_by, rows_in) VALUES (?1, 'Bank sync', ?2, '${WRITER}', ?3) ON CONFLICT(id) DO NOTHING`)
-      .bind(importId, at, plan.inserts.length))
+    body.push([db.prepare(`INSERT INTO imports (id, source_label, created_at, created_by, rows_in) VALUES (?1, 'Bank sync', ?2, '${WRITER}', ?3) ON CONFLICT(id) DO NOTHING`)
+      .bind(importId, at, plan.inserts.length)])
   }
+  // Each push below is one UNIT that never straddles two batches (see applyPlan): a row with its mapping, a pending-to-posted
+  // in place, a removal with its unpair, both sides of a pair. Units are also rerun-safe on their own (decide sees a finished
+  // unit as already mapped), so a run that dies between any two batches repeats from the old cursor to the same state.
+  const unit = (...stmts: D1PreparedStatement[]): void => void body.push(stmts)
   for (const r of plan.inserts) {
-    body.push(db.prepare(INSERT_TXN).bind(r.id, r.accountId, importId, r.postedDate, r.txnDate, r.amountCents, r.description, r.merchantKey, r.merchantName, r.storeNo,
-      r.counterpartyLast4, r.bankRef, r.kind, r.kindSource, r.categoryId, r.categorySource, r.ruleId, r.confidence, r.needsReview ? 1 : 0, r.reviewReason,
-      r.debtAccountId, at, r.pending))
-    body.push(db.prepare(INSERT_MAP('inserted')).bind(r.plaidTxnId, r.bankAccountId, r.id, r.dupOf, at))
+    unit(
+      db.prepare(INSERT_TXN).bind(r.id, r.accountId, importId, r.postedDate, r.txnDate, r.amountCents, r.description, r.merchantKey, r.merchantName, r.storeNo,
+        r.counterpartyLast4, r.bankRef, r.kind, r.kindSource, r.categoryId, r.categorySource, r.ruleId, r.confidence, r.needsReview ? 1 : 0, r.reviewReason,
+        r.debtAccountId, at, r.pending),
+      db.prepare(INSERT_MAP('inserted')).bind(r.plaidTxnId, r.bankAccountId, r.id, r.dupOf, at),
+    )
   }
-  for (const m of plan.matches) body.push(db.prepare(INSERT_MAP('matched')).bind(m.plaidTxnId, m.bankAccountId, m.txnId, null, at))
+  for (const m of plan.matches) unit(db.prepare(INSERT_MAP('matched')).bind(m.plaidTxnId, m.bankAccountId, m.txnId, null, at))
   for (const p of plan.inPlace) {
-    body.push(db.prepare('DELETE FROM bank_txns WHERE plaid_txn_id = ?1').bind(p.oldPlaidId))
-    body.push(db.prepare(UPDATE_BANK_FIELDS_REF).bind(p.txnId, p.postedDate, p.txnDate, p.amountCents, p.description, p.pending, p.updatedAt, p.bankRef))
-    body.push(db.prepare(INSERT_MAP('inserted')).bind(p.newPlaidId, p.bankAccountId, p.txnId, null, at))
+    // The row's bank fields, then the mapping moves to the new id in ONE update (no delete + insert that a batch boundary could split).
+    unit(
+      db.prepare(UPDATE_BANK_FIELDS_REF).bind(p.txnId, p.postedDate, p.txnDate, p.amountCents, p.description, p.pending, p.updatedAt, p.bankRef),
+      db.prepare(`UPDATE bank_txns SET plaid_txn_id = ?2, state = 'live', updated_at = ?3 WHERE plaid_txn_id = ?1`).bind(p.oldPlaidId, p.newPlaidId, at),
+    )
   }
-  for (const u of plan.updates) body.push(db.prepare(UPDATE_BANK_FIELDS).bind(u.txnId, u.postedDate, u.txnDate, u.amountCents, u.description, u.pending, u.updatedAt))
-  for (const id of plan.unmap) body.push(db.prepare('DELETE FROM bank_txns WHERE plaid_txn_id = ?1').bind(id))
-  for (const id of plan.dropped) body.push(db.prepare(`UPDATE bank_txns SET state = 'dropped', updated_at = ?2 WHERE plaid_txn_id = ?1 AND role = 'inserted'`).bind(id, at))
+  for (const u of plan.updates) unit(db.prepare(UPDATE_BANK_FIELDS).bind(u.txnId, u.postedDate, u.txnDate, u.amountCents, u.description, u.pending, u.updatedAt))
+  for (const id of plan.unmap) unit(db.prepare('DELETE FROM bank_txns WHERE plaid_txn_id = ?1').bind(id))
+  for (const id of plan.dropped) unit(db.prepare(`UPDATE bank_txns SET state = 'dropped', updated_at = ?2 WHERE plaid_txn_id = ?1 AND role = 'inserted'`).bind(id, at))
   for (const d of plan.deletes) {
-    if (d.pairId) body.push(db.prepare(UNPAIR_PARTNER).bind(d.pairId, d.txnId))
-    body.push(db.prepare(DELETE_UNTOUCHED).bind(d.txnId))
+    unit(...(d.pairId ? [db.prepare(UNPAIR_PARTNER).bind(d.pairId, d.txnId)] : []), db.prepare(DELETE_UNTOUCHED).bind(d.txnId))
   }
-  for (const [a, b] of plan.pairs) {
-    body.push(db.prepare(pairUpdateSql(a, b, at, WRITER)))
-    body.push(db.prepare(pairUpdateSql(b, a, at, WRITER)))
-  }
+  for (const [a, b] of plan.pairs) unit(db.prepare(pairUpdateSql(a, b, at, WRITER)), db.prepare(pairUpdateSql(b, a, at, WRITER)))
   const k = plan.counts
   const tail = [
     // The cursor moves last, together with the run row; a flag set during the run (later than run_start) survives it.
@@ -378,7 +385,13 @@ export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D
 /** Write the plan in batches of at most 100 statements; the cursor batch is last, so a failure before it repeats from the old cursor. */
 export async function applyPlan(db: D1Database, plan: Plan, c: RunCtx): Promise<void> {
   const { body, tail } = planStatements(db, plan, c)
-  for (const part of chunks(body, BATCH_SIZE)) await db.batch(part)
+  // Pack whole units into batches of at most BATCH_SIZE statements; a unit is never split.
+  let cur: D1PreparedStatement[] = []
+  for (const u of body) {
+    if (cur.length > 0 && cur.length + u.length > BATCH_SIZE) { await db.batch(cur); cur = [] }
+    cur.push(...u)
+  }
+  if (cur.length > 0) await db.batch(cur)
   await db.batch(tail)
 }
 
@@ -417,7 +430,8 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
     const norm = prepareUpdate(res)
     const st = await loadState(db, itemId, norm, now)
     const plan = await decide(norm, st)
-    plan.pairs = await planPairs(db, plan, st.budgetAccounts)
+    const rerunDates = [...norm.added, ...norm.modified].filter((t) => t.pending === 0 && st.mapped.get(t.plaidTxnId)?.role === 'inserted').map((t) => t.postedDate)
+    plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
     await applyPlan(db, plan, { itemId, runId, now, runStart, pages: res.pages, nextCursor: res.nextCursor })
     log('sync_ok', { ...plan.counts, pairs: plan.pairs.length, pages: res.pages })
     return true

@@ -672,3 +672,66 @@ describe('logs carry counts and codes only', () => {
     expect(all).toContain('plaid_item_login_required')
   })
 })
+
+// A run that dies between ANY two D1 batches and repeats from the old cursor ends where one clean run ends (plan 4.4 and 4.7).
+describe('a run that dies between batches', () => {
+  const COLS = 'id, account_id, posted_date, txn_date, amount_cents, description, kind, kind_source, category_id, category_source, pair_id, pending, bank_ref, needs_review, review_reason, updated_by'
+  const snapshot = () => ({
+    txns: q(`SELECT ${COLS} FROM transactions ORDER BY id`),
+    map: q('SELECT plaid_txn_id, bank_account_id, txn_id, role, state, dup_of FROM bank_txns ORDER BY plaid_txn_id'),
+  })
+  const filler = (from: number, n: number) => Array.from({ length: n }, (_, i) => ptxn(`plaid-f${from + i}`, { amount: 1 + (from + i) / 100, name: `Shop ${from + i}` }))
+  const update1 = () => page({ added: [ptxn('plaid-a'), ptxn('plaid-p', { pending: true, amount: 20 }), ptxn('plaid-gone'), ...filler(0, 30)] })
+  const update2 = () => page({
+    added: [
+      ...filler(100, 60),
+      ptxn('plaid-p2', { pending_transaction_id: 'plaid-p', amount: 20.5, date: '2026-11-21' }),
+      ptxn('plaid-t1', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' }),
+      ptxn('plaid-t2', { account_id: 'acc-crd', name: 'Payment Thank You', amount: -50, date: '2026-11-21' }),
+    ],
+    modified: [ptxn('plaid-a', { amount: 13 })],
+    removed: [{ transaction_id: 'plaid-gone' }],
+    next_cursor: 'cur-2',
+  })
+  /** The same D1 with batch() dying at the failAt-th call (counted from 1); failAt 0 never dies. */
+  const flaky = (failAt: number) => {
+    let n = 0
+    const real = db.d1
+    const d1 = new Proxy(real, {
+      get(tg, p) {
+        if (p === 'batch') return async (s: any) => { n++; if (n === failAt) throw new Error('D1_ERROR: died'); return (tg as any).batch(s) }
+        const v = (tg as any)[p]
+        return typeof v === 'function' ? v.bind(tg) : v
+      },
+    }) as D1Database
+    return { d1, batches: () => n }
+  }
+  async function scenario(failAt: number): Promise<{ snap: ReturnType<typeof snapshot>; batches: number }> {
+    db = await createBudgetDb({ seed: false })
+    queue = []
+    t = new Date(NOW)
+    await seedWorld()
+    await sync(update1())
+    const f = flaky(failAt)
+    queue.push(() => update2())
+    t = new Date(t.getTime() + 20 * MIN)
+    await syncItem(f.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t)
+    if (failAt > 0) {
+      expect(item().sync_cursor).toBe('cur-1') // the cursor did not move
+      await sync(update2()) // the rerun, from the old cursor
+    }
+    expect(item().sync_cursor).toBe('cur-2')
+    return { snap: snapshot(), batches: f.batches() }
+  }
+
+  it('every batch boundary of an update with inserts, an in-place posting, a modify, a remove and a pair converges to the clean run', async () => {
+    const clean = await scenario(0)
+    expect(clean.batches).toBeGreaterThanOrEqual(4) // the body spans several batches plus the cursor batch
+    expect(clean.snap.txns.filter((r: any) => r.pair_id)).toHaveLength(2) // the transfer pair exists
+    expect(clean.snap.txns.find((r: any) => r.id === txnOf('plaid-p2'))).toMatchObject({ bank_ref: 'plaid:plaid-p2', pending: 0, amount_cents: -2050 })
+    for (let k = 1; k <= clean.batches; k++) {
+      const died = await scenario(k)
+      expect(died.snap, `died at batch ${k} of ${clean.batches}`).toEqual(clean.snap)
+    }
+  })
+})
