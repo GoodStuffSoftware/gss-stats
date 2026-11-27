@@ -343,7 +343,7 @@ export interface RunCtx {
   itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string; more?: boolean; chunk?: number; counts?: Counts
   /** The cursor this update began at ('' = the very start); saved with the cursor while `more`, cleared when the update finishes. */
   base?: string
-  /** The whole update was fetched after Plaid said the historical pull is complete: only then does a NULL sync_from get its value. */
+  /** The last page of the update said the historical pull is complete: only then does a NULL sync_from get its value. */
   historical?: boolean
 }
 
@@ -493,11 +493,10 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
     // base: the cursor the in-progress update began at ('' = the very start), NULL when the saved cursor is a finished one. A mutation
     // error restarts at base, never at the saved mid-way cursor (Plaid: restart at the update's first cursor).
     let base = cursor === null ? null : sn(facts.sync_cursor_base)
-    let hist = false // an update begun in an earlier run: its early pages were not seen, so the historical gate stays shut for it
     const totals = zeroCounts()
     let pairs = 0
     for (let chunk = 0; ; chunk++) {
-      if (base === null) { base = cursor ?? ''; hist = true } // this chunk begins a new update
+      if (base === null) base = cursor ?? '' // this chunk begins a new update
       const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES, restartCursor: base === '' ? null : base })
       pages += res.pages
       if (res.kind === 'noop') { await finishRun(db, runId, now, pages); await release(db, itemId, now); log('sync_noop', { pages }); return true }
@@ -510,8 +509,7 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
       plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
       addCounts(totals, plan.counts)
       pairs += plan.pairs.length
-      hist = res.restarts > 0 ? res.historical : hist && res.historical // a restart began the pass at the update's first cursor
-      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: hist })
+      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: res.historical })
       budget.used += st.queries + 1 + batches + Math.ceil(plan.inPlace.filter((p) => p.pending === 0).length / CHUNK)
       cursor = res.nextCursor
       if (!res.more) break
