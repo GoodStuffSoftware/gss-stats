@@ -1,8 +1,9 @@
 // Receipt extraction with the Claude Messages API (plan: email-receipts section 6; decisions file wins).
 // Plain fetch, no SDK, no tools. The email is untrusted data: the model's reply is checked by a strict validator
-// before anything reaches D1. Errors are fixed codes only: never the key, never email content. Nothing is logged here.
+// before anything reaches D1. Errors are fixed codes only: never the key, never email content. Only the API error type code of a 400 is logged (via log.ts).
 
 import { maskDigits } from '../../../src/lib/budget/mask'
+import { log } from './log'
 
 export const API_URL = 'https://api.anthropic.com/v1/messages'
 export const API_VERSION = '2023-06-01'
@@ -99,7 +100,6 @@ export function buildRequestBody(model: string, input: ExtractInput): Record<str
   return {
     model,
     max_tokens: MAX_TOKENS,
-    temperature: 0,
     system: buildSystemPrompt(input.categoryIds),
     messages: [{ role: 'user', content: buildUserMessage(input.text) }],
   }
@@ -276,7 +276,18 @@ export async function extractReceipt(
   } catch {
     return { ok: false, code: 'stop_run', reason: 'api_unavailable' }
   }
-  if (!res.ok) return failureForStatus(res.status)
+  if (!res.ok) {
+    if (res.status === 400) {
+      // Diagnosis aid: the error type code only (log.ts keeps it to [a-z0-9_]); never the message text.
+      let type = 'unknown'
+      try {
+        const e = await res.json()
+        if (isObj(e) && isObj(e.error) && typeof e.error.type === 'string') type = e.error.type
+      } catch { /* no readable body */ }
+      log('api_rejected', {}, type)
+    }
+    return failureForStatus(res.status)
+  }
 
   let body: unknown
   try { body = await res.json() } catch { return { ok: false, code: 'extract_invalid' } }
