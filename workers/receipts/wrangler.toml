@@ -79,3 +79,14 @@ RECEIPTS_DAILY_CAP = "150" # model calls per connection per day
 RECEIPTS_BACKFILL_DAYS = "14" # the dry run; raise to 90 after Mike checks the suggestions
 RECEIPTS_AUTO_APPLY = "0" # "1" only after the precision check (plan section 12 step 8)
 RECEIPTS_AUTO_MIN_SCORE = "90"
+RECEIPTS_UPLOAD_DAILY_CAP = "20" # receipt photos per person per UTC day
+RECEIPTS_IMAGE_KEEP_DAYS = "90" # stored photos older than this are deleted by the daily sweep
+
+# Receipt photo storage: the landing turns ONE of these on (R2 preferred, KV the fallback). Neither bound = uploads answer 503.
+# [[r2_buckets]]
+# binding = "RECEIPT_IMAGES"
+# bucket_name = "gss-budget-receipt-images"
+#
+# [[kv_namespaces]]
+# binding = "RECEIPT_IMAGES_KV"
+# id = "<namespace id, filled in at the landing>"

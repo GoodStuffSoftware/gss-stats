@@ -67,7 +67,7 @@ const SLICE_S = 7 * 86_400
 const MIN_SLICE_S = 3_600
 const MAX_LISTS_PER_RUN = 8
 
-const CATEGORIES_SQL =`SELECT id FROM categories WHERE archived = 0 ORDER BY id`
+export const CATEGORIES_SQL = `SELECT id FROM categories WHERE archived = 0 ORDER BY id`
 /** The run is still open and its connection still active (a disconnect pauses or revokes the connection first). */
 const RUN_ACTIVE_SQL = `SELECT 1 AS ok FROM receipt_sync_runs r JOIN email_connections c ON c.id = r.connection_id
 WHERE r.id = ?1 AND r.connection_id = ?2 AND r.finished_at IS NULL AND c.status = 'active'`

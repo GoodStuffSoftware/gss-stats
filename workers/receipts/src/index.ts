@@ -2,10 +2,11 @@
 // untrusted anyway: a fixed route table, fixed-code answers, no echo of input, no stack or message text in a response.
 // Plan: email receipts sections 1, 5 and 9; ADR 0008.
 import { loadActiveConnectionIds, loadConnection } from './store'
-import { MANUAL_BUDGET_MS, allowedEmails, jsonResponse, runConnection, runIsOpen, type Env } from './run'
+import { MANUAL_BUDGET_MS, allowedEmails, jsonResponse, runConnection, runIsOpen, runUploads, sweepImages, type Env } from './run'
 import { handleDisconnect } from './disconnect'
 import { handleExchange } from './exchange'
 import { log } from './log'
+import { handleImage, handleUpload, handleUploadDelete } from './upload'
 
 export type { Env } from './run'
 type Handler = (request: Request, env: Env, ctx: ExecutionContext) => Promise<Response>
@@ -49,6 +50,9 @@ export const ROUTES: Readonly<Record<string, Handler>> = {
   '/sync': handleSync,
   '/exchange': (request, env) => handleExchange(request, env),
   '/disconnect': (request, env) => handleDisconnect(request, env),
+  '/upload': handleUpload,
+  '/upload-delete': handleUploadDelete,
+  '/image': handleImage,
 }
 // ---- END ROUTE TABLE ----
 
@@ -68,8 +72,8 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
   }
 }
 
-/** The hourly cron: one run per active connection, one after another; one failure never blocks the other. */
-export async function handleScheduled(env: Env): Promise<void> {
+/** The hourly cron: one run per active connection, one after another; one failure never blocks the other. Then the upload retries, and at 03:xx UTC the image retention sweep. */
+export async function handleScheduled(env: Env, now: Date = new Date()): Promise<void> {
   const ids = await loadActiveConnectionIds(env.BUDGET_DB)
   log('scheduled_start', { connections: ids.length })
   for (const id of ids) {
@@ -78,6 +82,12 @@ export async function handleScheduled(env: Env): Promise<void> {
     } catch {
       log('connection_failed')
     }
+  }
+  try {
+    await runUploads(env)
+    if (now.getUTCHours() === 3) await sweepImages(env) // the image retention sweep runs once a day
+  } catch {
+    log('uploads_failed')
   }
 }
 

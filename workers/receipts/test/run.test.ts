@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, insertTxn, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { handleFetch, handleScheduled, ROUTES } from '../src/index'
 import { log } from '../src/log'
@@ -492,8 +492,8 @@ describe('router', () => {
     }
   })
 
-  it('has exactly the sync, exchange and disconnect routes; every other path is a 404 with a fixed body', async () => {
-    expect(Object.keys(ROUTES)).toEqual(['/sync', '/exchange', '/disconnect'])
+  it('has exactly the sync, exchange, disconnect, upload, upload-delete and image routes; every other path is a 404 with a fixed body', async () => {
+    expect(Object.keys(ROUTES)).toEqual(['/sync', '/exchange', '/disconnect', '/upload', '/upload-delete', '/image'])
     const ctx = { waitUntil() {} } as unknown as ExecutionContext
     for (const p of ['/', '/sync/', '/SYNC', '/exchange-x', '/__proto__', '/constructor', '/toString', '/sync/../x', '/%73ync']) {
       const res = await handleFetch(new Request(`https://receipts.internal${p}`, { method: 'POST', body: '{}' }), makeEnv(), ctx)
@@ -740,5 +740,187 @@ describe('uploads: image retention sweep', () => {
     const old = await addUpload(mem, { at: new Date('2026-08-01T00:00:00.000Z') })
     expect(await sweepImages(makeEnv(), { now: () => NOW })).toEqual({ swept: 0, code: null })
     expect(rcpt(old).image_key).toBe(S.imageKeyOf(old))
+  })
+})
+
+// ---------- photo uploads: the routes and the cron wiring ----------
+const STRANGER = 'stranger@example.com'
+const jcat = (...p: Uint8Array[]): Uint8Array => {
+  const out = new Uint8Array(p.reduce((a, b) => a + b.length, 0))
+  let at = 0
+  for (const x of p) { out.set(x, at); at += x.length }
+  return out
+}
+const jseg = (code: number, body: Uint8Array): Uint8Array => jcat(Uint8Array.of(0xff, code, (body.length + 2) >> 8, (body.length + 2) & 0xff), body)
+/** A made-up JPEG built in code (valid for the sanitizer); `seed` makes the bytes, and so the hash, differ. */
+function fakeJpeg(seed: number): Uint8Array {
+  const scan = new Uint8Array(1500).map((_, i) => (i * 31 + seed * 7 + 7) % 251)
+  return jcat(Uint8Array.of(0xff, 0xd8), jseg(0xdb, new Uint8Array(65).fill(3)),
+    jseg(0xc0, Uint8Array.of(8, 0, 48, 0, 64, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0)), jseg(0xc4, new Uint8Array(20).fill(1)),
+    jseg(0xda, Uint8Array.of(3, 1, 0, 2, 0, 3, 0, 0, 63, 0)), scan, Uint8Array.of(0xff, 0xd9))
+}
+
+describe('upload routes', () => {
+  const pending: Promise<unknown>[] = []
+  const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext
+  const call = async (path: string, email: string | null, init: RequestInit, env: Env): Promise<Response> => {
+    const headers = new Headers(init.headers)
+    if (email !== null) headers.set('X-Budget-Email', email)
+    const res = await handleFetch(new Request(`https://receipts.internal${path}`, { ...init, headers }), env, ctx)
+    await Promise.all(pending.splice(0))
+    return res
+  }
+  const upload = (env: Env, email: string | null, bytes: Uint8Array, ct = 'image/jpeg') => call('/upload', email, { method: 'POST', body: bytes, headers: { 'content-type': ct } }, env)
+  const del = (env: Env, email: string | null, id: string, bodyEmail: string | null = email) =>
+    call('/upload-delete', email, { method: 'POST', body: JSON.stringify({ id, email: bodyEmail }) }, env)
+  const image = (env: Env, email: string | null, id: string) => call(`/image?id=${id}`, email, { method: 'GET' }, env)
+  const code = async (r: Response) => ((await r.json()) as { code?: string }).code
+  beforeEach(() => { pending.length = 0; vi.stubGlobal('fetch', makeNet().fetch) })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('stores a sanitized upload, answers 202 with the id and reads it in the background', async () => {
+    const mem = memKv()
+    const res = await upload(upEnv(mem), OWNER, fakeJpeg(1))
+    expect(res.status).toBe(202)
+    const { id } = (await res.json()) as { id: string }
+    expect(mem.map.has(S.imageKeyOf(id))).toBe(true)
+    expect(rcpt(id)).toMatchObject({ source: 'upload', uploader_email: OWNER, image_key: S.imageKeyOf(id), merchant: 'Fake Mart', status: 'unmatched' })
+  })
+  it('lower-cases the header address', async () => {
+    const mem = memKv()
+    const res = await upload(upEnv(mem), OWNER.toUpperCase(), fakeJpeg(2))
+    const { id } = (await res.json()) as { id: string }
+    expect(rcpt(id).uploader_email).toBe(OWNER)
+  })
+  it('a repeat of your own upload answers 200 duplicate with your id; nothing new is stored', async () => {
+    const mem = memKv()
+    const first = (await (await upload(upEnv(mem), OWNER, fakeJpeg(3))).json()) as { id: string }
+    const res = await upload(upEnv(mem), OWNER, fakeJpeg(3))
+    expect([res.status, await res.json()]).toEqual([200, { duplicate: true, id: first.id }])
+    expect(count('receipts')).toBe(1)
+    expect(mem.map.size).toBe(1)
+  })
+  it('the other allowed person uploading the same photo gets duplicate with no id', async () => {
+    const mem = memKv()
+    await upload(upEnv(mem), OWNER, fakeJpeg(4))
+    const res = await upload(upEnv(mem), OTHER, fakeJpeg(4))
+    expect([res.status, await res.json()]).toEqual([200, { duplicate: true }])
+    expect(count('receipts')).toBe(1)
+  })
+  it('the daily cap answers 429 daily_cap per person', async () => {
+    const mem = memKv()
+    const env = upEnv(mem, { RECEIPTS_UPLOAD_DAILY_CAP: '2' })
+    expect((await upload(env, OWNER, fakeJpeg(5))).status).toBe(202)
+    expect((await upload(env, OWNER, fakeJpeg(6))).status).toBe(202)
+    const res = await upload(env, OWNER, fakeJpeg(7))
+    expect([res.status, await code(res)]).toEqual([429, 'daily_cap'])
+    expect((await upload(env, OTHER, fakeJpeg(8))).status).toBe(202)
+  })
+  it('answers 503 unavailable with no image store bound', async () => {
+    const res = await upload(makeEnv(), OWNER, fakeJpeg(9))
+    expect([res.status, await code(res)]).toEqual([503, 'unavailable'])
+    expect(count('receipts')).toBe(0)
+  })
+  it('maps bad bodies: 400 empty, 413 too big, 415 not a JPEG, 422 broken JPEG', async () => {
+    const env = upEnv(memKv())
+    const stat = async (b: Uint8Array) => { const r = await upload(env, OWNER, b); return [r.status, await code(r)] }
+    expect(await stat(new Uint8Array(0))).toEqual([400, 'bad_request'])
+    expect(await stat(new Uint8Array(2_000_001))).toEqual([413, 'too_large'])
+    expect(await stat(new TextEncoder().encode('not a jpeg at all'))).toEqual([415, 'convert_first'])
+    expect(await stat(Uint8Array.of(0xff, 0xd8, 0xff, 0xdb, 0, 5, 1))).toEqual([422, 'bad_image'])
+    expect(count('receipts')).toBe(0)
+  })
+  it('answers 403 for a missing, unlisted or malformed email on all three routes, and 405 for the wrong method', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    for (const email of [null, STRANGER, 'x']) {
+      expect((await upload(env, email, fakeJpeg(10))).status).toBe(403)
+      expect((await del(env, email, id)).status).toBe(403)
+      expect((await image(env, email, id)).status).toBe(403)
+    }
+    expect((await call('/upload', OWNER, { method: 'GET' }, env)).status).toBe(405)
+    expect(count('receipts')).toBe(1)
+  })
+
+  it('/image streams the JPEG to the owner and to the other allowed person, 403 to a stranger, 404 for an unknown id or a gone image', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    for (const email of [OWNER, OTHER]) {
+      const res = await image(env, email, id)
+      expect([res.status, res.headers.get('content-type')]).toEqual([200, 'image/jpeg'])
+      expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([0xff, 0xd8, 0xff, 0xdb, 1, 2, 3, 0xff, 0xd9])
+    }
+    expect((await image(env, STRANGER, id)).status).toBe(403)
+    expect((await image(env, OWNER, 'r0000000000000000')).status).toBe(404)
+    expect((await image(env, OWNER, 'nope')).status).toBe(404)
+    mem.map.clear()
+    expect((await image(env, OWNER, id)).status).toBe(404)
+  })
+
+  it('/upload-delete removes the image and the row for the owner (204); matches cascade', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    insertTxn(db, { posted_date: '2026-12-02', amount_cents: -1234, merchant_name: 'Fake Mart' })
+    await upRun(env, makeNet())
+    expect(count('receipt_matches')).toBeGreaterThan(0)
+    const res = await del(env, OWNER, id)
+    expect(res.status).toBe(204)
+    expect(mem.deleted).toEqual([S.imageKeyOf(id)])
+    expect(count('receipts')).toBe(0)
+    expect(count('receipt_matches')).toBe(0)
+  })
+  it('/upload-delete answers 404 alike for the other allowed person and a missing id; 403 for a stranger; nothing is removed', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    expect((await del(env, OTHER, id)).status).toBe(404)
+    expect((await del(env, OWNER, 'r0000000000000000')).status).toBe(404)
+    expect((await del(env, STRANGER, id)).status).toBe(403)
+    expect(count('receipts')).toBe(1)
+    expect(mem.map.has(S.imageKeyOf(id))).toBe(true)
+    expect((await del(env, OWNER, id)).status).toBe(204)
+    expect((await del(env, OWNER, id)).status).toBe(404)
+  })
+  it('/upload-delete refuses a body email that differs from the header, and a bad id or body', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    const res = await del(env, OWNER, id, OTHER)
+    expect([res.status, await code(res)]).toEqual([400, 'bad_request'])
+    expect((await del(env, OWNER, id, null)).status).toBe(400)
+    expect((await del(env, OWNER, 'bad id')).status).toBe(400)
+    expect((await call('/upload-delete', OWNER, { method: 'POST', body: 'not json' }, env)).status).toBe(400)
+    expect(count('receipts')).toBe(1)
+  })
+  it('a failed image delete keeps the row so the delete can be retried', async () => {
+    const mem = memKv(true)
+    const env = upEnv(mem)
+    const id = await addUpload(mem)
+    expect((await del(env, OWNER, id)).status).toBe(500)
+    expect(count('receipts')).toBe(1)
+  })
+})
+
+describe('scheduled: uploads and the image sweep', () => {
+  it('retries uploads every hour and sweeps images only at 03:xx UTC', async () => {
+    const mem = memKv()
+    const env = upEnv(mem)
+    const old = await addUpload(mem, { at: new Date('2026-01-01T00:00:00.000Z') })
+    const net = makeNet({ messages: 0 })
+    vi.stubGlobal('fetch', net.fetch)
+    try {
+      await handleScheduled(env, new Date('2026-12-05T04:23:00.000Z'))
+      expect(net.anthropic).toBe(1) // the pending upload was retried
+      expect(rcpt(old).image_key).toBe(S.imageKeyOf(old)) // no sweep at 04
+      expect(mem.deleted).toEqual([])
+      await handleScheduled(env, new Date('2026-12-05T03:23:00.000Z'))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(rcpt(old).image_key).toBeNull()
+    expect(mem.deleted).toEqual([S.imageKeyOf(old)])
   })
 })
