@@ -39,6 +39,11 @@ fields, the same matching and the same suggestions as an emailed receipt.
 10. **The daily cap counts live rows.** 20 uploads per person per day, counted from existing rows; deleting an upload
     frees a slot. Accepted as simple and cheap.
 
+11. **Sec-Fetch-Site is checked only when present.** `POST /api/budget/uploads` answers 403 when the header is
+    present and not `same-origin`, and allows an absent header. Safari before 16.4 does not send it. The real guard is
+    the exact `Content-Type: image/jpeg`: it is non-simple, so a cross-site send needs a preflight, and no CORS grant is
+    given. A test pins both cases.
+
 ## Consequences
 
 - The Worker needs the R2 binding and a token that can deploy it; R2 must be enabled on the account first.

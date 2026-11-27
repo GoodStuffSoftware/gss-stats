@@ -10,6 +10,7 @@ import { onRequest as image } from './[id]/image'
 import { onRequest as links } from '../email/links'
 import { onRequest as list } from '../email/receipts/index'
 import { onRequest as apply } from '../email/apply'
+import { onRequest as dismiss } from '../email/receipts/[id]'
 
 const A = 'user-a@example.com'
 const B = 'user-b@example.com'
@@ -83,6 +84,11 @@ describe('POST /uploads', () => {
       expect(res.status, ct).toBe(415)
     }
     expect(worker).not.toHaveBeenCalled()
+  })
+  it('a missing Sec-Fetch-Site header is allowed (older Safari; the non-simple Content-Type is the guard, ADR 0010)', async () => {
+    const res = await call(post, '/api/budget/uploads', A, ok())
+    expect(res.status).toBe(202)
+    expect(worker).toHaveBeenCalledTimes(1)
   })
   it('Sec-Fetch-Site other than same-origin is 403', async () => {
     for (const v of ['cross-site', 'same-site', 'none']) expect((await call(post, '/api/budget/uploads', A, ok({ 'Sec-Fetch-Site': v }))).status, v).toBe(403)
@@ -166,6 +172,14 @@ describe('GET /uploads/<id>/image', () => {
     expect((await get(open, B, { RECEIPTS_SHARE: 'fields' })).status).toBe(404)
     expect((await get(id, A, { RECEIPTS_IMAGE_SHARE: 'owner', RECEIPTS_SHARE: 'none' })).status).toBe(200)
   })
+  it('after the retention sweep cleared image_key, the image is 404 and the Worker is not asked', async () => {
+    const id = upload(1, A, { status: 'applied' })
+    expect((await get(id, A)).status).toBe(200)
+    worker.mockClear()
+    db.sqlite.prepare('UPDATE receipts SET image_key = NULL WHERE id = ?').run(id)
+    for (const who of [A, B]) expect((await get(id, who, { RECEIPTS_SHARE: 'fields' })).status).toBe(404)
+    expect(worker).not.toHaveBeenCalled()
+  })
   it('no image, missing, a bad id and a stranger without access are 404 (403 off the list); a Worker 404 or failure is passed on', async () => {
     const gone = upload(3, A, { image: false })
     expect((await get(gone, A)).status).toBe(404)
@@ -204,6 +218,51 @@ describe('links: imageUrl and mine', () => {
     expect((await linkFor(A, { RECEIPTS_SHARE: 'none', RECEIPTS_IMAGE_SHARE: 'owner' })).imageUrl).toBe(url)
     db = await createBudgetDb()
     expect(await linkFor(B, { RECEIPTS_SHARE: 'none' })).toBeUndefined()
+  })
+})
+
+describe('links: fields_and_link on an upload row', () => {
+  it('shows the fields to the other person but never a gmailMsgId, since an upload has no email', async () => {
+    const id = upload(1, A, { status: 'applied' })
+    const t = insertTxn(db)
+    db.sqlite.prepare(`INSERT INTO receipt_matches (receipt_id, txn_id, group_key, rule, share_cents, score, status, txn_updated_at, created_at) VALUES (?, ?, 'g', 'exact', 500, 90, 'applied', ?, ?)`).run(id, t, NOW, NOW)
+    for (const who of [A, B]) {
+      const request = new Request('https://stats.goodstuff.software/api/budget/email/links', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ txnIds: [t] }) })
+      const res = await (links as unknown as (c: never) => Promise<Response>)({ request, env: env({ RECEIPTS_SHARE: 'fields_and_link' }), params: {}, data: { budgetEmail: who } } as never)
+      const link = ((await res.json()) as any).links[t]
+      expect(link, who).toMatchObject({ source: 'upload', hasImage: true, merchant: 'Invented Shop', imageUrl: `/api/budget/uploads/${id}/image` })
+      expect('gmailMsgId' in link, who).toBe(false)
+    }
+  })
+})
+
+describe('dismiss and undo on an upload row', () => {
+  const patch = (id: string, who: string, dismissed: boolean) => call(dismiss, `/api/budget/email/receipts/${id}`, who, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed }), params: { id } })
+  const status = (id: string) => (db.sqlite.prepare('SELECT status FROM receipts WHERE id = ?').get(id) as { status: string }).status
+
+  it('the uploader dismisses a suggested upload and undoes it; undo with no open match is unmatched', async () => {
+    const id = upload(1, A)
+    let res = await patch(id, A, true)
+    expect([res.status, await res.json()]).toEqual([200, { id, status: 'dismissed' }])
+    expect(status(id)).toBe('dismissed')
+    res = await patch(id, A, false)
+    expect([res.status, await res.json()]).toEqual([200, { id, status: 'unmatched' }])
+  })
+  it('undo returns to suggested while a suggested match exists', async () => {
+    const id = upload(1, A)
+    const t = insertTxn(db)
+    db.sqlite.prepare(`INSERT INTO receipt_matches (receipt_id, txn_id, group_key, rule, share_cents, score, status, txn_updated_at, created_at) VALUES (?, ?, 'g', 'exact', 500, 90, 'suggested', ?, ?)`).run(id, t, NOW, NOW)
+    expect((await patch(id, A, true)).status).toBe(200)
+    const res = await patch(id, A, false)
+    expect(await res.json()).toEqual({ id, status: 'suggested' })
+  })
+  it('the other person and a stranger get 404 and change nothing; an applied upload is 409', async () => {
+    const id = upload(1, A)
+    for (const who of [B, STRANGER]) expect((await patch(id, who, true)).status, who).toBe(404)
+    expect(status(id)).toBe('suggested')
+    const done = upload(2, A, { status: 'applied' })
+    expect((await patch(done, A, true)).status).toBe(409)
+    expect(status(done)).toBe('applied')
   })
 })
 
