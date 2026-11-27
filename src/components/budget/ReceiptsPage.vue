@@ -18,7 +18,6 @@ import { formatCents } from '../../lib/budget/money'
 import { prepareReceiptImage, ReceiptImageError } from '../../lib/budget/receiptImage'
 import {
   disconnectReceipts,
-  fetchReceipts,
   fetchReceiptsStatus,
   fetchUpload,
   uploadReceiptImage,
@@ -56,16 +55,8 @@ const CONSENT_LINES = [
   'Receipts you connect are also shown to the other Budget person.',
 ]
 
-/** Without Gmail, the list still shows when this person has photo receipts: one look at each tab, once per load. */
+/** Without Gmail, the list still shows when this person has photo receipts: the status answer says so (`hasUploads`), no extra reads. */
 const hasUploads = ref(false)
-async function probeUploads() {
-  try {
-    const pages = await Promise.all((['suggested', 'unmatched', 'applied'] as const).map((s) => fetchReceipts({ status: s })))
-    if (pages.some((p) => p.receipts.some((r) => r.source === 'upload'))) hasUploads.value = true
-  } catch {
-    // the list is optional here; the photo card still works
-  }
-}
 const showReview = computed(() => isConnected.value || hasUploads.value)
 
 async function load() {
@@ -73,7 +64,7 @@ async function load() {
   failed.value = false
   try {
     status.value = await fetchReceiptsStatus()
-    if (status.value.configured && !(status.value.connection && status.value.connection.status !== 'revoked')) void probeUploads()
+    if (status.value.hasUploads) hasUploads.value = true
   } catch {
     status.value = null
     failed.value = true
@@ -174,7 +165,8 @@ function poll(id: string, run: number, startedAt: number) {
       if (s.status !== 'pending') return finishPhoto(s)
     } catch (e) {
       if (run !== photoRun) return
-      return photoFailed(e)
+      // One failed poll (a network blip, a 5xx) is not the end: the upload went through. Only a definite answer fails it.
+      if (e instanceof ReceiptsApiError && [401, 403, 404].includes(e.status)) return photoFailed(e)
     }
     if (Date.now() - startedAt >= POLL_MAX_MS) {
       photo.value = { phase: 'slow', text: '', row: null }

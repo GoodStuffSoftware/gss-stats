@@ -8,7 +8,9 @@
 // Batches: at most MAX_BATCH match ids per apply call (whole splits stay together, so a big selection goes in several calls).
 import { computed, onMounted, ref } from 'vue'
 import EditableTable, { type EditableColumn, type RowStatus } from '../table/EditableTable.vue'
+import ModalPanel from '../ui/ModalPanel.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
+import ReceiptPhotoModal from './ReceiptPhotoModal.vue'
 import CategorySelect from './CategorySelect.vue'
 import { formatCents } from '../../lib/budget/money'
 import { receiptText } from '../../lib/budget/tableModel'
@@ -19,6 +21,7 @@ import {
   fetchReceipts,
   receiptsMessage,
   ReceiptsApiError,
+  photoUrlOf,
   type ApplyItem,
   type ReceiptMatch,
   type ReceiptRow,
@@ -36,6 +39,7 @@ const TABS = [
   { value: 'suggested', label: 'Suggested', testid: 'rr-tab-suggested' },
   { value: 'unmatched', label: 'Unmatched', testid: 'rr-tab-unmatched' },
   { value: 'applied', label: 'Applied', testid: 'rr-tab-applied' },
+  { value: 'photos', label: 'My photos', testid: 'rr-tab-photos' },
 ]
 
 /** Plain words for each reason the server skipped a match. */
@@ -48,6 +52,11 @@ const SKIP_TEXT: Record<string, string> = {
   too_many: 'This purchase is split over too many charges to apply here.',
   not_found: 'This match is no longer there.',
   not_suggested: 'This match is no longer a suggestion.',
+}
+/** Plain words for a photo's state in the My photos tab. */
+const STATE_TEXT: Record<string, string> = {
+  pending: 'Being read', error: 'Could not be read', skipped: 'Not a receipt', no_total: 'No total found',
+  dismissed: 'Dismissed', suggested: 'Match suggested', unmatched: 'No match yet', applied: 'Applied',
 }
 const skipText = (reason: string) => SKIP_TEXT[reason] ?? 'Not applied.'
 
@@ -111,7 +120,7 @@ const columns = computed<EditableColumn<ReceiptRow>[]>(() => {
     { key: 'total', label: 'Total', editor: null, align: 'end', value: (r) => money(r.totalCents), minWidth: 80 },
     { key: 'bank', label: 'Bank row', editor: null, cardLine: 1, minWidth: 190 },
   ]
-  if (tab.value !== 'unmatched') cols.push({ key: 'category', label: 'Category', editor: 'select', value: (r) => chosenFor(r), options: options.value, cardLine: 2, minWidth: 170 })
+  if (tab.value === 'suggested' || tab.value === 'applied') cols.push({ key: 'category', label: 'Category', editor: 'select', value: (r) => chosenFor(r), options: options.value, cardLine: 2, minWidth: 170 })
   cols.push({ key: 'items', label: 'Items', editor: null, value: (r) => itemNames(r), cardLine: 2, minWidth: 140 })
   if (tab.value === 'suggested') cols.push({ key: 'strength', label: 'Match', editor: null, value: (r) => (bestOf(r) ? strength(bestOf(r)!) : ''), cardLine: 1, minWidth: 70 })
   cols.push({ key: 'actions', label: '', editor: null, cardLine: 2, minWidth: 190 })
@@ -283,8 +292,23 @@ async function dismiss(r: ReceiptRow) {
   }
 }
 
+/** Delete asks first (the shared ModalPanel, as the Disconnect dialog does): it cannot be undone. */
+const confirmRow = ref<ReceiptRow | null>(null)
+const confirmReturn = ref<HTMLElement | null>(null)
+function askDelete(r: ReceiptRow, ev: Event) {
+  confirmReturn.value = ev.currentTarget as HTMLElement
+  confirmRow.value = r
+}
+/** The photo viewer: one at a time, opened from a row's View photo. */
+const viewing = ref<{ url: string; returnTo: HTMLElement | null } | null>(null)
+function viewPhoto(r: ReceiptRow, ev: Event) {
+  const url = photoUrlOf(r.imageUrl)
+  if (url) viewing.value = { url, returnTo: ev.currentTarget as HTMLElement }
+}
+
 /** Deletes the viewer's own photo receipt (and its photo) for good; the server refuses anyone else. */
 async function deletePhoto(r: ReceiptRow) {
+  confirmRow.value = null
   if (busy.value) return
   busy.value = true
   results.value = []
@@ -301,7 +325,7 @@ async function deletePhoto(r: ReceiptRow) {
 
 const rowLabel =(r: ReceiptRow) => `${nameOf(r)} ${money(r.totalCents)}`
 const emptyText = computed(() =>
-  tab.value === 'suggested' ? 'No suggested matches right now.' : tab.value === 'unmatched' ? 'No unmatched receipts.' : 'No receipts applied yet.',
+  tab.value === 'suggested' ? 'No suggested matches right now.' : tab.value === 'unmatched' ? 'No unmatched receipts.' : tab.value === 'photos' ? 'No receipt photos yet.' : 'No receipts applied yet.',
 )
 </script>
 
@@ -350,6 +374,7 @@ const emptyText = computed(() =>
           <span data-testid="rr-store">{{ storeName(row) }}</span>
           <span v-if="receiptText(row.paymentVia, 40)" class="rr-sub"> via {{ receiptText(row.paymentVia, 40) }}</span>
           <span class="rr-sub" data-testid="rr-source"> · {{ row.source === 'upload' ? 'Photo' : 'Email' }}</span>
+          <span v-if="tab === 'photos'" class="rr-sub" data-testid="rr-state"> · {{ STATE_TEXT[row.status] ?? row.status }}</span>
         </template>
         <template #cell-bank="{ row }">
           <template v-if="bestOf(row)">
@@ -381,8 +406,9 @@ const emptyText = computed(() =>
               <button type="button" class="btn btn-primary rr-btn" :disabled="busy" data-testid="rr-apply" @click="applyRows([row])">Apply</button>
               <button type="button" class="btn rr-btn" :disabled="busy" data-testid="rr-reject" @click="reject(row)">Reject</button>
             </template>
-            <button v-if="tab !== 'applied'" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-dismiss" @click="dismiss(row)">Dismiss</button>
-            <button v-if="row.source === 'upload' && row.mine" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-delete" @click="deletePhoto(row)">Delete</button>
+            <button v-if="row.source === 'upload' && photoUrlOf(row.imageUrl)" type="button" class="btn btn-ghost rr-btn" data-testid="rr-view-photo" @click="viewPhoto(row, $event)">View photo</button>
+            <button v-if="tab !== 'applied' && tab !== 'photos'" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-dismiss" @click="dismiss(row)">Dismiss</button>
+            <button v-if="row.source === 'upload' && row.mine" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-delete" @click="askDelete(row, $event)">Delete</button>
           </span>
         </template>
         <template #footer>
@@ -394,6 +420,14 @@ const emptyText = computed(() =>
         </template>
       </EditableTable>
     </template>
+    <ModalPanel :open="!!confirmRow" title="Delete this photo?" title-id="rr-del-title" described-by="rr-del-desc" :return-to="confirmReturn" @close="confirmRow = null">
+      <p id="rr-del-desc" class="rr-muted">Delete this photo and its receipt? This can't be undone.</p>
+      <template #actions>
+        <button type="button" class="btn rr-btn" data-testid="rr-delete-cancel" @click="confirmRow = null">Cancel</button>
+        <button type="button" class="btn btn-primary rr-btn" :disabled="busy" data-testid="rr-delete-confirm" @click="confirmRow && deletePhoto(confirmRow)">Delete</button>
+      </template>
+    </ModalPanel>
+    <ReceiptPhotoModal :url="viewing?.url ?? null" :return-to="viewing?.returnTo ?? null" @close="viewing = null" />
   </section>
 </template>
 

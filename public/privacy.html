@@ -26,7 +26,7 @@
 <body>
 <main>
 <h1>Privacy policy, GSS Budget Receipts</h1>
-<p class="meta">Last updated: 2026-11-26</p>
+<p class="meta">Last updated: 2026-11-27</p>
 
 <h2>What this is</h2>
 <p>GSS Budget Receipts is part of the Budget section of a private household budgeting tool. It reads receipt emails from a connected Gmail account, and photos of paper receipts that you upload, and matches them to bank transactions, so each purchase can be given a category. Only people on an allowlist can sign in.</p>
@@ -58,10 +58,10 @@
 <h2>Receipt photos</h2>
 <p>On the Receipts page you can take or choose a photo of a paper receipt. This does not need a Gmail connection.</p>
 <ul>
-  <li>The photo is re-encoded on your device, which strips its location and camera data, and it is stripped again on the server.</li>
+  <li>The photo is re-encoded on your device, which strips its location and camera data, and it is stripped again on the server. Photos are resized on your device and are at most 2 MB.</li>
   <li>It is sent to Anthropic's API, which reads the merchant, date, total and items from it. We send it for this purpose only.</li>
-  <li>It is stored in private Cloudflare storage. It is never public, and only the two people on the Budget can view it, after signing in.</li>
-  <li>It is deleted automatically after 90 days, or sooner when you delete the receipt in the app.</li>
+  <li>It is stored in private Cloudflare storage and kept for 90 days. It is never public. Only you can view it. Once the receipt is applied to a transaction, the other person on the Budget can view it too, after signing in, unless photo sharing is set to the uploader only, in which case they never can.</li>
+  <li>It is deleted automatically after 90 days, or sooner when you delete it in the app (Receipts, My photos tab).</li>
   <li>The fields read from a deleted receipt can stay in the database's 30-day point-in-time backup.</li>
 </ul>
 

@@ -143,6 +143,19 @@ describe('BudgetTable receipt tip', () => {
     // the note comes before the block
     expect(tip.html().indexOf('note-tip')).toBeLessThan(tip.html().indexOf('receipt-block'))
   })
+  it('the photo opens outside the tip and survives a pointerdown on it', async () => {
+    mockApi([txn(A, { note: 'weekly shop' })], () => json({ links: { [A]: receipt({ source: 'upload', hasImage: true, imageUrl: '/api/budget/uploads/r1/image' }) } }))
+    const w = await mountTable()
+    await noteBtn(w, A).trigger('click')
+    await w.get('[data-testid="receipt-photo-btn"]').trigger('click')
+    await flushPromises()
+    const img = document.querySelector('[data-testid="receipt-photo-img"]') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('/api/budget/uploads/r1/image')
+    img.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    window.dispatchEvent(new Event('scroll'))
+    await flushPromises()
+    expect(document.querySelector('[data-testid="receipt-photo-img"]')).not.toBeNull()
+  })
   it('without gmailMsgId (the other person) the block shows and there is no link', async () => {
     mockApi([txn(A, { note: 'n' })], () => json({ links: { [A]: receipt() } }))
     const w = await mountTable()

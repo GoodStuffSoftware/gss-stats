@@ -22,6 +22,7 @@ import EditableTable from '../table/EditableTable.vue'
 import SegmentedControl, { type SegOption } from '../ui/SegmentedControl.vue'
 import CategorySelect from './CategorySelect.vue'
 import ReceiptBlock from './ReceiptBlock.vue'
+import ReceiptPhotoModal from './ReceiptPhotoModal.vue'
 import SimilarDialog from './SimilarDialog.vue'
 import TxnToolbar from './TxnToolbar.vue'
 import { applySimilar, createCategory, createRule, fetchSimilar, fetchTxnPage, patchTxn } from '../../lib/budget/clientEdit'
@@ -255,10 +256,20 @@ type TipData = { kind: 'merchant'; name: string; description: string; note: stri
 const { tip, close: closeTip, toggle, openOnKeyboardFocus } = useToggletip<TipData>('.bt-merchant, .et-hold, .bt-tip')
 const merchantTip = (row: Txn): TipData => ({ kind: 'merchant', name: row.merchantName || row.description, description: row.description, note: row.note ?? '', receipt: receiptOf(row.id) })
 const merchantKey = (row: Txn) => `merchant:${row.id}`
+// The receipt photo opens here, outside the tip: the tip closes on any touch or scroll outside it, which would take the photo
+// with it. Focus returns to the trigger that opened the tip.
+const photo = ref<{ url: string; returnTo: HTMLElement | null } | null>(null)
+let tipTrigger: HTMLElement | null = null
+function viewPhoto(url: string) {
+  photo.value = { url, returnTo: tipTrigger }
+  closeTip()
+}
 function toggleTip(row: Txn, e: Event) {
+  tipTrigger = e.currentTarget as HTMLElement
   toggle(merchantKey(row), merchantTip(row), e.currentTarget as HTMLElement)
 }
 function focusTip(row: Txn, e: FocusEvent) {
+  tipTrigger = e.currentTarget as HTMLElement
   openOnKeyboardFocus(merchantKey(row), merchantTip(row), e.currentTarget as HTMLElement)
 }
 // The note: a click or tap shows it in full (a row without one has nothing to show, so the table opens the editor), a hold
@@ -268,6 +279,7 @@ function onPeek(rowKey: string, field: string, el: HTMLElement, source: 'click' 
   const row = rows.value.find((r) => r.id === rowKey)
   const receipt = receiptOf(rowKey)
   if (!row || (!row.note && !receipt)) return
+  tipTrigger = el
   const key = `note:${rowKey}`
   const data: TipData = { kind: 'note', note: row.note ?? '', receipt }
   if (source === 'focus') openOnKeyboardFocus(key, data, el)
@@ -495,13 +507,14 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
         <span class="bt-tip-name">{{ tip.data.name }}</span>
         <span v-if="tip.data.description && tip.data.description !== tip.data.name" class="bt-tip-desc" data-testid="merchant-tip-desc">{{ tip.data.description }}</span>
         <span v-if="tip.data.note" class="bt-tip-note" data-testid="merchant-tip-note"><MarkdownText :text="tip.data.note" /></span>
-        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" />
+        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" @view-photo="viewPhoto" />
       </template>
       <template v-else>
         <span v-if="tip.data.note" class="bt-tip-fullnote" data-testid="note-tip"><MarkdownText :text="tip.data.note" /></span>
-        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" />
+        <ReceiptBlock v-if="tip.data.receipt" :link="tip.data.receipt" @view-photo="viewPhoto" />
       </template>
     </div>
+    <ReceiptPhotoModal :url="photo?.url ?? null" :return-to="photo?.returnTo ?? null" @close="photo = null" />
   </section>
 </template>
 

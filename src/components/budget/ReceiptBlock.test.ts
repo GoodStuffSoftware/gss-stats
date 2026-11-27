@@ -118,17 +118,14 @@ describe('Open in Gmail link', () => {
 })
 
 describe('View photo', () => {
-  it('shows only when imageUrl is set, and opens the photo in the shared modal', async () => {
+  it('shows only when imageUrl is set, and asks the host to open the photo', async () => {
     const none = mountBlock(link({ source: 'upload', hasImage: true }))
     expect(none.find('[data-testid="receipt-photo-btn"]').exists()).toBe(false)
-    const w = mount(ReceiptBlock, { props: { link: link({ source: 'upload', hasImage: true, imageUrl: '/api/budget/uploads/r1/image' }) }, attachTo: document.body })
-    const btn = w.find('[data-testid="receipt-photo-btn"]')
+    const w = mountBlock(link({ source: 'upload', hasImage: true, imageUrl: '/api/budget/uploads/r1/image' }))
+    const btn = w.get('[data-testid="receipt-photo-btn"]')
     expect(btn.text()).toBe('View photo')
-    expect(document.querySelector('[data-testid="receipt-photo-img"]')).toBeNull()
     await btn.trigger('click')
-    const img = document.querySelector('[data-testid="receipt-photo-img"]') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('/api/budget/uploads/r1/image')
-    w.unmount()
+    expect(w.emitted('view-photo')).toEqual([['/api/budget/uploads/r1/image']])
   })
   it('ignores an imageUrl that is not an uploads path', () => {
     const w = mountBlock(link({ imageUrl: 'https://evil.example.com/x.jpg' }))

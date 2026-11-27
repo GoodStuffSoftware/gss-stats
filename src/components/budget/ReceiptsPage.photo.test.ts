@@ -151,6 +151,19 @@ describe('upload and polling', () => {
     expect(calls.filter((c) => c.key.startsWith('GET /api/budget/uploads/u3'))).toHaveLength(20)
   })
 
+  it('one failed poll does not end the upload: it retries and finishes', async () => {
+    await mountPage(connected)
+    vi.useFakeTimers()
+    routes['POST /api/budget/uploads'] = [{ status: 202, body: { id: 'u6' } }]
+    routes['GET /api/budget/uploads/u6'] = [{ status: 502, body: { code: 'unavailable' } }, { body: { id: 'u6', status: 'unmatched', row: photoRow({ matches: [] }) } }]
+    await pick('receipts-take')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(byId('receipts-photo-error').exists()).toBe(false)
+    expect(byId('receipts-photo-reading').exists()).toBe(true)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(byId('receipts-photo-done').exists()).toBe(true)
+  })
+
   it('a read that ends in error says so', async () => {
     await mountPage(connected)
     vi.useFakeTimers()
@@ -201,13 +214,10 @@ describe('upload errors', () => {
 
 describe('review list visibility', () => {
   it('mounts without Gmail when the person already has a photo receipt', async () => {
-    routes['GET /api/budget/email/status'] = [{ body: notConnected }]
-    routes['GET /api/budget/email/receipts?status=suggested*'] = [{ body: { receipts: [photoRow()], nextCursor: null } }]
-    routes['GET /api/budget/email/receipts?status=unmatched*'] = [{ body: emptyList }]
-    routes['GET /api/budget/email/receipts?status=applied*'] = [{ body: emptyList }]
-    wrapper = mount(ReceiptsPage as never, { attachTo: document.body } as never) as unknown as VueWrapper
-    await flushPromises()
+    await mountPage({ ...notConnected, hasUploads: true })
     expect(byId('receipts-review').exists()).toBe(true)
+    // one status read and the list's own first load: no 3-tab probe
+    expect(calls.filter((c) => c.key.startsWith('GET /api/budget/email/receipts')).length).toBe(1)
   })
 
   it('stays out without Gmail and without uploads', async () => {
@@ -257,6 +267,9 @@ describe('review rows', () => {
     const perLayout = dels.length
     routes['DELETE /api/budget/uploads/own'] = [{ status: 204, body: null }]
     await dels[0].trigger('click')
+    await flushPromises()
+    expect(calls.some((c) => c.key === 'DELETE /api/budget/uploads/own')).toBe(false) // asks first
+    ;(document.querySelector('[data-testid="rr-delete-confirm"]') as HTMLElement).click()
     await flushPromises()
     expect(calls.some((c) => c.key === 'DELETE /api/budget/uploads/own')).toBe(true)
     expect(perLayout).toBeLessThanOrEqual(2)

@@ -180,3 +180,22 @@ describe('ReceiptsReview', () => {
     expect(byId('rr-apply').exists()).toBe(false)
   })
 })
+
+describe('My photos tab and delete', () => {
+  const photo = (over: Record<string, unknown> = {}) => receipt(1, [], { source: 'upload', mine: true, status: 'skipped', hasImage: true, imageUrl: '/api/budget/uploads/r1/image', gmailMsgId: undefined, ...over })
+  it('lists a skipped photo, offers View photo, and asks before deleting', async () => {
+    await mountList([], null)
+    routes['GET /api/budget/email/receipts?status=photos'] = [{ body: { receipts: [photo()], nextCursor: null } }]
+    await byId('rr-tab-photos').trigger('click')
+    await flushPromises()
+    expect(byId('rr-state').text()).toContain('Not a receipt')
+    expect(byId('rr-view-photo').exists()).toBe(true)
+    routes['DELETE /api/budget/uploads/r1'] = [{ body: {} }]
+    await byId('rr-delete').trigger('click')
+    expect(fetchMock.mock.calls.some((c) => c[1]?.method === 'DELETE')).toBe(false)
+    ;(document.querySelector('[data-testid="rr-delete-confirm"]') as HTMLElement).click()
+    await flushPromises()
+    expect(fetchMock.mock.calls.some((c) => c[1]?.method === 'DELETE')).toBe(true)
+    expect(all('rr-delete')).toHaveLength(0)
+  })
+})

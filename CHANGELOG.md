@@ -7,7 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **Receipt photos** — take or choose a photo of a paper receipt on the Budget page; it's read like an email receipt and suggested for a matching transaction.
+- **Receipt photos** — take or choose a photo of a paper receipt on the Receipts page; it's read like an email receipt and suggested for a matching transaction. Photos are sent at higher resolution so small print stays readable.
+- **My photos tab** — every receipt photo you took, whatever its state, can be viewed and deleted from the Receipts list, and deleting asks first.
+- **Photo viewer stays open** — tapping, scrolling or pinch-zooming a receipt photo no longer closes it.
 
 ## [0.87.0] — 2026-11-27
 
