@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetPageOf, budgetSectionOpen, parseBudgetPage, searchWithSection } from './sectionLink'
+import { BUDGET_PAGES, budgetPageOf, budgetSectionOpen, parseBudgetPage, searchWithSection } from './sectionLink'
 
 describe('budgetSectionOpen', () => {
   it('is true only for section=budget', () => {
@@ -47,6 +47,14 @@ describe('the Budget page param', () => {
     expect(budgetPageOf('?section=budget&b_page=Receipts')).toBe('overview')
     expect(searchWithSection('?page=p1', true, 'receipts')).toBe('?page=p1&section=budget&b_page=receipts')
     expect(searchWithSection('?section=budget&b_page=receipts&email=connected', false)).toBe('?email=connected')
+  })
+  it('banks is a page: parsed, read from b_page, written when opening, listed for the menu; Banks (capital) is Overview', () => {
+    expect(parseBudgetPage('banks')).toBe('banks')
+    expect(parseBudgetPage('Banks')).toBe('overview')
+    expect(budgetPageOf('?section=budget&b_page=banks')).toBe('banks')
+    expect(searchWithSection('?page=p1', true, 'banks')).toBe('?page=p1&section=budget&b_page=banks')
+    expect(searchWithSection('?section=budget&b_page=banks&utm_source=x', false)).toBe('?utm_source=x')
+    expect(BUDGET_PAGES.find((p) => p.id === 'banks')?.label).toBe('Banks')
   })
   it('opening on Loans writes b_page=loans; Overview writes nothing; closing drops it', () => {
     expect(searchWithSection('?page=p1', true, 'loans')).toBe('?page=p1&section=budget&b_page=loans')

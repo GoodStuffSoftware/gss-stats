@@ -1136,3 +1136,25 @@ describe('BudgetTable phone Cards | Table switch', () => {
     expect(w.find('[data-testid="merchant-tip"]').exists()).toBe(true)
   })
 })
+
+describe('BudgetTable Pending tag (bank rows the bank has not posted)', () => {
+  it('a pending row shows a muted Pending tag beside the merchant; posted rows show none, and a pending row can still be reviewed', async () => {
+    mockFetch(() => json({ rows: [txn('t1', { pending: true }), txn('t2'), txn('t3', { pending: false, needsReview: true })], nextCursor: null }))
+    const w = await mountTable()
+    const tag = rowEl(w, 't1').find('[data-testid="pending-tag"]')
+    expect(tag.exists()).toBe(true)
+    expect(tag.text()).toBe('Pending')
+    expect(tag.classes()).toContain('bt-badge-pending')
+    expect(rowEl(w, 't1').find('[data-testid="merchant-tip-toggle"]').text()).toBe('Chain X')
+    expect(rowEl(w, 't2').find('[data-testid="pending-tag"]').exists()).toBe(false)
+    expect(rowEl(w, 't3').find('[data-testid="pending-tag"]').exists()).toBe(false)
+    expect(rowEl(w, 't3').find('.bt-badge').text()).toBe('Review')
+  })
+  it('shows on the phone Table layout too', async () => {
+    width = 390
+    window.localStorage.setItem('gss-stats-budget-txn-view', 'table')
+    mockFetch(() => json({ rows: [txn('t1', { pending: true })], nextCursor: null }))
+    const w = await mountTable()
+    expect(rowEl(w, 't1').find('[data-testid="pending-tag"]').exists()).toBe(true)
+  })
+})

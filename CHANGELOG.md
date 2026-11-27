@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Link a bank** — a new Banks page in Budget links a bank through Plaid, shows each bank's accounts with the last 4 digits only, and lets the person who linked it choose which Budget account each one feeds, reconnect it, share new accounts, sync now or unlink.
+- **Bank link counter** — the Banks page shows how many of the 10 free bank links are used, warns at 3 left, and explains that unlinking does not give a link back.
+- **Pending bank rows** — a transaction the bank has not posted yet shows a muted Pending tag beside the merchant.
+
 ### Changed
 - **Statement files and bank links don't double up** — once a bank account is linked, a statement load skips rows the bank already sends.
 
