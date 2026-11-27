@@ -254,6 +254,8 @@ export interface CallOptions {
   params?: Record<string, string>
   /** `data.budgetEmail`; pass null to leave it unset (a route must then answer 403). */
   email?: string | null
+  /** Extra env bindings on top of BUDGET_DB (for example BANKS). */
+  env?: Partial<BudgetEnv>
 }
 
 /** Calls a route handler the way Pages does: request, env, params and the middleware's `data`. */
@@ -274,7 +276,7 @@ export function callRoute(
   }
   const data: Record<string, unknown> = {}
   if (o.email !== null) data.budgetEmail = o.email ?? TEST_EMAIL
-  const ctx = { request: new Request(url, init), env: budgetEnv(db), params: o.params ?? {}, data, waitUntil: () => {}, next: async () => new Response('next') }
+  const ctx = { request: new Request(url, init), env: { ...budgetEnv(db), ...(o.env ?? {}) }, params: o.params ?? {}, data, waitUntil: () => {}, next: async () => new Response('next') }
   return Promise.resolve(handler(ctx as never))
 }
 
