@@ -6,14 +6,22 @@
 -- and while nobody edits Budget. The migration rebuilds a table that has cascading foreign keys; it is not "additive".
 -- The code from 0.86.1 (and every earlier receipts build) keeps working on the new schema: it never names the new columns,
 -- the column DEFAULT makes its rows 'email', it always supplies connection_id and gmail_msg_id (so the email CHECK passes),
--- and every one of its queries filters connection_id = ?, which no upload row matches. So this can be applied before or after
--- the code that uses it. Private data never lives in this file; schema only.
+-- and every one of its queries filters connection_id = ?, which no upload row matches. The reverse does not hold: the upload
+-- code names the new columns (even the email receipt list selects source and image_key), so 0006 must be applied BEFORE
+-- release 0.89.0 merges to main (a merge to main deploys). Private data never lives in this file; schema only.
+-- D1 read budget: this account's D1 allows 5M rows read per day (UTC), shared with the live site. The file reads each row of
+-- receipts, receipt_items and receipt_matches about ten times (counts, copies, restore, guard), so its cost is about ten times
+-- their combined row count. Check the result with one count per table; never a probe sweep over production.
 -- Note: gss-budget is shared by Preview and Production, so applying this for the preview touches production's file.
 --
--- NUMBERING AND ORDER: the number is 0006 because 0005 is the bank-link migration (six bank_* tables, three triggers and a
--- transactions.pending column; it names none of receipts, receipt_items, receipt_matches). The two migrations touch disjoint
--- tables, so they apply cleanly in either state: tests apply this file over 0001-0004 and over 0001-0005 (functions/_lib/receiptUploadsSchema.test.ts).
--- wrangler applies files in name order, so a database that has not applied 0005 yet gets it first.
+-- NUMBERING AND ORDER: the number is 0006 because 0005 is the bank-link migration (release 0.88.0: six bank_* tables, three
+-- triggers on plaid_slot_log and a transactions.pending column; it names none of receipts, receipt_items, receipt_matches and
+-- adds no foreign key, view or trigger that reaches them). The two touch disjoint tables, so either order gives the same schema
+-- and rows. If 0005 is in the checkout and not yet applied, wrangler applies it first (name order). If 0006 is applied from a
+-- checkout that has no 0005 yet, a later `migrations apply` still runs 0005 on top: wrangler applies every file d1_migrations
+-- does not list, in name order, with no out-of-order check (wrangler 4.143.0). Both orders are tested: 0001-0004 then 0006,
+-- 0001-0005 then 0006, and 0001-0004, 0006, then 0005, with a copy of the real 0005 pinned by its git blob sha
+-- (functions/_lib/receiptUploadsSchema.test.ts).
 --
 -- Why a rebuild: SQLite cannot drop NOT NULL with ALTER. connection_id and gmail_msg_id must become nullable (an upload has
 -- neither), so receipts is re-created. The other options were rejected (a per-person pseudo email_connection: the status/token
@@ -48,8 +56,9 @@
 -- extra final statement that fails (an INSERT into a table that does not exist). Result: the migration was reported as failed
 -- (SQLITE_ERROR no such table) and the WHOLE FILE WAS ROLLED BACK: receipts still had its 24 original columns, the four old
 -- indexes and the trigger were intact, no _m6_* table existed, the row counts were unchanged (2 receipts, 1 item), and
--- d1_migrations did not list 0006. The unmodified file then applied cleanly (34 statements; receipts 29 columns, counts
--- unchanged, no leftover _m6_* table). So local D1 applies a migration file atomically. That is evidence about local D1
+-- d1_migrations did not list 0006. The unmodified file then applied cleanly (receipts 29 columns, counts unchanged, no
+-- leftover _m6_* table; rehearsed on the draft, which differs from this file only in comments and the image_key CHECK). So
+-- local D1 applies a migration file atomically. That is evidence about local D1
 -- (workerd's SQLite), not a proof about production D1, which cannot be rehearsed without touching it; hence the bookmark.
 -- If production were NOT atomic, the guard in step 6 still stops the run and leaves every original row in the _m6_* tables
 -- (see Safety nets); the operator then restores the bookmark.
@@ -120,7 +129,7 @@ CREATE TABLE receipts (
   updated_by      TEXT NOT NULL,
   source          TEXT NOT NULL DEFAULT 'email' CHECK (source IN ('email','upload')),
   uploader_email  TEXT CHECK (uploader_email IS NULL OR (uploader_email = lower(uploader_email) AND instr(uploader_email, '@') > 1 AND instr(uploader_email, '@') < length(uploader_email) AND length(uploader_email) <= 254)),
-  image_key       TEXT CHECK (image_key IS NULL OR (length(image_key) = 25 AND image_key GLOB 'img/r*.jpg' AND substr(image_key, 6, 16) NOT GLOB '*[^0-9a-f]*')),   -- 'img/' || id || '.jpg'; NULL once the image is deleted
+  image_key       TEXT CHECK (image_key IS NULL OR image_key = ('img/' || id || '.jpg')),   -- this row's own id only (id is checked above); NULL once the image is deleted
   image_sha256    TEXT CHECK (image_sha256 IS NULL OR (length(image_sha256) = 64 AND image_sha256 NOT GLOB '*[^0-9a-f]*')),   -- of the stripped bytes; kept after the image goes
   image_bytes     INTEGER CHECK (image_bytes IS NULL OR (typeof(image_bytes) = 'integer' AND image_bytes BETWEEN 1 AND 3000000)),
   CHECK ((source = 'email'  AND connection_id IS NOT NULL AND gmail_msg_id IS NOT NULL AND uploader_email IS NULL

@@ -3,8 +3,9 @@
 // and a trigger on a child table, so these tests prove: every row and value survives, the child tables and the trigger are
 // byte-identical to 0004, foreign keys still act, the new CHECKs and indexes work, the 0.86.1 Worker SQL still runs, the guard
 // really fails the file, and the rollback block in the file restores 0004's shape.
-// The file must apply whether or not 0005 (the bank-link migration, which lands with its own release) is there: the suite runs
-// over 0001-0004, over every file numbered below 0006 that is in the directory, and over a stand-in for a bank-link 0005.
+// The file must apply whether or not 0005 (the bank-link migration, which lands with its own release) is there, in either order:
+// the suite runs 0001-0004 then 0006; 0001-0005 then 0006; and 0001-0004, 0006, then 0005. The 0005 used is the real file,
+// vendored under fixtures/ (blob sha pinned below), so the "both orders" claim is tested over the real DDL.
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
@@ -17,23 +18,24 @@ const read = (f: string): string => readFileSync(`${DIR}/${f}`, 'utf8').replaceA
 const files = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort()
 const UP = read(UP_FILE)
 const through4 = files.filter((f) => f < '0005_')
-const earlier = files.filter((f) => f < UP_FILE)
 
-/** A Plaid-shaped 0005 made up for this test (real one lives on another branch): a column on transactions, tables that
- *  reference transactions, and a trigger on transactions. It names no receipt table, as the real one does not. */
-const STAND_IN_0005 = `
-ALTER TABLE transactions ADD COLUMN stub_pending INTEGER NOT NULL DEFAULT 0;
-CREATE TABLE bank_stub_links (id TEXT PRIMARY KEY, label TEXT NOT NULL);
-CREATE TABLE bank_stub_map (txn_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE, link_id TEXT NOT NULL REFERENCES bank_stub_links(id), PRIMARY KEY (txn_id, link_id));
-CREATE TABLE bank_stub_log (id INTEGER PRIMARY KEY, note TEXT NOT NULL);
-CREATE TRIGGER trg_bank_stub_gone AFTER DELETE ON transactions BEGIN INSERT INTO bank_stub_log (note) VALUES ('gone ' || OLD.id); END;
-`
+/** The real 0005_bank_links.sql from release/0.88.0 (it lands with its own release), CRLF normalised, pinned by git blob sha. */
+const SQL_0005 = readFileSync('functions/_lib/fixtures/0005_bank_links.sql', 'utf8').replaceAll('\r\n', '\n')
+/** git blob sha of text: sha1("blob <bytes>\0" + bytes), by Web Crypto (no node:crypto types in this tsconfig). */
+async function blobSha(text: string): Promise<string> {
+  const body = new TextEncoder().encode(text)
+  const head = new TextEncoder().encode(`blob ${body.length}\0`)
+  const bytes = new Uint8Array(head.length + body.length)
+  bytes.set(head)
+  bytes.set(body, head.length)
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-1', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+const EXPECTED_SHA_0005 = '85c88a1f0e8cfa18816b33e943b5e5f26002efe4'
 
-interface Variant { name: string; standIn: boolean; apply: (d: DatabaseSync) => void }
+interface Variant { name: string; apply: (d: DatabaseSync) => void }
 const VARIANTS: Variant[] = [
-  { name: `over ${through4.join(', ')}`, standIn: false, apply: (d) => through4.forEach((f) => d.exec(read(f))) },
-  { name: `over every file below ${UP_FILE} in the directory (${earlier.at(-1)})`, standIn: false, apply: (d) => earlier.forEach((f) => d.exec(read(f))) },
-  { name: 'over 0001-0004 plus a Plaid-shaped 0005 stand-in', standIn: true, apply: (d) => { through4.forEach((f) => d.exec(read(f))); d.exec(STAND_IN_0005) } },
+  { name: `over ${through4.join(', ')}`, apply: (d) => through4.forEach((f) => d.exec(read(f))) },
+  { name: 'over 0001-0004 plus the real 0005', apply: (d) => { through4.forEach((f) => d.exec(read(f))); d.exec(SQL_0005) } },
 ]
 
 const NOW = '2026-12-05T10:00:00.000Z'
@@ -85,9 +87,17 @@ function seed(d: DatabaseSync): void {
   m(9, 2, 2, {})
   m(12, 3, 3, { status: 'rejected', decided_at: NOW, decided_by: 'user-a@example.com' })
   m(15, 2, 3, { status: 'superseded', proposed_category_id: 'shopping' })
-  if (d.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'bank_stub_map'`).get()) {
-    d.exec(`INSERT INTO bank_stub_links (id, label) VALUES ('l1', 'link'); INSERT INTO bank_stub_map (txn_id, link_id) VALUES ('${tid(4)}', 'l1'), ('${tid(2)}', 'l1')`)
-  }
+  if (d.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'bank_txns'`).get()) seedBank(d)
+}
+
+/** Made-up Plaid rows (real 0005 tables): one item, one account, two linked bank rows. Needs 0005 applied. */
+function seedBank(d: DatabaseSync): void {
+  d.exec(`INSERT INTO bank_items (id, owner_email, environment, plaid_item_id, status, token_ct, token_iv, key_id, consent_version, consented_at, created_at, updated_at)
+            VALUES ('i0123456789abcdef', 'user-a@example.com', 'sandbox', 'item_test_1', 'active', 'Y2lwaGVydGV4dA==', 'aXZpdml2aXZpaXZp', '0a1b2c3d', 1, '${NOW}', '${NOW}', '${NOW}');
+          INSERT INTO bank_accounts (id, item_id, plaid_account_id, account_id, name, type, sync, created_at, updated_at)
+            VALUES ('b0123456789abcdef', 'i0123456789abcdef', 'acct_test_1', 'acc-1', 'Checking', 'depository', 'on', '${NOW}', '${NOW}');
+          INSERT INTO bank_txns (plaid_txn_id, bank_account_id, txn_id, role, seen_at, updated_at) VALUES
+            ('ptxn_test_4', 'b0123456789abcdef', '${tid(4)}', 'inserted', '${NOW}', '${NOW}'), ('ptxn_test_2', 'b0123456789abcdef', '${tid(2)}', 'matched', '${NOW}', '${NOW}')`)
 }
 
 /** A database at the state just before 0006, seeded, with foreign keys on (as D1 always has them). */
@@ -212,11 +222,12 @@ describe.each(VARIANTS)('0006 $name', (v) => {
     for (const k of [`img/${rid(109)}.png`, `img/${rid(109)}.JPG`, `img/R${rid(109).slice(1)}.jpg`, `img/${rid(109).slice(0, 16)}g.jpg`, `img/${rid(109).slice(0, 16)}.jpg`, `img/${rid(109)}0.jpg`,
       `tmp/${rid(109)}.jpg`, `../${rid(109)}.jpg`, `img/x${rid(109).slice(1)}.jpg`, `img/${rid(109).toUpperCase()}.jpg`, '', 'img/.jpg']) bad({ image_key: k })
     for (const b of [0, -1, 3000001, 12.5, 'big']) bad({ image_bytes: b })
+    bad({ image_key: KEY(rid(108)) })   // well formed, but names another receipt: the key must be built from the row's own id
     bad({ source: 'photo' })
     bad({ source: 'email' })
     bad({ source: undefined })   // the DEFAULT 'email' then fails the row-shape CHECK
     put(d, 'receipts', uploadRow(1))
-    bad({ id: rid(150), image_sha256: HASH(1) }, 'UNIQUE')   // the same image twice, household-wide
+    bad({ id: rid(150), image_sha256: HASH(1), image_key: KEY(rid(150)) }, 'UNIQUE')   // the same image twice, household-wide (own key, so the key CHECK does not fire first)
     expect(count(d, 'receipts')).toBe(7)
   })
 
@@ -251,14 +262,14 @@ describe.each(VARIANTS)('0006 $name', (v) => {
   it('runs the 0.86.1 Worker receipt SQL unchanged: insert, dedupe, items, retry list', () => {
     const d = migrated()
     put(d, 'receipts', uploadRow(1, { status: 'error', attempts: 1 }))                            // an upload must never reach the email retry list
-    const ins = (id: string, msg: string, conn = CONN): number => Number(d.prepare(INSERT_RECEIPT_SQL).run(id, conn, msg, '2026-11-10', 'error', 1, 'fetch_failed', null, 'shop.example.com', null, null, null, null, null, null, null, null, null, null, null, null, NOW).changes)
+    const ins = (id: string, msg: string, conn = CONN): number => Number((d.prepare(INSERT_RECEIPT_SQL).run(id, conn, msg, '2026-11-10', 'error', 1, 'fetch_failed', null, 'shop.example.com', null, null, null, null, null, null, null, null, null, null, null, null, NOW) as { changes: number | bigint }).changes)
     expect(ins(rid(300), '18c3f2a9b7d4e777')).toBe(1)
     expect(ins(rid(301), '18c3f2a9b7d4e777')).toBe(0)                                           // INSERT OR IGNORE on (connection, message)
     expect(ins(rid(302), '18c3f2a9b7d4e778', 'cdeadbeefdeadbeef')).toBe(0)                       // no active connection with that id
     expect(get(d, `SELECT source, uploader_email AS u, image_sha256 AS h, updated_by FROM receipts WHERE id = '${rid(300)}'`)).toMatchObject({ source: 'email', u: null, h: null })
     d.prepare(INSERT_ITEMS_SQL).run(rid(300), JSON.stringify([{ d: 'Widget', a: 500, q: 1, c: 'groceries' }, { d: 'Bad hint', a: 1, q: 1, c: 'no-such-category' }]), NOW)
     expect(all(d, `SELECT seq, category_hint FROM receipt_items WHERE receipt_id = '${rid(300)}' ORDER BY seq`)).toEqual([{ seq: 1, category_hint: 'groceries' }, { seq: 2, category_hint: null }])
-    expect(d.prepare(RETRY_SQL).all(CONN, 10).map((r) => r.id)).toEqual([rid(4), rid(300)])   // ORDER BY attempts, id: the upload row is not listed
+    expect((d.prepare(RETRY_SQL).all(CONN, 10) as Row[]).map((r) => r.id)).toEqual([rid(4), rid(300)])   // ORDER BY attempts, id: the upload row is not listed
   })
 
   it('serves the upload queries from the new partial indexes (and the old queries from the old ones)', () => {
@@ -354,6 +365,43 @@ describe.each(VARIANTS)('0006 $name', (v) => {
       d.exec(UP)
       expect(all(d, `SELECT name FROM pragma_table_info('receipts')`)).toHaveLength(R_COLS.length + 5)
     })
+  })
+})
+
+describe('0006 and the real 0005, in both orders', () => {
+  it('uses the pinned 0005 file', async () => {
+    const sha = await blobSha(SQL_0005)
+    console.log(`0005 fixture blob sha: ${sha}`)
+    expect(sha).toBe(EXPECTED_SHA_0005)
+  })
+
+  it('0001-0004, 0006, then 0005 ends with the same DDL and rows as 0001-0005 then 0006', () => {
+    const through5Then6 = new DatabaseSync(':memory:')
+    through5Then6.exec('PRAGMA foreign_keys = ON')
+    through4.forEach((f) => through5Then6.exec(read(f)))
+    through5Then6.exec(SQL_0005)
+    seed(through5Then6)
+    through5Then6.exec(UP)
+
+    const sixThenFive = new DatabaseSync(':memory:')
+    sixThenFive.exec('PRAGMA foreign_keys = ON')
+    through4.forEach((f) => sixThenFive.exec(read(f)))
+    seed(sixThenFive)
+    sixThenFive.exec(UP)
+    sixThenFive.exec(SQL_0005)
+    seedBank(sixThenFive)
+
+    expect(all(sixThenFive, 'PRAGMA foreign_key_check')).toEqual([])
+    expect(get(sixThenFive, 'PRAGMA foreign_keys').foreign_keys).toBe(1)
+    const a = snapshot(through5Then6)
+    const b = snapshot(sixThenFive)
+    expect(b.ddl).toEqual(a.ddl)
+    expect(b.data).toEqual(a.data)
+    // the Plaid foreign keys into transactions still act on both
+    for (const d of [through5Then6, sixThenFive]) {
+      d.exec(`DELETE FROM transactions WHERE id = '${tid(4)}'`)
+      expect(all(d, `SELECT plaid_txn_id FROM bank_txns`)).toEqual([{ plaid_txn_id: 'ptxn_test_2' }])
+    }
   })
 })
 
