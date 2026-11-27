@@ -85,11 +85,11 @@ describe('routing', () => {
 })
 
 describe('scheduled', () => {
-  it('runs the stub and logs one counts-only line', async () => {
+  it('without token keys the tick logs a start and a skip code, and calls nothing', async () => {
     const lines: string[] = []
     vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')))
     await handleScheduled(env)
-    expect(lines).toEqual(['{"event":"scheduled_start"}'])
+    expect(lines).toEqual(['{"event":"scheduled_start"}', '{"event":"scheduled_skip","code":"keys_missing"}'])
   })
 })
 

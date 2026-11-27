@@ -430,11 +430,21 @@ describe('pairing', () => {
     expect(txn(txnOf('plaid-e')!).pair_id).toBeNull()
   })
 
-  it('pairs a new row with an existing unpaired statement row in the date range', async () => {
-    const stmt = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', updated_by: 'load:seed' })
+  // What the production statement load writes to updated_by: scripts/budget/build-load-sql.ts passes who = 'tool:build-load-sql'
+  // to planImportDetailed (no '@'; planImport has no other caller), so loaded rows are not "person edits" and can pair.
+  it('pairs a new row with an existing unpaired statement row, stamped the way the production load stamps it', async () => {
+    const stmt = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', updated_by: 'tool:build-load-sql' })
     await sync(page({ added: [ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' })] }))
     expect(txn(txnOf('plaid-c')!).pair_id).toBe(stmt)
     expect(txn(stmt).pair_id).toBe(txnOf('plaid-c'))
+  })
+
+  it('an existing row whose updated_by holds an address (a person touched it, even only a note) is not paired or rewritten', async () => {
+    const stmt = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', updated_by: 'kristen@example.com' })
+    const before = txn(stmt)
+    await sync(page({ added: [ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' })] }))
+    expect(txn(stmt)).toEqual(before)
+    expect(txn(txnOf('plaid-c')!).pair_id).toBeNull()
   })
 
   it('never pairs a pending row, and never touches an existing row a person edited', async () => {
