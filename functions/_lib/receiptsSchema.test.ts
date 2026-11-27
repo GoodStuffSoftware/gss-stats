@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createBudgetDb, insertTxn, syntheticSeedSql, type FakeBudgetDb } from './testing/budgetDb'
+import { withoutBankGuard } from '../../src/lib/budget/__fixtures__/synthetic'
 
 const M1 = readFileSync('migrations/gss-budget/0001_init.sql', 'utf8')
 const M2 = readFileSync('migrations/gss-budget/0002_loans.sql', 'utf8')
@@ -478,7 +479,7 @@ describe('0004 over an existing database', () => {
     const d = new DatabaseSync(':memory:')
     d.exec('PRAGMA foreign_keys = ON')
     d.exec(M1); d.exec(M2); d.exec(M3)
-    d.exec(await syntheticSeedSql())
+    d.exec(withoutBankGuard(await syntheticSeedSql()))
     return d
   }
 
@@ -525,7 +526,7 @@ describe('rollback and re-apply', () => {
     const d = new DatabaseSync(':memory:')
     d.exec('PRAGMA foreign_keys = ON')
     d.exec(M1); d.exec(M2); d.exec(M3)
-    d.exec(await syntheticSeedSql())
+    d.exec(withoutBankGuard(await syntheticSeedSql()))
     const base = d.prepare(`SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`).all()
     const tx = (d.prepare('SELECT COUNT(*) AS n FROM transactions').get() as { n: number }).n
     d.exec(M4)

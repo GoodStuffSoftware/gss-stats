@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { insideGitWorkTree, parseArgs, run } from './build-load-sql'
-import { CARD_ROWS, CHECKING_ROWS, SAVINGS_ROWS, SEED } from '../../src/lib/budget/__fixtures__/synthetic'
+import { CARD_ROWS, CHECKING_ROWS, SAVINGS_ROWS, SEED, withoutBankGuard } from '../../src/lib/budget/__fixtures__/synthetic'
 
 const MIGRATION = readFileSync('migrations/gss-budget/0001_init.sql', 'utf8')
 
@@ -73,7 +73,7 @@ describe('run', () => {
 
     const db = new DatabaseSync(':memory:')
     db.exec(MIGRATION)
-    db.exec(sql)
+    db.exec(withoutBankGuard(sql)) // the real migration here is 0001 alone: no bank_accounts table for the guard
     const n = (t: string) => (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n
     expect(n('transactions')).toBe(sum.inserted)
     expect(sum.duplicates).toBeGreaterThan(0) // the repeated checking statement
@@ -82,7 +82,7 @@ describe('run', () => {
     expect(n('merchant_rules')).toBe(SEED.rules!.length)
     expect((db.prepare('SELECT COUNT(*) AS n FROM transactions WHERE pair_id IS NOT NULL').get() as { n: number }).n).toBe(sum.paired * 2)
     const before = n('transactions')
-    db.exec(sql)
+    db.exec(withoutBankGuard(sql))
     expect(n('transactions')).toBe(before)
 
     const printed = lines.join('\n')
