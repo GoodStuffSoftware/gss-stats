@@ -106,6 +106,10 @@ export const ME_PATH = '/auth/me'
 export const SIGNED_OUT_PATH = '/auth/signed-out'
 /** The only page served without sign-in (see authGate). */
 export const PRIVACY_PATH = '/privacy'
+/** The one unauthenticated endpoint: Plaid's webhook (functions/hooks/plaid.ts). POST only, exact path, no query
+ *  string (see authGate). It checks nothing itself: it forwards the raw body to the banks Worker, which verifies
+ *  Plaid's signed JWT and answers 401 to anything else. docs/adr/0009-bank-links-plaid.md amends ADR 0002 for it. */
+export const PLAID_HOOK_PATH = '/hooks/plaid'
 
 export const MIN_SESSION_SECRET_LENGTH = 32
 export const DEFAULT_SESSION_TTL_HOURS = 168 // 7 days, deckhand's default
@@ -789,6 +793,13 @@ export async function authGate(
     url.protocol = 'https:'
     return Response.redirect(url.toString(), 308)
   }
+
+  // The one unauthenticated write: Plaid's webhook. Exact pathname, POST only, and no query string at all (so
+  // /hooks/plaid/, /hooks/Plaid, /hooks/plaidx, /hooks/plaid/x, /hooks/plaid?x=1 and every other method stay
+  // behind the gate below). It skips the session gate and the Origin check because Plaid sends neither a cookie nor
+  // an Origin; the host guard (functions/_middleware.ts) and the https redirect above still apply. The Function
+  // only forwards the raw body to the banks Worker, which verifies the signature; Plaid's JWT is the credential.
+  if (path === PLAID_HOOK_PATH && method === 'POST' && url.search === '') return next()
 
   // CSRF backstop for anything that changes state (PUT /api/config, POST /auth/logout,
   // …). SameSite=Lax already keeps the cookie off cross-SITE posts; this also refuses

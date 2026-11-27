@@ -61,6 +61,16 @@ service = "gss-live"
 binding = "RECEIPTS"
 service = "gss-budget-receipts"
 
+# The gss-budget-banks Worker (workers/banks/), reachable ONLY through this Service Binding: no workers.dev
+# URL, no route. functions/api/budget/banks/* hand it the Plaid link token, the token exchange, unlink and the
+# accounts refresh; functions/hooks/plaid.ts forwards Plaid's webhook to it (the one unauthenticated path). Without
+# it (preview, or `wrangler pages dev` without the Worker) every banks route but the status read answers 503
+# banks_not_configured. Top level ONLY: the preview shares the production D1, so it never gets this binding. The
+# Worker must exist before a Pages deploy binds it (.github/workflows/deploy.yml deploy-banks).
+[[services]]
+binding = "BANKS"
+service = "gss-budget-banks"
+
 # Receipts sharing (functions/api/budget/email/links.ts): "fields" = each listed Budget person sees the
 # other's receipt fields (never the Gmail link); "none" (the code default) = owner only. Mike chose
 # "fields" on 2026-11-23. Not a secret.
@@ -123,6 +133,10 @@ service = "gss-live"
 [[env.preview.services]]
 binding = "RECEIPTS"
 service = "gss-budget-receipts"
+
+# NO BANKS binding here, on purpose: the preview shares the production Budget D1, and a bank link made
+# from the preview would write real bank data through preview code (functions/_lib/banksBinding.ts).
+# Banks routes answer 503 banks_not_configured on preview, and so does functions/hooks/plaid.ts.
 
 # The one extra hostname the host guard (functions/_middleware.ts) serves, and only
 # where this var is set: preview deployments. Production never has it.
