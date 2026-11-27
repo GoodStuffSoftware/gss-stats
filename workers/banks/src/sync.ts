@@ -13,11 +13,27 @@ export const PICK_LIMIT = 3
 export const PAGE_SIZE = 500
 export const MAX_PAGES = 60
 export const MAX_RESTARTS = 3
+/**
+ * Work per Worker invocation (read 2026-11-27; the account is on Workers Paid since 2026-10-29, docs/capacity.md).
+ * D1 https://developers.cloudflare.com/d1/platform/limits/ : 1,000 queries per Worker invocation (Paid; 50 on Free), a db.batch
+ * counts as ONE query, 100 bound parameters per statement. Workers https://developers.cloudflare.com/workers/platform/limits/ :
+ * 10,000 subrequests per invocation (Paid; 50 on Free), cron CPU 30 s default (Paid; 10 ms on Free), 15 min wall time.
+ * A chunk is CHUNK_PAGES pages (about 3,000 rows, about 130 queries) and commits the cursor; the tick starts no more chunks or
+ * Items once TICK_QUERY_BUDGET estimated queries are used. A longer first sync resumes at the cursor on the next tick.
+ * On Workers Free (50 queries) both numbers would have to drop first.
+ */
+export const CHUNK_PAGES = 6
+export const TICK_QUERY_BUDGET = 600
 
-/** The due pick, exactly plan 4.1 (leg 1's EXPLAIN test runs the same text): requested first, at most 3 per tick. */
+/**
+ * The due pick (plan 4.1, made fair): ?1 = now - 20 h, ?2 = now - the claim window (a recently claimed Item cannot hold a slot).
+ * Requested Items without a standing error first, then the rest; within a group the least recently claimed first, so an Item that
+ * keeps failing, or sits in another Plaid environment, rotates to the back instead of taking every slot. At most 3 per tick.
+ */
 export const DUE_SQL =
   `SELECT id FROM bank_items WHERE status IN ('active','pending_disconnect') AND (sync_requested_at IS NOT NULL OR last_ok_at IS NULL OR last_ok_at < ?1)
-   ORDER BY sync_requested_at IS NULL, sync_requested_at LIMIT ${PICK_LIMIT}`
+   AND (last_sync_at IS NULL OR last_sync_at < ?2)
+   ORDER BY (sync_requested_at IS NULL OR last_error IS NOT NULL), COALESCE(last_sync_at, ''), sync_requested_at LIMIT ${PICK_LIMIT}`
 /** The daily reconnect check pick (plan 4.1). */
 export const RECONNECT_SQL = `SELECT id FROM bank_items WHERE status = 'needs_reconnect' AND (last_sync_at IS NULL OR last_sync_at < ?1) LIMIT ${PICK_LIMIT}`
 export const CLAIM_SQL = `UPDATE bank_items SET last_sync_at = ?2 WHERE id = ?1 AND (last_sync_at IS NULL OR last_sync_at < ?3)`
@@ -27,7 +43,7 @@ const iso = (ms: number): string => new Date(ms).toISOString()
 
 /** Items to sync this tick: ids, requested ones first. */
 export async function pickDue(db: D1Database, now: Date): Promise<string[]> {
-  const r = await db.prepare(DUE_SQL).bind(iso(now.getTime() - DUE_AFTER_MS)).all<{ id: string }>()
+  const r = await db.prepare(DUE_SQL).bind(iso(now.getTime() - DUE_AFTER_MS), iso(now.getTime() - CLAIM_WINDOW_MS)).all<{ id: string }>()
   return (r.results ?? []).map((x) => x.id)
 }
 
@@ -41,6 +57,16 @@ export async function pickReconnect(db: D1Database, now: Date): Promise<string[]
 export async function claim(db: D1Database, id: string, now: Date, windowMs: number = CLAIM_WINDOW_MS): Promise<boolean> {
   const r = await db.prepare(CLAIM_SQL).bind(id, now.toISOString(), iso(now.getTime() - windowMs)).run()
   return (r.meta?.changes ?? 0) === 1
+}
+
+/**
+ * A run that is over (done, failed, no-op, or stopped at the tick budget) releases its claim: the stamp moves back one window, so
+ * the Item can be claimed and picked again at once, yet still sorts by when it last ran (the pick rotates on it). Only a run in
+ * flight, or one that crashed before it could release, holds the Item for CLAIM_WINDOW_MS. The guard keeps a newer claim.
+ */
+export const releasedStamp = (now: Date): string => iso(now.getTime() - CLAIM_WINDOW_MS - 1)
+export async function release(db: D1Database, id: string, now: Date): Promise<void> {
+  await db.prepare(`UPDATE bank_items SET last_sync_at = ?3 WHERE id = ?1 AND last_sync_at = ?2`).bind(id, now.toISOString(), releasedStamp(now)).run()
 }
 
 export type RunTrigger = 'webhook' | 'cron' | 'manual' | 'initial' | 'resync'
@@ -112,7 +138,8 @@ interface SyncPage {
 }
 
 export type FetchResult =
-  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number }
+  /** more: stopped after maxPages with pages left; nextCursor is where the next call resumes. */
+  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean }
   /** Nothing to apply, nothing moves: the Item is not ready yet (empty next_cursor, or PRODUCT_NOT_READY). */
   | { kind: 'noop'; pages: number }
   | { kind: 'needs_reconnect'; pages: number }
@@ -132,11 +159,12 @@ const arr = <T>(v: unknown): T[] | null => (Array.isArray(v) ? (v as T[]) : v ==
  * memory. A mutation during pagination restarts from cursor0 (at most 3 restarts), more than 60 calls stops. Neither
  * a stop nor a no-op applies anything.
  */
-export async function fetchUpdate(client: PlaidClient, accessToken: string, cursor0: string | null): Promise<FetchResult> {
+export async function fetchUpdate(client: PlaidClient, accessToken: string, cursor0: string | null, opts: { maxPages?: number } = {}): Promise<FetchResult> {
   let pages = 0
   let restarts = 0
   for (;;) {
     let cursor = cursor0
+    let pass = 0 // pages fetched since cursor0 (resets on a restart)
     const added: PlaidTxn[] = []
     const modified: PlaidTxn[] = []
     const removed: PlaidRemoved[] = []
@@ -144,6 +172,7 @@ export async function fetchUpdate(client: PlaidClient, accessToken: string, curs
       if (pages >= MAX_PAGES) return { kind: 'error', code: 'too_many_pages', pages }
       let page: SyncPage
       pages++
+      pass++
       try {
         page = await client.post<SyncPage>('/transactions/sync', {
           access_token: accessToken,
@@ -175,7 +204,8 @@ export async function fetchUpdate(client: PlaidClient, accessToken: string, curs
         return { kind: 'error', code: 'bad_response', pages }
       }
       cursor = next
-      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages }
+      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false }
+      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true }
     }
   }
 }

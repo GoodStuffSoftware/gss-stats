@@ -71,7 +71,7 @@ return its slot, so a careless link is a permanent cost.
    `dropped` and waits for Delete or Keep on the Banks page; an unedited removed row is deleted.
 8. **The statement load steps aside for a linked account.** The load's insert is guarded: rows dated on or after
    `sync_from` for an account whose bank feed is on are skipped, so a file and the bank never double up. Rows before
-   the cutover still load, and the statement's own facts (balances, APR) load as before. Loan and debt readings
+   the cutover still load, and the statement's own facts (balances, APR) load as before. When an account is linked with no statement rows, its `sync_from` is NULL and is set to the earliest posted date the bank returned for it when its first sync completes. Loan and debt readings
    taken from the bank are marked source `bank` and never replace a person's own entry for the same day.
 9. **Bank data is household data; management is the linker's.** Both listed Budget people see every linked
    account and row (the person filter is only a view), as with statement files. Only the person who linked an Item

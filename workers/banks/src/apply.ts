@@ -15,7 +15,7 @@ import { pairUpdateSql } from '../../../src/lib/budget/sqlFile'
 import { log } from './log'
 import { createPlaidClient, type PlaidClient } from './plaid'
 import { getItem, openAndRefreshToken, type Keys } from './store'
-import { chooseTrigger, claim, fetchUpdate, finishRun, normalize, pickDue, plaidErrorCode, startRun, type BankTxn, type FetchResult } from './sync'
+import { CHUNK_PAGES, TICK_QUERY_BUDGET, chooseTrigger, claim, fetchUpdate, release, releasedStamp, finishRun, normalize, pickDue, plaidErrorCode, startRun, type BankTxn, type FetchResult } from './sync'
 import type { Env } from './env'
 
 export const WRITER = 'sync:plaid'
@@ -43,6 +43,8 @@ export interface State {
   candidates: Map<string, Candidate[]> // by bank account id (boundary candidates)
   /** Rows Plaid removed: txn id -> whether a person touched it, and its pair partner. */
   removedFacts: Map<string, { touched: boolean; pairId: string | null }>
+  /** D1 queries loadState issued (for the per-invocation budget). */
+  queries: number
 }
 
 export interface Fields { postedDate: string; txnDate: string | null; amountCents: number; description: string; pending: number }
@@ -127,6 +129,7 @@ const sn = (v: unknown): string | null => (v === null || v === undefined ? null 
 const nn = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v))
 
 export async function loadState(db: D1Database, itemId: string, norm: Normalized, now: Date): Promise<State> {
+  let queries = 3
   const [ba, ac, ru] = await Promise.all([
     db.prepare(SQL.bankAccounts).bind(itemId).all<Row>(),
     db.prepare(SQL.accounts).all<Row>(),
@@ -156,6 +159,7 @@ export async function loadState(db: D1Database, itemId: string, norm: Normalized
   const mapped = new Map<string, MapRow>()
   for (const part of chunks([...ids], CHUNK)) {
     const r = await db.prepare(SQL.mapped(part.length)).bind(...part).all<Row>()
+    queries++
     for (const x of r.results ?? []) {
       mapped.set(s(x.plaid_txn_id), {
         plaidTxnId: s(x.plaid_txn_id), bankAccountId: s(x.bank_account_id), txnId: s(x.txn_id), role: s(x.role) as MapRow['role'],
@@ -167,11 +171,12 @@ export async function loadState(db: D1Database, itemId: string, norm: Normalized
 
   // Boundary candidates: one query per account that has a posted new row near its sync_from.
   const candidates = new Map<string, Candidate[]>()
-  for (const t of norm.added) {
+  for (const t of [...norm.added, ...norm.modified]) {
     const a = accounts.get(t.plaidAccountId)
     if (!a || a.sync !== 'on' || !a.syncFrom || candidates.has(a.id) || t.pending === 1 || mapped.has(t.plaidTxnId)) continue
     if (t.postedDate < a.syncFrom || daysBetween(a.syncFrom, t.postedDate) >= BOUNDARY_DAYS + 1 || !a.accountId) continue
     const r = await db.prepare(SQL.candidates).bind(a.accountId, a.syncFrom).all<Row>()
+    queries++
     candidates.set(a.id, (r.results ?? []).map((x) => ({ id: s(x.id), postedDate: s(x.posted_date), amountCents: Number(x.amount_cents) })))
   }
 
@@ -180,9 +185,10 @@ export async function loadState(db: D1Database, itemId: string, norm: Normalized
   const rm = norm.removed.map((id) => mapped.get(id)).filter((m): m is MapRow => !!m && m.role === 'inserted' && m.state === 'live').map((m) => m.txnId)
   for (const part of chunks(rm, CHUNK)) {
     const r = await db.prepare(SQL.touched(part.length)).bind(...part).all<Row>()
+    queries++
     for (const x of r.results ?? []) removedFacts.set(s(x.id), { touched: Number(x.touched) === 1, pairId: sn(x.pair_id) })
   }
-  return { now, accounts, budgetAccounts, rules, mapped, candidates, removedFacts }
+  return { now, accounts, budgetAccounts, rules, mapped, candidates, removedFacts, queries }
 }
 
 // ---- decide (no D1 access) ------------------------------------------------------------------------------------------
@@ -316,7 +322,8 @@ export async function planPairs(db: D1Database, plan: Plan, accounts: Account[],
 
 // ---- apply (D1 writes) ----------------------------------------------------------------------------------------------
 
-export interface RunCtx { itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string }
+/** more: the update has pages left (the cursor moves, the Item stays due). chunk: 0-based chunk of this run. counts: the run's totals so far. */
+export interface RunCtx { itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string; more?: boolean; chunk?: number; counts?: Counts }
 
 const INSERT_TXN = `INSERT INTO transactions (id, account_id, statement_end, import_id, posted_date, txn_date, amount_cents, description, merchant_key,
   merchant_name, store_no, counterparty_last4, bank_ref, kind, kind_source, category_id, category_source, rule_id, confidence, needs_review,
@@ -328,6 +335,11 @@ const INSERT_MAP = (role: 'inserted' | 'matched') => `INSERT OR IGNORE INTO bank
 /** The ONLY update of an existing transactions row: the bank's own fields. No category, kind, included, note or updated_by. */
 export const UPDATE_BANK_FIELDS = `UPDATE transactions SET posted_date = ?2, txn_date = ?3, amount_cents = ?4, description = ?5, pending = ?6, updated_at = ?7 WHERE id = ?1`
 export const UPDATE_BANK_FIELDS_REF = `UPDATE transactions SET posted_date = ?2, txn_date = ?3, amount_cents = ?4, description = ?5, pending = ?6, bank_ref = ?8, updated_at = ?7 WHERE id = ?1`
+// An account linked with sync_from NULL (it had no statement rows) gets its cutover when its first sync completes: the earliest
+// date the bank returned for it, so older statement history still loads (the load guard skips only rows on or after sync_from).
+const FIRST_SYNC_FROM = `UPDATE bank_accounts SET updated_at = ?2, sync_from = (SELECT MIN(t.posted_date) FROM bank_txns b JOIN transactions t ON t.id = b.txn_id
+  WHERE b.bank_account_id = bank_accounts.id AND b.role = 'inserted') WHERE item_id = ?1 AND sync = 'on' AND sync_from IS NULL AND account_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM bank_txns b2 WHERE b2.bank_account_id = bank_accounts.id AND b2.role = 'inserted')`
 const DELETE_UNTOUCHED = `DELETE FROM transactions WHERE id = ?1 AND instr(updated_by,'@') = 0 AND category_source <> 'manual' AND kind_source <> 'manual'
   AND note IS NULL AND included = 1 AND NOT EXISTS (SELECT 1 FROM receipt_matches m WHERE m.txn_id = ?1)`
 const UNPAIR_PARTNER = `UPDATE transactions SET pair_id = NULL WHERE id = ?1 AND pair_id = ?2 AND instr(updated_by,'@') = 0
@@ -336,7 +348,7 @@ const UNPAIR_PARTNER = `UPDATE transactions SET pair_id = NULL WHERE id = ?1 AND
 export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D1PreparedStatement[][]; tail: D1PreparedStatement[] } {
   const at = c.now.toISOString()
   const body: D1PreparedStatement[][] = []
-  const importId = `bank-${c.itemId}-${c.runId}`
+  const importId = `bank-${c.itemId}-${c.runId}${c.chunk ? `-${c.chunk}` : ''}`
   if (plan.inserts.length > 0) {
     body.push([db.prepare(`INSERT INTO imports (id, source_label, created_at, created_by, rows_in) VALUES (?1, 'Bank sync', ?2, '${WRITER}', ?3) ON CONFLICT(id) DO NOTHING`)
       .bind(importId, at, plan.inserts.length)])
@@ -368,12 +380,16 @@ export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D
     unit(...(d.pairId ? [db.prepare(UNPAIR_PARTNER).bind(d.pairId, d.txnId)] : []), db.prepare(DELETE_UNTOUCHED).bind(d.txnId))
   }
   for (const [a, b] of plan.pairs) unit(db.prepare(pairUpdateSql(a, b, at, WRITER)), db.prepare(pairUpdateSql(b, a, at, WRITER)))
-  const k = plan.counts
+  const k = c.counts ?? plan.counts
+  const more = c.more ? 1 : 0
   const tail = [
-    // The cursor moves last, together with the run row; a flag set during the run (later than run_start) survives it.
+    ...(more ? [] : [db.prepare(FIRST_SYNC_FROM).bind(c.itemId, at)]),
+    // The cursor moves last, together with the run row; a flag set during the run (later than run_start) survives it. A run that
+    // is done (not `more`) also releases its claim (releasedStamp), so only a run in flight or one that crashed holds the Item.
     db.prepare(`UPDATE bank_items SET sync_cursor = ?2, last_ok_at = ?3, last_error = NULL, updated_at = ?3,
-      sync_requested_at = CASE WHEN sync_requested_at <= ?4 THEN NULL ELSE sync_requested_at END
-      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart),
+      sync_requested_at = CASE WHEN ?5 = 1 THEN COALESCE(sync_requested_at, ?3) WHEN sync_requested_at <= ?4 THEN NULL ELSE sync_requested_at END,
+      last_sync_at = CASE WHEN ?5 = 0 AND last_sync_at = ?3 THEN ?6 ELSE last_sync_at END
+      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart, more, releasedStamp(c.now)),
     db.prepare(`UPDATE bank_sync_runs SET finished_at = ?2, pages = ?3, added = ?4, modified = ?5, removed = ?6, inserted = ?7, matched = ?8,
       flagged = ?9, posted = ?10, dropped = ?11, skipped = ?12, error_code = NULL WHERE id = ?1`)
       .bind(c.runId, at, c.pages, k.added, k.modified, k.removed, k.inserted, k.matched, k.flagged, k.posted, k.dropped, k.skipped),
@@ -383,37 +399,58 @@ export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D
 }
 
 /** Write the plan in batches of at most 100 statements; the cursor batch is last, so a failure before it repeats from the old cursor. */
-export async function applyPlan(db: D1Database, plan: Plan, c: RunCtx): Promise<void> {
+export async function applyPlan(db: D1Database, plan: Plan, c: RunCtx): Promise<number> {
+  let batches = 0
   const { body, tail } = planStatements(db, plan, c)
   // Pack whole units into batches of at most BATCH_SIZE statements; a unit is never split.
   let cur: D1PreparedStatement[] = []
   for (const u of body) {
-    if (cur.length > 0 && cur.length + u.length > BATCH_SIZE) { await db.batch(cur); cur = [] }
+    if (cur.length > 0 && cur.length + u.length > BATCH_SIZE) { await db.batch(cur); batches++; cur = [] }
     cur.push(...u)
   }
-  if (cur.length > 0) await db.batch(cur)
+  if (cur.length > 0) { await db.batch(cur); batches++ }
   await db.batch(tail)
+  return batches + 1
 }
 
 // ---- the tick ---------------------------------------------------------------------------------------------------------
 
-/** One Item: claim, run row, token, fetch, decide, pair, apply. Returns false when it was skipped (not due, claimed elsewhere). */
-export async function syncItem(db: D1Database, env: Env, client: PlaidClient, keys: Keys, itemId: string, now: Date): Promise<boolean> {
+/** Fixed D1 queries one Item costs outside the update: facts, claim, trigger, run row, item + token, finish (rounded up). */
+const ITEM_FIXED_QUERIES = 10
+
+const zeroCounts = (): Counts => ({ added: 0, modified: 0, removed: 0, inserted: 0, matched: 0, flagged: 0, posted: 0, dropped: 0, skipped: 0 })
+const addCounts = (to: Counts, c: Counts): void => { for (const k of Object.keys(to) as Array<keyof Counts>) to[k] += c[k] }
+
+/** D1 queries used so far in this Worker invocation (an estimate from the calls we make; a db.batch counts as one). */
+export interface QueryBudget { used: number }
+
+/**
+ * One Item: claim, run row, token, then the update in chunks of CHUNK_PAGES pages: fetch, decide, pair, apply, and the cursor
+ * moves with each chunk's last batch, so a long first sync resumes from the last finished chunk (in this tick while the query budget
+ * lasts, else next tick). Returns false when it was skipped (not due, claimed elsewhere, other Plaid environment).
+ */
+export async function syncItem(db: D1Database, env: Env, client: PlaidClient, keys: Keys, itemId: string, now: Date, budget: QueryBudget = { used: 0 }): Promise<boolean> {
   const facts = await db
     .prepare(`SELECT sync_cursor, initial_done, sync_requested_at, last_webhook_at, status, environment FROM bank_items WHERE id = ?1`)
     .bind(itemId).first<Row>()
+  budget.used += ITEM_FIXED_QUERIES
   if (!facts || (facts.status !== 'active' && facts.status !== 'pending_disconnect')) return false
-  if (s(facts.environment) !== (env.PLAID_ENV ?? '')) { log('sync_skip', {}, 'environment_mismatch'); return false }
+  // Claim FIRST, so an Item that returns early (other environment, claimed elsewhere) still moves to the back of the pick order.
   if (!(await claim(db, itemId, now))) return false
+  if (s(facts.environment) !== (env.PLAID_ENV ?? '')) { log('sync_skip', {}, 'environment_mismatch'); return false }
   const runStart = now.toISOString()
   const requested = sn(facts.sync_requested_at)
   const byWebhook = requested !== null && sn(facts.last_webhook_at) !== null && s(facts.last_webhook_at) >= requested
   const trigger = await chooseTrigger(db, itemId,
     { initial_done: Number(facts.initial_done), sync_cursor: sn(facts.sync_cursor), sync_requested_at: requested }, byWebhook ? 'webhook' : 'manual')
   const runId = await startRun(db, itemId, trigger, now)
-  const fail = async (code: string, pages: number, status?: 'needs_reconnect'): Promise<boolean> => {
+  let pages = 0
+  const fail = async (code: string, status?: 'needs_reconnect'): Promise<boolean> => {
     const at = now.toISOString()
-    const stmts = [db.prepare(`UPDATE bank_items SET last_error = ?2, updated_at = ?3 ${status ? ", status = 'needs_reconnect'" : ''} WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(itemId, code, at)]
+    // A failed run releases its claim like a finished one (the Item is retried on a later tick), except into needs_reconnect, whose
+    // claim is the daily reconnect check's window.
+    const stmts = [db.prepare(`UPDATE bank_items SET last_error = ?2, updated_at = ?3 ${status ? ", status = 'needs_reconnect'" : ', last_sync_at = CASE WHEN last_sync_at = ?3 THEN ?4 ELSE last_sync_at END'} WHERE id = ?1 AND status IN ('active','pending_disconnect')`)
+      .bind(...(status ? [itemId, code, at] : [itemId, code, at, releasedStamp(now)]))]
     await db.batch(stmts)
     await finishRun(db, runId, now, pages, code)
     log('sync_failed', { pages }, code)
@@ -421,36 +458,50 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
   }
   try {
     const item = await getItem(db, itemId)
-    if (!item) return false
+    if (!item) { await finishRun(db, runId, now, 0, 'item_missing'); await release(db, itemId, now); return false }
     const token = await openAndRefreshToken(db, item, keys)
-    const res = await fetchUpdate(client, token, sn(facts.sync_cursor))
-    if (res.kind === 'noop') { await finishRun(db, runId, now, res.pages); log('sync_noop', { pages: res.pages }); return true }
-    if (res.kind === 'needs_reconnect') return await fail(plaidErrorCode('ITEM_LOGIN_REQUIRED'), res.pages, 'needs_reconnect')
-    if (res.kind === 'error') return await fail(res.code, res.pages)
-    const norm = prepareUpdate(res)
-    const st = await loadState(db, itemId, norm, now)
-    const plan = await decide(norm, st)
-    const rerunDates = [...norm.added, ...norm.modified].filter((t) => t.pending === 0 && st.mapped.get(t.plaidTxnId)?.role === 'inserted').map((t) => t.postedDate)
-    plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
-    await applyPlan(db, plan, { itemId, runId, now, runStart, pages: res.pages, nextCursor: res.nextCursor })
-    log('sync_ok', { ...plan.counts, pairs: plan.pairs.length, pages: res.pages })
+    let cursor = sn(facts.sync_cursor)
+    const totals = zeroCounts()
+    let pairs = 0
+    for (let chunk = 0; ; chunk++) {
+      const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES })
+      pages += res.pages
+      if (res.kind === 'noop') { await finishRun(db, runId, now, pages); await release(db, itemId, now); log('sync_noop', { pages }); return true }
+      if (res.kind === 'needs_reconnect') return await fail(plaidErrorCode('ITEM_LOGIN_REQUIRED'), 'needs_reconnect')
+      if (res.kind === 'error') return await fail(res.code)
+      const norm = prepareUpdate(res)
+      const st = await loadState(db, itemId, norm, now)
+      const plan = await decide(norm, st)
+      const rerunDates = [...norm.added, ...norm.modified].filter((t) => t.pending === 0 && st.mapped.get(t.plaidTxnId)?.role === 'inserted').map((t) => t.postedDate)
+      plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
+      addCounts(totals, plan.counts)
+      pairs += plan.pairs.length
+      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals } })
+      budget.used += st.queries + 1 + batches
+      cursor = res.nextCursor
+      if (!res.more) break
+      if (budget.used >= TICK_QUERY_BUDGET) { await release(db, itemId, now); log('sync_partial', { ...totals, pairs, pages }); return true } // the next tick resumes at the cursor just written
+    }
+    log('sync_ok', { ...totals, pairs, pages })
     return true
   } catch (e) {
     const code = e instanceof Error && e.message === 'decrypt_failed' ? 'token_unreadable' : 'internal_error'
-    try { await finishRun(db, runId, now, 0, code) } catch { /* the run row stays open */ }
+    try { await finishRun(db, runId, now, 0, code); await release(db, itemId, now) } catch { /* the run row stays open; the claim lapses after its window */ }
     log('sync_failed', {}, code)
     return true
   }
 }
 
-/** The sync half of a cron tick: up to 3 due Items, one at a time. */
-export async function syncTick(env: Env, fetchFn: typeof fetch, keys: Keys, now: () => Date): Promise<number> {
+/** The sync half of a cron tick: up to 3 due Items, one at a time, while the tick's D1 query budget lasts. */
+export async function syncTick(env: Env, fetchFn: typeof fetch, keys: Keys, now: () => Date, budget: QueryBudget = { used: 0 }): Promise<number> {
   const db = env.BUDGET_DB
   const client = createPlaidClient({ env, fetch: fetchFn, now })
   let ran = 0
+  budget.used += 1
   for (const id of await pickDue(db, now())) {
+    if (budget.used >= TICK_QUERY_BUDGET) { log('sync_budget', { used: budget.used }); break }
     try {
-      if (await syncItem(db, env, client, keys, id, now())) ran++
+      if (await syncItem(db, env, client, keys, id, now(), budget)) ran++
     } catch {
       log('sync_failed', {}, 'internal_error')
     }

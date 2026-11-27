@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { keyFingerprint } from '../../receipts/src/tokenCrypto'
-import { SQL, KEEP_RUNS, applyPlan, syncItem } from '../src/apply'
+import { SQL, KEEP_RUNS, applyPlan, syncItem, syncTick } from '../src/apply'
 import { handleScheduled } from '../src/index'
 import { createPlaidClient } from '../src/plaid'
 import { openToken, sealToken, type Keys } from '../src/store'
-import { plaidErrorCode } from '../src/sync'
+import { CHUNK_PAGES, TICK_QUERY_BUDGET, claim, pickDue, plaidErrorCode } from '../src/sync'
 import type { Env } from '../src/env'
 
 const secret = (v: string) => ({ get: async () => v })
@@ -502,12 +502,15 @@ describe('the run row, the cursor flag, trigger and token', () => {
     expect(fetched).toHaveLength(0)
     expect(one('SELECT count(*) AS n FROM bank_sync_runs')!.n).toBe(0)
     expect(logs.join('\n')).toContain('environment_mismatch')
+    expect(item().last_sync_at).toBe(t.toISOString()) // claimed before the check: the Item moves to the back of the pick
   })
 
-  it('a second tick inside the claim window skips', async () => {
-    await sync(page({ added: [ptxn('plaid-a')] }))
+  it('a second tick inside the claim window skips a run still in flight (or one that crashed)', async () => {
+    await claim(db.d1, ITEM, t) // a run that started and has not finished
     queue.push(() => page())
     expect(await syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, new Date(t.getTime() + 5 * MIN))).toBe(false)
+    expect(fetched).toHaveLength(0)
+    expect(await syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, new Date(t.getTime() + 16 * MIN))).toBe(true) // the crashed run's claim lapses
     expect(fetched).toHaveLength(1)
   })
 })
@@ -684,7 +687,7 @@ describe('a run that dies between batches', () => {
   const update1 = () => page({ added: [ptxn('plaid-a'), ptxn('plaid-p', { pending: true, amount: 20 }), ptxn('plaid-gone'), ...filler(0, 30)] })
   const update2 = () => page({
     added: [
-      ...filler(100, 60),
+      ...filler(100, 110),
       ptxn('plaid-p2', { pending_transaction_id: 'plaid-p', amount: 20.5, date: '2026-11-21' }),
       ptxn('plaid-t1', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' }),
       ptxn('plaid-t2', { account_id: 'acc-crd', name: 'Payment Thank You', amount: -50, date: '2026-11-21' }),
@@ -733,5 +736,177 @@ describe('a run that dies between batches', () => {
       const died = await scenario(k)
       expect(died.snap, `died at batch ${k} of ${clean.batches}`).toEqual(clean.snap)
     }
+  })
+})
+
+// ---- fix A2: the claim is released when a run ends, the due pick is fair, one run is capped, sync_from fills in -------------
+
+describe('claim release and the fair pick', () => {
+  beforeEach(() => seedWorld({ lastOk: null }))
+  const stamp = () => String(item().last_sync_at)
+  const released = () => expect(stamp() < new Date(t.getTime() - 15 * MIN).toISOString()).toBe(true)
+  const again = (min = 1) => {
+    const n = new Date(t.getTime() + min * MIN)
+    return syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => n }), KEYS, ITEM, n)
+  }
+
+  it('a run that finishes releases its claim, whether it applied rows, found nothing ready, or failed; the Item is picked again at once', async () => {
+    await sync(page({ added: [ptxn('plaid-a')] }))
+    released()
+    run(`UPDATE bank_items SET sync_requested_at = ? WHERE id = ?`, new Date(t.getTime() + 30_000).toISOString(), ITEM) // a webhook a minute after
+    queue.push(() => plaidError('PRODUCT_NOT_READY'))
+    expect(await again()).toBe(true) // not skipped for the claim window
+    released()
+    queue.push(() => plaidError('RATE_LIMIT_EXCEEDED'))
+    expect(await again()).toBe(true)
+    expect(item().last_error).toBe('plaid_rate_limit_exceeded')
+    released()
+    expect(await pickDue(db.d1, new Date(t.getTime() + 2 * MIN))).toEqual([ITEM]) // standing error: still due, retried on a later tick
+    queue.push(() => page({ next_cursor: 'cur-2' }))
+    expect(await again(3)).toBe(true)
+    expect(item().last_error).toBeNull()
+  })
+
+  it('an Item in the other environment keeps its claim (skipped for the window, then retried); a crashed run lapses by itself', async () => {
+    run(`UPDATE bank_items SET environment = 'production' WHERE id = ?`, ITEM)
+    expect(await sync(page())).toBe(false)
+    expect(await pickDue(db.d1, new Date(t.getTime() + 5 * MIN))).toEqual([])
+    expect(await pickDue(db.d1, new Date(t.getTime() + 16 * MIN))).toEqual([ITEM])
+  })
+
+  it('three Items in the wrong environment cannot hold every slot: the healthy due Item runs by the second tick', async () => {
+    for (const n of [1, 2, 3]) {
+      run(`INSERT INTO bank_items (id, owner_email, environment, plaid_item_id, status, token_ct, token_iv, key_id, sync_cursor, initial_done, sync_requested_at,
+             consent_version, consented_at, created_at, updated_at)
+           VALUES (?, ?, 'production', ?, 'active', 'QUJD', 'AAAAAAAAAAAAAAAA', 'abcdef01', 'cur-0', 1, '2026-11-20T00:00:00Z', 1, '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')`,
+        `i00000000000000c${n}`, OWNER, `item-plaid-c${n}`)
+    }
+    queue.push(() => page({ added: [ptxn('plaid-a')] }))
+    t = new Date(t.getTime() + 20 * MIN)
+    const tick = () => syncTick(env(), stubFetch, KEYS, () => t)
+    await tick() // the three requested mismatches take the slots and are claimed
+    expect(fetched).toHaveLength(0)
+    expect(q(`SELECT last_sync_at FROM bank_items WHERE environment = 'production'`).every((r) => r.last_sync_at === t.toISOString())).toBe(true)
+    t = new Date(t.getTime() + MIN)
+    await tick() // inside their claim window: the healthy Item is next
+    expect(fetched).toHaveLength(1)
+    expect(item().last_ok_at).not.toBeNull()
+    // a quarter of an hour on, the mismatched Items are looked at again (never skipped for good)
+    t = new Date(t.getTime() + 16 * MIN)
+    expect((await pickDue(db.d1, t)).filter((id) => id.includes('c'))).toHaveLength(3)
+  })
+})
+
+describe('the per-run cap', () => {
+  beforeEach(() => seedWorld({ lastOk: null }))
+  const bankRows = () => Number(one(`SELECT count(*) AS n FROM transactions WHERE bank_ref LIKE 'plaid:%'`)!.n)
+  /** n pages of `rows` rows each; page i carries cursor cur-p<i>, the last one has_more false. */
+  const queuePages = (n: number, rows: number, date = (i: number) => '2026-11-20') => {
+    for (let i = 1; i <= n; i++) {
+      queue.push(() => page({
+        added: Array.from({ length: rows }, (_, j) => ptxn(`plaid-p${i}-${j}`, { amount: 1 + i + j / 100, name: `Shop ${i} ${j}`, date: date(i) })),
+        next_cursor: `cur-p${i}`, has_more: i < n,
+      }))
+    }
+  }
+  const go = (budget = { used: 0 }) => {
+    t = new Date(t.getTime() + MIN)
+    return syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t, budget)
+  }
+
+  it('an update longer than CHUNK_PAGES is applied in chunks, the cursor saved after each, one run row with the running totals', async () => {
+    queuePages(2 * CHUNK_PAGES + 2, 3)
+    expect(await go()).toBe(true)
+    expect(fetched.map((f) => f.body.cursor)).toEqual(['cur-0', ...Array.from({ length: 2 * CHUNK_PAGES + 1 }, (_, i) => `cur-p${i + 1}`)])
+    expect(item()).toMatchObject({ sync_cursor: `cur-p${2 * CHUNK_PAGES + 2}`, sync_requested_at: null, last_error: null })
+    expect(bankRows()).toBe(3 * (2 * CHUNK_PAGES + 2))
+    expect(one('SELECT count(*) AS n FROM bank_sync_runs')!.n).toBe(1)
+    expect(lastRun()).toMatchObject({ pages: 2 * CHUNK_PAGES + 2, inserted: 3 * (2 * CHUNK_PAGES + 2), error_code: null })
+    expect(lastRun().finished_at).not.toBeNull()
+    expect(one(`SELECT count(*) AS n FROM imports WHERE source_label = 'Bank sync'`)!.n).toBe(3) // one per chunk
+  })
+
+  it('a tick whose query budget is used stops after the chunk in hand; the Item stays due and the next tick resumes at that cursor', async () => {
+    queuePages(2 * CHUNK_PAGES + 2, 3)
+    expect(await go({ used: TICK_QUERY_BUDGET - 1 })).toBe(true)
+    expect(fetched).toHaveLength(CHUNK_PAGES)
+    expect(item()).toMatchObject({ sync_cursor: `cur-p${CHUNK_PAGES}`, last_error: null })
+    expect(item().sync_requested_at).not.toBeNull() // still due
+    expect(bankRows()).toBe(3 * CHUNK_PAGES)
+    expect(lastRun()).toMatchObject({ pages: CHUNK_PAGES, inserted: 3 * CHUNK_PAGES })
+    expect(await pickDue(db.d1, new Date(t.getTime() + MIN))).toEqual([ITEM]) // released: picked again at once
+    fetched.length = 0
+    expect(await go({ used: TICK_QUERY_BUDGET - 1 })).toBe(true)
+    expect(fetched[0].body.cursor).toBe(`cur-p${CHUNK_PAGES}`) // resumed, nothing re-read
+    expect(item().sync_cursor).toBe(`cur-p${2 * CHUNK_PAGES}`)
+    expect(await go()).toBe(true) // the last two pages
+    expect(item()).toMatchObject({ sync_cursor: `cur-p${2 * CHUNK_PAGES + 2}`, sync_requested_at: null })
+    expect(bankRows()).toBe(3 * (2 * CHUNK_PAGES + 2))
+    expect(one('SELECT count(*) AS n FROM bank_sync_runs')!.n).toBe(3)
+  })
+
+  it('a tick whose budget is already used starts no Item', async () => {
+    queuePages(1, 1)
+    t = new Date(t.getTime() + MIN)
+    expect(await syncTick(env(), stubFetch, KEYS, () => t, { used: TICK_QUERY_BUDGET })).toBe(0)
+    expect(fetched).toHaveLength(0)
+    expect(logs.join('\n')).toContain('sync_budget')
+  })
+
+  it('one full chunk (CHUNK_PAGES pages of 500) costs far fewer D1 queries than the per-invocation limit leaves after the budget', { timeout: 120_000 }, async () => {
+    queuePages(CHUNK_PAGES, 500, (i) => `2026-11-${String(10 + i).padStart(2, '0')}`)
+    const sizes: number[] = []
+    const real = db.d1
+    const counting = new Proxy(real, {
+      get(tg, p) {
+        if (p === 'batch') return async (s: any) => { sizes.push(s.length); return (tg as any).batch(s) }
+        const v = (tg as any)[p]
+        return typeof v === 'function' ? v.bind(tg) : v
+      },
+    }) as D1Database
+    const before = db.statements.length
+    const budget = { used: 0 }
+    t = new Date(t.getTime() + MIN)
+    const ran = await syncItem(counting, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t, budget)
+    const executed = db.statements.length - before
+    expect(ran).toBe(true)
+    expect(bankRows()).toBe(CHUNK_PAGES * 500)
+    const queries = executed - sizes.reduce((a, b) => a + b, 0) + sizes.length // a batch is one query
+    expect(budget.used).toBeGreaterThanOrEqual(queries) // the estimate never undercounts
+    expect(queries + TICK_QUERY_BUDGET).toBeLessThan(1000) // budget reached, plus one more chunk, still inside Workers Paid's 1,000
+  })
+})
+
+describe('sync_from of an account linked without statement rows', () => {
+  const syncFrom = (id: string) => one<{ sync_from: string | null }>('SELECT sync_from FROM bank_accounts WHERE id = ?', id)!.sync_from
+  beforeEach(() => seedWorld({ syncFrom: null, lastOk: null }))
+
+  it('the first completed sync sets it to the earliest posted date the bank returned for that account; later syncs leave it', async () => {
+    await sync(page({ added: [ptxn('plaid-a', { date: '2026-11-18' }), ptxn('plaid-b', { date: '2026-11-22' }), ptxn('plaid-c', { account_id: 'acc-crd', date: '2026-11-25', amount: 5 })] }))
+    expect(syncFrom(BA_CHK)).toBe('2026-11-18')
+    expect(syncFrom(BA_CRD)).toBe('2026-11-25')
+    expect(syncFrom(BA_OFF)).toBeNull() // an account that is not synced gets none
+    await sync(page({ next_cursor: 'cur-2', added: [ptxn('plaid-d', { date: '2026-11-02', amount: 9 })] }))
+    expect(syncFrom(BA_CHK)).toBe('2026-11-18') // set once
+  })
+
+  it('an account with no returned row yet stays NULL', async () => {
+    await sync(page({ added: [ptxn('plaid-a', { date: '2026-11-18' })] }))
+    expect(syncFrom(BA_CRD)).toBeNull() // no card rows yet
+  })
+
+  it('a first sync in chunks sets it only when the last chunk is applied, to the earliest date over all chunks', async () => {
+    for (let i = 1; i <= CHUNK_PAGES + 1; i++) {
+      queue.push(() => page({ added: [ptxn(`plaid-q${i}`, { date: `2026-11-${String(20 - i).padStart(2, '0')}`, amount: 2 + i })], next_cursor: `cur-q${i}`, has_more: i < CHUNK_PAGES + 1 }))
+    }
+    const go = (budget: { used: number }) => {
+      t = new Date(t.getTime() + 20 * MIN)
+      return syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t, budget)
+    }
+    await go({ used: TICK_QUERY_BUDGET - 1 }) // stops after the first chunk
+    expect(item().sync_cursor).toBe(`cur-q${CHUNK_PAGES}`)
+    expect(syncFrom(BA_CHK)).toBeNull()
+    await go({ used: 0 })
+    expect(syncFrom(BA_CHK)).toBe(`2026-11-${String(20 - CHUNK_PAGES - 1).padStart(2, '0')}`)
   })
 })

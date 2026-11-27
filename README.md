@@ -2881,8 +2881,9 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
     20 hours; a daily check asks Plaid whether a needs-reconnect Item has recovered, and card and loan details refresh
     about every 20 hours. Rows the bank still shows as pending carry a Pending tag and are updated in place when they
     post, keeping the person's category and note. When Sync is switched on, only bank rows from the day after the
-    account's newest row arrive, and the statement load skips rows from that day on for that account; a row Plaid
-    removes after a person edited it waits under "Removed by the bank" for Delete or Keep. A Budget account that a
+    account's newest row arrive, and the statement load skips rows from that day on for that account (an account
+    linked with no rows has no day yet: it is set to the earliest date the bank returned when its first sync
+    completes); a row Plaid removes after a person edited it waits under "Removed by the bank" for Delete or Keep. A Budget account that a
     synced bank account feeds cannot be deleted (no delete route exists; a future one must answer 409 `account_synced`,
     ADR 0009 decision 12).
   - **Names (values never in the repo).** Secrets Store, read by the Worker `gss-budget-banks` only: `PLAID_CLIENT_ID`,

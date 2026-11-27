@@ -6,7 +6,7 @@ import { createPlaidClient } from '../src/plaid'
 import type { Env } from '../src/env'
 import {
   CLAIM_SQL, DUE_SQL, MAPPED_SQL, RECONNECT_SQL, RECONNECT_WINDOW_MS, chooseTrigger, claim, fetchUpdate, finishRun, normalize,
-  pickDue, pickReconnect, plaidErrorCode, startRun, toCents,
+  pickDue, pickReconnect, plaidErrorCode, release, startRun, toCents,
 } from '../src/sync'
 
 const secret = (v: string) => ({ get: async () => v })
@@ -82,7 +82,7 @@ describe('pickDue', () => {
   })
 
   it('every pick and claim read uses an index', () => {
-    const due = db.explain(DUE_SQL, [ago(20 * HOUR)]).join('\n')
+    const due = db.explain(DUE_SQL, [ago(20 * HOUR), ago(15 * 60_000)]).join('\n')
     expect(due).toMatch(/idx_bank_items_due/)
     expect(due).not.toMatch(/SCAN bank_items(?! USING)/)
     expect(db.explain(RECONNECT_SQL, [ago(24 * HOUR)]).join('\n')).toMatch(/idx_bank_items_due/)
@@ -152,7 +152,79 @@ describe('run row and trigger', () => {
   })
 })
 
+describe('release and the fair pick', () => {
+  const MIN = 60_000
+  const at = (n: number) => new Date(NOW.getTime() + n * MIN)
+  const stamp = (id: string) => db.get<{ last_sync_at: string | null }>('SELECT last_sync_at FROM bank_items WHERE id = ?', id)?.last_sync_at ?? null
+  const standingError = (id: string) => run(`UPDATE bank_items SET last_error = 'plaid_rate_limit' WHERE id = ?`, id)
+
+  it('a claimed Item (a run in flight, or one that crashed) is not picked for 15 minutes; a released one is picked at once', async () => {
+    seedItem(iid(1), { last_ok_at: null })
+    expect(await claim(db.d1, iid(1), NOW)).toBe(true)
+    expect(await pickDue(db.d1, at(5))).toEqual([]) // in flight or crashed: skipped inside the window
+    expect(await pickDue(db.d1, at(16))).toEqual([iid(1)]) // a crashed run lapses by itself
+    await release(db.d1, iid(1), NOW)
+    expect(await pickDue(db.d1, at(5))).toEqual([iid(1)]) // a finished run does not hold the Item
+    expect(await claim(db.d1, iid(1), at(5))).toBe(true)
+  })
+
+  it('release keeps a newer claim and only moves back the stamp it was given', async () => {
+    seedItem(iid(1), { last_ok_at: null })
+    await claim(db.d1, iid(1), NOW)
+    await claim(db.d1, iid(1), at(20)) // a later run took the Item
+    await release(db.d1, iid(1), NOW) // the earlier run's release must not free the later claim
+    expect(stamp(iid(1))).toBe(at(20).toISOString())
+  })
+
+  it('Items with a standing error sort after the rest: the healthy requested Item is picked first', async () => {
+    for (const n of [1, 2, 3]) { seedItem(iid(n), { last_ok_at: ago(HOUR), sync_requested_at: ago(3 * HOUR) }); standingError(iid(n)) }
+    seedItem(iid(4), { last_ok_at: ago(HOUR), sync_requested_at: ago(HOUR) })
+    expect((await pickDue(db.d1, NOW))[0]).toBe(iid(4))
+  })
+
+  it('five Items with a standing error are all retried within a few ticks, none skipped forever; a healthy Item is never starved', async () => {
+    for (const n of [1, 2, 3, 4, 5]) { seedItem(iid(n), { last_ok_at: ago(HOUR), sync_requested_at: ago(3 * HOUR) }); standingError(iid(n)) }
+    seedItem(iid(6), { last_ok_at: null })
+    const picked = new Map<string, number>()
+    for (let tick = 0; tick < 4; tick++) {
+      const now = at(tick) // one minute apart: far inside the claim window, so only release lets an Item back in
+      for (const id of await pickDue(db.d1, now)) {
+        expect(await claim(db.d1, id, now)).toBe(true)
+        picked.set(id, (picked.get(id) ?? 0) + 1)
+        await release(db.d1, id, now) // the run failed again: it finished with its error
+      }
+    }
+    for (const n of [1, 2, 3, 4, 5, 6]) expect(picked.get(iid(n)) ?? 0, `Item ${n} was picked`).toBeGreaterThanOrEqual(1)
+    // the rotation is least recently run first: after 4 ticks of 3 slots no Item was picked twice before every other was picked once
+    expect(Math.max(...picked.values()) - Math.min(...picked.values())).toBeLessThanOrEqual(1)
+  })
+
+  it('more due Items than one tick can take: every Item runs within ceil(n / 3) ticks', async () => {
+    for (let n = 1; n <= 8; n++) seedItem(iid(n), { last_ok_at: null })
+    const seen = new Set<string>()
+    for (let tick = 0; tick < 3; tick++) {
+      const now = at(tick)
+      for (const id of await pickDue(db.d1, now)) {
+        await claim(db.d1, id, now)
+        seen.add(id)
+        run(`UPDATE bank_items SET last_ok_at = ? WHERE id = ?`, now.toISOString(), id) // done: no longer due
+        await release(db.d1, id, now)
+      }
+    }
+    expect(seen.size).toBe(8)
+  })
+})
+
 describe('fetchUpdate', () => {
+  it('maxPages stops after that many pages with more: true and the cursor to resume from', async () => {
+    responder = (_c, n) => page({ added: [txn(`t${n}`)], next_cursor: `cur-${n}`, has_more: n < 5 })
+    const r = await fetchUpdate(client(), 'access-sandbox-aaaa', 'cur-0', { maxPages: 2 })
+    expect(r).toMatchObject({ kind: 'ok', nextCursor: 'cur-2', pages: 2, more: true })
+    expect(calls).toHaveLength(2)
+    const rest = await fetchUpdate(client(), 'access-sandbox-aaaa', 'cur-2', { maxPages: 10 })
+    expect(rest).toMatchObject({ kind: 'ok', nextCursor: 'cur-5', pages: 3, more: false })
+  })
+
   it('loops while has_more, passes each next_cursor and collects every page', async () => {
     responder = (c, n) =>
       n === 1 ? page({ added: [txn('t1')], next_cursor: 'cur-a', has_more: true })
