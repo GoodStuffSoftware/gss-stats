@@ -87,12 +87,12 @@ return its slot, so a careless link is a permanent cost.
     last payment amount and date, escrow balance, original loan amount and date, interest and principal paid this
     year, and payoff or maturity dates. Masking (`maskDigits`) cuts a run of 5 or more digits, and a number written
     in groups (single spaces, dashes or slashes) that totals 9 or more digits, to a bullet plus its last four;
-    shorter numbers, dates and a lone phone number stay. It is applied to descriptions and to account and bank
+    shorter numbers and dates stay, and so does a phone number written in groups (3-3-4) with spaces or dashes; an unbroken 10-digit number is cut. It is applied to descriptions and to account and bank
     names. Plaid's own ids are kept (item, institution, account and transaction ids, and `transactions.bank_ref`
     as `plaid:` plus the transaction id) and stay after an unlink. Never kept or logged: the full account number,
     routing numbers, property or servicer addresses, payment reference numbers, and Plaid's own category.
     `/privacy` names every field above and must change with this list. Consent is asked of each person before
-    their own first link (the card shows until they own an Item); `consented_at` and `consent_version` are stored
+    their own first link (the card shows until they own an Item); `consented_at` (when that link was made, not the person's first agreement) and `consent_version` are stored
     per Item.
 12. **Deleting a Budget account that a bank account feeds is refused.** `bank_accounts.account_id` is
     `ON DELETE SET NULL`, but the table's CHECK (`sync <> 'on' OR account_id IS NOT NULL`) fails first, so such a
@@ -105,7 +105,7 @@ return its slot, so a careless link is a permanent cost.
 - One more place holds secrets, a small one with no public surface. The cost of a leak at Pages is a link token
   or a flag, not a bank login.
 - Unlinking ends Plaid's access (`/item/remove`) and wipes the token, key id, cursor and the card and loan details;
-  the Item's name, the accounts' masked names, last four digits and balances, and every transaction already in
+  the `debt_balances` rows the sync wrote (balance and rate, source `sync:plaid`) stay as part of each debt's history; the Item's name, the accounts' masked names, last four digits and balances, and every transaction already in
   Budget stay as household records, with the owner address, consent record, Plaid's ids and the sync-run counts. It
   does not return the slot; `plaid_slot_log` keeps the Plaid item id, institution id and the linker's address.
   Revoking access at the bank or through Plaid does the same once Plaid sends the webhook.
