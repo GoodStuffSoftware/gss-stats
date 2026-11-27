@@ -24,6 +24,8 @@ import {
 /** The bindings the budget Functions read: the auth settings plus the budget database. */
 export interface BudgetEnv extends AuthEnv {
   BUDGET_DB?: D1Database
+  /** The gss-budget-banks Worker (bank links). Absent in the dev preview, and locally without the Worker. */
+  BANKS?: Fetcher
 }
 
 /** What the scoped middleware leaves in `context.data` for every budget route. */
