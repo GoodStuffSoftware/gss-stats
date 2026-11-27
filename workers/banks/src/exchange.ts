@@ -51,7 +51,7 @@ function cents(v: unknown): number | null {
   return Math.abs(c) <= LIMIT ? c : null
 }
 
-interface PlaidAccount {
+export interface PlaidAccount {
   account_id?: unknown
   name?: unknown
   mask?: unknown
@@ -61,7 +61,7 @@ interface PlaidAccount {
 }
 
 /** One /accounts/get account as a row, or null when it has no usable id. Name masked; mask only when 4 digits. */
-function toAccount(a: PlaidAccount): NewAccount | null {
+export function toAccount(a: PlaidAccount): NewAccount | null {
   if (typeof a.account_id !== 'string' || !PLAID_ID.test(a.account_id)) return null
   const type = typeof a.type === 'string' && TYPES.has(a.type) ? (a.type as NewAccount['type']) : a.type === 'brokerage' ? 'investment' : 'other'
   const sub = typeof a.subtype === 'string' ? a.subtype.toLowerCase().replace(/[^a-z0-9 _-]/g, '').slice(0, 40) : ''

@@ -19,11 +19,11 @@ const code = async (r: Response) => ((await r.json()) as { code: string }).code
 afterEach(() => vi.restoreAllMocks())
 
 describe('routing', () => {
-  it('answers 501 not_built on the unbuilt owner paths for an allowed owner', async () => {
+  it('answers 400 bad_request on /unlink and /accounts-refresh without an item id, before any D1 or Plaid call', async () => {
     for (const p of ['/unlink', '/accounts-refresh']) {
       const r = await post(p, { ownerEmail: 'Owner@example.com' })
-      expect(r.status).toBe(501)
-      expect(await code(r)).toBe('not_built')
+      expect(r.status).toBe(400)
+      expect(await code(r)).toBe('bad_request')
     }
   })
 
@@ -66,7 +66,7 @@ describe('routing', () => {
   })
 
   it('accepts the second allowlisted person, case-insensitively', async () => {
-    expect((await post('/unlink', { ownerEmail: ' OTHER@example.com ' })).status).toBe(501)
+    expect((await post('/unlink', { ownerEmail: ' OTHER@example.com ' })).status).toBe(400)
   })
 
   it('has exactly the planned routes', () => {
