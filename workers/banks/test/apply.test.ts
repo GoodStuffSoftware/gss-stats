@@ -2,7 +2,7 @@
 // expect; D1 is the fake over the real migrations. Every value is made up. The rule these tests guard (Mike's): a manual edit
 // is never overwritten by a re-import, Plaid sync and pending-to-posted included.
 import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
@@ -625,7 +625,7 @@ describe('reads and writes are keyed', () => {
 })
 
 describe('the transaction updates carry no person-owned column', () => {
-  const dir = join(fileURLToPath(new URL('..', import.meta.url)), 'src')
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
   const OWNED = /\b(category_id|category_source|kind|kind_source|included|note|updated_by)\s*=/
 
   it('every UPDATE transactions SET in the Worker (before its WHERE) sets none of them', () => {
