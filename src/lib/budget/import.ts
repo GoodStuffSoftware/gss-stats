@@ -9,13 +9,11 @@ import type {
 import { TXN_KINDS } from './types'
 import { maskDigits } from './mask'
 import { normalizeDescription } from './normalize'
-import { merchantKey, withCounterparty } from './merchant'
 import { inferYear, isIsoDate } from './dates'
 import { dedupeKey, occurrences } from './dedupe'
-import { classifyKind } from './kind'
-import { autoCategory, categorize, ruleIdFor, type RuleInput } from './rules'
-import { storeSplitReview } from './storeSplit'
-import { reviewFlags, sameDayKey } from './review'
+import { classifyRow } from './classifyRow'
+import { ruleIdFor } from './rules'
+import { sameDayKey } from './review'
 import { pairTransfers, REKIND_ON_PAIR } from './pairing'
 
 export class ImportError extends Error {
@@ -29,7 +27,6 @@ export interface PlanResult {
 }
 
 const isInt = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n)
-const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)))
 
 function mergeById<T extends { id: string }>(base: readonly T[], over: readonly T[]): T[] {
   const m = new Map<string, T>()
@@ -104,19 +101,8 @@ export async function planImportDetailed(req: ImportRequest, ctx: PlanContext, w
       if (known.has(id)) { duplicates++; continue }
       known.add(id)
 
-      const guess = classifyKind(n, row.amountCents, account, accounts, row.kindHint)
-      const counterpartyKnown = n.counterpartyLast4 !== null && accounts.some((a) => a.id !== account.id && a.last4 === n.counterpartyLast4)
-      let mk = merchantKey(n.clean)
-      if (guess.kind === 'transfer_external' && n.counterpartyLast4 && !counterpartyKnown) mk = withCounterparty(mk, n.counterpartyLast4)
-      // A payment out to one of our own loans or lines carries that account's last four too, so a rule can treat one
-      // debt differently from another (they share the same name words). Every other kind keeps its key.
-      else if (guess.kind === 'loan_payment' && row.amountCents < 0 && n.counterpartyLast4 && counterpartyKnown) mk = withCounterparty(mk, n.counterpartyLast4)
-      const input: RuleInput = { accountId: st.accountId, merchantKey: mk.key, storeNo: n.storeNo, amountCents: row.amountCents }
-      const cat = categorize(input, rules, { kind: guess.kind, kindSource: guess.source, kindConfidence: guess.confidence, categoryId: autoCategory(n.clean) ?? (guess.kind === 'fee' ? 'fees' : null) })
-      const split = storeSplitReview(input, cat.rule, rules)
-      const confidence = clamp(cat.confidence + split.confidenceDelta)
-      const flags = reviewFlags({ ...cat, ...input, confidence, split, aggregator: mk.aggregator, counterpartyLast4: n.counterpartyLast4,
-        counterpartyKnown, postedDate: row.postedDate }, { sameDayAmounts: seenKeys })
+      const { mk, cat, confidence, flags } = classifyRow({ description: row.description, amountCents: row.amountCents, postedDate: row.postedDate, kindHint: row.kindHint },
+        account, accounts, rules, seenKeys)
 
       let txnDate = row.txnDate ?? null
       if (!txnDate && n.purchaseMmdd) {
