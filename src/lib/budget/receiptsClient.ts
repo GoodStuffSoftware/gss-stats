@@ -34,6 +34,8 @@ export interface ReceiptsStatus {
   connection: ReceiptsConnection | null
   lastRuns: ReceiptsRun[]
   nextRunAt: string | null
+  /** This person has at least one receipt photo (any state): the photo list shows even without Gmail. */
+  hasUploads?: boolean
 }
 export interface ReceiptMatchTxn {
   postedDate: string
@@ -135,7 +137,13 @@ export interface ReceiptLink {
   /** Present only when this viewer may see the photo; "View photo" shows only then. */
   imageUrl?: string
 }
-export type ReceiptsListStatus = 'suggested' | 'unmatched' | 'applied'
+/** `photos` is the person's own receipt photos in every state, newest first (so each one can be deleted). */
+export type ReceiptsListStatus = 'suggested' | 'unmatched' | 'applied' | 'photos'
+
+/** The photo path the server sent, only when it is a same-origin uploads path; anything else is not shown. */
+export function photoUrlOf(u: unknown): string {
+  return typeof u === 'string' && u.startsWith('/api/budget/uploads/') ? u : ''
+}
 
 /** Plain-English text for every fixed code the receipts routes, the connect callback and the sync runs return. */
 const MESSAGES: Record<string, string> = {
@@ -313,7 +321,9 @@ export interface UploadResult {
 
 /** An upload answer's error words: the daily limit and size read differently here than for the email reader. */
 function uploadMessage(code: string | null, status: number): string {
-  if (code === 'daily_cap') return 'The daily limit of 20 receipt photos was reached. Try again tomorrow.'
+  if (code === 'daily_cap') return 'The daily limit of receipt photos was reached. Try again tomorrow.'
+  if (code === 'not_allowed') return receiptsMessage('forbidden')
+  if (code === 'bad_image') return 'That photo could not be used. Retake it, or save it as JPEG and try again.'
   if (code === 'too_large') return 'That photo is too large to send. Try a closer photo of the receipt.'
   return receiptsMessage(code ?? (status === 403 ? 'forbidden' : status === 404 ? 'not_found' : null))
 }

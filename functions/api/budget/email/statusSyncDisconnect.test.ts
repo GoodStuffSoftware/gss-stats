@@ -217,7 +217,7 @@ describe('GET status', () => {
 
   it('says not connected, and not configured when the binding or client id is missing', async () => {
     const { res } = await call(env(db), A, 'status', 'GET')
-    expect(await j(res)).toEqual({ configured: false, connection: null, lastRuns: [], nextRunAt: null })
+    expect(await j(res)).toEqual({ configured: false, connection: null, lastRuns: [], hasUploads: false, nextRunAt: null })
     const full = await call(env(db, { RECEIPTS: okBinding(), RECEIPTS_GMAIL_CLIENT_ID: 'x' }), B, 'status', 'GET')
     expect((await j<{ configured: boolean }>(full.res)).configured).toBe(true)
   })
@@ -231,11 +231,11 @@ describe('GET status', () => {
     expect(a.nextRunAt).toBeNull()
   })
 
-  it('is one batch of two reads', async () => {
+  it('is one batch of three reads', async () => {
     conn(CONN_A, A, SUB_A)
     const before = db.statements.length
     await call(env(db), A, 'status', 'GET')
-    expect(db.statements.length - before).toBe(2)
+    expect(db.statements.length - before).toBe(3)
   })
 
   it('computes the next :23 UTC cron time', () => {

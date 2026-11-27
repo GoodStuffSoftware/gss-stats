@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 //
-// GET /api/budget/email/status: the signed-in login's OWN Gmail receipts connection, in one batch of two reads
+// GET /api/budget/email/status: the signed-in login's OWN Gmail receipts connection, in one batch of three reads (the third is the photo existence probe, `hasUploads`)
 // (plan section 4). `{configured, connection: {status, lastRunAt, lastOkAt, lastError, consentVersion, googleEmail} | null,
 // lastRuns: [newest 5], nextRunAt}`. Only codes and counts, plus `googleEmail`: the
 // signed-in person's OWN linked Gmail address, returned to them only (the row is found by their session email, so the
@@ -11,6 +11,7 @@
 
 import { budgetJson, type BudgetEnv } from '../../../_lib/budgetAccess'
 import { defineRoute } from '../../../_lib/budgetDb'
+import { HAS_UPLOADS_SQL } from '../../../_lib/receiptsDb'
 
 interface ReceiptsEnv extends BudgetEnv {
   RECEIPTS?: Fetcher
@@ -55,7 +56,7 @@ export const onRequest = defineRoute({
     const env = ctx.env as ReceiptsEnv
     const db = env.BUDGET_DB!
     const email = ctx.data.budgetEmail!
-    const [conn, runs] = await db.batch([
+    const [conn, runs, up] = await db.batch([
       db.prepare('SELECT status, last_run_at, last_ok_at, last_error, consent_version, google_email FROM email_connections WHERE owner_email = ?').bind(email),
       db
         .prepare(
@@ -65,6 +66,7 @@ export const onRequest = defineRoute({
             ORDER BY id DESC LIMIT 5`,
         )
         .bind(email),
+      db.prepare(HAS_UPLOADS_SQL).bind(email),
     ])
     const c = (conn.results as ConnRow[])[0]
     const configured = typeof env.RECEIPTS?.fetch === 'function' && !!env.RECEIPTS_GMAIL_CLIENT_ID
@@ -85,6 +87,7 @@ export const onRequest = defineRoute({
         autoApplied: r.auto_applied,
         errorCode: r.error_code,
       })),
+      hasUploads: Number((up.results as Array<{ has_uploads: number }>)[0]?.has_uploads ?? 0) === 1,
       nextRunAt: c && c.status === 'active' ? nextRunAt(new Date()) : null,
     })
   },

@@ -17,7 +17,7 @@ fields, the same matching and the same suggestions as an emailed receipt.
    writes nothing to D1 for an upload and never sees the Anthropic key.
 2. **Private object store.** The photo lives in a private R2 bucket bound to the Worker only, key `img/<receipt id>.jpg`.
    If R2 is not enabled, a Worker-only KV namespace sits behind the same `ImageStore` interface.
-3. **Two-step metadata removal.** The browser re-encodes the photo (long edge at most 1568 px, JPEG), which bakes
+3. **Two-step metadata removal.** The browser re-encodes the photo (long edge at most 2576 px, the high-resolution read tier, JPEG), which bakes
    orientation in and drops metadata. The Worker then rebuilds the file from an allowlist of JPEG segments (no APPn,
    no comments, nothing after the end marker). Photos are served only with inert headers (nosniff, a `default-src
    'none'; sandbox` CSP, `Cross-Origin-Resource-Policy: same-origin`, `private, no-store`).

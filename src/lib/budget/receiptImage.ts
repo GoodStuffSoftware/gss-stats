@@ -1,9 +1,9 @@
 // Receipt photo prep, run in the browser before anything is sent (receipt photo upload plan, sections 3 and 4): decode the
-// picked file with its orientation applied, draw it onto a canvas no larger than 1568 px on the long edge, and re-encode as
+// picked file with its orientation applied, draw it onto a canvas no larger than 2576 px on the long edge, and re-encode as
 // JPEG. Re-encoding drops every EXIF, GPS and camera tag, so none of it leaves the device. Images only (no PDF).
 
-/** Longest edge sent, in pixels: the size the vision API scales to anyway. */
-export const MAX_EDGE = 1568
+/** Longest edge sent, in pixels: the vision API's high-resolution tier, so small print on a long receipt stays readable. */
+export const MAX_EDGE = 2576
 /** The server refuses bodies over this many bytes. */
 export const MAX_UPLOAD_BYTES = 2_000_000
 /** A picked file larger than this is refused before it is decoded. */

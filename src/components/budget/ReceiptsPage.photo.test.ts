@@ -175,7 +175,7 @@ describe('upload errors', () => {
   const cases: [number, string, string][] = [
     [413, 'too_large', 'too large'],
     [415, 'convert_first', "Can't read this image type"],
-    [429, 'daily_cap', 'daily limit of 20'],
+    [429, 'daily_cap', 'daily limit of receipt photos'],
     [403, 'forbidden', 'Budget access'],
     [502, 'unavailable', 'unavailable'],
   ]

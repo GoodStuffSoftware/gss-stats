@@ -35,9 +35,9 @@ afterEach(() => {
 const file = (n = 10) => new Blob([new Uint8Array(n)], { type: 'image/heic' })
 
 describe('scaledSize', () => {
-  it('limits the long edge to 1568 and keeps the ratio', () => {
-    expect(scaledSize(4000, 3000)).toEqual({ width: MAX_EDGE, height: 1176 })
-    expect(scaledSize(3000, 4000)).toEqual({ width: 1176, height: MAX_EDGE })
+  it('limits the long edge to 2576 and keeps the ratio', () => {
+    expect(scaledSize(4000, 3000)).toEqual({ width: MAX_EDGE, height: 1932 })
+    expect(scaledSize(3000, 4000)).toEqual({ width: 1932, height: MAX_EDGE })
   })
   it('never enlarges a small image', () => {
     expect(scaledSize(800, 600)).toEqual({ width: 800, height: 600 })
@@ -49,8 +49,8 @@ describe('prepareReceiptImage', () => {
     stubCanvas(() => 100_000)
     const out = await prepareReceiptImage(file())
     expect(bitmapMock).toHaveBeenCalledWith(expect.anything(), { imageOrientation: 'from-image' })
-    expect(canvas).toMatchObject({ width: 1568, height: 1176 })
-    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 1568, 1176)
+    expect(canvas).toMatchObject({ width: 2576, height: 1932 })
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 2576, 1932)
     expect(toBlobMock).toHaveBeenCalledTimes(1)
     expect(toBlobMock.mock.calls[0][1]).toBe('image/jpeg')
     expect(toBlobMock.mock.calls[0][2]).toBe(0.85)
@@ -66,6 +66,16 @@ describe('prepareReceiptImage', () => {
     expect(qs[0]).toBe(0.85)
     expect(qs.length).toBeGreaterThan(1)
     expect(qs[qs.length - 1]).toBeLessThanOrEqual(0.7)
+  })
+
+  it('keeps a 2576 px frame under 2 MB by stepping 0.85, 0.75, 0.65', async () => {
+    bitmapMock.mockResolvedValue({ width: 3000, height: 4000, close: vi.fn() })
+    stubCanvas((q) => (q > 0.7 ? 2_400_000 : q > 0.6 ? 1_900_000 : 900_000))
+    const out = await prepareReceiptImage(file())
+    expect(canvas).toMatchObject({ width: 1932, height: 2576 })
+    expect(toBlobMock.mock.calls.map((c) => c[2] as number).map((q) => Math.round(q * 100) / 100).slice(0, 3)).toEqual([0.85, 0.75, 0.65])
+    expect(out.size).toBe(1_900_000)
+    expect(out.size).toBeLessThan(MAX_UPLOAD_BYTES)
   })
 
   it('refuses when even the lowest quality is over 2 MB', async () => {

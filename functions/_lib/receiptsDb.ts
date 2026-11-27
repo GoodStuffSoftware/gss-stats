@@ -59,6 +59,11 @@ export function listSql(withCursor: boolean): string {
     + ' ORDER BY email_date DESC, id DESC LIMIT ?3'
 }
 
+/** The caller's own photos in every state, newest upload first: one bounded read on idx_rcpt_up_day (uploader_email, created_at), no sort. */
+export const PHOTOS_SQL = `SELECT ${LIST_COLUMNS} FROM receipts r WHERE r.uploader_email = ?1 AND r.source = 'upload' ORDER BY r.created_at DESC LIMIT ?2`
+/** Whether the caller has any photo (any state): an existence probe on idx_rcpt_up_day. */
+export const HAS_UPLOADS_SQL = `SELECT EXISTS (SELECT 1 FROM receipts WHERE uploader_email = ?1 AND source = 'upload') AS has_uploads`
+
 export const LIST_MATCHES_SQL = `SELECT m.id, m.receipt_id, m.txn_id, m.group_key, m.rule, m.share_cents, m.score, m.status, m.proposed_category_id,
   t.posted_date, t.amount_cents, t.merchant_name, t.category_id, t.category_source, t.needs_review, t.updated_at, a.label AS account_label,
   ${personEditSql('t')} AS person_edit,
@@ -72,6 +77,12 @@ WHERE receipt_id IN (SELECT value FROM json_each(?1)) ORDER BY receipt_id, seq`
 
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v))
 const s = (v: unknown): string | null => (v === null || v === undefined ? null : String(v))
+
+/** The photo tab: up to `limit` of the caller's newest uploads, whatever their state (so each can be deleted); one page, no cursor. */
+export async function loadOwnPhotos(db: D1Database, email: string, limit: number): Promise<{ receipts: unknown[]; nextCursor: string | null }> {
+  const rows = (await db.prepare(PHOTOS_SQL).bind(email, limit).all<Row>()).results
+  return { receipts: rows.length ? await hydrateReceipts(db, rows) : [], nextCursor: null }
+}
 
 export async function loadReceiptList(
   db: D1Database, email: string, status: ListStatus, limit: number, cursor: { emailDate: string; id: string } | null,

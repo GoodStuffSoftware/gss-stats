@@ -5,7 +5,7 @@ import { createBudgetDb, callRoute, insertTxn, json, type FakeBudgetDb } from '.
 import { onRequest as apply } from './apply'
 import { onRequest as list } from './receipts/index'
 import { onRequest as byId } from './receipts/[id]'
-import { APPLY_READ_SQL, APPLY_UPDATE_SQL, listSql, LIST_MATCHES_SQL, LIST_ITEMS_SQL, OWN_RECEIPT_SQL } from '../../../_lib/receiptsDb'
+import { APPLY_READ_SQL, APPLY_UPDATE_SQL, HAS_UPLOADS_SQL, listSql, PHOTOS_SQL, LIST_MATCHES_SQL, LIST_ITEMS_SQL, OWN_RECEIPT_SQL } from '../../../_lib/receiptsDb'
 
 const A = 'user-a@example.com'
 const B = 'user-b@example.com'
@@ -448,6 +448,27 @@ describe('query plans (the D1 read budget)', () => {
       expect(plan.join(' | ')).toMatch(/idx_rcpt_review/)
       expect(plan.join(' | ')).toMatch(/idx_rcpt_up_review/)
       noScan(plan.filter((l) => !/^SCAN \(subquery-\d+\)$/.test(l))) // the merge reads the two LIMITed arms, not a table
+    }
+  })
+  it('each arm is ordered by its index (no sort inside a co-routine); only the final merge sorts', () => {
+    for (const [withCursor, vals] of [[false, [A, 'suggested', 11]], [true, [A, 'suggested', 11, '2026-11-20', rid(1)]]] as const) {
+      const rows = db.all<{ id: number; parent: number; detail: string }>(`EXPLAIN QUERY PLAN ${listSql(withCursor)}`, ...vals)
+      const byId = new Map(rows.map((r) => [r.id, r]))
+      const insideArm = (r: { parent: number }): boolean => {
+        for (let p = byId.get(r.parent); p; p = byId.get(p.parent)) if (/^CO-ROUTINE/.test(p.detail)) return true
+        return false
+      }
+      const sorts = rows.filter((r) => /TEMP B-TREE FOR ORDER BY/.test(r.detail))
+      expect(sorts.filter(insideArm), rows.map((r) => r.detail).join(' | ')).toEqual([])
+      expect(sorts.length).toBeLessThanOrEqual(2) // the merge's two sides, nothing else
+    }
+  })
+  it('the photo list and the has-uploads probe use idx_rcpt_up_day and never sort or scan a table', () => {
+    for (const [sql, vals] of [[PHOTOS_SQL, [A, 100]], [HAS_UPLOADS_SQL, [A]]] as const) {
+      const plan = db.explain(sql, [...vals])
+      expect(plan.join(' | ')).toMatch(/idx_rcpt_up_/)
+      expect(plan.join(' | ')).not.toMatch(/TEMP B-TREE/)
+      noScan(plan.filter((l) => l !== 'SCAN CONSTANT ROW'))
     }
   })
   it('the match, item, own-receipt and apply read statements never scan a table', () => {
