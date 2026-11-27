@@ -27,8 +27,18 @@ export const MAX_RESTARTS = 3
  */
 export const CHUNK_PAGES = 6
 export const TICK_QUERY_BUDGET = 600
-/** D1 queries one full chunk (CHUNK_PAGES pages of 500 rows, measured by the per-run cap test) can cost, rounded up with slack. */
-export const WORST_CHUNK_QUERIES = 160
+/**
+ * D1 queries one chunk can cost, derived from apply.ts. A chunk holds at most CHUNK_PAGES * PAGE_SIZE = 3,000 Plaid updates (we
+ * send count = PAGE_SIZE; Plaid caps a page at count updates). Reads take CHUNK = 90 ids, batches BATCH_SIZE = 100 statements in
+ * whole units of at most 2. The costliest update is an added posted row whose pending id is mapped (posts in place) and pairs with
+ * an existing row: 2 ids to look up, 1 posted-facts id, 4 statements (in-place unit 2 + pair unit 2). Removals (1 id, 1 touched
+ * id, 2 statements) and plain inserts (1-2 ids, 4 statements) cost less. So, per chunk:
+ *   loadState  3 config + ceil(6,000/90) = 67 mapped + 1 boundary read per synced account (50 at link, exchange.ts MAX_ACCOUNTS) = 120
+ *   planPairs  ceil(3,000/90) = 34 posted-facts + 1 range read                                                                  =  35
+ *   applyPlan  12,000 statements, 50 two-statement units per batch = 120 (+1 for an import row) + 1 tail batch                 = 122
+ * 277 in all, rounded up to 280. An Item that gains accounts past 50 later adds one read per account; the 250 margin below covers it.
+ */
+export const WORST_CHUNK_QUERIES = 280
 /** Reserved for the reconnect check and the liabilities tick that run after the sync half in the same invocation. */
 export const OTHER_TICK_QUERIES = 150
 
@@ -154,7 +164,9 @@ export type FetchResult =
    * more: stopped after maxPages with pages left; nextCursor is where the next call resumes.
    * historical: the last page said HISTORICAL_UPDATE_COMPLETE, so the log it caught up to already holds the historical rows (the stream is append-only: rows that arrive later come after any cursor we saved).
    */
-  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean }
+  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean
+      /** The pass that produced this went back from a saved mid-way cursor to restartCursor (see fetchUpdate). */
+      rebased: boolean }
   /** Nothing to apply, nothing moves: the Item is not ready yet (empty next_cursor, or PRODUCT_NOT_READY). */
   | { kind: 'noop'; pages: number }
   | { kind: 'needs_reconnect'; pages: number }
@@ -175,13 +187,17 @@ const arr = <T>(v: unknown): T[] | null => (Array.isArray(v) ? (v as T[]) : v ==
  * whole loop restarts at the update's first cursor, and a saved mid-way cursor is not that. So a mutation error, or Plaid
  * refusing a mid-way cursor as invalid (INVALID_REQUEST on the first page), restarts at restartCursor (at most 3 restarts;
  * NULL = a full re-pull, safe because every write unit is keyed). More than 60 calls stops. Neither a stop nor a no-op applies anything.
+ * Going back from a mid-way cursor to restartCursor (a rebase) happens at most once per call; `rebase: false` (the run already
+ * rebased once) allows none: a mutation on a mid-way pass is then `sync_mutation`, an INVALID_REQUEST is the plain error. A
+ * pass that already began at restartCursor never treats INVALID_REQUEST as a restart, so a real request error cannot loop.
  */
 export async function fetchUpdate(
-  client: PlaidClient, accessToken: string, cursor0: string | null, opts: { maxPages?: number; restartCursor?: string | null } = {},
+  client: PlaidClient, accessToken: string, cursor0: string | null, opts: { maxPages?: number; restartCursor?: string | null; rebase?: boolean } = {},
 ): Promise<FetchResult> {
   const restartAt = opts.restartCursor === undefined ? cursor0 : opts.restartCursor
   let pages = 0
   let restarts = 0
+  let rebased = false
   let start = cursor0
   for (;;) {
     let cursor = start
@@ -204,12 +220,18 @@ export async function fetchUpdate(
       } catch (e) {
         if (e instanceof PlaidTimeoutError) return { kind: 'error', code: 'plaid_timeout', pages }
         if (!(e instanceof PlaidError)) throw e
-        const midway = pass === 1 && start !== restartAt // the first page of a pass that began at a saved mid-way cursor
-        if (e.code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION' || (midway && e.type === 'INVALID_REQUEST')) {
-          if (restarts >= MAX_RESTARTS) return { kind: 'error', code: 'sync_mutation', pages }
-          restarts++
-          start = restartAt
-          break // drop what was collected, start over from the update's first cursor
+        const midway = start !== restartAt // this pass began at a saved mid-way cursor, not where the update began
+        const mutation = e.code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION'
+        const refused = midway && pass === 1 && e.type === 'INVALID_REQUEST' // Plaid refusing the mid-way cursor itself
+        if (mutation || refused) {
+          const allowed = restarts < MAX_RESTARTS && (!midway || (opts.rebase !== false && !rebased))
+          if (allowed) {
+            restarts++
+            if (midway) rebased = true
+            start = restartAt
+            break // drop what was collected, start over from the update's first cursor
+          }
+          if (mutation) return { kind: 'error', code: 'sync_mutation', pages }
         }
         if (e.code === 'ITEM_LOGIN_REQUIRED') return { kind: 'needs_reconnect', pages }
         if (e.code === 'PRODUCT_NOT_READY') return { kind: 'noop', pages }
@@ -229,8 +251,8 @@ export async function fetchUpdate(
         return { kind: 'error', code: 'bad_response', pages }
       }
       cursor = next
-      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical }
-      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical }
+      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical, rebased }
+      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical, rebased }
     }
   }
 }
