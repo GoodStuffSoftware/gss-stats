@@ -218,8 +218,8 @@ export async function finishConnect(request: Request, env: ReceiptsConnectEnv, e
   return back(url, typeof r.code === 'string' && CODE_SET.has(r.code) && r.code !== 'connected' ? (r.code as ConnectCode) : 'exchange_failed')
 }
 
-/** Time limits for the Pages-to-Worker calls (ms): sync answers 202 at once; disconnect waits on Google's revoke; the exchange talks to Google twice. */
-export const BINDING_TIMEOUT_MS = { sync: 8_000, disconnect: 10_000, exchange: 20_000 } as const
+/** Time limits for the Pages-to-Worker calls (ms): sync answers 202 at once; disconnect waits on Google's revoke; the exchange talks to Google twice; an upload or image call moves one small JPEG. */
+export const BINDING_TIMEOUT_MS = { sync: 8_000, disconnect: 10_000, exchange: 20_000, upload: 15_000 } as const
 
 /** Service Binding fetch with a hard time limit (abort signal plus a race, in case the binding ignores the signal). Rejects on timeout. */
 export async function bindingFetch(binding: { fetch: (url: string, init?: RequestInit) => Promise<Response> }, url: string, init: RequestInit, ms: number): Promise<Response> {

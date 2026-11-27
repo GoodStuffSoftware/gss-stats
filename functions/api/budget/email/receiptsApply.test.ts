@@ -442,12 +442,12 @@ describe('query plans (the D1 read budget)', () => {
     const t = autoTxn()
     match(receipt(1, CONN_A), t)
   })
-  it('the list and its cursor page search idx_rcpt_review with no sort', () => {
+  it('the list and its cursor page search idx_rcpt_review and idx_rcpt_up_review', () => {
     for (const [withCursor, vals] of [[false, [A, 'suggested', 11]], [true, [A, 'suggested', 11, '2026-11-20', rid(1)]]] as const) {
       const plan = db.explain(listSql(withCursor), [...vals])
       expect(plan.join(' | ')).toMatch(/idx_rcpt_review/)
-      expect(plan.join(' | ')).not.toMatch(/TEMP B-TREE/)
-      noScan(plan)
+      expect(plan.join(' | ')).toMatch(/idx_rcpt_up_review/)
+      noScan(plan.filter((l) => !/^SCAN \(subquery-\d+\)$/.test(l))) // the merge reads the two LIMITed arms, not a table
     }
   })
   it('the match, item, own-receipt and apply read statements never scan a table', () => {

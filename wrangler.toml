@@ -64,8 +64,11 @@ service = "gss-budget-receipts"
 # Receipts sharing (functions/api/budget/email/links.ts): "fields" = each listed Budget person sees the
 # other's receipt fields (never the Gmail link); "none" (the code default) = owner only. Mike chose
 # "fields" on 2026-11-23. Not a secret.
+# RECEIPTS_IMAGE_SHARE (functions/api/budget/uploads/**, ADR 0010): "both" = each listed person also sees the other's receipt PHOTO;
+# "owner" = only the uploader does. Not a secret.
 [vars]
 RECEIPTS_SHARE = "fields"
+RECEIPTS_IMAGE_SHARE = "both"
 
 # Secrets (NOT here): RECEIPTS_GMAIL_CLIENT_ID (the Gmail OAuth client id, a Pages secret:
 # `npx wrangler pages secret put RECEIPTS_GMAIL_CLIENT_ID`), BUDGET_ALLOWED_EMAILS (comma-separated; who may open /api/budget/*, set
@@ -129,3 +132,4 @@ service = "gss-budget-receipts"
 [env.preview.vars]
 PREVIEW_HOST = "dev.gss-stats.pages.dev"
 RECEIPTS_SHARE = "fields"
+RECEIPTS_IMAGE_SHARE = "both"

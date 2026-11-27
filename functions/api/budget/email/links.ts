@@ -10,10 +10,14 @@
 //   none            only the caller's own receipts
 //   fields          every listed person's receipt fields; `gmailMsgId` only to the mailbox owner
 //   fields_and_link every listed person's fields and `gmailMsgId`
+// An upload (photo) receipt follows the same modes; it has no gmailMsgId. Its `imageUrl` goes to the uploader always and to the
+// other listed person only when RECEIPTS_IMAGE_SHARE is `both` (the default; `owner` = uploader only).
 // Never returned: tokens, key_id, the Google sub, any email address, connection ids, or raw email text.
 
 import { budgetJson, type BudgetEnv } from '../../../_lib/budgetAccess'
 import { badRequest, defineRoute, readJsonObject } from '../../../_lib/budgetDb'
+import { imageUrlFor } from '../../../_lib/receiptsDb'
+import { imageShareBoth } from '../../../_lib/receiptUploads'
 
 export const MAX_LINK_TXNS = 200
 const TXN_ID_RE = /^[0-9a-f]{32}$/
@@ -28,16 +32,17 @@ export function shareMode(raw: unknown): ShareMode {
 
 export const LINKS_SQL = `SELECT m.txn_id AS txn_id, r.merchant AS merchant, coalesce(r.receipt_date, r.email_date) AS date,
        r.total_cents AS total_cents, r.tax_cents AS tax_cents, r.currency AS currency, r.order_ref AS order_ref,
-       r.card_last4 AS card_last4, r.gmail_msg_id AS gmail_msg_id, (c.owner_email = ?) AS mine,
+       r.card_last4 AS card_last4, r.gmail_msg_id AS gmail_msg_id, (coalesce(c.owner_email, r.uploader_email) = ?) AS mine,
+       r.id AS receipt_id, r.source AS source, (r.image_key IS NOT NULL) AS has_image,
        i.seq AS seq, i.description AS description, i.quantity AS quantity, i.amount_cents AS amount_cents,
        i.category_hint AS category_id, k.label AS category_label
   FROM json_each(?) j
   JOIN receipt_matches m ON m.txn_id = j.value AND m.status = 'applied'
   JOIN receipts r ON r.id = m.receipt_id
-  JOIN email_connections c ON c.id = r.connection_id
+  LEFT JOIN email_connections c ON c.id = r.connection_id
   LEFT JOIN receipt_items i ON i.receipt_id = r.id
   LEFT JOIN categories k ON k.id = i.category_hint
- WHERE (? = 1 OR c.owner_email = ?)`
+ WHERE (? = 1 OR coalesce(c.owner_email, r.uploader_email) = ?)`
 
 interface LinkRow {
   txn_id: string
@@ -48,8 +53,11 @@ interface LinkRow {
   currency: string | null
   order_ref: string | null
   card_last4: string | null
-  gmail_msg_id: string
+  gmail_msg_id: string | null
   mine: number
+  receipt_id: string
+  source: string
+  has_image: number
   seq: number | null
   description: string | null
   quantity: number | null
@@ -75,6 +83,10 @@ export interface ReceiptLink {
   cardLast4: string | null
   items: ReceiptLinkItem[]
   gmailMsgId?: string
+  source?: 'email' | 'upload'
+  hasImage?: boolean
+  /** Only when this viewer may see the photo (RECEIPTS_IMAGE_SHARE). */
+  imageUrl?: string
 }
 
 export function parseTxnIds(body: Record<string, unknown>): string[] {
@@ -87,10 +99,11 @@ export function parseTxnIds(body: Record<string, unknown>): string[] {
 
 export const onRequest = defineRoute({
   POST: async (ctx) => {
-    const env = ctx.env as BudgetEnv & { RECEIPTS_SHARE?: string }
+    const env = ctx.env as BudgetEnv & { RECEIPTS_SHARE?: string; RECEIPTS_IMAGE_SHARE?: string }
     const ids = parseTxnIds(await readJsonObject(ctx.request, MAX_BODY_BYTES))
     if (ids.length === 0) return budgetJson(200, { links: {} })
     const mode = shareMode(env.RECEIPTS_SHARE)
+    const imageBoth = imageShareBoth(env.RECEIPTS_IMAGE_SHARE)
     const email = ctx.data.budgetEmail!
     const { results } = await env
       .BUDGET_DB!.prepare(LINKS_SQL)
@@ -111,7 +124,11 @@ export const onRequest = defineRoute({
           cardLast4: r.card_last4,
           items: [],
         }
-        if (r.mine === 1 || mode === 'fields_and_link') link.gmailMsgId = r.gmail_msg_id
+        if (r.source === 'upload') {
+          link.source = 'upload'
+          link.hasImage = r.has_image === 1
+          if (r.has_image === 1 && (r.mine === 1 || imageBoth)) link.imageUrl = imageUrlFor(r.receipt_id)
+        } else if (r.gmail_msg_id !== null && (r.mine === 1 || mode === 'fields_and_link')) link.gmailMsgId = r.gmail_msg_id
       }
       if (r.seq !== null && r.description !== null) {
         link.items.push({ description: r.description, quantity: r.quantity, amountCents: r.amount_cents, categoryId: r.category_id, category: r.category_label })

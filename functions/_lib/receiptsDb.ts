@@ -41,13 +41,22 @@ export function decodeReceiptCursor(cursor: string): { emailDate: string; id: st
 
 const OWN_CONN = '(SELECT id FROM email_connections WHERE owner_email = ?1)'
 const LIST_COLUMNS = 'r.id, r.email_date, r.status, r.kind, r.merchant, r.payment_via, r.card_last4, r.order_ref, r.receipt_date, r.related_date, '
-  + 'r.currency, r.total_cents, r.tax_cents, r.shipping_cents, r.gmail_msg_id'
+  + 'r.currency, r.total_cents, r.tax_cents, r.shipping_cents, r.gmail_msg_id, r.source, r.image_key'
 
-/** Newest first on idx_rcpt_review (connection_id, status, email_date, id): equality on the first two, a reverse scan for the order. */
+/** One arm of the list: newest first, LIMIT applied inside so each arm reads only what the page needs. */
+const listArm = (where: string, withCursor: boolean): string =>
+  `SELECT * FROM (SELECT ${LIST_COLUMNS} FROM receipts r WHERE ${where} AND r.status = ?2`
+  + (withCursor ? ' AND (r.email_date, r.id) < (?4, ?5)' : '')
+  + ' ORDER BY r.email_date DESC, r.id DESC LIMIT ?3)'
+
+/**
+ * The review list is a UNION ALL of two index-served arms, merged by (email_date, id): the email arm on idx_rcpt_review
+ * (connection_id, status, email_date, id) and the upload arm on idx_rcpt_up_review (uploader_email, status, email_date, id).
+ * Each arm is a reverse index scan with the keyset cursor and LIMIT; only the merge of at most 2 x LIMIT rows sorts.
+ */
 export function listSql(withCursor: boolean): string {
-  return `SELECT ${LIST_COLUMNS} FROM receipts r WHERE r.connection_id = ${OWN_CONN} AND r.status = ?2`
-    + (withCursor ? ' AND (r.email_date, r.id) < (?4, ?5)' : '')
-    + ' ORDER BY r.email_date DESC, r.id DESC LIMIT ?3'
+  return `${listArm(`r.connection_id = ${OWN_CONN}`, withCursor)} UNION ALL ${listArm('r.uploader_email = ?1', withCursor)}`
+    + ' ORDER BY email_date DESC, id DESC LIMIT ?3'
 }
 
 export const LIST_MATCHES_SQL = `SELECT m.id, m.receipt_id, m.txn_id, m.group_key, m.rule, m.share_cents, m.score, m.status, m.proposed_category_id,
@@ -74,6 +83,34 @@ export async function loadReceiptList(
   const rows = all.slice(0, limit)
   const nextCursor = all.length > limit && rows.length > 0 ? encodeReceiptCursor(String(rows[rows.length - 1].email_date), String(rows[rows.length - 1].id)) : null
   if (rows.length === 0) return { receipts: [], nextCursor: null }
+  return { receipts: await hydrateReceipts(db, rows), nextCursor }
+}
+
+export const imageUrlFor = (id: string): string => `/api/budget/uploads/${id}/image`
+
+/** One of the caller's own upload receipts in the review-list row shape (null when missing or not theirs: one PK read). */
+export async function loadOwnUpload(db: D1Database, id: string, email: string): Promise<{ status: string; row: unknown | null } | null> {
+  const r = await db.prepare(`SELECT ${LIST_COLUMNS} FROM receipts r WHERE r.id = ?1 AND r.source = 'upload' AND r.uploader_email = ?2`).bind(id, email).first<Row>()
+  if (!r) return null
+  const status = String(r.status)
+  if (status === 'pending') return { status, row: null }
+  return { status, row: (await hydrateReceipts(db, [r]))[0] }
+}
+
+/** Who may fetch an upload's photo: the uploader, or (RECEIPTS_SHARE not none, RECEIPTS_IMAGE_SHARE both) another listed person once the receipt is applied. */
+export async function mayViewImage(db: D1Database, id: string, email: string, shareFields: boolean, imageShareBoth: boolean): Promise<boolean> {
+  const r = await db.prepare("SELECT status, image_key, uploader_email FROM receipts WHERE id = ?1 AND source = 'upload'").bind(id).first<Row>()
+  if (!r || r.image_key === null || r.image_key === undefined) return false
+  if (r.uploader_email === email) return true
+  return shareFields && imageShareBoth && r.status === 'applied'
+}
+
+/** Whether the caller uploaded this receipt (one PK read). */
+export async function isUploader(db: D1Database, id: string, email: string): Promise<boolean> {
+  return (await db.prepare("SELECT 1 AS x FROM receipts WHERE id = ?1 AND source = 'upload' AND uploader_email = ?2").bind(id, email).first()) !== null
+}
+
+async function hydrateReceipts(db: D1Database, rows: Row[]): Promise<unknown[]> {
   const ids = JSON.stringify(rows.map((r) => String(r.id)))
   const [matches, items] = await db.batch([db.prepare(LIST_MATCHES_SQL).bind(ids), db.prepare(LIST_ITEMS_SQL).bind(ids)])
   const mBy = new Map<string, unknown[]>()
@@ -96,20 +133,24 @@ export async function loadReceiptList(
     const k = String(i.receipt_id)
     iBy.set(k, [...(iBy.get(k) ?? []), { seq: Number(i.seq), description: String(i.description), amountCents: num(i.amount_cents), quantity: num(i.quantity), categoryHint: s(i.category_hint) }])
   }
-  return {
-    nextCursor,
-    receipts: rows.map((r) => ({
+  return rows.map((r) => {
+    const upload = r.source === 'upload'
+    const hasImage = r.image_key !== null && r.image_key !== undefined
+    return {
       id: String(r.id), emailDate: String(r.email_date), status: String(r.status), kind: s(r.kind), merchant: s(r.merchant), paymentVia: s(r.payment_via),
       cardLast4: s(r.card_last4), orderRef: s(r.order_ref), receiptDate: s(r.receipt_date), relatedDate: s(r.related_date), currency: s(r.currency),
-      totalCents: num(r.total_cents), taxCents: num(r.tax_cents), shippingCents: num(r.shipping_cents), gmailMsgId: String(r.gmail_msg_id),
+      totalCents: num(r.total_cents), taxCents: num(r.tax_cents), shippingCents: num(r.shipping_cents),
+      ...(upload ? {} : { gmailMsgId: String(r.gmail_msg_id) }),
+      source: upload ? 'upload' : 'email', hasImage, mine: true, // this list only ever holds the caller's own rows
+      ...(hasImage ? { imageUrl: imageUrlFor(String(r.id)) } : {}),
       items: iBy.get(String(r.id)) ?? [], matches: mBy.get(String(r.id)) ?? [],
-    })),
-  }
+    }
+  })
 }
 
 // ---------- dismiss ------------------------------------------------------------------------------
 
-export const OWN_RECEIPT_SQL = `SELECT r.status FROM receipts r WHERE r.id = ?1 AND r.connection_id = (SELECT id FROM email_connections WHERE owner_email = ?2)`
+export const OWN_RECEIPT_SQL = `SELECT r.status FROM receipts r WHERE r.id = ?1 AND (r.connection_id = (SELECT id FROM email_connections WHERE owner_email = ?2) OR r.uploader_email = ?2)`
 
 /** Dismiss (suggested or unmatched -> dismissed) or undo (dismissed -> suggested when a suggestion is left, else unmatched). Returns the new status, or null on a state mismatch. */
 export async function setDismissed(db: D1Database, id: string, email: string, dismissed: boolean, now = new Date().toISOString()): Promise<{ found: boolean; status: string | null }> {
@@ -120,7 +161,7 @@ export async function setDismissed(db: D1Database, id: string, email: string, di
   const to = dismissed ? "'dismissed'" : "CASE WHEN EXISTS (SELECT 1 FROM receipt_matches m WHERE m.receipt_id = receipts.id AND m.status = 'suggested') THEN 'suggested' ELSE 'unmatched' END"
   const res = await db.prepare(
     `UPDATE receipts SET status = ${to}, updated_at = ?3, updated_by = ?2
-      WHERE id = ?1 AND status = ?4 AND connection_id = (SELECT id FROM email_connections WHERE owner_email = ?2)`,
+      WHERE id = ?1 AND status = ?4 AND (connection_id = (SELECT id FROM email_connections WHERE owner_email = ?2) OR uploader_email = ?2)`,
   ).bind(id, email, now, cur.status).run()
   if (Number(res.meta?.changes ?? 0) === 0) return { found: true, status: null }
   const after = await db.prepare(OWN_RECEIPT_SQL).bind(id, email).first<{ status: string }>()
@@ -142,9 +183,9 @@ export const APPLY_READ_SQL = `SELECT m.id AS match_id, m.receipt_id, m.txn_id, 
   ${personEditSql('t')} AS person_edit,
   EXISTS (SELECT 1 FROM receipt_matches o WHERE o.txn_id = m.txn_id AND o.status = 'applied') AS linked
 FROM receipt_matches m JOIN receipts r ON r.id = m.receipt_id
-  JOIN email_connections c ON c.id = r.connection_id AND c.owner_email = ?2
+  LEFT JOIN email_connections c ON c.id = r.connection_id
   JOIN transactions t ON t.id = m.txn_id
-WHERE m.id IN (SELECT value FROM json_each(?1))`
+WHERE m.id IN (SELECT value FROM json_each(?1)) AND (c.owner_email = ?2 OR r.uploader_email = ?2)`
 
 /** The suggested sibling parts of split_charges groups (one receipt over several bank rows): all apply or none. */
 export const GROUP_SIBLINGS_SQL = `SELECT id, receipt_id, group_key FROM receipt_matches
