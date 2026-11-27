@@ -222,7 +222,10 @@ describe('App: Budget pages (Overview, Loans)', () => {
     const w = await mountAt('/banks/return?oauth_state_id=abc')
     await sectionShown(w)
     await vi.waitFor(() => expect(w.find('[data-testid="banks-page"]').exists()).toBe(true), { timeout: 4000 })
-    expect(location.pathname + location.search).toBe('/?section=budget&b_page=banks')
+    expect(location.pathname).toBe('/')
+    expect(params().get('section')).toBe('budget')
+    expect(params().get('b_page')).toBe('banks')
+    expect(params().has('oauth_state_id')).toBe(false)
     expect(w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')).toBe('Budget›Banks')
   })
 
