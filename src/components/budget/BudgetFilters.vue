@@ -1,56 +1,44 @@
 <script setup lang="ts">
-// Budget filters: a date-range picker (presets: this month, last month, 3 months, year to date, custom)
-// and a person segmented control (All + the people from GET /api/budget/meta).
+// Budget filters: a date-range picker (presets: this month, last month, 3 months, year to date, custom), a smart date
+// field beside it (type words such as "last 30 days" or "Oct 1 to Nov 15", or open its calendar and pick one date or a
+// range; components/ui/SmartDateRange.vue) and a person segmented control (All + the people from GET /api/budget/meta).
 // Props: from, to (YYYY-MM-DD), person ('all' or a person id), people (from /meta), today (tests only).
 // Emits: `range` ({from, to}; only ever a range the server accepts) and `person` (id or 'all').
-// Phone: the range select takes the full first row, the person control the second.
+// Phone: the range select takes the full first row, the smart date field the next, the person control the last.
 import { computed, ref, watch } from 'vue'
 import type { IsoDate, Person, PersonFilter } from '../../lib/budget/types'
-import { MAX_RANGE_DAYS, RANGE_PRESETS, presetLabel, presetOf, rangeForPreset, rangeMonths, rangeValid, todayIso, type RangePreset } from '../../lib/budget/viewState'
+import { MAX_RANGE_DAYS, RANGE_PRESETS, presetLabel, presetOf, rangeForPreset, rangeMonths, todayIso, type RangePreset } from '../../lib/budget/viewState'
+import SmartDateRange from '../ui/SmartDateRange.vue'
 
 const props = defineProps<{ from: IsoDate; to: IsoDate; person: PersonFilter; people: Person[]; today?: IsoDate; rangeHidden?: boolean }>()
 const emit = defineEmits<{ range: [r: { from: IsoDate; to: IsoDate }]; person: [p: PersonFilter] }>()
 
 const todayStr = computed(() => props.today ?? todayIso())
 const matched = computed(() => presetOf(props.from, props.to, todayStr.value))
-// "Custom" stays chosen (and its date inputs stay open) while the user edits, even if the dates happen
-// to land on a preset.
+// "Custom" stays chosen while the user edits the dates, even if they happen to land on a preset.
 const forcedCustom = ref(false)
 watch(matched, (m) => {
   if (m !== 'custom') forcedCustom.value = false
 })
 const selected = computed<RangePreset>(() => (forcedCustom.value ? 'custom' : matched.value))
-const customFrom = ref(props.from)
-const customTo = ref(props.to)
-watch(() => [props.from, props.to], () => {
-  customFrom.value = props.from
-  customTo.value = props.to
-})
-const rangeError = ref('')
+const smart = ref<InstanceType<typeof SmartDateRange> | null>(null)
 // The months the picked range covers, from the same range the queries use (props.from / props.to).
 const covers = computed(() => rangeMonths(props.from, props.to, todayStr.value))
 
 function onPreset(e: Event) {
   const id = (e.target as HTMLSelectElement).value as RangePreset
-  rangeError.value = ''
   if (id === 'custom') {
     forcedCustom.value = true
+    smart.value?.focus() // the dates to type or pick are right there
     return
   }
   forcedCustom.value = false
   const r = rangeForPreset(id, todayStr.value)
   if (r) emit('range', r)
 }
-function onCustom() {
-  if (!rangeValid(customFrom.value, customTo.value)) {
-    rangeError.value =
-      customFrom.value && customTo.value && customFrom.value > customTo.value
-        ? 'The start date is after the end date.'
-        : `Pick a range of at most ${MAX_RANGE_DAYS} days.`
-    return
-  }
-  rangeError.value = ''
-  if (customFrom.value !== props.from || customTo.value !== props.to) emit('range', { from: customFrom.value, to: customTo.value })
+/** Dates typed or picked in the smart field (it has already checked the length). */
+function onSmart(r: { from: IsoDate; to: IsoDate }) {
+  if (r.from !== props.from || r.to !== props.to) emit('range', r)
 }
 </script>
 
@@ -61,11 +49,7 @@ function onCustom() {
       <select id="budget-range" class="bf-select" :value="selected" data-testid="budget-range" @change="onPreset">
         <option v-for="p in RANGE_PRESETS" :key="p.id" :value="p.id">{{ presetLabel(p.id, todayStr) }}</option>
       </select>
-      <span v-if="selected === 'custom'" class="bf-custom">
-        <input v-model="customFrom" type="date" class="bf-date" aria-label="From date" data-testid="budget-from" @change="onCustom" />
-        <span aria-hidden="true">–</span>
-        <input v-model="customTo" type="date" class="bf-date" aria-label="To date" data-testid="budget-to" @change="onCustom" />
-      </span>
+      <SmartDateRange ref="smart" class="bf-smart" :from="from" :to="to" :today="today" :max-days="MAX_RANGE_DAYS" label="Dates" testid="budget-date" @change="onSmart" />
       <span v-if="covers" class="bf-covers" data-testid="budget-range-months">Covers {{ covers }}</span>
     </div>
     <div class="bf-person" role="radiogroup" aria-label="Person">
@@ -90,7 +74,6 @@ function onCustom() {
         @click="emit('person', p.id)"
       >{{ p.label }}</button>
     </div>
-    <p v-if="rangeError" class="bf-error" role="alert">{{ rangeError }}</p>
   </div>
 </template>
 
@@ -101,8 +84,7 @@ function onCustom() {
   align-items: center;
   gap: 8px 16px;
 }
-.bf-range,
-.bf-custom {
+.bf-range {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -112,8 +94,7 @@ function onCustom() {
   font-size: 12px;
   color: rgb(var(--ink-3));
 }
-.bf-select,
-.bf-date {
+.bf-select {
   min-height: 36px;
   padding: 4px 8px;
   border: 1px solid rgb(var(--line-2));
@@ -146,16 +127,9 @@ function onCustom() {
   color: #fff;
 }
 .bf-seg:focus-visible,
-.bf-select:focus-visible,
-.bf-date:focus-visible {
+.bf-select:focus-visible {
   outline: 2px solid rgb(var(--amber));
   outline-offset: 1px;
-}
-.bf-error {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 12px;
-  color: #b3261e;
 }
 .bf-covers {
   font-size: 12px;
@@ -169,6 +143,9 @@ function onCustom() {
   .bf-range {
     flex-basis: 100%;
     min-width: 0; /* its select cannot size it past a very narrow page */
+  }
+  .bf-smart {
+    flex: 1 1 100%;
   }
   .bf-select {
     flex: 1 1 auto;

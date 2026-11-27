@@ -3,7 +3,7 @@
 // (lib/budget/txnView.ts) and shows "N of M transactions"; BudgetTable applies it to the rows it has loaded, and the
 // owner remembers it per login (lib/budget/txnPrefsStore.ts). It never changes the pies or totals.
 // Props: modelValue (the prefs), rows (what the table has loaded: the choices come from them), categories, accounts,
-// people, shown (rows after the toolbar), bounds (the page's period: the date inputs stay inside it).
+// people, shown (rows after the toolbar), bounds (the page's period: the date field stays inside it).
 // Emits: update:modelValue (a whole new prefs object).
 // The row is ONE line at every width: [lead] [search] [Filters]. It measures its own width (ResizeObserver) and folds, in
 // order (lib/budget/toolbarFold.ts): the lead (slot `lead`, the Cards | Table switch; it gets `collapsed` so it can fold into
@@ -18,6 +18,7 @@ import {
 } from '../../lib/budget/txnView'
 import { foldLevel, type FoldLevel } from '../../lib/budget/toolbarFold'
 import { useFlyout } from '../ui/useFlyout'
+import SmartDateRange from '../ui/SmartDateRange.vue'
 
 const props = defineProps<{
   modelValue: TxnViewPrefs
@@ -31,6 +32,10 @@ const props = defineProps<{
   bounds?: { from: string; to: string }
 }>()
 const emit = defineEmits<{ 'update:modelValue': [p: TxnViewPrefs] }>()
+// The smart date field shows a range: with only one end set, the other end shows as the period's edge (no filter there either way);
+// with neither set it stays empty (its placeholder says what to type).
+const shownFrom = computed(() => (props.modelValue.from || props.modelValue.to ? props.modelValue.from || props.bounds?.from || props.modelValue.to : ''))
+const shownTo = computed(() => (props.modelValue.from || props.modelValue.to ? props.modelValue.to || props.bounds?.to || props.modelValue.from : ''))
 const slots = useSlots()
 
 const SORT_LABELS: Record<TxnSortKey, string> = { date: 'Date', merchant: 'Merchant', category: 'Category', account: 'Account', amount: 'Amount' }
@@ -279,26 +284,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <span class="tt-dates">
-        <input
-          type="date"
-          class="tt-date"
-          :value="modelValue.from"
+        <SmartDateRange
+          class="tt-smart"
+          :from="shownFrom"
+          :to="shownTo"
           :min="bounds?.from"
-          :max="modelValue.to || bounds?.to"
-          aria-label="From date"
-          data-testid="txn-from"
-          @change="set({ from: ($event.target as HTMLInputElement).value })"
-        />
-        <span aria-hidden="true">–</span>
-        <input
-          type="date"
-          class="tt-date"
-          :value="modelValue.to"
-          :min="modelValue.from || bounds?.from"
           :max="bounds?.to"
-          aria-label="To date"
-          data-testid="txn-to"
-          @change="set({ to: ($event.target as HTMLInputElement).value })"
+          label="Dates"
+          testid="txn-date"
+          @change="set({ from: $event.from, to: $event.to })"
         />
       </span>
       <span class="tt-sort">
@@ -342,7 +336,6 @@ onBeforeUnmount(() => {
 }
 .tt-search,
 .tt-select,
-.tt-date,
 .tt-btn,
 .tt-toggle,
 .tt-icon {
@@ -485,9 +478,28 @@ onBeforeUnmount(() => {
 .tt-sort {
   flex-wrap: wrap; /* on a very narrow panel the To date drops under the From date instead of running off the edge */
 }
-.tt-date {
-  flex: 1 1 140px;
+.tt-smart {
+  flex: 1 1 100%;
   min-width: 0;
+}
+.tt-smart :deep(.sdr-input) {
+  flex: 1 1 auto;
+  width: auto; /* the field fills the panel row */
+}
+/* The calendar opens in the panel's flow, not over it: the panel scrolls, so a floating calendar would be clipped. */
+.tt-smart :deep(.sdr-note) {
+  position: static !important; /* in the panel's flow too */
+  box-shadow: none !important;
+  padding: 0 !important;
+  max-width: none !important;
+  width: auto !important;
+}
+.tt-smart :deep(.sdr-pop) {
+  position: static;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  box-shadow: none;
 }
 .tt-select {
   flex: 1 1 90px;
@@ -521,7 +533,6 @@ onBeforeUnmount(() => {
 }
 .tt-search:focus-visible,
 .tt-select:focus-visible,
-.tt-date:focus-visible,
 .tt-btn:focus-visible,
 .tt-toggle:focus-visible,
 .tt-icon:focus-visible,
@@ -544,7 +555,6 @@ onBeforeUnmount(() => {
     font-size: 14px;
   }
   .tt-flyout .tt-select,
-  .tt-flyout .tt-date,
   .tt-flyout .tt-btn {
     min-height: 44px;
     font-size: 16px;
