@@ -14,6 +14,7 @@ import { formatCents } from '../../lib/budget/money'
 import { receiptText } from '../../lib/budget/tableModel'
 import {
   applyReceipts,
+  deleteUpload,
   dismissReceipt,
   fetchReceipts,
   receiptsMessage,
@@ -282,7 +283,23 @@ async function dismiss(r: ReceiptRow) {
   }
 }
 
-const rowLabel = (r: ReceiptRow) => `${nameOf(r)} ${money(r.totalCents)}`
+/** Deletes the viewer's own photo receipt (and its photo) for good; the server refuses anyone else. */
+async function deletePhoto(r: ReceiptRow) {
+  if (busy.value) return
+  busy.value = true
+  results.value = []
+  try {
+    await deleteUpload(r.id)
+    results.value = [{ text: `${nameOf(r)}: Deleted.`, tone: 'ok' }]
+    removeRows(new Set([r.id]))
+  } catch (e) {
+    results.value = [{ text: errText(e), tone: 'bad' }]
+  } finally {
+    busy.value = false
+  }
+}
+
+const rowLabel =(r: ReceiptRow) => `${nameOf(r)} ${money(r.totalCents)}`
 const emptyText = computed(() =>
   tab.value === 'suggested' ? 'No suggested matches right now.' : tab.value === 'unmatched' ? 'No unmatched receipts.' : 'No receipts applied yet.',
 )
@@ -332,6 +349,7 @@ const emptyText = computed(() =>
         <template #cell-store="{ row }">
           <span data-testid="rr-store">{{ storeName(row) }}</span>
           <span v-if="receiptText(row.paymentVia, 40)" class="rr-sub"> via {{ receiptText(row.paymentVia, 40) }}</span>
+          <span class="rr-sub" data-testid="rr-source"> · {{ row.source === 'upload' ? 'Photo' : 'Email' }}</span>
         </template>
         <template #cell-bank="{ row }">
           <template v-if="bestOf(row)">
@@ -364,6 +382,7 @@ const emptyText = computed(() =>
               <button type="button" class="btn rr-btn" :disabled="busy" data-testid="rr-reject" @click="reject(row)">Reject</button>
             </template>
             <button v-if="tab !== 'applied'" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-dismiss" @click="dismiss(row)">Dismiss</button>
+            <button v-if="row.source === 'upload' && row.mine" type="button" class="btn btn-ghost rr-btn" :disabled="busy" data-testid="rr-delete" @click="deletePhoto(row)">Delete</button>
           </span>
         </template>
         <template #footer>

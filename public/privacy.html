@@ -29,7 +29,7 @@
 <p class="meta">Last updated: 2026-11-26</p>
 
 <h2>What this is</h2>
-<p>GSS Budget Receipts is part of the Budget section of a private household budgeting tool. It reads receipt emails from a connected Gmail account and matches them to bank transactions, so each purchase can be given a category. Only people on an allowlist can sign in.</p>
+<p>GSS Budget Receipts is part of the Budget section of a private household budgeting tool. It reads receipt emails from a connected Gmail account, and photos of paper receipts that you upload, and matches them to bank transactions, so each purchase can be given a category. Only people on an allowlist can sign in.</p>
 
 <h2>What Google data it accesses</h2>
 <p>It asks for these from your Google account:</p>
@@ -54,6 +54,16 @@
 
 <h2>How the emails are processed</h2>
 <p>The text of each matching email is sent to Anthropic's API, which pulls out the fields listed above. We send it for this purpose only. We then keep the fields and discard the text.</p>
+
+<h2>Receipt photos</h2>
+<p>On the Receipts page you can take or choose a photo of a paper receipt. This does not need a Gmail connection.</p>
+<ul>
+  <li>The photo is re-encoded on your device, which strips its location and camera data, and it is stripped again on the server.</li>
+  <li>It is sent to Anthropic's API, which reads the merchant, date, total and items from it. We send it for this purpose only.</li>
+  <li>It is stored in private Cloudflare storage. It is never public, and only the two people on the Budget can view it, after signing in.</li>
+  <li>It is deleted automatically after 90 days, or sooner when you delete the receipt in the app.</li>
+  <li>The fields read from a deleted receipt can stay in the database's 30-day point-in-time backup.</li>
+</ul>
 
 <h2>Who can see it</h2>
 <p>The people signed in to this household's budget can see the receipt fields on a transaction, including receipts from your mailbox. Only you get the link that opens the original email in Gmail. We do not sell your data, share it with anyone else, or use it for advertising.</p>

@@ -2827,6 +2827,11 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
     (`0` by default).
   - **Deploy order.** The Worker must deploy before Pages, because Pages binds it (`deploy.yml` orders the jobs).
     All Secrets Store secrets must exist before the Worker's first deploy.
+- **Receipt photos.** The Receipts page has an "Add a receipt photo" card (Take photo, Choose image), shown with or
+  without Gmail. The browser re-encodes the picked image to JPEG (long edge at most 1568 px, at most 2,000,000 bytes,
+  which drops EXIF and GPS; `src/lib/budget/receiptImage.ts`), sends it to `POST /api/budget/uploads`, then polls
+  `GET /api/budget/uploads/<id>` every 2 s for up to 40 s. The review list tags each row Photo or Email; "View photo"
+  shows only when the server sends `imageUrl`, and Delete only on the viewer's own photo receipts. Images only (no PDF).
 
 ## Security / hardening
 

@@ -67,6 +67,7 @@ export interface ReceiptItem {
   quantity: number | null
   categoryHint: string | null
 }
+export type ReceiptSource = 'email' | 'upload'
 export interface ReceiptRow {
   id: string
   emailDate: string | null
@@ -84,6 +85,14 @@ export interface ReceiptRow {
   shippingCents: number | null
   /** Sent by the server so a receipt can be opened in Gmail; the review list never shows it as text. */
   gmailMsgId?: string
+  /** Where the receipt came from: an email, or a photo uploaded on this page. */
+  source?: ReceiptSource
+  /** A photo is stored for this receipt (it may not be viewable by this person; see `imageUrl`). */
+  hasImage?: boolean
+  /** Present only when this viewer may see the photo; the server decides. */
+  imageUrl?: string
+  /** The viewer uploaded this receipt (the server may send it; Delete only shows when true). */
+  mine?: boolean
   items: ReceiptItem[]
   matches: ReceiptMatch[]
 }
@@ -121,6 +130,10 @@ export interface ReceiptLink {
   cardLast4: string | null
   items: ReceiptLinkItem[]
   gmailMsgId?: string
+  source?: ReceiptSource
+  hasImage?: boolean
+  /** Present only when this viewer may see the photo; "View photo" shows only then. */
+  imageUrl?: string
 }
 export type ReceiptsListStatus = 'suggested' | 'unmatched' | 'applied'
 
@@ -174,6 +187,9 @@ const MESSAGES: Record<string, string> = {
   method_not_allowed: 'That request was not accepted. Reload and try again.',
   server_error: 'The receipt service had a problem. Please try again in a few minutes.',
   unauthorized: 'Your sign-in expired. Sign in again.',
+  // photo upload errors
+  convert_first: "Can't read this image type; take a photo or save it as JPEG",
+  unavailable: 'The reading service is unavailable right now. Please try again in a few minutes.',
   // generic
   bad_state: 'That receipt cannot be changed that way.',
   conflict: 'A receipt was linked to one of these rows meanwhile. Reload and try again.',
@@ -207,8 +223,8 @@ export class ReceiptsApiError extends Error {
   readonly status: number
   readonly code: string | null
   readonly retryAfterSec: number | null
-  constructor(status: number, code: string | null, retryAfterSec: number | null = null) {
-    super(receiptsMessage(code ?? (status === 403 ? 'forbidden' : status === 404 ? 'not_found' : null)))
+  constructor(status: number, code: string | null, retryAfterSec: number | null = null, message?: string) {
+    super(message ?? receiptsMessage(code ?? (status === 403 ? 'forbidden' : status === 404 ? 'not_found' : null)))
     this.name = 'ReceiptsApiError'
     this.status = status
     this.code = code
@@ -278,4 +294,61 @@ export function applyReceipts(items: ApplyItem[], reject: number[] = []): Promis
 export async function fetchReceiptLinks(txnIds: string[]): Promise<Record<string, ReceiptLink>> {
   const r = await call<{ links: Record<string, ReceiptLink> }>('/links', post({ txnIds }))
   return r.links
+}
+
+// ---- Receipt photos (/api/budget/uploads) ----
+
+export interface UploadStatus {
+  id: string
+  /** A receipt status: `pending` while it is still being read; else `error`, `no_total`, `unmatched`, `suggested`, `applied`, `dismissed` or `skipped`. */
+  status: string
+  /** The same shape as a review-list row; present once the receipt has been read. */
+  row?: ReceiptRow
+}
+export interface UploadResult {
+  id?: string
+  /** The same photo was sent before; no new receipt was made. */
+  duplicate: boolean
+}
+
+/** An upload answer's error words: the daily limit and size read differently here than for the email reader. */
+function uploadMessage(code: string | null, status: number): string {
+  if (code === 'daily_cap') return 'The daily limit of 20 receipt photos was reached. Try again tomorrow.'
+  if (code === 'too_large') return 'That photo is too large to send. Try a closer photo of the receipt.'
+  return receiptsMessage(code ?? (status === 403 ? 'forbidden' : status === 404 ? 'not_found' : null))
+}
+
+async function uploadCall(path: string, init: RequestInit & { headers?: Record<string, string> }): Promise<Response> {
+  try {
+    const res = await fetch(`/api/budget/uploads${path}`, { cache: 'no-store', ...init, headers: { Accept: 'application/json', ...init.headers } })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { code?: string; error?: string } | null
+      const code = typeof body?.code === 'string' ? body.code : typeof body?.error === 'string' ? body.error : null
+      throw new ReceiptsApiError(res.status, code, null, uploadMessage(code, res.status))
+    }
+    return res
+  } catch (e) {
+    if (isNetworkError(e) || isAuthError(e) || (e instanceof ReceiptsApiError && e.status === 401)) await checkSessionExpired()
+    throw e
+  }
+}
+
+/**
+ * Sends the re-encoded JPEG (at most 2,000,000 bytes; see receiptImage.ts). 202 `{id}`: it is being read. 200
+ * `{duplicate: true, id?}`: sent before. Errors: 413 `too_large`, 415 `convert_first`, 429 `daily_cap`, 403, 502 `unavailable`.
+ */
+export async function uploadReceiptImage(jpeg: Blob): Promise<UploadResult> {
+  const res = await uploadCall('', { method: 'POST', body: jpeg, headers: { 'Content-Type': 'image/jpeg' } })
+  const body = (await res.json().catch(() => null)) as { id?: string; duplicate?: boolean } | null
+  return { id: typeof body?.id === 'string' ? body.id : undefined, duplicate: body?.duplicate === true }
+}
+
+/** The state of one upload: poll this while `status` is `pending`. */
+export async function fetchUpload(id: string): Promise<UploadStatus> {
+  return (await (await uploadCall(`/${encodeURIComponent(id)}`, { method: 'GET' })).json()) as UploadStatus
+}
+
+/** Deletes the photo and its receipt (the uploader only). */
+export async function deleteUpload(id: string): Promise<void> {
+  await uploadCall(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

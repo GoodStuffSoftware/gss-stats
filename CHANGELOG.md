@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Receipt photos** — take or choose a photo of a paper receipt on the Budget page; it's read like an email receipt and suggested for a matching transaction.
+
 ## [0.87.0] — 2026-11-27
 
 ### Added

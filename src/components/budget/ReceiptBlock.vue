@@ -3,7 +3,8 @@
 // it is untrusted: each one is drawn through plain Vue text interpolation (escaped) after receiptText() strips control and
 // bidi characters and caps its length. No v-html, no markdown. The only link is "Open in Gmail", built from `gmailMsgId`
 // after re-checking it against a strict pattern (gmailUrl); without a valid id there is no link.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import ModalPanel from '../ui/ModalPanel.vue'
 import type { ReceiptLink } from '../../lib/budget/receiptsClient'
 import { formatDate, gmailUrl, receiptMoney, receiptText } from '../../lib/budget/tableModel'
 
@@ -31,6 +32,13 @@ const items = computed(() =>
 )
 const more = computed(() => Math.max(0, allItems.value.length - MAX_ITEMS))
 const href = computed(() => gmailUrl(props.link.gmailMsgId))
+/** The photo, only when the server sent a same-origin path for this viewer (it decides who may see it). */
+const photoUrl = computed(() => {
+  const u = props.link.imageUrl
+  return typeof u === 'string' && u.startsWith('/api/budget/uploads/') ? u : ''
+})
+const photoOpen = ref(false)
+const photoBtn = ref<HTMLElement | null>(null)
 </script>
 
 <template>
@@ -54,6 +62,10 @@ const href = computed(() => gmailUrl(props.link.gmailMsgId))
       <li v-if="more" class="rb-more">+{{ more }} more</li>
     </ul>
     <a v-if="href" class="rb-link" :href="href" target="_blank" rel="noopener noreferrer" data-testid="receipt-gmail">Open in Gmail</a>
+    <button v-if="photoUrl" ref="photoBtn" type="button" class="btn btn-ghost rb-photo" data-testid="receipt-photo-btn" @click="photoOpen = true">View photo</button>
+    <ModalPanel v-if="photoUrl" :open="photoOpen" title="Receipt photo" title-id="rb-photo-title" wide :return-to="photoBtn" @close="photoOpen = false">
+      <img :src="photoUrl" alt="Photo of the receipt" class="rb-img" data-testid="receipt-photo-img" />
+    </ModalPanel>
   </section>
 </template>
 
@@ -119,6 +131,18 @@ const href = computed(() => gmailUrl(props.link.gmailMsgId))
 }
 .rb-more {
   color: rgb(var(--ink-2));
+}
+.rb-photo {
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 0 8px;
+}
+.rb-img {
+  display: block;
+  max-width: 100%;
+  max-height: 80vh;
+  margin: 0 auto;
+  object-fit: contain;
 }
 .rb-link {
   display: inline-flex;

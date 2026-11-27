@@ -13,10 +13,16 @@
 // `email` is removed from the URL with history.replaceState.
 //
 // The review list (ReceiptsReview) is mounted below the status card, only while connected.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { formatCents } from '../../lib/budget/money'
+import { prepareReceiptImage, ReceiptImageError } from '../../lib/budget/receiptImage'
 import {
   disconnectReceipts,
+  fetchReceipts,
   fetchReceiptsStatus,
+  fetchUpload,
+  uploadReceiptImage,
+  type ReceiptRow,
   receiptsMessage,
   receiptsRunMessage,
   ReceiptsApiError,
@@ -50,11 +56,24 @@ const CONSENT_LINES = [
   'Receipts you connect are also shown to the other Budget person.',
 ]
 
+/** Without Gmail, the list still shows when this person has photo receipts: one look at each tab, once per load. */
+const hasUploads = ref(false)
+async function probeUploads() {
+  try {
+    const pages = await Promise.all((['suggested', 'unmatched', 'applied'] as const).map((s) => fetchReceipts({ status: s })))
+    if (pages.some((p) => p.receipts.some((r) => r.source === 'upload'))) hasUploads.value = true
+  } catch {
+    // the list is optional here; the photo card still works
+  }
+}
+const showReview = computed(() => isConnected.value || hasUploads.value)
+
 async function load() {
   loading.value = true
   failed.value = false
   try {
     status.value = await fetchReceiptsStatus()
+    if (status.value.configured && !(status.value.connection && status.value.connection.status !== 'revoked')) void probeUploads()
   } catch {
     status.value = null
     failed.value = true
@@ -77,6 +96,116 @@ onMounted(() => {
   takeCallbackCode()
   void load()
 })
+
+// ---- Receipt photos ----
+/** One photo at a time: pick, re-encode on the device, send, then poll the upload every 2 s for up to 40 s. */
+const POLL_MS = 2000
+const POLL_MAX_MS = 40_000
+type PhotoPhase = 'idle' | 'sending' | 'reading' | 'slow' | 'done' | 'error'
+const photo = ref<{ phase: PhotoPhase; text: string; row: ReceiptRow | null }>({ phase: 'idle', text: '', row: null })
+const takeInput = ref<HTMLInputElement | null>(null)
+const chooseInput = ref<HTMLInputElement | null>(null)
+const reviewKey = ref(0)
+const photoBusy = computed(() => photo.value.phase === 'sending' || photo.value.phase === 'reading')
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let photoRun = 0
+
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = null
+}
+onBeforeUnmount(() => {
+  photoRun++
+  stopPolling()
+})
+
+const DONE_TEXT: Record<string, string> = {
+  suggested: 'Read. A matching bank row was found.',
+  unmatched: 'Read. No matching bank row yet; it will be matched when the transaction arrives.',
+  no_total: 'Read, but no total was found on that photo.',
+  applied: 'Read and already applied.',
+  dismissed: 'Read, and it was dismissed.',
+  skipped: 'That photo was skipped; it does not look like a receipt.',
+}
+const photoFacts = computed(() => {
+  const r = photo.value.row
+  if (!r) return []
+  const out: { label: string; value: string }[] = []
+  const store = receiptText(r.merchant, 60)
+  if (store) out.push({ label: 'Store', value: store })
+  const d = receiptText(r.receiptDate ?? r.emailDate, 40)
+  if (d) out.push({ label: 'Date', value: d })
+  if (r.totalCents !== null && r.totalCents !== undefined) out.push({ label: 'Total', value: formatCents(r.totalCents) })
+  if (r.items?.length) out.push({ label: 'Items', value: String(r.items.length) })
+  return out
+})
+const photoSuggestion = computed(() => {
+  const r = photo.value.row
+  const m = r?.matches?.length ? [...r.matches].sort((a, b) => b.score - a.score)[0] : null
+  if (!r || !m) return ''
+  return `Suggested: ${m.txn.postedDate} ${formatCents(m.txn.amountCents)} ${receiptText(m.txn.merchantName, 60)}. Apply it in the list below.`.replace(/\s+/g, ' ')
+})
+
+function photoFailed(e: unknown) {
+  photo.value = {
+    phase: 'error',
+    text: e instanceof ReceiptImageError || e instanceof ReceiptsApiError ? e.message : 'Something went wrong. Please try again.',
+    row: null,
+  }
+}
+
+function finishPhoto(s: { status: string; row?: ReceiptRow }) {
+  if (s.status === 'error') {
+    photo.value = { phase: 'error', text: 'That receipt could not be read. Try a clearer photo.', row: null }
+    return
+  }
+  photo.value = { phase: 'done', text: DONE_TEXT[s.status] ?? 'Read.', row: s.row ?? null }
+  hasUploads.value = true
+  reviewKey.value++
+}
+
+function poll(id: string, run: number, startedAt: number) {
+  pollTimer = setTimeout(async () => {
+    pollTimer = null
+    if (run !== photoRun) return
+    try {
+      const s = await fetchUpload(id)
+      if (run !== photoRun) return
+      if (s.status !== 'pending') return finishPhoto(s)
+    } catch (e) {
+      if (run !== photoRun) return
+      return photoFailed(e)
+    }
+    if (Date.now() - startedAt >= POLL_MAX_MS) {
+      photo.value = { phase: 'slow', text: '', row: null }
+      return
+    }
+    poll(id, run, startedAt)
+  }, POLL_MS)
+}
+
+async function onPicked(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || photoBusy.value) return
+  const run = ++photoRun
+  stopPolling()
+  photo.value = { phase: 'sending', text: '', row: null }
+  try {
+    const jpeg = await prepareReceiptImage(file)
+    const r = await uploadReceiptImage(jpeg)
+    if (run !== photoRun) return
+    if (r.duplicate && !r.id) {
+      photo.value = { phase: 'done', text: 'That photo was already added.', row: null }
+      return
+    }
+    photo.value = { phase: 'reading', text: '', row: null }
+    poll(r.id!, run, Date.now())
+  } catch (e) {
+    if (run === photoRun) photoFailed(e)
+  }
+}
 
 const connection = computed(() => status.value?.connection ?? null)
 const lastRun = computed<ReceiptsRun | null>(() => status.value?.lastRuns[0] ?? null)
@@ -186,7 +315,31 @@ async function disconnect() {
 
     <p v-else-if="status && !status.configured" class="rp-muted" data-testid="receipts-not-configured">Receipts aren't set up yet.</p>
 
-    <section v-else-if="status && !isConnected" class="card rp-card" data-testid="receipts-consent">
+    <template v-else-if="status">
+    <!-- Receipt photos work with or without Gmail: this card shows in every configured state. -->
+    <section class="card rp-card" data-testid="receipts-photo">
+      <p class="rp-lead">Add a receipt photo</p>
+      <p class="rp-muted">Take a photo of a paper receipt, or choose one from your phone. It is read and matched like an email receipt.</p>
+      <div class="rp-row">
+        <button type="button" class="btn btn-primary rp-btn" :disabled="photoBusy" data-testid="receipts-take-btn" @click="takeInput?.click()">Take photo</button>
+        <button type="button" class="btn rp-btn" :disabled="photoBusy" data-testid="receipts-choose-btn" @click="chooseInput?.click()">Choose image</button>
+        <input ref="takeInput" type="file" accept="image/*" capture="environment" class="rp-file" tabindex="-1" aria-hidden="true" data-testid="receipts-take" @change="onPicked" />
+        <input ref="chooseInput" type="file" accept="image/*" class="rp-file" tabindex="-1" aria-hidden="true" data-testid="receipts-choose" @change="onPicked" />
+      </div>
+      <p v-if="photo.phase === 'sending'" class="rp-muted" role="status" data-testid="receipts-photo-sending">Sending the photo…</p>
+      <p v-else-if="photo.phase === 'reading'" class="rp-muted" role="status" data-testid="receipts-photo-reading">Reading the receipt…</p>
+      <p v-else-if="photo.phase === 'slow'" class="rp-muted" role="status" data-testid="receipts-photo-slow">Still reading; it will show in the list within the hour</p>
+      <p v-else-if="photo.phase === 'error'" class="rp-bad-text" role="alert" data-testid="receipts-photo-error">{{ photo.text }}</p>
+      <div v-else-if="photo.phase === 'done'" role="status" data-testid="receipts-photo-done">
+        <p class="rp-lead">{{ photo.text }}</p>
+        <dl v-if="photoFacts.length" class="rp-facts">
+          <template v-for="f in photoFacts" :key="f.label"><dt>{{ f.label }}</dt><dd>{{ f.value }}</dd></template>
+        </dl>
+        <p v-if="photoSuggestion" class="rp-muted" data-testid="receipts-photo-suggestion">{{ photoSuggestion }}</p>
+      </div>
+    </section>
+
+    <section v-if="!isConnected" class="card rp-card" data-testid="receipts-consent">
       <p class="rp-lead">{{ CONSENT_LINES[0] }}</p>
       <p>
         Connect your Gmail so Budget can find receipts and match them to your bank purchases. With your permission this site reads emails
@@ -211,7 +364,7 @@ async function disconnect() {
       </div>
     </section>
 
-    <template v-else-if="status && connection">
+    <template v-else-if="connection">
       <section class="card rp-card" data-testid="receipts-status">
         <p class="rp-lead" data-testid="receipts-conn-line">
           <span class="rp-dot" :class="{ off: !healthy }" aria-hidden="true"></span>
@@ -228,7 +381,9 @@ async function disconnect() {
           <button ref="disconnectBtn" type="button" class="btn btn-ghost rp-btn" :disabled="!!busy" data-testid="receipts-disconnect" @click="openDisconnect">Disconnect</button>
         </div>
       </section>
-      <ReceiptsReview :categories="categories" />
+    </template>
+    <!-- The list shows Gmail receipts and photo receipts; it mounts once the page is set up, and reloads when a photo is read. -->
+    <ReceiptsReview v-if="showReview" :key="reviewKey" :categories="categories" />
     </template>
 
     <ModalPanel :open="modalOpen" title="Disconnect Gmail?" title-id="rp-dc-title" described-by="rp-dc-desc" :return-to="disconnectBtn" initial-focus="input:checked" @close="modalOpen = false">
@@ -284,6 +439,22 @@ async function disconnect() {
 }
 .rp-btn {
   min-height: 36px;
+}
+.rp-file {
+  display: none;
+}
+.rp-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1px 8px;
+  margin: 4px 0 0;
+}
+.rp-facts dt {
+  color: rgb(var(--ink-2));
+}
+.rp-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .rp-agree {
   display: flex;
