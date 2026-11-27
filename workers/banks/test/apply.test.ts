@@ -744,7 +744,8 @@ describe('a run that dies between batches', () => {
 describe('claim release and the fair pick', () => {
   beforeEach(() => seedWorld({ lastOk: null }))
   const stamp = () => String(item().last_sync_at)
-  const released = () => expect(stamp() < new Date(t.getTime() - 15 * MIN).toISOString()).toBe(true)
+  // `min`: the minute (after t) the run that just ended started at; its released stamp sits one claim window behind that.
+  const released = (min = 0) => expect(stamp() < new Date(t.getTime() + min * MIN - 15 * MIN).toISOString()).toBe(true)
   const again = (min = 1) => {
     const n = new Date(t.getTime() + min * MIN)
     return syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => n }), KEYS, ITEM, n)
@@ -756,14 +757,15 @@ describe('claim release and the fair pick', () => {
     run(`UPDATE bank_items SET sync_requested_at = ? WHERE id = ?`, new Date(t.getTime() + 30_000).toISOString(), ITEM) // a webhook a minute after
     queue.push(() => plaidError('PRODUCT_NOT_READY'))
     expect(await again()).toBe(true) // not skipped for the claim window
-    released()
+    released(1)
     queue.push(() => plaidError('RATE_LIMIT_EXCEEDED'))
     expect(await again()).toBe(true)
     expect(item().last_error).toBe('plaid_rate_limit_exceeded')
-    released()
+    released(1)
     expect(await pickDue(db.d1, new Date(t.getTime() + 2 * MIN))).toEqual([ITEM]) // standing error: still due, retried on a later tick
     queue.push(() => page({ next_cursor: 'cur-2' }))
     expect(await again(3)).toBe(true)
+    released(3)
     expect(item().last_error).toBeNull()
   })
 
