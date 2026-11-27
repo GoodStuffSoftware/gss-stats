@@ -19,8 +19,8 @@ const code = async (r: Response) => ((await r.json()) as { code: string }).code
 afterEach(() => vi.restoreAllMocks())
 
 describe('routing', () => {
-  it('answers 501 not_built on the four owner paths for an allowed owner', async () => {
-    for (const p of ['/link-token', '/exchange', '/unlink', '/accounts-refresh']) {
+  it('answers 501 not_built on the unbuilt owner paths for an allowed owner', async () => {
+    for (const p of ['/unlink', '/accounts-refresh']) {
       const r = await post(p, { ownerEmail: 'Owner@example.com' })
       expect(r.status).toBe(501)
       expect(await code(r)).toBe('not_built')

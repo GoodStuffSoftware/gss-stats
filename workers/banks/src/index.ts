@@ -3,6 +3,8 @@
 // Plan: bank links sections 1, 3.3 and 5; ADR 0009. Legs 3 to 7 replace the 501 handlers.
 import { allowedEmails, type Env } from './env'
 import { log } from './log'
+import { handleLinkToken } from './linkToken'
+import { handleExchange } from './exchange'
 
 export type { Env } from './env'
 
@@ -34,8 +36,8 @@ const notBuilt: Handler = async () => fail(501, 'not_built')
 
 // ---- ROUTE TABLE: one line per route, exact path match, POST only. Add a route here and nowhere else. ----
 export const ROUTES: Readonly<Record<string, Route>> = {
-  '/link-token': { auth: 'owner', handler: notBuilt },
-  '/exchange': { auth: 'owner', handler: notBuilt },
+  '/link-token': { auth: 'owner', handler: (i) => handleLinkToken(i) },
+  '/exchange': { auth: 'owner', handler: (i) => handleExchange(i) },
   '/unlink': { auth: 'owner', handler: notBuilt },
   '/accounts-refresh': { auth: 'owner', handler: notBuilt },
   '/webhook': { auth: 'raw', handler: notBuilt },
