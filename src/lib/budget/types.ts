@@ -47,7 +47,9 @@ export interface Txn { id: string; accountId: string; postedDate: IsoDate; txnDa
   included?: boolean
   /** Set by the transactions API: a rule on this row's merchant key would affect only the merchant the row names (one display
    *  name under the key, not a payment-service key). Absent or false: no "Use for all" offer. */
-  ruleSafe?: boolean }
+  ruleSafe?: boolean
+  /** true while the bank shows the row as pending (bank-linked accounts only). Absent = posted. */
+  pending?: boolean }
 /** What pairing changes on a row: it is the row's classification as it stood before it was paired. */
 export type UnpairedFields = Pick<Txn, 'kind' | 'categoryId' | 'categorySource' | 'confidence' | 'needsReview' | 'reviewReason'>
 export interface TxnInsert extends Txn { importId: string; statementEnd: IsoDate | null
@@ -122,7 +124,7 @@ export interface SimilarApplyResponse {
 export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_store' }
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null
-  personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: 'statement' | 'manual' | null
+  personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: 'statement' | 'manual' | 'bank' | null
   aprBp: number | null; creditLimitCents: Cents | null
   /** Cosigned (debt_terms): shown, but kept out of the total owed and the pie. Absent = not cosigned. */
   cosigned?: boolean }
@@ -165,3 +167,18 @@ export interface BudgetTableProps { query: TxnQuery; categories: Category[]; acc
    *  has no person choices and no saved state): the people, the signed-in login (the key of its saved toolbar), the period. */
   people?: Person[]; accountEmail?: string; bounds?: { from: IsoDate; to: IsoDate } }
 export interface BudgetEditedEvent { txnId: string; ruleApplied: boolean; reapplied: number }
+
+// Bank links (ADR 0009). Owned by the lead like the rest of this file.
+export type BankItemStatus = 'active' | 'needs_reconnect' | 'pending_disconnect' | 'revoked' | 'removed'
+export type BankAccountSync = 'unmapped' | 'on' | 'off'
+export interface BankAccountView { id: string; name: string; mask: string | null; type: string; subtype: string | null
+  sync: BankAccountSync; accountId: string | null; syncFrom: IsoDate | null
+  balanceCents: Cents | null; availableCents: Cents | null; limitCents: Cents | null; balanceAsOf: string | null }
+export interface BankItemView { id: string; institutionName: string | null; status: BankItemStatus; mine: boolean
+  newAccounts: boolean; lastOkAt: string | null; lastError: string | null; syncRequested: boolean
+  accounts: BankAccountView[] }
+export interface BankDroppedRow { txnId: string; postedDate: IsoDate; amountCents: Cents; description: string; accountId: string }
+export interface BanksStatus { configured: boolean; linkEnabled: boolean
+  slots: { used: number; limit: number; left: number }; items: BankItemView[]; dropped: BankDroppedRow[] }
+export const BANKS_CONSENT_VERSION = 1
+export const PLAID_SLOT_LIMIT = 10
