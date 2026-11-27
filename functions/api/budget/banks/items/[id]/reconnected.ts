@@ -10,12 +10,13 @@ import { defineRoute } from '../../../../../_lib/budgetDb'
 import { LIVE_ITEM_STATUSES, itemNotActive, requireBanks, requireOwnItem } from '../../../../../_lib/banks'
 
 // The failed sync's claim stamp (last_sync_at) would keep the Item out of the next tick's due pick for the 15-minute claim window.
-// Reconnecting releases it the way the Worker's releasedStamp does (now - window - 1 ms; keep in step with workers/banks/src/sync.ts),
-// so the first tick after the reconnect syncs. An older stamp is left alone (it still orders the pick).
+// Reconnecting a needs_reconnect Item releases it the way the Worker's releasedStamp does (now - window - 1 ms; keep in step with workers/banks/src/sync.ts),
+// so the first tick after the reconnect syncs. An older stamp is left alone (it still orders the pick). An active or pending_disconnect Item keeps
+// its stamp: finished runs release their own claim, so a fresh stamp there means a run in flight (releasing it would allow a second, concurrent sync).
 const CLAIM_WINDOW_MS = 15 * 60_000
 
 export const RECONNECTED_SQL = `UPDATE bank_items SET status = 'active', last_error = NULL, sync_requested_at = ?1, updated_at = ?1,
-          last_sync_at = CASE WHEN last_sync_at > ?3 THEN ?3 ELSE last_sync_at END
+          last_sync_at = CASE WHEN status = 'needs_reconnect' AND last_sync_at > ?3 THEN ?3 ELSE last_sync_at END
         WHERE id = ?2 AND status IN ('needs_reconnect','pending_disconnect','active')`
 
 export const onRequest = defineRoute({

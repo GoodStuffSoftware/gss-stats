@@ -100,6 +100,14 @@ describe('reconnected', () => {
     expect(row().last_sync_at).toBe('2026-01-01T00:00:00.000Z')
   })
 
+  it.each(['active', 'pending_disconnect'])('a %s Item with a fresh claim keeps its stamp (a run may be in flight)', async (status) => {
+    setStatus(status)
+    const fresh = new Date().toISOString()
+    db.exec(`UPDATE bank_items SET last_sync_at = '${fresh}' WHERE id = '${ITEM}'`)
+    await act(reconnected, 'reconnected')
+    expect(row()).toMatchObject({ status: 'active', last_sync_at: fresh })
+  })
+
   it.each(['revoked', 'removed'])('409 item_not_active for a %s Item, status unchanged', async (status) => {
     setStatus(status)
     const res = await act(reconnected, 'reconnected')

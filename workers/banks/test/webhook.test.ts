@@ -339,6 +339,23 @@ describe('markRepaired', () => {
     expect(await markRepaired(db.d1, ITEM, NOW)).toBe(1)
     expect(row()).toMatchObject({ status: 'active', last_error: null, sync_requested_at: NOW.toISOString(), updated_at: NOW.toISOString() })
   })
+  it('releases a fresh claim stamp only on a needs_reconnect Item, and leaves an older stamp alone', async () => {
+    const fresh = new Date(NOW.getTime() - 60_000).toISOString()
+    await seedItem('needs_reconnect')
+    runSql(`UPDATE bank_items SET last_sync_at = ? WHERE id = ?`, fresh, ITEM)
+    expect(await markRepaired(db.d1, ITEM, NOW)).toBe(1)
+    expect(String(row().last_sync_at) < new Date(NOW.getTime() - 15 * 60_000).toISOString()).toBe(true)
+    runSql(`UPDATE bank_items SET status = 'needs_reconnect', last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = ?`, ITEM)
+    expect(await markRepaired(db.d1, ITEM, NOW)).toBe(1)
+    expect(row().last_sync_at).toBe('2026-01-01T00:00:00.000Z')
+  })
+  it('keeps the claim of a run in flight on a pending_disconnect Item', async () => {
+    const fresh = new Date(NOW.getTime() - 60_000).toISOString()
+    await seedItem('pending_disconnect')
+    runSql(`UPDATE bank_items SET last_sync_at = ? WHERE id = ?`, fresh, ITEM)
+    expect(await markRepaired(db.d1, ITEM, NOW)).toBe(1)
+    expect(row()).toMatchObject({ status: 'active', last_sync_at: fresh })
+  })
   it('leaves a revoked item alone', async () => {
     await seedItem('revoked')
     expect(await markRepaired(db.d1, ITEM, NOW)).toBe(0)

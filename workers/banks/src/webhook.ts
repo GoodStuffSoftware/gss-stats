@@ -139,7 +139,7 @@ export async function markRepaired(db: D1Database, itemId: string, now: Date): P
   const r = await db
     .prepare(
       `UPDATE bank_items SET status = 'active', last_error = NULL, sync_requested_at = ?2, updated_at = ?2,
-        last_sync_at = CASE WHEN last_sync_at > ?3 THEN ?3 ELSE last_sync_at END
+        last_sync_at = CASE WHEN status = 'needs_reconnect' AND last_sync_at > ?3 THEN ?3 ELSE last_sync_at END
         WHERE id = ?1 AND status IN ('needs_reconnect','pending_disconnect')`,
     )
     .bind(itemId, at, releasedStamp(now))

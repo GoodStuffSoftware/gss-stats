@@ -76,7 +76,8 @@ export async function handleLinkToken(input: RouteInput, deps: Partial<BankDeps>
     log('link_token_created', { update: itemId === undefined ? 0 : 1 })
     return jsonResponse(200, { ok: true, linkToken: res.link_token, expiration: typeof res.expiration === 'string' ? res.expiration : null })
   } catch (e) {
-    if (isSetupRefusal(e)) {
+    // Update mode: a refusal means this Item's link is bad (INVALID_ACCESS_TOKEN and the like), not our setup. It stays plaid_<type>, the bank-side/relink path.
+    if (itemId === undefined && isSetupRefusal(e)) {
       log('link_failed', {}, 'plaid_setup')
       return jsonResponse(502, { ok: false, code: 'plaid_setup' })
     }

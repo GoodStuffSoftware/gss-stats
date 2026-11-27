@@ -367,6 +367,14 @@ describe('POST /link-token', () => {
       calls.length = 0
     })
 
+    it('a refused update-mode token (bad link, not our setup) keeps plaid_<type>, never plaid_setup', async () => {
+      known[LINK] = () => json({ error_type: 'INVALID_INPUT', error_code: 'INVALID_ACCESS_TOKEN', error_message: 'secret-looking text' }, 400)
+      const res = await link(makeEnv(), { itemId })
+      expect(res.status).toBe(502)
+      expect(((await res.json()) as { code: string }).code).toBe('plaid_invalid_input')
+      expect(logs.join('\n')).not.toContain('secret-looking')
+    })
+
     it('sends the decrypted access token, no products, and no update by default', async () => {
       const res = await link(makeEnv(), { itemId })
       expect(res.status).toBe(200)
