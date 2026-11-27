@@ -1,4 +1,5 @@
 // Receipts Worker store against the real budget schema in SQLite (node:sqlite, D1's dialect). Made-up rows only.
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createBudgetDb, insertTxn, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { isStale, matchReceipts, STALE_AFTER_DAYS, type MatchProposal } from '../../../src/lib/budget/receiptMatch'
@@ -500,3 +501,210 @@ describe('query plans use an index (D1 read budget)', () => {
     scan(plan(S.AUTO_RECEIPT_SQL, ['r1', 't1', 'x']))
   })
 })
+
+// ---------- photo uploads (stage 2) ----------
+const UP_A = 'user-a@example.com'
+const UP_B = 'user-b@example.com'
+const hex = (n: number): string => n.toString(16).padStart(64, '0')
+let upN = 0
+async function putUpload(over: { email?: string; sha?: string; at?: Date } = {}) {
+  const id = S.newUploadId()
+  upN++
+  const r = await S.insertUploadReceipt(d1(), { id, uploaderEmail: over.email ?? UP_A, imageSha256: over.sha ?? hex(upN), imageBytes: 1234 }, over.at ?? NOW)
+  return { id, r }
+}
+/** Make an upload row look read: the fields the matcher needs. */
+function readUp(id: string, over: { status?: string; total?: number; orderRef?: string | null; receiptDate?: string } = {}): void {
+  db.sqlite.prepare(`UPDATE receipts SET status = ?, kind = 'purchase', merchant = 'Photo Shop', currency = 'USD', total_cents = ?, order_ref = ?, receipt_date = ? WHERE id = ?`)
+    .run(over.status ?? 'unmatched', over.total ?? 2500, over.orderRef ?? null, over.receiptDate ?? '2026-12-01', id)
+}
+
+describe('upload helpers', () => {
+  it('inserts a pending upload row with its image key, hash and size, and no connection', async () => {
+    const { id, r } = await putUpload()
+    expect(r).toEqual({ ok: true, id })
+    const row = db.get<Record<string, unknown>>('SELECT * FROM receipts WHERE id = ?', id)!
+    expect(row).toMatchObject({ source: 'upload', status: 'pending', attempts: 0, connection_id: null, gmail_msg_id: null, uploader_email: UP_A, image_key: S.imageKeyOf(id), image_bytes: 1234, email_date: '2026-12-05' })
+    expect(S.imageKeyOf(id)).toBe(`img/${id}.jpg`)
+  })
+  it("the same image twice answers with the existing row (own upload and someone else's)", async () => {
+    const first = await putUpload({ sha: hex(900) })
+    const own = await S.insertUploadReceipt(d1(), { id: S.newUploadId(), uploaderEmail: UP_A, imageSha256: hex(900), imageBytes: 5 }, NOW)
+    expect(own).toMatchObject({ ok: false, duplicate: { id: first.id, uploaderEmail: UP_A } })
+    const other = await S.insertUploadReceipt(d1(), { id: S.newUploadId(), uploaderEmail: UP_B, imageSha256: hex(900), imageBytes: 5 }, NOW)
+    expect(other).toMatchObject({ ok: false, duplicate: { id: first.id, uploaderEmail: UP_A } })
+    expect(db.get<{ n: number }>('SELECT count(*) AS n FROM receipts')!.n).toBe(1)
+    expect((await S.findUploadByHash(d1(), hex(900)))?.id).toBe(first.id)
+    expect(await S.findUploadByHash(d1(), hex(901))).toBeNull()
+  })
+  it('a non-unique database error is not swallowed', async () => {
+    await expect(S.insertUploadReceipt(d1(), { id: 'bad', uploaderEmail: UP_A, imageSha256: hex(5), imageBytes: 5 }, NOW)).rejects.toThrow()
+  })
+  it('loadUpload finds uploads only, not email receipts', async () => {
+    const { id } = await putUpload()
+    expect(await S.loadUpload(d1(), id)).toMatchObject({ id, uploaderEmail: UP_A, status: 'pending', imageKey: `img/${id}.jpg`, attempts: 0 })
+    const e = await put()
+    expect(await S.loadUpload(d1(), (e as unknown as { id: string }).id)).toBeNull()
+    expect(await S.loadUpload(d1(), 'r0000000000000000')).toBeNull()
+  })
+  it('uploadsToday counts one person since the start of the UTC day', async () => {
+    await putUpload({ at: new Date('2026-12-04T23:59:59.000Z') })
+    await putUpload({ at: new Date('2026-12-05T00:00:00.000Z') })
+    await putUpload({ at: NOW })
+    await putUpload({ email: UP_B, at: NOW })
+    expect(await S.uploadsToday(d1(), UP_A, NOW)).toBe(2)
+    expect(await S.uploadsToday(d1(), UP_B, NOW)).toBe(1)
+    expect(await S.uploadsToday(d1(), 'nobody@example.com', NOW)).toBe(0)
+  })
+  it('loadUploadRetries lists pending and error uploads under the attempt limit, fewest attempts first, never email rows', async () => {
+    const a = await putUpload()
+    const b = await putUpload()
+    const c = await putUpload()
+    const d = await putUpload()
+    db.exec(`UPDATE receipts SET attempts = 2, status = 'error' WHERE id = '${b.id}'`)
+    db.exec(`UPDATE receipts SET attempts = 3, status = 'error' WHERE id = '${c.id}'`)
+    db.exec(`UPDATE receipts SET status = 'unmatched' WHERE id = '${d.id}'`)
+    await put({ extracted: { ...extracted(), status: 'ok' } })
+    const rows = await S.loadUploadRetries(d1(), 10)
+    expect(rows.map((r) => r.id)).toEqual([a.id, b.id])
+    expect(await S.loadUploadRetries(d1(), 1)).toHaveLength(1)
+  })
+  it("deleteUploadReceipt removes only the uploader's own row, with its items", async () => {
+    const { id } = await putUpload()
+    db.exec(`INSERT INTO receipt_items (receipt_id, seq, description, amount_cents) VALUES ('${id}', 1, 'Thing', 100)`)
+    expect(await S.deleteUploadReceipt(d1(), id, UP_B)).toBe(false)
+    expect(await S.deleteUploadReceipt(d1(), 'r0000000000000000', UP_A)).toBe(false)
+    expect(db.get('SELECT 1 FROM receipts WHERE id = ?', id)).toBeTruthy()
+    expect(await S.deleteUploadReceipt(d1(), id, UP_A)).toBe(true)
+    expect(db.get('SELECT 1 FROM receipts WHERE id = ?', id)).toBeFalsy()
+    expect(db.get('SELECT 1 FROM receipt_items WHERE receipt_id = ?', id)).toBeFalsy()
+  })
+  it('an email receipt is never deleted through the upload helper', async () => {
+    const e = (await put()) as unknown as { id: string }
+    expect(await S.deleteUploadReceipt(d1(), e.id, UP_A)).toBe(false)
+    expect(db.get('SELECT 1 FROM receipts WHERE id = ?', e.id)).toBeTruthy()
+  })
+  it('the retention sweep reads images older than the cutoff and clearing keeps the row and its hash', async () => {
+    const old = await putUpload({ at: new Date('2026-08-01T00:00:00.000Z'), sha: hex(700) })
+    const fresh = await putUpload({ at: NOW })
+    const cutoff = new Date('2026-09-01T00:00:00.000Z')
+    expect(await S.loadExpiredImages(d1(), cutoff, 50)).toEqual([{ id: old.id, imageKey: `img/${old.id}.jpg` }])
+    await S.clearImageKey(d1(), old.id, NOW)
+    const row = db.get<Record<string, unknown>>('SELECT image_key, image_sha256 FROM receipts WHERE id = ?', old.id)!
+    expect(row.image_key).toBeNull()
+    expect(row.image_sha256).toBe(hex(700))
+    expect(await S.loadExpiredImages(d1(), cutoff, 50)).toEqual([])
+    expect((await S.loadUpload(d1(), fresh.id))?.imageKey).toBe(`img/${fresh.id}.jpg`)
+  })
+})
+
+describe('upload scope twins', () => {
+  it("loadOpenReceipts for an upload scope returns only that person's open uploads, never email receipts", async () => {
+    const a = await putUpload(); readUp(a.id)
+    const b = await putUpload({ email: UP_B }); readUp(b.id)
+    await putUpload() // still pending: not open
+    await put()
+    const open = await S.loadOpenReceipts(d1(), { kind: 'upload', email: UP_A }, NOW)
+    expect(open.map((r) => r.id)).toEqual([a.id])
+    const emailOpen = await S.loadOpenReceipts(d1(), CONN, NOW)
+    expect(emailOpen.map((r) => r.id)).not.toContain(a.id)
+    expect(emailOpen).toHaveLength(1)
+  })
+  it("markStale in upload scope dismisses only that person's old open uploads", async () => {
+    const a = await putUpload(); readUp(a.id, { receiptDate: '2026-08-01' })
+    const b = await putUpload({ email: UP_B }); readUp(b.id, { receiptDate: '2026-08-01' })
+    const fresh = await putUpload(); readUp(fresh.id)
+    expect(await S.markStale(d1(), { kind: 'upload', email: UP_A }, NOW)).toBe(1)
+    expect(rcptStatus(a.id)).toBe('dismissed')
+    expect(rcptStatus(b.id)).toBe('unmatched')
+    expect(rcptStatus(fresh.id)).toBe('unmatched')
+  })
+  it("loadAppliedSiblings in upload scope uses the order ref arm over that person's applied uploads only", async () => {
+    const a = await putUpload(); readUp(a.id, { status: 'applied', orderRef: 'UP-1' })
+    const b = await putUpload({ email: UP_B }); readUp(b.id, { status: 'applied', orderRef: 'UP-1' })
+    const sib = await S.loadAppliedSiblings(d1(), { kind: 'upload', email: UP_A }, [{ orderRef: 'UP-1', senderDomain: null, emailDate: '2026-12-05', receiptDate: '2026-12-01' }])
+    expect(sib).toHaveLength(1)
+    expect(sib[0].orderRef).toBe('UP-1')
+    expect(await S.loadAppliedSiblings(d1(), { kind: 'upload', email: UP_A }, [{ orderRef: null, senderDomain: null, emailDate: '2026-12-05', receiptDate: null }])).toEqual([])
+  })
+  it('a bare string scope is still a connection id', async () => {
+    await put()
+    expect(await S.loadOpenReceipts(d1(), CONN, NOW)).toHaveLength(1)
+    expect(await S.loadOpenReceipts(d1(), { kind: 'connection', connectionId: CONN }, NOW)).toHaveLength(1)
+  })
+})
+
+describe('upload query plans use the 0006 partial indexes', () => {
+  const scan = (p: string) => expect(p).not.toMatch(/SCAN (receipts|receipt_matches|receipt_items)\b/)
+  it('open list and stale updates use idx_rcpt_up_open', () => {
+    const open = plan(S.UP_OPEN_RECEIPTS_SQL, [UP_A, '2026-10-01'])
+    expect(open).toMatch(/idx_rcpt_up_open/)
+    expect(open).not.toMatch(/TEMP B-TREE/)
+    expect(plan(S.UP_STALE_DISMISS_SQL, [UP_A, '2026-09-01', 'x'])).toMatch(/idx_rcpt_up_open/)
+    const sup = plan(S.UP_STALE_SUPERSEDE_SQL, [UP_A, '2026-09-01', 'x'])
+    expect(sup).toMatch(/idx_rcpt_up_open/)
+    scan(sup)
+  })
+  it('applied siblings use idx_rcpt_up_review', () => {
+    const p = plan(S.UP_APPLIED_SIBLINGS_SQL, [UP_A, '["A-1"]'])
+    expect(p).toMatch(/idx_rcpt_up_review/)
+    scan(p)
+  })
+  it('the daily count uses idx_rcpt_up_day; the retry list uses idx_rcpt_up_retry', () => {
+    expect(plan(S.UPLOADS_TODAY_SQL, [UP_A, '2026-12-05T00:00:00.000Z'])).toMatch(/idx_rcpt_up_day/)
+    const retry = plan(S.UPLOAD_RETRY_SQL, [5])
+    expect(retry).toMatch(/idx_rcpt_up_retry/)
+    expect(retry).not.toMatch(/TEMP B-TREE/)
+  })
+  it('the hash lookup uses idx_rcpt_up_hash; id lookup, delete and clear use the primary key', () => {
+    expect(plan(S.UPLOAD_BY_HASH_SQL, [hex(1)])).toMatch(/idx_rcpt_up_hash/)
+    scan(plan(S.UPLOAD_BY_ID_SQL, ['r1']))
+    scan(plan(S.DELETE_UPLOAD_SQL, ['r1', UP_A]))
+    scan(plan(S.CLEAR_IMAGE_KEY_SQL, ['r1', 'x']))
+  })
+  it('the retention read is served by idx_rcpt_up_day (a partial index of uploads only)', () => {
+    expect(plan(S.EXPIRED_IMAGES_SQL, ['2026-09-01T00:00:00.000Z', 50])).toMatch(/idx_rcpt_up_day/)
+  })
+})
+
+describe('email SQL stays byte-identical', () => {
+  const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
+  it('the email statements keep the text they had before uploads', () => {
+    expect({
+      STALE_SUPERSEDE_SQL: sha(S.STALE_SUPERSEDE_SQL), STALE_DISMISS_SQL: sha(S.STALE_DISMISS_SQL), OPEN_RECEIPTS_SQL: sha(S.OPEN_RECEIPTS_SQL),
+      APPLIED_SIBLINGS_SQL: sha(S.APPLIED_SIBLINGS_SQL), RETRY_SQL: sha(S.RETRY_SQL), KNOWN_IDS_SQL: sha(S.KNOWN_IDS_SQL),
+    }).toEqual(EMAIL_SQL_HASHES)
+  })
+})
+
+describe('uploads are never auto-applied', () => {
+  it('the auto-apply SQL is restricted to source = email receipts', () => {
+    expect(S.AUTO_LINK_SQL).toContain("r.source = 'email'")
+    expect(S.AUTO_RECEIPT_SQL).toContain("source = 'email'")
+  })
+  it('with the flag on, an upload proposal is not linked and the upload stays suggested', async () => {
+    const t = mk({ posted_date: '2026-12-02', amount_cents: -2500, merchant_name: 'Photo Shop' })
+    const u = await putUpload()
+    readUp(u.id, { total: 2500, receiptDate: '2026-12-01' })
+    db.exec(`INSERT INTO receipt_items (receipt_id, seq, description, amount_cents, category_hint) VALUES ('${u.id}', 1, 'Gas', 2500, 'fuel')`)
+    const open = await S.loadOpenReceipts(d1(), { kind: 'upload', email: UP_A }, NOW)
+    const { rows } = await S.loadCandidateRows(d1(), open)
+    const w = await S.writeMatchResults(d1(), matchReceipts(open, rows, { autoApply: true }), NOW)
+    expect(w.proposals.length).toBeGreaterThan(0)
+    const applied = await S.autoApplyMatches(d1(), w.proposals, NOW, { enabled: true })
+    expect(applied).toBe(0)
+    expect(rcptStatus(u.id)).toBe('suggested')
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM receipt_matches WHERE status = 'applied'")!.n).toBe(0)
+    expect(db.get<{ category_id: string | null }>('SELECT category_id FROM transactions WHERE id = ?', t)!.category_id).toBeNull()
+  })
+})
+
+// sha256 of each statement as it was before photo uploads (a989a83)
+const EMAIL_SQL_HASHES: Record<string, string> = {
+  APPLIED_SIBLINGS_SQL: '8e77e20354db9dfce76ad4b549dc965e4f3405dc9748f998beb4122e0571442e',
+  KNOWN_IDS_SQL: '27e087b7c3af844e81f2a28ea875702708553261c94e678a183682a840058aad',
+  OPEN_RECEIPTS_SQL: '47021f41ec73dfc8f19da7ba159cc16d5a460da6a01e6f447fd21907194a1b11',
+  RETRY_SQL: '39ada5646fbb66cc52f7db0d9c9890e5557639d2d6cade505fe9ec074090c782',
+  STALE_DISMISS_SQL: 'e487c9925446d6a3ed3f31f53e73d2f244c1a6bb52c39bc3448a52b81848deda',
+  STALE_SUPERSEDE_SQL: '938669d0ffb5be968d3da22c5b78a2c18fb864f0cc7d9a8ced10765e022faa5a',
+}

@@ -44,6 +44,10 @@ const iso = (d: Date): string => d.toISOString()
 const dayOf = (d: Date): string => d.toISOString().slice(0, 10)
 const HEX_ID = /^[0-9a-f]{8,32}$/
 
+/** Whose receipts a re-match covers: one email connection's, or one person's photo uploads. A bare string is a connection id. */
+export type ReceiptScope = { kind: 'connection'; connectionId: string } | { kind: 'upload'; email: string }
+const asScope = (s: ReceiptScope | string): ReceiptScope => (typeof s === 'string' ? { kind: 'connection', connectionId: s } : s)
+
 /** Same rule as functions/_lib/budgetDb nextStamp: strictly newer than the previous stamp, so an updated_at guard sees every edit. */
 function nextStamp(prev: string | null, now: number): string {
   const prevMs = prev ? Date.parse(prev) : NaN
@@ -297,14 +301,21 @@ export const STALE_SUPERSEDE_SQL = `UPDATE receipt_matches SET status = 'superse
 WHERE status = 'suggested' AND receipt_id IN (SELECT id FROM receipts WHERE connection_id = ?1 AND status IN ('unmatched','suggested') AND ${OPEN_BASE} <= ?2)`
 export const STALE_DISMISS_SQL = `UPDATE receipts SET status = 'dismissed', updated_at = ?3, updated_by = '${ACTOR}'
 WHERE connection_id = ?1 AND status IN ('unmatched','suggested') AND ${OPEN_BASE} <= ?2`
+/** Upload twins: one person's uploads (idx_rcpt_up_open). */
+export const UP_STALE_SUPERSEDE_SQL = `UPDATE receipt_matches SET status = 'superseded', decided_at = ?3, decided_by = '${ACTOR}'
+WHERE status = 'suggested' AND receipt_id IN (SELECT id FROM receipts WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND status IN ('unmatched','suggested') AND ${OPEN_BASE} <= ?2)`
+export const UP_STALE_DISMISS_SQL = `UPDATE receipts SET status = 'dismissed', updated_at = ?3, updated_by = '${ACTOR}'
+WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND status IN ('unmatched','suggested') AND ${OPEN_BASE} <= ?2`
 
 /** Unmatched or suggested receipts older than 75 days go dismissed on their own (their open suggestions are superseded). Returns how many. */
-export async function markStale(db: Db, connectionId: string, now: Date): Promise<number> {
+export async function markStale(db: Db, scope: ReceiptScope | string, now: Date): Promise<number> {
+  const sc = asScope(scope)
+  const [supersede, dismiss, key] = sc.kind === 'connection' ? [STALE_SUPERSEDE_SQL, STALE_DISMISS_SQL, sc.connectionId] : [UP_STALE_SUPERSEDE_SQL, UP_STALE_DISMISS_SQL, sc.email]
   const cutoff = staleCutoff(dayOf(now))
   const at = iso(now)
   const res = await db.batch([
-    db.prepare(STALE_SUPERSEDE_SQL).bind(connectionId, cutoff, at),
-    db.prepare(STALE_DISMISS_SQL).bind(connectionId, cutoff, at),
+    db.prepare(supersede).bind(key, cutoff, at),
+    db.prepare(dismiss).bind(key, cutoff, at),
   ])
   return res[1].meta?.changes ?? 0
 }
@@ -313,6 +324,10 @@ export async function markStale(db: Db, connectionId: string, now: Date): Promis
 
 export const OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, sender_domain, currency, email_date, receipt_date, related_date, total_cents, charges_json
 FROM receipts WHERE connection_id = ?1 AND status IN ('unmatched','suggested') AND ${OPEN_BASE} >= ?2
+ORDER BY ${OPEN_BASE} DESC LIMIT ${MAX_OPEN_PER_RUN}`
+/** Upload twin (idx_rcpt_up_open): one person's open uploads. */
+export const UP_OPEN_RECEIPTS_SQL = `SELECT id, kind, merchant, payment_via, card_last4, order_ref, sender_domain, currency, email_date, receipt_date, related_date, total_cents, charges_json
+FROM receipts WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND status IN ('unmatched','suggested') AND ${OPEN_BASE} >= ?2
 ORDER BY ${OPEN_BASE} DESC LIMIT ${MAX_OPEN_PER_RUN}`
 export const ITEMS_SQL = `SELECT receipt_id, seq, description, amount_cents, quantity, category_hint FROM receipt_items
 WHERE receipt_id IN (SELECT value FROM json_each(?1)) ORDER BY receipt_id, seq`
@@ -335,8 +350,10 @@ function parseCharges(text: unknown): MatchReceipt['charges'] {
  * Open receipts (unmatched or suggested, not stale) as matcher input, with their items, newest first. Two reads in
  * all: idx_rcpt_open, then one items read for the whole set (the primary key).
  */
-export async function loadOpenReceipts(db: Db, connectionId: string, now: Date): Promise<MatchReceipt[]> {
-  const { results } = await db.prepare(OPEN_RECEIPTS_SQL).bind(connectionId, openSince(dayOf(now))).all<Record<string, unknown>>()
+export async function loadOpenReceipts(db: Db, scope: ReceiptScope | string, now: Date): Promise<MatchReceipt[]> {
+  const sc = asScope(scope)
+  const { results } = await db.prepare(sc.kind === 'connection' ? OPEN_RECEIPTS_SQL : UP_OPEN_RECEIPTS_SQL)
+    .bind(sc.kind === 'connection' ? sc.connectionId : sc.email, openSince(dayOf(now))).all<Record<string, unknown>>()
   if (results.length === 0) return []
   const items = await db.prepare(ITEMS_SQL).bind(JSON.stringify(results.map((r) => r.id))).all<Record<string, unknown>>()
   const byReceipt = new Map<string, MatchReceipt['items']>()
@@ -364,9 +381,21 @@ UNION ALL
 SELECT order_ref, kind, sender_domain, coalesce(receipt_date, email_date) AS base_date, total_cents, charges_json FROM receipts
 WHERE connection_id = ?1 AND status = 'applied' AND email_date >= ?4 AND order_ref IS NULL AND sender_domain IN (SELECT value FROM json_each(?3))`
 
+/** Upload twin: a photo has no sender domain, so only the order_ref arm applies (idx_rcpt_up_review). */
+export const UP_APPLIED_SIBLINGS_SQL = `SELECT order_ref, kind, sender_domain, coalesce(receipt_date, email_date) AS base_date, total_cents, charges_json FROM receipts
+WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND status = 'applied' AND order_ref IN (SELECT value FROM json_each(?2))`
+
 /** Applied receipts that could be the twin of an open one (see APPLIED_SIBLINGS_SQL): the matcher's repeat-email guard. */
-export async function loadAppliedSiblings(db: Db, connectionId: string,
+export async function loadAppliedSiblings(db: Db, scope: ReceiptScope | string,
   open: ReadonlyArray<Pick<MatchReceipt, 'orderRef' | 'senderDomain' | 'emailDate' | 'receiptDate'>>): Promise<AppliedSibling[]> {
+  const sc = asScope(scope)
+  if (sc.kind === 'upload') {
+    const upRefs = [...new Set(open.flatMap((r) => (r.orderRef ? [r.orderRef] : [])))]
+    if (upRefs.length === 0) return []
+    const { results } = await db.prepare(UP_APPLIED_SIBLINGS_SQL).bind(sc.email, JSON.stringify(upRefs)).all<Record<string, unknown>>()
+    return siblingsOf(results)
+  }
+  const connectionId = sc.connectionId
   const refs = [...new Set(open.flatMap((r) => (r.orderRef ? [r.orderRef] : [])))]
   const noRef = open.filter((r) => !r.orderRef && r.senderDomain)
   if (refs.length === 0 && noRef.length === 0) return []
@@ -374,6 +403,10 @@ export async function loadAppliedSiblings(db: Db, connectionId: string,
   const earliest = noRef.reduce((m, r) => { const d = r.receiptDate ?? r.emailDate; return d < m ? d : m }, '9999-12-31')
   const from = noRef.length === 0 ? '9999-12-31' : addDays(earliest, -NO_REF_REPEAT_DAYS)
   const { results } = await db.prepare(APPLIED_SIBLINGS_SQL).bind(connectionId, JSON.stringify(refs), JSON.stringify(domains), from).all<Record<string, unknown>>()
+  return siblingsOf(results)
+}
+
+function siblingsOf(results: ReadonlyArray<Record<string, unknown>>): AppliedSibling[] {
   return results.flatMap((r) => {
     const amountCents = chargedCents({ totalCents: (r.total_cents as number | null) ?? null, charges: parseCharges(r.charges_json) })
     return amountCents === null ? [] : [{
@@ -509,7 +542,7 @@ const AUTO_ROW_GUARD = `t.category_source <> 'manual' AND t.kind_source <> 'manu
 /** ?1 stamp, ?2 receipt, ?3 txn, ?4 the row's updated_at when proposed. */
 export const AUTO_LINK_SQL = `UPDATE receipt_matches SET status = 'applied', decided_at = ?1, decided_by = '${ACTOR}'
 WHERE receipt_id = ?2 AND txn_id = ?3 AND status = 'suggested'
-  AND EXISTS (SELECT 1 FROM receipts r WHERE r.id = ?2 AND r.status IN ('unmatched','suggested'))
+  AND EXISTS (SELECT 1 FROM receipts r WHERE r.id = ?2 AND r.source = 'email' AND r.status IN ('unmatched','suggested'))
   AND EXISTS (SELECT 1 FROM transactions t WHERE t.id = ?3 AND t.updated_at = ?4 AND ${AUTO_ROW_GUARD})`
 /** ?1 category, ?2 new stamp, ?3 txn, ?4 prev updated_at, ?5 receipt, ?6 link stamp. Only a row with no category; never the note. */
 export const AUTO_CATEGORY_SQL = `UPDATE transactions AS t SET category_id = ?1, category_source = 'auto', updated_by = '${ACTOR}', updated_at = ?2
@@ -518,7 +551,7 @@ WHERE t.id = ?3 AND t.updated_at = ?4 AND t.category_id IS NULL AND ${AUTO_ROW_G
 export const AUTO_AUDIT_SQL = `INSERT INTO category_edits (txn_id, old_category_id, new_category_id, old_kind, new_kind, rule_id, edited_at, edited_by)
 SELECT t.id, NULL, ?1, t.kind, t.kind, NULL, ?2, '${ACTOR}' FROM transactions t WHERE t.id = ?3 AND t.updated_at = ?2 AND t.updated_by = '${ACTOR}'`
 export const AUTO_RECEIPT_SQL = `UPDATE receipts SET status = 'applied', updated_at = ?3, updated_by = '${ACTOR}'
-WHERE id = ?1 AND status IN ('unmatched','suggested')
+WHERE id = ?1 AND source = 'email' AND status IN ('unmatched','suggested')
   AND EXISTS (SELECT 1 FROM receipt_matches m WHERE m.receipt_id = ?1 AND m.txn_id = ?2 AND m.status = 'applied' AND m.decided_at = ?3 AND m.decided_by = '${ACTOR}')`
 
 export interface AutoApplyOptions { enabled: boolean; minScore?: number }
@@ -554,6 +587,93 @@ export async function autoApplyMatches(db: Db, proposals: readonly MatchProposal
     }
   }
   return applied
+}
+
+// ---------- photo uploads ----------
+
+/** The stored image key of an upload: 'img/<receipt id>.jpg' (the schema CHECK holds the same shape). */
+export const imageKeyOf = (id: string): string => `img/${id}.jpg`
+export const newUploadId = (): string => newId('r')
+
+export interface NewUploadInput {
+  id: string
+  /** Lower-cased signed-in address of the uploader. */
+  uploaderEmail: string
+  /** sha256 hex of the stripped bytes. */
+  imageSha256: string
+  imageBytes: number
+}
+
+export const INSERT_UPLOAD_SQL = `INSERT INTO receipts (id, connection_id, gmail_msg_id, email_date, status, attempts, created_at, updated_at, updated_by,
+  source, uploader_email, image_key, image_sha256, image_bytes)
+VALUES (?1, NULL, NULL, ?2, 'pending', 0, ?3, ?3, '${ACTOR}', 'upload', ?4, ?5, ?6, ?7)`
+
+export interface UploadRow { id: string; uploaderEmail: string; status: string; imageKey: string | null; attempts: number; emailDate: string }
+export type InsertedUpload = { ok: true; id: string } | { ok: false; duplicate: UploadRow | null }
+
+export const UPLOAD_BY_HASH_SQL = `SELECT id, uploader_email, status, image_key, attempts, email_date FROM receipts WHERE image_sha256 = ?1 AND image_sha256 IS NOT NULL`
+export const UPLOAD_BY_ID_SQL = `SELECT id, uploader_email, status, image_key, attempts, email_date FROM receipts WHERE id = ?1 AND source = 'upload'`
+/** ?1 uploader, ?2 start of the UTC day (ISO). */
+export const UPLOADS_TODAY_SQL = `SELECT count(*) AS n FROM receipts WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND created_at >= ?2`
+export const UPLOAD_RETRY_SQL = `SELECT id, uploader_email, status, image_key, attempts, email_date FROM receipts
+WHERE uploader_email IS NOT NULL AND status IN ('pending','error') AND attempts < ${MAX_ATTEMPTS} ORDER BY attempts, id LIMIT ?1`
+/** Rows whose image is past retention (?1 = ISO cutoff). Scans the small idx_rcpt_up_day partial index: uploads are few. */
+export const EXPIRED_IMAGES_SQL = `SELECT id, image_key FROM receipts WHERE uploader_email IS NOT NULL AND created_at < ?1 AND image_key IS NOT NULL ORDER BY created_at LIMIT ?2`
+export const CLEAR_IMAGE_KEY_SQL = `UPDATE receipts SET image_key = NULL, updated_at = ?2, updated_by = '${ACTOR}' WHERE id = ?1 AND uploader_email IS NOT NULL AND image_key IS NOT NULL`
+export const DELETE_UPLOAD_SQL = `DELETE FROM receipts WHERE id = ?1 AND uploader_email = ?2 AND uploader_email IS NOT NULL`
+
+const uploadRow = (r: Record<string, unknown>): UploadRow => ({
+  id: r.id as string, uploaderEmail: r.uploader_email as string, status: r.status as string,
+  imageKey: (r.image_key as string | null) ?? null, attempts: r.attempts as number, emailDate: r.email_date as string,
+})
+
+export async function findUploadByHash(db: Db, sha256: string): Promise<UploadRow | null> {
+  const r = await db.prepare(UPLOAD_BY_HASH_SQL).bind(sha256).first<Record<string, unknown>>()
+  return r ? uploadRow(r) : null
+}
+
+export async function loadUpload(db: Db, id: string): Promise<UploadRow | null> {
+  const r = await db.prepare(UPLOAD_BY_ID_SQL).bind(id).first<Record<string, unknown>>()
+  return r ? uploadRow(r) : null
+}
+
+/** Insert one pending upload row. The unique image hash is the household-wide dedupe: a collision (a race) answers with the existing row. */
+export async function insertUploadReceipt(db: Db, u: NewUploadInput, now: Date): Promise<InsertedUpload> {
+  try {
+    await db.prepare(INSERT_UPLOAD_SQL).bind(u.id, dayOf(now), iso(now), u.uploaderEmail, imageKeyOf(u.id), u.imageSha256, u.imageBytes).run()
+    return { ok: true, id: u.id }
+  } catch (e) {
+    if (/UNIQUE/i.test(e instanceof Error ? e.message : '')) return { ok: false, duplicate: await findUploadByHash(db, u.imageSha256) }
+    throw e
+  }
+}
+
+export async function uploadsToday(db: Db, email: string, now: Date): Promise<number> {
+  const r = await db.prepare(UPLOADS_TODAY_SQL).bind(email, `${dayOf(now)}T00:00:00.000Z`).first<{ n: number }>()
+  return r?.n ?? 0
+}
+
+/** Pending or failed uploads still under the attempt limit, across people, oldest attempts first. */
+export async function loadUploadRetries(db: Db, limit: number): Promise<UploadRow[]> {
+  const { results } = await db.prepare(UPLOAD_RETRY_SQL).bind(Math.max(1, Math.floor(limit))).all<Record<string, unknown>>()
+  return results.map(uploadRow)
+}
+
+/** Delete the uploader's own row (items and matches cascade). True when a row went; false for a missing row or someone else's. */
+export async function deleteUploadReceipt(db: Db, id: string, email: string): Promise<boolean> {
+  const res = await db.prepare(DELETE_UPLOAD_SQL).bind(id, email).run()
+  return (res.meta?.changes ?? 0) > 0
+}
+
+export interface ExpiredImage { id: string; imageKey: string }
+export async function loadExpiredImages(db: Db, olderThan: Date, limit: number): Promise<ExpiredImage[]> {
+  const { results } = await db.prepare(EXPIRED_IMAGES_SQL).bind(iso(olderThan), Math.max(1, Math.floor(limit))).all<{ id: string; image_key: string }>()
+  return results.map((r) => ({ id: r.id, imageKey: r.image_key }))
+}
+
+/** Keep the row (its facts, matches and hash) and drop only the pointer to the deleted image. */
+export async function clearImageKey(db: Db, id: string, now: Date): Promise<void> {
+  await db.prepare(CLEAR_IMAGE_KEY_SQL).bind(id, iso(now)).run()
 }
 
 // ---------- run rows and the daily cap ----------
