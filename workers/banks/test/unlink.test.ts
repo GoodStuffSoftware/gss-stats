@@ -1,6 +1,8 @@
 // POST /unlink (plan 3.3). Plaid is a stub that throws on any URL it was not told to expect; D1 is the fake over the real migrations.
 // Every value is made up.
 import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { handleUnlink } from '../src/unlink'
@@ -233,7 +235,7 @@ describe('unlink: guards', () => {
 
 describe('unlink and the webhook share one wipe', () => {
   it('unlink.ts imports wipeItemStatements from webhook.ts and writes no wipe SQL of its own', () => {
-    const src = readFileSync(new URL('../src/unlink.ts', import.meta.url), 'utf8')
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'unlink.ts'), 'utf8')
     expect(src).toMatch(/import \{ wipeItemStatements \} from '\.\/webhook'/)
     expect(src).not.toMatch(/DELETE FROM|UPDATE bank_items|UPDATE bank_accounts/)
   })

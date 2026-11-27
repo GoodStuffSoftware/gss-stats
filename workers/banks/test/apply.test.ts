@@ -563,6 +563,8 @@ describe('errors', () => {
 describe('the cron entry', () => {
   it('syncs a due Item through the scheduled handler', async () => {
     await seedWorld()
+    // The tick's liabilities step has its own cases (liabilities.test.ts): mark it fresh so this case stays about the sync.
+    run('UPDATE bank_items SET liabilities_at = ? WHERE id = ?', t.toISOString(), ITEM)
     queue.push(() => page({ added: [ptxn('plaid-a')] }))
     await handleScheduled(env(), { fetch: stubFetch, now: () => t })
     expect(txnOf('plaid-a')).toBeTruthy()
