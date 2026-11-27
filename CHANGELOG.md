@@ -15,6 +15,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Changed
 - **Statement files and bank links don't double up** — once a bank account is linked, a statement load skips rows the bank already sends.
 
+## [0.87.0] — 2026-11-27
+
+### Added
+- **Smart date fields in Budget** — type dates in words ("last 30 days", "March", "Oct 1 to Nov 15"), or open the calendar and pick one day or a range, on the Budget date range and the Transactions Filters panel.
+
 ## [0.86.1] — 2026-11-27
 
 ### Fixed

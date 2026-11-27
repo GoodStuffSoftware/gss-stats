@@ -136,3 +136,38 @@ describe('TxnToolbar pop-outs', () => {
     expect(w.get('#txn-tt-panel').isVisible()).toBe(false)
   })
 })
+
+describe('TxnToolbar dates', () => {
+  function mountDates(prefs: { from: string; to: string }, bounds = { from: '2026-09-01', to: '2026-11-30' }) {
+    wrapper = mount(TxnToolbar, {
+      attachTo: document.body,
+      props: { modelValue: { ...defaultTxnViewPrefs(), ...prefs }, rows: [], categories: [], accounts: [], people: [], shown: 0, bounds },
+    })
+    return wrapper
+  }
+  it('shows the filter range as words and fills a missing end from the period', async () => {
+    const w = mountDates({ from: '2026-10-01', to: '2026-10-15' })
+    expect((w.get('[data-testid="txn-date-input"]').element as HTMLInputElement).value).toBe('Oct 1 – Oct 15, 2026')
+    await w.setProps({ modelValue: { ...defaultTxnViewPrefs(), from: '2026-10-20', to: '' } })
+    expect((w.get('[data-testid="txn-date-input"]').element as HTMLInputElement).value).toContain('Oct 20')
+    await w.setProps({ modelValue: defaultTxnViewPrefs() })
+    expect((w.get('[data-testid="txn-date-input"]').element as HTMLInputElement).value).toBe('')
+  })
+  it('typing a range sets both ends in the prefs', async () => {
+    const w = mountDates({ from: '', to: '' })
+    const input = w.get('[data-testid="txn-date-input"]')
+    await input.setValue('Oct 1 to Oct 15 2026')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = w.emitted('update:modelValue')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0][0]).toMatchObject({ from: '2026-10-01', to: '2026-10-15' })
+  })
+  it('a range outside the period is refused with a hint and changes nothing', async () => {
+    const w = mountDates({ from: '', to: '' })
+    const input = w.get('[data-testid="txn-date-input"]')
+    await input.setValue('Oct 1 to Dec 31 2026')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('update:modelValue')).toBeFalsy()
+    expect(w.find('[data-testid="txn-date-hint"]').exists()).toBe(true)
+  })
+})

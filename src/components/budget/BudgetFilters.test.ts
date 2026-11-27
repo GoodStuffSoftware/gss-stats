@@ -34,28 +34,39 @@ describe('BudgetFilters', () => {
     expect(w.emitted('range')![1]).toEqual([{ from: '2026-01-01', to: '2026-11-20' }])
   })
 
-  it('a range that matches no preset shows Custom with date inputs', () => {
+  it('the smart date field shows the range as text; a range that matches no preset shows Custom', () => {
     const w = mountFilters({ from: '2026-10-05', to: '2026-10-09' })
     expect((w.get('[data-testid="budget-range"]').element as unknown as HTMLSelectElement).value).toBe('custom')
-    expect((w.get('[data-testid="budget-from"]').element as unknown as HTMLInputElement).value).toBe('2026-10-05')
+    expect((w.get('[data-testid="budget-date-input"]').element as unknown as HTMLInputElement).value).toBe('Oct 5 – Oct 9, 2026')
+    expect(mountFilters().find('[data-testid="budget-date-input"]').exists()).toBe(true)
   })
 
-  it('choosing Custom opens the inputs without changing the range; a valid custom range emits', async () => {
+  it('typing words in the smart field emits the range', async () => {
     const w = mountFilters()
-    expect(w.find('[data-testid="budget-from"]').exists()).toBe(false)
+    await w.get('[data-testid="budget-date-input"]').setValue('Oct 1 to Oct 9')
+    await w.get('[data-testid="budget-date-input"]').trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('range')).toEqual([[{ from: '2026-10-01', to: '2026-10-09' }]])
+  })
+
+  it('a pick in the calendar emits a single date or a range', async () => {
+    const w = mountFilters()
+    await w.get('[data-testid="budget-date-calendar"]').trigger('click')
+    await w.get('button[data-date="2026-11-10"]').trigger('click')
+    await w.get('button[data-date="2026-11-10"]').trigger('click')
+    expect(w.emitted('range')).toEqual([[{ from: '2026-11-10', to: '2026-11-10' }]])
+    await w.get('[data-testid="budget-date-calendar"]').trigger('click')
+    await w.get('button[data-date="2026-11-03"]').trigger('click')
+    await w.get('button[data-date="2026-11-12"]').trigger('click')
+    expect(w.emitted('range')!.at(-1)).toEqual([{ from: '2026-11-03', to: '2026-11-12' }])
+  })
+
+  it('choosing Custom changes nothing; a range longer than the server accepts shows a hint and emits nothing', async () => {
+    const w = mountFilters()
     await w.get('[data-testid="budget-range"]').setValue('custom')
     expect(w.emitted('range')).toBeUndefined()
-    await w.get('[data-testid="budget-from"]').setValue('2026-10-05')
-    await w.get('[data-testid="budget-to"]').setValue('2026-10-09')
-    expect(w.emitted('range')!.at(-1)).toEqual([{ from: '2026-10-05', to: '2026-10-09' }])
-  })
-
-  it('an inverted or over-long custom range shows a message and emits nothing', async () => {
-    const w = mountFilters({ from: '2026-10-05', to: '2026-10-09' })
-    await w.get('[data-testid="budget-from"]').setValue('2026-10-20')
-    expect(w.get('[role="alert"]').text()).toContain('after')
-    await w.get('[data-testid="budget-from"]').setValue('2024-01-01')
-    expect(w.get('[role="alert"]').text()).toContain('400')
+    await w.get('[data-testid="budget-date-input"]').setValue('since 2024')
+    await w.get('[data-testid="budget-date-input"]').trigger('keydown', { key: 'Enter' })
+    expect(w.get('[data-testid="budget-date-hint"]').text()).toContain('400')
     expect(w.emitted('range')).toBeUndefined()
   })
 
