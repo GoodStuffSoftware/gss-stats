@@ -1150,6 +1150,14 @@ describe('BudgetTable Pending tag (bank rows the bank has not posted)', () => {
     expect(rowEl(w, 't3').find('[data-testid="pending-tag"]').exists()).toBe(false)
     expect(rowEl(w, 't3').find('.bt-badge').text()).toBe('Review')
   })
+  it('marks only a Pending + Review row so its tags can wrap under the name on a phone card', async () => {
+    width = 390
+    mockFetch(() => json({ rows: [txn('t1', { pending: true, needsReview: true }), txn('t2', { pending: true }), txn('t3', { needsReview: true })], nextCursor: null }))
+    const w = await mountTable()
+    expect(rowEl(w, 't1').find('.bt-mline').classes()).toContain('bt-mline-both')
+    expect(rowEl(w, 't2').find('.bt-mline').classes()).not.toContain('bt-mline-both')
+    expect(rowEl(w, 't3').find('.bt-mline').classes()).not.toContain('bt-mline-both')
+  })
   it('shows on the phone Table layout too', async () => {
     width = 390
     window.localStorage.setItem('gss-stats-budget-txn-view', 'table')

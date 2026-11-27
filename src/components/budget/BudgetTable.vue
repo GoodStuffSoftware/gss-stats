@@ -349,7 +349,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
     >
       <template #cell-merchant="{ row }">
         <!-- One line: the pill or the short Use for all button keeps its size and the name gives way, so they never drop below the name and a confirmed row keeps its height. -->
-        <span class="bt-mline">
+        <span class="bt-mline" :class="{ 'bt-mline-both': row.pending && (row.needsReview || isReviewed(row)) }">
         <button
           type="button"
           class="bt-merchant"
@@ -540,6 +540,17 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
 @media (max-width: 700px) {
   .bt-merchant {
     max-width: min(100%, 18ch);
+  }
+}
+/* Pending and Review (or the confirmed pill and tick) together: on a phone card the tags drop to a second line, so the name keeps its
+   room and the tick never covers the amount. The phone Table view keeps one line (its cell is cut with an ellipsis). */
+@media (max-width: 700px) {
+  .budget-table:not(.bt-phone-table) .bt-mline-both {
+    flex-wrap: wrap;
+    gap: 4px 6px;
+  }
+  .budget-table:not(.bt-phone-table) .bt-mline-both .bt-badge {
+    margin-left: 0;
   }
 }
 .bt-merchant:focus-visible {
