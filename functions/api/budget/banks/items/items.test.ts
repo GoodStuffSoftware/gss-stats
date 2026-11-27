@@ -4,8 +4,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { callRoute, createBudgetDb, json, TEST_EMAIL, type FakeBudgetDb } from '../../../../_lib/testing/budgetDb'
 import { createFakeBanks, seedBankAccount, seedBankItem, SECRETS, type FakeBanks } from '../../../../_lib/testing/banksFake'
-import { onRequest as sync } from './[id]/sync'
-import { onRequest as reconnected } from './[id]/reconnected'
+import { onRequest as sync, SYNC_REQUEST_SQL } from './[id]/sync'
+import { onRequest as reconnected, RECONNECTED_SQL } from './[id]/reconnected'
+import { ITEM_OWNER_SQL } from '../../../../_lib/banks'
 import { onRequest as refresh } from './[id]/accounts-refresh'
 import { onRequest as unlink } from './[id]/unlink'
 
@@ -188,5 +189,24 @@ describe('unlink', () => {
     const res = await act(unlink, 'unlink', ITEM, { body: { confirm: true }, email: `  ${TEST_EMAIL.toUpperCase()} ` })
     expect(res.status).toBe(200)
     expect(banks.calls[0]!.body.ownerEmail).toBe(TEST_EMAIL)
+  })
+})
+
+describe('query plans', () => {
+  const plan = (sql: string, values: unknown[]) => db.explain(sql, values).join('\n')
+  const NOW = '2026-11-20T10:00:00.000Z'
+
+  it('the owner lookup every item route starts with is a primary-key search', () => {
+    const p = plan(ITEM_OWNER_SQL, [ITEM])
+    expect(p).toMatch(/SEARCH bank_items USING/)
+    expect(p).not.toMatch(/SCAN/)
+  })
+
+  it('Sync now and reconnected update by primary key, never a scan', () => {
+    for (const sql of [SYNC_REQUEST_SQL, RECONNECTED_SQL]) {
+      const p = plan(sql, [NOW, ITEM])
+      expect(p).toMatch(/SEARCH bank_items USING/)
+      expect(p).not.toMatch(/SCAN/)
+    }
   })
 })

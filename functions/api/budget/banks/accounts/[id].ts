@@ -18,6 +18,12 @@ import { BANK_ACCOUNT_ID_RE, LIVE_ITEM_STATUSES, itemNotActive, requireBanks } f
 export const MAX_BODY_ACCOUNT = 2048
 const PERSON_RE = /^[a-z0-9]{1,24}$/
 
+// The reads and the mapping update, named so a test can EXPLAIN them (every one is index-backed).
+export const TARGET_SQL = `SELECT a.type, a.sync, a.item_id, a.mask, i.owner_email, i.status FROM bank_accounts a JOIN bank_items i ON i.id = a.item_id WHERE a.id = ?`
+export const TAKEN_SQL = "SELECT 1 AS x FROM bank_accounts WHERE account_id = ? AND sync = 'on' AND id <> ?"
+export const MAP_SQL = `UPDATE bank_accounts SET account_id = ?1, sync = 'on', updated_at = ?2,
+           sync_from = (SELECT date(MAX(posted_date), '+1 day') FROM transactions WHERE account_id = ?1) WHERE id = ?3`
+
 /** Budget account kinds a Plaid account type may feed. */
 const FITS: Record<string, readonly AccountKind[]> = { depository: ['checking', 'savings'], credit: ['card', 'line_of_credit'], loan: ['loan'] }
 const DEBT_KINDS: readonly string[] = ['card', 'line_of_credit', 'loan']
@@ -47,9 +53,7 @@ export const onRequest = defineRoute({
     if (sync !== 'on' && sync !== 'off') throw badRequest("sync: expected 'on' or 'off'")
     if (!BANK_ACCOUNT_ID_RE.test(id)) throw notFound()
 
-    const row = await db.prepare(
-      `SELECT a.type, a.sync, a.item_id, a.mask, i.owner_email, i.status FROM bank_accounts a JOIN bank_items i ON i.id = a.item_id WHERE a.id = ?`,
-    ).bind(id).first<{ type: string; sync: string; item_id: string; mask: string | null; owner_email: string; status: string }>()
+    const row = await db.prepare(TARGET_SQL).bind(id).first<{ type: string; sync: string; item_id: string; mask: string | null; owner_email: string; status: string }>()
     if (!row) throw notFound()
     const t: Target = { type: row.type, sync: row.sync, itemId: row.item_id, owner: row.owner_email, status: row.status, mask: row.mask }
     if (t.owner !== email) throw new BudgetHttpError(403, 'not_owner', 'Only the person who linked this bank can do that.')
@@ -75,7 +79,7 @@ export const onRequest = defineRoute({
       const acct = await db.prepare('SELECT kind FROM accounts WHERE id = ? AND archived = 0').bind(accountId).first<{ kind: string }>()
       if (!acct) throw notFound('accountId: no such account')
       if (!fits(t.type, acct.kind)) throw mismatch()
-      const taken = await db.prepare("SELECT 1 AS x FROM bank_accounts WHERE account_id = ? AND sync = 'on' AND id <> ?").bind(accountId, id).first()
+      const taken = await db.prepare(TAKEN_SQL).bind(accountId, id).first()
       if (taken) throw new BudgetHttpError(409, 'account_taken', 'Another bank account already feeds that account.')
     } else {
       const na = body.newAccount
@@ -100,10 +104,7 @@ export const onRequest = defineRoute({
 
     // sync_from: the day after the newest row the Budget account holds (NULL for none; idx_txn_account serves MAX).
     stmts.push(
-      db.prepare(
-        `UPDATE bank_accounts SET account_id = ?1, sync = 'on', updated_at = ?2,
-           sync_from = (SELECT date(MAX(posted_date), '+1 day') FROM transactions WHERE account_id = ?1) WHERE id = ?3`,
-      ).bind(accountId, now, id),
+      db.prepare(MAP_SQL).bind(accountId, now, id),
       db.prepare("UPDATE bank_items SET sync_cursor = NULL, sync_requested_at = ?1, updated_at = ?1 WHERE id = ?2 AND status IN ('active','needs_reconnect','pending_disconnect')").bind(now, t.itemId),
     )
     try {

@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { callRoute, createBudgetDb, insertTxn, json, TEST_EMAIL, type FakeBudgetDb } from '../../../../_lib/testing/budgetDb'
 import { createFakeBanks, seedBankAccount, seedBankItem, seedBankTxn, type FakeBanks } from '../../../../_lib/testing/banksFake'
-import { onRequest } from './[txnId]'
+import { DELETE_DROPPED_SQL, UNPAIR_PARTNER_SQL, onRequest } from './[txnId]'
 
 const OTHER = 'user-b@example.com'
 const NOW = '2026-11-20T10:00:00.000Z'
@@ -50,6 +50,33 @@ describe('delete', () => {
     expect(count('bank_txns', `txn_id = '${dropped}'`)).toBe(0)
     expect(db.get<{ status: string }>("SELECT status FROM receipts WHERE id = 'r0000000000000001'")!.status).toBe('unmatched')
     expect(banks.calls).toEqual([])
+  })
+
+  it('clears the transfer partner pair_id so it never points at the deleted row', async () => {
+    const partner = insertTxn(db, { account_id: 'chk-a', description: 'PARTNER SIDE' })
+    const bystander = insertTxn(db, { account_id: 'chk-a', description: 'OTHER PAIR' })
+    const bystanderPartner = insertTxn(db, { account_id: 'chk-a', description: 'OTHER PAIR B' })
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(partner, dropped)
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(dropped, partner)
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(bystanderPartner, bystander)
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(bystander, bystanderPartner)
+    expect((await settle(dropped, { action: 'delete' })).status).toBe(200)
+    const pair = (id: string) => db.get<{ pair_id: string | null }>('SELECT pair_id FROM transactions WHERE id = ?', id)!.pair_id
+    expect(count('transactions', `id = '${dropped}'`)).toBe(0)
+    expect(pair(partner)).toBeNull()
+    expect(pair(bystander)).toBe(bystanderPartner)
+    expect(pair(bystanderPartner)).toBe(bystander)
+    expect(count('transactions', `pair_id = '${dropped}'`)).toBe(0)
+  })
+
+  it('a row that is not dropped is not deleted and its partner keeps its pair_id', async () => {
+    const live = insertTxn(db, { account_id: 'chk-a' })
+    const partner = insertTxn(db, { account_id: 'chk-a' })
+    seedBankTxn(db, { plaidTxnId: 'plaid-txn-002', txnId: live })
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(partner, live)
+    db.sqlite.prepare('UPDATE transactions SET pair_id = ? WHERE id = ?').run(live, partner)
+    expect((await settle(live, { action: 'delete' })).status).toBe(404)
+    expect(db.get<{ pair_id: string }>('SELECT pair_id FROM transactions WHERE id = ?', partner)!.pair_id).toBe(live)
   })
 
   it('a second delete finds nothing and answers 404', async () => {
@@ -133,11 +160,15 @@ describe('refusals', () => {
 
 describe('query plans', () => {
   it('the delete guard finds its mapping by the unique txn_id index and the cascade children by their indexes', () => {
-    const plan = db.explain(
-      "DELETE FROM transactions WHERE id = ?1 AND EXISTS (SELECT 1 FROM bank_txns b WHERE b.txn_id = ?1 AND b.state = 'dropped')", [dropped],
-    ).join('\n')
+    const plan = db.explain(DELETE_DROPPED_SQL, [dropped]).join('\n')
     expect(plan).toMatch(/idx_bank_txn_txn/)
     expect(plan).not.toMatch(/SCAN bank_txns/)
+  })
+
+  it('the partner unpair finds the partner by primary key and the mapping by its index, with no table scan', () => {
+    const plan = db.explain(UNPAIR_PARTNER_SQL, [dropped]).join('\n')
+    expect(plan).toMatch(/idx_bank_txn_txn/)
+    expect(plan).not.toMatch(/SCAN (transactions|bank_txns)/)
   })
 
   it('the keep update is an index search on txn_id', () => {

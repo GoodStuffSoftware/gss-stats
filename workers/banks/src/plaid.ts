@@ -14,12 +14,15 @@ export class PlaidError extends Error {
   readonly type: string
   readonly code: string
   readonly status: number
-  constructor(type: string, code: string, status = 0) {
+  /** True only when Plaid answered with a JSON error body (so the request was refused, nothing created). Non-JSON or local errors: false. */
+  readonly refused: boolean
+  constructor(type: string, code: string, status = 0, refused = false) {
     super(`plaid_${type.toLowerCase()}`) // fixed text only, never Plaid's message
     this.name = 'PlaidError'
     this.type = type
     this.code = code
     this.status = status
+    this.refused = refused
   }
 }
 
@@ -80,7 +83,7 @@ export function createPlaidClient(deps: PlaidDeps): PlaidClient {
       }
       if (!res.ok) {
         const e = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
-        throw new PlaidError(cleanCode(e.error_type, 'API_ERROR'), cleanCode(e.error_code, 'UNKNOWN'), res.status)
+        throw new PlaidError(cleanCode(e.error_type, 'API_ERROR'), cleanCode(e.error_code, 'UNKNOWN'), res.status, json !== null && typeof json === 'object')
       }
       return json as T
     } finally {

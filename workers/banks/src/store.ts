@@ -133,6 +133,8 @@ export interface NewItem {
   institutionName: string | null
   consentVersion: number
   enc: EncryptedToken
+  /** Stored with new_accounts = 1 so /accounts-refresh fills in the accounts later (the first /accounts/get failed). */
+  newAccounts?: boolean
 }
 
 /** The statements that store one new item and its accounts (run in one batch with the slot update). */
@@ -141,12 +143,12 @@ export function newItemStatements(db: D1Database, item: NewItem, accounts: NewAc
     db
       .prepare(
         `INSERT INTO bank_items (id, owner_email, environment, plaid_item_id, institution_id, institution_name, status,
-           token_ct, token_iv, key_id, consent_version, consented_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, ?9, ?10, ?11, ?11, ?11)`,
+           token_ct, token_iv, key_id, consent_version, consented_at, created_at, updated_at, new_accounts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, ?9, ?10, ?11, ?11, ?11, ?12)`,
       )
       .bind(
         item.id, item.ownerEmail, item.environment, item.plaidItemId, item.institutionId, item.institutionName,
-        item.enc.token_ct, item.enc.token_iv, item.enc.key_id, item.consentVersion, asOf,
+        item.enc.token_ct, item.enc.token_iv, item.enc.key_id, item.consentVersion, asOf, item.newAccounts ? 1 : 0,
       ),
   ]
   for (const a of accounts) {

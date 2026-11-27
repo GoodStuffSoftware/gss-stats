@@ -13,6 +13,11 @@ import { requireBanks } from '../../../../_lib/banks'
 
 export const MAX_BODY_DROPPED = 1024
 
+const STILL_DROPPED = "EXISTS (SELECT 1 FROM bank_txns b WHERE b.txn_id = ?1 AND b.state = 'dropped')"
+export const DELETE_DROPPED_SQL = `DELETE FROM transactions WHERE id = ?1 AND ${STILL_DROPPED}`
+export const UNPAIR_PARTNER_SQL = `UPDATE transactions SET pair_id = NULL
+  WHERE id = (SELECT pair_id FROM transactions WHERE id = ?1) AND pair_id = ?1 AND ${STILL_DROPPED}`
+
 export const onRequest = defineRoute({
   POST: async (ctx) => {
     requireBanks(ctx.env)
@@ -24,9 +29,13 @@ export const onRequest = defineRoute({
     if (!isTxnId(id)) throw notFound()
 
     if (action === 'delete') {
-      const r = await db.prepare(
-        "DELETE FROM transactions WHERE id = ?1 AND EXISTS (SELECT 1 FROM bank_txns b WHERE b.txn_id = ?1 AND b.state = 'dropped')",
-      ).bind(id).run()
+      // One batch: first clear the transfer partner's pair_id (it has no foreign key, so it would point at a missing row; the
+      // sync's own delete does the same), then delete. Both are guarded by the same "still dropped" test, so a second click
+      // finds nothing to do. The partner is found by primary key through this row's own pair_id.
+      const [, r] = await db.batch([
+        db.prepare(UNPAIR_PARTNER_SQL).bind(id),
+        db.prepare(DELETE_DROPPED_SQL).bind(id),
+      ])
       if (!r.meta.changes) throw notFound()
       return budgetJson(200, { ok: true })
     }

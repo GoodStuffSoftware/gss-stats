@@ -140,3 +140,10 @@ describe('Item lookups', () => {
     for (const s of [SECRETS.tokenCt, SECRETS.cursor, SECRETS.plaidItem]) expect(text).not.toContain(s)
   })
 })
+
+describe('BANKS_TIMEOUT_MS', () => {
+  it('the exchange limit sits above the Worker worst case: exchange, accounts/get and a remove at the Plaid timeout, plus the D1 batches', async () => {
+    const { PLAID_TIMEOUT_MS } = await import('../../workers/banks/src/plaid')
+    expect(BANKS_TIMEOUT_MS.exchange).toBeGreaterThan(3 * PLAID_TIMEOUT_MS)
+  })
+})

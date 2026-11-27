@@ -41,6 +41,19 @@ describe('routing', () => {
     expect(await code(get)).toBe('not_found')
   })
 
+  it('hands the /exchange run to waitUntil, so a caller that goes away cannot cut it between the Item and its stored token', async () => {
+    const held: Promise<unknown>[] = []
+    const c = { waitUntil: (p: Promise<unknown>) => void held.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext
+    const res = await handleFetch(new Request('https://banks.internal/exchange', { method: 'POST', body: JSON.stringify({ ownerEmail: 'owner@example.com' }) }), env, c)
+    expect(res.status).toBe(400)
+    expect(held).toHaveLength(1)
+    await expect(held[0]).resolves.toBeUndefined()
+    // the other owner routes are not held this way
+    held.length = 0
+    await handleFetch(new Request('https://banks.internal/link-token', { method: 'POST', body: JSON.stringify({ ownerEmail: 'owner@example.com' }) }), env, c)
+    expect(held).toHaveLength(0)
+  })
+
   it('413s a body over the cap, by header and by bytes', async () => {
     const big = JSON.stringify({ ownerEmail: 'owner@example.com', pad: 'x'.repeat(17 * 1024) })
     expect((await post('/exchange', big)).status).toBe(413)

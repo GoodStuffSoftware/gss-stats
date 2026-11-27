@@ -1,8 +1,20 @@
 // The banks Worker's bindings and vars (workers/banks/wrangler.toml). Secrets are Secrets Store bindings read with
 // readSecret; a missing or empty one reads as ''.
-import { readSecret, type SecretBinding } from '../../receipts/src/disconnect'
 
-export { readSecret, type SecretBinding }
+/** A Secrets Store binding: get() resolves to the secret's value. */
+export interface SecretBinding {
+  get(): Promise<string>
+}
+
+/** A secret's value, or '' when the binding is missing, empty or unreadable. */
+export async function readSecret(b: SecretBinding | undefined): Promise<string> {
+  if (!b || typeof b.get !== 'function') return ''
+  try {
+    return String((await b.get()) ?? '').trim()
+  } catch {
+    return ''
+  }
+}
 
 export interface Env {
   BUDGET_DB: D1Database

@@ -64,10 +64,12 @@ export interface ItemOwner {
   status: string
 }
 
+export const ITEM_OWNER_SQL = 'SELECT owner_email, status FROM bank_items WHERE id = ?'
+
 /** One primary-key lookup: who owns the Item and its status, or null when there is no such Item (or the id is malformed). */
 export async function itemOwner(db: D1Database, id: string): Promise<ItemOwner | null> {
   if (!isItemId(id)) return null
-  const row = await db.prepare('SELECT owner_email, status FROM bank_items WHERE id = ?').bind(id).first<{ owner_email: string; status: string }>()
+  const row = await db.prepare(ITEM_OWNER_SQL).bind(id).first<{ owner_email: string; status: string }>()
   return row ? { ownerEmail: row.owner_email, status: row.status } : null
 }
 

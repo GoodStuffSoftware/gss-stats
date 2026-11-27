@@ -128,7 +128,9 @@ export async function handleExchange(input: RouteInput, deps: Partial<BankDeps> 
 
   const plaid = createPlaidClient({ env, fetch: doFetch, now })
 
-  // 3. Exchange. A Plaid answer with an error closes the row as failed; no answer (timeout, network) leaves it pending.
+  // 3. Exchange. Only a refusal (a 4xx with a JSON error body: no Item was made) closes the row as failed. Anything else leaves it
+  // pending, so the count can only read high: a timeout, a network error, a 5xx, a non-JSON answer, or a 2xx answer we cannot use
+  // (the Item may exist at Plaid).
   let accessToken: string
   let plaidItemId: string
   try {
@@ -139,8 +141,8 @@ export async function handleExchange(input: RouteInput, deps: Partial<BankDeps> 
     accessToken = ex.access_token
     plaidItemId = ex.item_id
   } catch (e) {
-    const answered = e instanceof PlaidError && e.type !== 'NETWORK'
-    if (answered) {
+    const refused = e instanceof PlaidError && e.refused && e.status >= 400 && e.status < 500
+    if (refused) {
       try {
         await finishSlot(db, slotId, 'failed', null, now())
       } catch {
@@ -162,19 +164,23 @@ export async function handleExchange(input: RouteInput, deps: Partial<BankDeps> 
     return fail(500, 'store_failed')
   }
 
-  // 4. Accounts, seal, one batch (item, accounts, slot row done), tried twice.
-  let accounts: NewAccount[]
+  // 4. Accounts, seal, one batch (item, accounts, slot row done), tried twice. A failed /accounts/get is free and often
+  // transient: the Item is stored with no accounts and new_accounts = 1, so /accounts-refresh fills them in. It never
+  // removes the Item (that would burn a lifetime slot for nothing).
+  let accounts: NewAccount[] = []
+  let newAccounts = false
   try {
     const res = await plaid.post<{ accounts?: PlaidAccount[] }>('/accounts/get', { access_token: accessToken })
     accounts = (Array.isArray(res.accounts) ? res.accounts : []).map(toAccount).filter((a): a is NewAccount => a !== null)
-  } catch {
-    return abandon()
+  } catch (e) {
+    newAccounts = true
+    log('exchange_accounts_deferred', {}, e instanceof PlaidTimeoutError ? 'plaid_timeout' : 'accounts_get_failed')
   }
   const itemId = newId('i')
   const asOf = now().toISOString()
   try {
     const enc = await sealToken(accessToken, itemId, keys)
-    const item = { id: itemId, ownerEmail, environment, plaidItemId, institutionId, institutionName, consentVersion: consent, enc }
+    const item = { id: itemId, ownerEmail, environment, plaidItemId, institutionId, institutionName, consentVersion: consent, enc, newAccounts }
     let stored = false
     for (let attempt = 0; attempt < 2 && !stored; attempt++) {
       try {

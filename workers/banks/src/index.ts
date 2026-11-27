@@ -43,10 +43,20 @@ interface Route {
   handler: Handler
 }
 
+/**
+ * Keep a run going if the caller goes away: a cancelled caller must not cut the exchange between Plaid making the Item and the
+ * encrypted token being stored (the token would be lost and the Item could never be removed). waitUntil gives the run up to
+ * 30 s after the caller disconnects (Cloudflare Context docs). The caller still gets the answer when it stays.
+ */
+function untilDone(ctx: ExecutionContext, run: Promise<Response>): Promise<Response> {
+  ctx.waitUntil?.(run.then(() => undefined, () => undefined))
+  return run
+}
+
 // ---- ROUTE TABLE: one line per route, exact path match, POST only. Add a route here and nowhere else. ----
 export const ROUTES: Readonly<Record<string, Route>> = {
   '/link-token': { auth: 'owner', handler: (i) => handleLinkToken(i) },
-  '/exchange': { auth: 'owner', handler: (i) => handleExchange(i) },
+  '/exchange': { auth: 'owner', handler: (i) => untilDone(i.ctx, handleExchange(i)) },
   '/unlink': { auth: 'owner', handler: (i) => handleUnlink(i) },
   '/accounts-refresh': { auth: 'owner', handler: (i) => handleAccountsRefresh(i) },
   '/webhook': { auth: 'raw', handler: (i) => handleWebhook(i) },

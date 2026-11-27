@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { callRoute, createBudgetDb, insertTxn, json, TEST_EMAIL, type FakeBudgetDb } from '../../../../_lib/testing/budgetDb'
 import { createFakeBanks, seedBankAccount, seedBankItem, seedBankTxn, SECRETS, type FakeBanks } from '../../../../_lib/testing/banksFake'
-import { onRequest } from './[id]'
+import { MAP_SQL, TAKEN_SQL, TARGET_SQL, onRequest } from './[id]'
 
 const ITEM = 'i000000000000a001'
 const BA = 'b000000000000c001'
@@ -250,5 +250,28 @@ describe('refusals', () => {
     for (const t of texts) {
       for (const s of [SECRETS.tokenCt, SECRETS.tokenIv, SECRETS.cursor, SECRETS.plaidItem, SECRETS.plaidAccount, '0a1b2c3d']) expect(t).not.toContain(s)
     }
+  })
+})
+
+describe('query plans', () => {
+  const plan = (sql: string, values: unknown[]) => db.explain(sql, values).join('\n')
+
+  it('the target read is a primary-key search of the account joined to its Item by primary key', () => {
+    const p = plan(TARGET_SQL, [BA])
+    expect(p).toMatch(/SEARCH a USING (INTEGER )?PRIMARY KEY|SEARCH a USING INDEX sqlite_autoindex_bank_accounts/)
+    expect(p).toMatch(/SEARCH i USING/)
+    expect(p).not.toMatch(/SCAN/)
+  })
+
+  it('the account_taken probe uses idx_bank_acct_on', () => {
+    const p = plan(TAKEN_SQL, ['chk-a', BA])
+    expect(p).toMatch(/idx_bank_acct_on/)
+    expect(p).not.toMatch(/SCAN bank_accounts/)
+  })
+
+  it('the mapping update searches by primary key and the sync_from MAX uses idx_txn_account', () => {
+    const p = plan(MAP_SQL, ['chk-a', '2026-11-20T10:00:00.000Z', BA])
+    expect(p).toMatch(/idx_txn_account/)
+    expect(p).not.toMatch(/SCAN (bank_accounts|transactions)/)
   })
 })

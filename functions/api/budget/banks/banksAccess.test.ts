@@ -2,6 +2,9 @@
 // reached with no identity, 405 (with Allow) for a wrong method, 503 banks_not_configured without the BANKS binding
 // (status still 200, configured:false), and 413 over each route's body cap. The Worker fake throws on any call, so a
 // refused request that still reaches the Worker fails here. Emails are made up (example.com).
+import { readdirSync, statSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSessionCookie, readAuthConfig, VIEWER_KEY_PREFIX, type ViewerStore } from '../../../_lib/auth'
 import type { BudgetData, BudgetEnv } from '../../../_lib/budgetAccess'
@@ -142,8 +145,32 @@ describe.each(ROUTES)('$name', (route) => {
 })
 
 describe('every route sits under the budget middleware scope', () => {
-  it('all new routes live beneath functions/api/budget/', () => {
-    for (const r of ROUTES) expect(r.path.startsWith('/api/budget/banks/')).toBe(true)
+  // Read the real route files: functions/api/budget/<...> is exactly what the budget middleware scopes, so a file here is covered by
+  // it; what must not happen is a route file that this suite does not exercise (a new route added without a ROUTES entry).
+  const dir = dirname(fileURLToPath(import.meta.url))
+  const walk = (d: string): string[] =>
+    readdirSync(d).flatMap((name) => {
+      const full = join(d, name)
+      return statSync(full).isDirectory() ? walk(full) : [full]
+    })
+  const files = walk(dir)
+    .map((f) => relative(dir, f).replace(/\\/g, '/'))
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+  const patternOf = (file: string): RegExp => new RegExp(`^/api/budget/banks/${file.replace(/\.ts$/, '').replace(/\[[^\]]+\]/g, '[^/]+')}$`)
+
+  it('finds the route files (guards against an empty glob)', () => {
+    expect(files.length).toBeGreaterThanOrEqual(ROUTES.length)
+  })
+
+  it('every route file has a ROUTES entry, so it is run through the middleware here', () => {
+    for (const file of files) expect(ROUTES.some((r) => patternOf(file).test(r.path)), file).toBe(true)
+  })
+
+  it('every ROUTES entry is a real route file beneath functions/api/budget/banks/', () => {
+    for (const r of ROUTES) {
+      expect(r.path.startsWith('/api/budget/banks/')).toBe(true)
+      expect(files.some((file) => patternOf(file).test(r.path)), r.path).toBe(true)
+    }
   })
 })
 

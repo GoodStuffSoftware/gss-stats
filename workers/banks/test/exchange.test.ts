@@ -178,6 +178,58 @@ describe('POST /exchange', () => {
     }
   })
 
+  it('a 2xx exchange answer that is not JSON leaves the slot pending (the Item may exist), nothing stored, no remove', async () => {
+    known[EX] = () => new Response('<html>gateway</html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    const res = await exchange()
+    expect(res.status).toBe(502)
+    expect(slots()).toMatchObject([{ status: 'pending' }])
+    expect(items()).toHaveLength(0)
+    expect(calls.map((c) => c.url)).toEqual([EX])
+    expectNoToken(logs.join('\n'))
+  })
+
+  it('a 2xx exchange answer with a bad item_id or no access_token leaves the slot pending', async () => {
+    for (const bad of [{ access_token: ACCESS, item_id: 'bad id with spaces' }, { access_token: ACCESS }, { item_id: 'item-sandbox-001' }]) {
+      known[EX] = () => json(bad)
+      const res = await exchange()
+      expect(res.status).toBe(502)
+    }
+    expect(slots().map((s) => s.status)).toEqual(['pending', 'pending', 'pending'])
+    expect(items()).toHaveLength(0)
+  })
+
+  it('a non-JSON error answer or a 5xx leaves the slot pending; only a 4xx JSON refusal closes it as failed', async () => {
+    known[EX] = () => new Response('bad gateway', { status: 502 })
+    expect((await exchange()).status).toBe(502)
+    known[EX] = () => json({ error_type: 'API_ERROR', error_code: 'INTERNAL_SERVER_ERROR' }, 500)
+    expect((await exchange()).status).toBe(502)
+    known[EX] = () => json({ error_type: 'INVALID_INPUT', error_code: 'INVALID_PUBLIC_TOKEN' }, 400)
+    expect((await exchange()).status).toBe(502)
+    expect(slots().map((s) => s.status)).toEqual(['pending', 'pending', 'failed'])
+  })
+
+  it('a failed /accounts/get after a good exchange keeps the Item (encrypted token, new_accounts = 1), no remove, slot done', async () => {
+    known[ACCTS] = () => json({ error_type: 'API_ERROR', error_code: 'INTERNAL_SERVER_ERROR', error_message: 'secret detail' }, 500)
+    const res = await exchange()
+    const out = (await res.json()) as { ok: boolean; itemId: string; accounts: number }
+    expect(res.status).toBe(200)
+    expect(out).toMatchObject({ ok: true, accounts: 0 })
+    expect(calls.map((c) => c.url)).toEqual([EX, ACCTS])
+    const [item] = items()
+    expect(item).toMatchObject({ id: out.itemId, status: 'active', new_accounts: 1 })
+    const row = { token_ct: item.token_ct, token_iv: item.token_iv, key_id: item.key_id }
+    expect((await decryptToken(row, item.id, { current: KEY })).plaintext).toBe(ACCESS)
+    expect(accts()).toHaveLength(0)
+    expect(slots()).toMatchObject([{ status: 'done', plaid_item_id: 'item-sandbox-001' }])
+    expect(logs.join('\n')).not.toContain('secret detail')
+    expectNoToken(logs.join('\n'))
+  })
+
+  it('a good /accounts/get stores the Item with new_accounts = 0', async () => {
+    await exchange()
+    expect(items()[0].new_accounts).toBe(0)
+  })
+
   it('batch fails twice: /item/remove is called, 500 store_failed, slot stays counted, nothing stored', async () => {
     const real = db.d1.batch.bind(db.d1)
     let n = 0
