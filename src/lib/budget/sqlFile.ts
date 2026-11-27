@@ -82,18 +82,29 @@ function statementSql(s: StatementFacts, importId: string): string {
     `min_due_cents = excluded.min_due_cents, due_date = excluded.due_date;`
 }
 
+/**
+ * The load guard (bank links, plan 4.6): true when a linked bank account (bank_accounts.sync = 'on') already sends this
+ * row, i.e. its cutover date (sync_from) is on or before the row's posted date. A NULL sync_from means the cutover is not
+ * set yet, so every row is skipped. Rows before the cutover, and every row of an unlinked account, still load. Reads one
+ * row through idx_bank_acct_on (the partial unique index on account_id WHERE sync = 'on'). Needs migration 0005 applied.
+ */
+export const bankSyncsRowSql = (accountId: string, postedDate: string): string =>
+  `SELECT 1 FROM bank_accounts WHERE account_id = ${sqlStr(accountId)} AND sync = 'on' ` +
+  `AND (sync_from IS NULL OR sync_from <= ${sqlStr(postedDate)})`
+
 function txnSql(row: TxnInsert): string {
   // A row the planner paired goes in as it was before pairing (no pair, its own classification): the
   // pair UPDATEs below then set both sides or neither, so a skipped pair never leaves one side half done.
   const t: TxnInsert = row.unpaired && row.pairId !== null ? { ...row, ...row.unpaired, pairId: null } : row
   return `INSERT INTO transactions (id, account_id, statement_end, import_id, posted_date, txn_date, amount_cents, description, merchant_key, ` +
     `merchant_name, store_no, counterparty_last4, bank_ref, kind, kind_source, category_id, category_source, rule_id, confidence, needs_review, ` +
-    `review_reason, pair_id, debt_account_id, principal_cents, interest_cents, note, updated_at, updated_by) VALUES (` +
+    `review_reason, pair_id, debt_account_id, principal_cents, interest_cents, note, updated_at, updated_by) SELECT ` +
     `${list([sqlStr(t.id), sqlStr(t.accountId), sqlStr(t.statementEnd), sqlStr(t.importId), sqlStr(t.postedDate), sqlStr(t.txnDate),
       sqlInt(t.amountCents), sqlStr(t.description), sqlStr(t.merchantKey), sqlStr(t.merchantName), sqlStr(t.storeNo), sqlStr(t.counterpartyLast4),
       sqlStr(t.bankRef), sqlStr(t.kind), sqlStr(t.kindSource), sqlStr(t.categoryId), sqlStr(t.categorySource), sqlStr(t.ruleId),
       sqlInt(t.confidence), sqlBool(t.needsReview), sqlStr(t.reviewReason), sqlStr(t.pairId), sqlStr(t.debtAccountId), sqlInt(t.principalCents),
-      sqlInt(t.interestCents), sqlStr(t.note), sqlStr(t.updatedAt), sqlStr(t.updatedBy)])}) ON CONFLICT(id) DO NOTHING;`
+      sqlInt(t.interestCents), sqlStr(t.note), sqlStr(t.updatedAt), sqlStr(t.updatedBy)])} ` +
+    `WHERE NOT EXISTS (${bankSyncsRowSql(t.accountId, t.postedDate)}) ON CONFLICT(id) DO NOTHING;`
 }
 
 /**

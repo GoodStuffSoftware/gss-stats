@@ -1,12 +1,14 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { MAX_STATEMENT_BYTES, pairUpdateSql, planStatements, renderPlanSql, sqlInt, sqlStr } from './sqlFile'
+import { MAX_STATEMENT_BYTES, bankSyncsRowSql, pairUpdateSql, planStatements, renderPlanSql, sqlInt, sqlStr } from './sqlFile'
 import { extendContext, planImport } from './import'
-import { SEED, emptyContext, row, syntheticRequest } from './__fixtures__/synthetic'
+import { SEED, emptyContext, row, syntheticRequest, withoutBankGuard } from './__fixtures__/synthetic'
 import type { ImportPlan, ImportRequest } from './types'
 
-const MIGRATION = readFileSync('migrations/gss-budget/0001_init.sql', 'utf8')
+// Every migration in order: the load's insert reads bank_accounts (the bank-link guard, migration 0005).
+const MIGRATION = readdirSync('migrations/gss-budget').filter((f) => f.endsWith('.sql')).sort()
+  .map((f) => readFileSync(`migrations/gss-budget/${f}`, 'utf8')).join('\n')
 const NOW = '2026-12-05T10:00:00.000Z'
 
 const freshDb = (): DatabaseSync => {

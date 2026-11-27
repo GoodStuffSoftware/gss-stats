@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { planImport } from './import'
 import { renderPlanSql } from './sqlFile'
-import { emptyContext, syntheticRequest } from './__fixtures__/synthetic'
+import { emptyContext, syntheticRequest, withoutBankGuard } from './__fixtures__/synthetic'
 
 const M1 = readFileSync('migrations/gss-budget/0001_init.sql', 'utf8')
 const M2 = readFileSync('migrations/gss-budget/0002_loans.sql', 'utf8')
@@ -16,7 +16,7 @@ const NOW = '2026-12-05T10:00:00.000Z'
 
 let seedSql: string
 beforeAll(async () => {
-  seedSql = renderPlanSql(await planImport(syntheticRequest('imp-incl-1', true), emptyContext(), 'tool:test', NOW))
+  seedSql = withoutBankGuard(renderPlanSql(await planImport(syntheticRequest('imp-incl-1', true), emptyContext(), 'tool:test', NOW)))
 })
 
 const fresh = (): DatabaseSync => {

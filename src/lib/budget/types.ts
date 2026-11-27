@@ -123,14 +123,16 @@ export interface SimilarApplyResponse {
 }
 export interface RuleFromEdit { txnId: string; scope: 'merchant' | 'merchant_store' }
 export interface RuleResponse { rule: MerchantRule; reapplied: number }
+/** Where a debt balance came from: a statement file, a person typing it in, or the bank link (debt_balances.entered_by 'sync:plaid'). */
+export type DebtSource = 'statement' | 'manual' | 'bank'
 export interface DebtSlice { accountId: string; label: string; kind: AccountKind; last4: string | null
-  personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: 'statement' | 'manual' | 'bank' | null
+  personId: string | null; balanceCents: Cents | null; asOf: IsoDate | null; source: DebtSource | null
   aprBp: number | null; creditLimitCents: Cents | null
   /** Cosigned (debt_terms): shown, but kept out of the total owed and the pie. Absent = not cosigned. */
   cosigned?: boolean }
 export interface DebtsResponse { debts: DebtSlice[] }
 export interface DebtDetail { account: Account
-  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: 'statement' | 'manual'; aprBp?: number | null }>
+  history: Array<{ asOf: IsoDate; balanceCents: Cents; source: DebtSource; aprBp?: number | null }>
   periods: Array<{ periodEnd: IsoDate; aprBp: number | null; interestCents: Cents | null
     principalPaidCents: Cents | null; advancesCents: Cents | null }>
   payments: Array<{ id: string; postedDate: IsoDate; amountCents: Cents; principalCents: Cents | null; interestCents: Cents | null }>

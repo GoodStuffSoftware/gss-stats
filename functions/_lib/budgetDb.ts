@@ -248,11 +248,13 @@ export const mapTxn = (r: Row): Txn => ({
   debtAccountId: strOrNull(r.debt_account_id), principalCents: numOrNull(r.principal_cents), interestCents: numOrNull(r.interest_cents),
   note: strOrNull(r.note), updatedAt: str(r.updated_at), updatedBy: str(r.updated_by),
   included: Number(r.included ?? 1) === 1,
+  // Only a bank-synced row can be pending (sync sets 1; a load inserts 0): sent when true, absent otherwise.
+  ...(Number(r.pending ?? 0) === 1 ? { pending: true } : {}),
 })
 
 export const TXN_COLUMNS = 'id, account_id, posted_date, txn_date, amount_cents, description, merchant_key, merchant_name, store_no, kind, kind_source, '
   + 'category_id, category_source, rule_id, confidence, needs_review, review_reason, pair_id, debt_account_id, principal_cents, interest_cents, '
-  + 'note, updated_at, updated_by, included'
+  + 'note, updated_at, updated_by, included, pending'
 export const RULE_COLUMNS = 'id, merchant_key, store_no, account_id, amount_min_cents, amount_max_cents, set_category_id, set_kind, debt_account_id, '
   + 'display_name, confidence, review, review_reason, source, active'
 export const ACCOUNT_COLUMNS = 'id, label, kind, person_id, last4, is_debt, in_spending, credit_limit_cents, apr_bp'
@@ -799,6 +801,11 @@ export async function ruleFromTxn(txn: Txn, scope: 'merchant' | 'merchant_store'
 
 interface DebtRow extends Row { id: string }
 
+/** debt_balances.entered_by of a row the bank sync wrote (the banks Worker's `WRITER`); every other writer is a person. */
+const BANK_BALANCE_WRITER = 'sync:plaid'
+/** A debt_balances row's source: `'bank'` only for the sync's own row, otherwise typed in by a person. */
+const balanceSource = (enteredBy: unknown): 'manual' | 'bank' => (enteredBy === BANK_BALANCE_WRITER ? 'bank' : 'manual')
+
 /** Latest statement balance and latest typed balance per debt account; the newer wins (a tie: the statement). */
 export async function loadDebts(db: D1Database, person: string): Promise<DebtSlice[]> {
   if (person !== 'all') {
@@ -814,7 +821,7 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
          AND s.period_end = (SELECT MAX(s2.period_end) FROM statements s2 WHERE s2.account_id = s.account_id AND s2.closing_balance_cents IS NOT NULL)`,
     ).bind(person),
     db.prepare(
-      `SELECT b.account_id, b.as_of, b.balance_cents, b.apr_bp FROM debt_balances b
+      `SELECT b.account_id, b.as_of, b.balance_cents, b.apr_bp, b.entered_by FROM debt_balances b
        WHERE b.account_id IN (${scope}) AND b.as_of = (SELECT MAX(b2.as_of) FROM debt_balances b2 WHERE b2.account_id = b.account_id)`,
     ).bind(person),
     db.prepare(`SELECT account_id FROM debt_terms WHERE cosigned = 1 AND account_id IN (${scope})`).bind(person),
@@ -832,7 +839,7 @@ export async function loadDebts(db: D1Database, person: string): Promise<DebtSli
       accountId: a.id, label: a.label, kind: a.kind, last4: a.last4, personId: a.personId,
       balanceCents: chosen ? Number(useManual ? m!.balance_cents : s!.closing_balance_cents) : null,
       asOf: chosen ? str(useManual ? m!.as_of : s!.period_end) : null,
-      source: chosen ? (useManual ? 'manual' : 'statement') : null,
+      source: chosen ? (useManual ? balanceSource(m!.entered_by) : 'statement') : null,
       aprBp: debtAprBp([
         ...(s ? [{ asOf: str(s.period_end), source: 'statement' as const, aprBp: numOrNull(s.apr_bp) }] : []),
         ...(m ? [{ asOf: str(m.as_of), source: 'manual' as const, aprBp: numOrNull(m.apr_bp) }] : []),
@@ -902,17 +909,45 @@ export const LOAN_LATEST_SQL = `SELECT ${LATEST_COLUMNS} FROM statements s WHERE
 export const LOAN_PROMOS_SQL = `SELECT ${PROMO_COLUMNS} FROM statement_promos p WHERE p.account_id IN (${LOAN_SCOPE})
          AND p.period_end = (SELECT MAX(s.period_end) FROM statements s WHERE s.account_id = p.account_id) ORDER BY p.account_id, p.seq`
 
+/**
+ * The bank's liabilities snapshot of each linked debt in scope (bank_liabilities, written by the banks Worker). One read:
+ * the scope's accounts drive, each looks up its single `on` bank account through the partial idx_bank_acct_on, then the
+ * snapshot by primary key. The test asserts the plan.
+ */
+export const LOAN_BANK_SQL = `SELECT ba.account_id, l.last_statement_date, l.min_due_cents, l.next_monthly_payment_cents, l.next_due_date, l.escrow_cents, l.fetched_at
+  FROM bank_accounts ba JOIN bank_liabilities l ON l.bank_account_id = ba.id
+  WHERE ba.sync = 'on' AND ba.account_id IN (${LOAN_SCOPE})`
+
+/**
+ * The latest-statement block of a Loans row: the bank snapshot's min due, due date and escrow replace the statement's only
+ * when the snapshot's last statement date is newer than the newest statement's period end (a snapshot with no statement
+ * date, as a mortgage has, wins only where there is no statement at all). Payoff and interest stay null: the bank sends neither.
+ */
+export function preferBankLatest(statement: LatestStatement | null, bank: Row | undefined): LatestStatement | null {
+  if (!bank) return statement
+  const stmtDate = strOrNull(bank.last_statement_date)
+  if (statement && !(stmtDate !== null && stmtDate > statement.periodEnd)) return statement
+  return {
+    periodEnd: (stmtDate ?? str(bank.fetched_at).slice(0, 10)) as IsoDate,
+    minDueCents: numOrNull(bank.min_due_cents) ?? numOrNull(bank.next_monthly_payment_cents),
+    dueDate: strOrNull(bank.next_due_date) as IsoDate | null,
+    payoffCents: null, escrowCents: numOrNull(bank.escrow_cents), interestCents: null,
+  }
+}
+
 /** Everything the Loans page needs; the debt rows are exactly loadDebts' (same scope, same newer-wins rule). */
 export async function loadLoans(db: D1Database, person: string, now: Date = new Date()): Promise<LoansResponse> {
   const debts = await loadDebts(db, person)
   const { months, from, to } = lastFullMonths(now)
-  const [terms, latest, promos, ext, own] = await db.batch<Row>([
+  const [terms, latest, promos, ext, own, bank] = await db.batch<Row>([
     db.prepare(LOAN_TERMS_SQL).bind(person),
     db.prepare(LOAN_LATEST_SQL).bind(person),
     db.prepare(LOAN_PROMOS_SQL).bind(person),
     db.prepare(LOAN_PAYMENTS_SQL.external).bind(person, from, to),
     db.prepare(LOAN_PAYMENTS_SQL.account).bind(person, from, to),
+    db.prepare(LOAN_BANK_SQL).bind(person),
   ])
+  const bankBy = new Map(bank.results.map((r) => [str(r.account_id), r]))
   const termsBy = new Map(terms.results.map((r) => [str(r.account_id), mapTerms(r)]))
   const latestBy = new Map(latest.results.map((r) => [str(r.account_id), mapLatest(r)]))
   const promosBy = new Map<string, StatementPromo[]>()
@@ -925,7 +960,7 @@ export async function loadLoans(db: D1Database, person: string, now: Date = new 
   const rows: LoanRow[] = debts.map((d) => ({
     ...d,
     terms: termsBy.get(d.accountId) ?? null,
-    latest: latestBy.get(d.accountId) ?? null,
+    latest: preferBankLatest(latestBy.get(d.accountId) ?? null, bankBy.get(d.accountId)),
     promos: promosBy.get(d.accountId) ?? [],
     payments: months.map((month) => ({ month, amountCents: paidBy.get(`${d.accountId}|${month}`) ?? 0 })),
   }))
@@ -951,7 +986,7 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
     db.prepare(
       `SELECT period_end, closing_balance_cents, apr_bp, interest_cents, principal_paid_cents, advances_cents FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 24`,
     ).bind(id),
-    db.prepare(`SELECT as_of, balance_cents, apr_bp FROM debt_balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 24`).bind(id),
+    db.prepare(`SELECT as_of, balance_cents, apr_bp, entered_by FROM debt_balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 24`).bind(id),
     db.prepare(paymentSql).bind(id),
     db.prepare(TERMS_SQL).bind(id),
     db.prepare(LATEST_ONE_SQL).bind(id),
@@ -959,7 +994,7 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
   ])
   const history: DebtDetail['history'] = [
     ...statements.results.filter((r) => r.closing_balance_cents !== null).map((r) => ({ asOf: str(r.period_end), balanceCents: Number(r.closing_balance_cents), source: 'statement' as const, aprBp: numOrNull(r.apr_bp) })),
-    ...manual.results.map((r) => ({ asOf: str(r.as_of), balanceCents: Number(r.balance_cents), source: 'manual' as const, aprBp: numOrNull(r.apr_bp) })),
+    ...manual.results.map((r) => ({ asOf: str(r.as_of), balanceCents: Number(r.balance_cents), source: balanceSource(r.entered_by), aprBp: numOrNull(r.apr_bp) })),
   ].sort((a, b) => (a.asOf < b.asOf ? -1 : a.asOf > b.asOf ? 1 : a.source === b.source ? 0 : a.source === 'statement' ? -1 : 1))
   const periods: DebtDetail['periods'] = statements.results.map((r) => ({
     periodEnd: str(r.period_end), aprBp: numOrNull(r.apr_bp), interestCents: numOrNull(r.interest_cents),

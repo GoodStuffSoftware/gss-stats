@@ -97,6 +97,13 @@ export function syntheticRequest(importId = 'imp-synth-1', withSeed = true): Imp
   }
 }
 
+/**
+ * The load's SQL without the bank-link guard (sqlFile.ts bankSyncsRowSql), for tests that run a seed against a schema older
+ * than migration 0005 (no bank_accounts table). Those tests are about the older migration, not about the guard.
+ */
+export const withoutBankGuard = (sql: string): string =>
+  sql.replace(/ WHERE NOT EXISTS \(SELECT 1 FROM bank_accounts .*?\)\) ON CONFLICT\(id\) DO NOTHING;/g, ' WHERE 1 ON CONFLICT(id) DO NOTHING;')
+
 /** SEED_RULES as stored rows (ids from ruleIdFor, source 'seed', active). */
 export async function seedRules(): Promise<MerchantRule[]> {
   return Promise.all(SEED_RULES.map(async (r) => ({ ...r, id: await ruleIdFor(r), source: 'seed' as const, active: true })))

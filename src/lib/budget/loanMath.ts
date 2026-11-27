@@ -1,4 +1,5 @@
 // Pure loan arithmetic for the Loans page: integer cents, APR in basis points (1999 = 19.99%). No I/O.
+import type { DebtSource } from './types'
 
 export type PayoffResult =
   | { kind: 'paid_off'; months: number }          // already at or below zero: months = 0
@@ -81,7 +82,7 @@ export function totalOwed(debts: OwedDebt[]): { totalCents: number; cosignedCent
   return { totalCents, cosignedCents, missingCount }
 }
 
-export interface AprCandidate { asOf: string; source: 'statement' | 'manual'; aprBp?: number | null }
+export interface AprCandidate { asOf: string; source: DebtSource; aprBp?: number | null }
 
 /**
  * A debt's rate, one rule for the Loans list and the detail: the newest balance's own rate (a typed balance when it
