@@ -63,7 +63,7 @@ export const handleUpload: Handler = async (request, env, ctx) => {
   if (input.length > MAX_UPLOAD_BYTES) return fail(413, 'too_large')
   const clean = sanitizeJpeg(input)
   if (!clean.ok) return clean.code === 'bad_type' ? fail(415, 'convert_first') : fail(422, 'bad_image')
-  const sha = hex(await crypto.subtle.digest('SHA-256', clean.bytes))
+  const sha = hex(await crypto.subtle.digest('SHA-256', clean.bytes as BufferSource))
   const db = env.BUDGET_DB
   const dup = await S.findUploadByHash(db, sha)
   if (dup) return jsonResponse(200, dup.uploaderEmail === who.email ? { duplicate: true, id: dup.id } : { duplicate: true })
@@ -127,5 +127,5 @@ export const handleImage: Handler = async (request, env) => {
   let bytes: Uint8Array | null
   try { bytes = await store.get(row.imageKey) } catch { return fail(404, 'not_found') }
   if (!bytes) return fail(404, 'not_found')
-  return new Response(bytes, { status: 200, headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, no-store', 'content-length': String(bytes.length) } })
+  return new Response(bytes as BodyInit, { status: 200, headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, no-store', 'content-length': String(bytes.length) } })
 }

@@ -770,7 +770,7 @@ describe('upload routes', () => {
     await Promise.all(pending.splice(0))
     return res
   }
-  const upload = (env: Env, email: string | null, bytes: Uint8Array, ct = 'image/jpeg') => call('/upload', email, { method: 'POST', body: bytes, headers: { 'content-type': ct } }, env)
+  const upload = (env: Env, email: string | null, bytes: Uint8Array, ct = 'image/jpeg') => call('/upload', email, { method: 'POST', body: bytes as BodyInit, headers: { 'content-type': ct } }, env)
   const del = (env: Env, email: string | null, id: string, bodyEmail: string | null = email) =>
     call('/upload-delete', email, { method: 'POST', body: JSON.stringify({ id, email: bodyEmail }) }, env)
   const image = (env: Env, email: string | null, id: string) => call(`/image?id=${id}`, email, { method: 'GET' }, env)
