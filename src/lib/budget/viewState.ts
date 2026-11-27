@@ -5,7 +5,7 @@
 // URL (`?section=budget` plus `b_*` params; every other param is left alone, see sectionLink.ts):
 //   b_from, b_to (YYYY-MM-DD, always written), b_person (omitted = all), b_group=account (omitted = merchant),
 //   b_review=1, b_tab=spending|debts|both (always written; absent reads as the width's default tab),
-//   b_page=loans|receipts (Overview is the default and writes nothing; anything else reads as Overview).
+//   b_page=loans|receipts|banks (Overview is the default and writes nothing; anything else reads as Overview).
 // The drill path (category and store names) is NOT in the URL: the repo is public and URLs reach logs and synced
 // history. It lives in history.state (drillHistory.ts), which also puts it back after a reload; an old link that
 // still carries a `b_path` has it ignored and removed (searchWithoutPath). Likewise the open loan on the Loans

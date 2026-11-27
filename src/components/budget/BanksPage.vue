@@ -268,10 +268,11 @@ async function setSync(a: BankAccountView, value: string) {
         ? { sync: 'on' as const, newAccount: { name: a.name.trim().slice(0, 40) || 'Bank account', kind: defaultKind(a), personId: null } }
         : { sync: 'on' as const, accountId: chosen }
     const r = await setBankAccount(a.id, body)
-    if (r.created && r.accountId && 'newAccount' in body) {
-      const kind = body.newAccount.kind as AccountKind
+    const made = 'newAccount' in body ? body.newAccount : undefined
+    if (r.created && r.accountId && made) {
+      const kind = made.kind as AccountKind
       const debt = kind === 'card' || kind === 'line_of_credit' || kind === 'loan'
-      emit('account-added', { id: r.accountId, label: body.newAccount.name, kind, personId: null, last4: a.mask, isDebt: debt, inSpending: kind === 'checking' || kind === 'savings' || kind === 'card', creditLimitCents: null, aprBp: null })
+      emit('account-added', { id: r.accountId, label: made.name, kind, personId: null, last4: a.mask, isDebt: debt, inSpending: kind === 'checking' || kind === 'savings' || kind === 'card', creditLimitCents: null, aprBp: null })
     }
     delete choice[a.id]
     delete rowState[a.id]

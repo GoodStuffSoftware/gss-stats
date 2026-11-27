@@ -14,7 +14,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchDebtDetail, fetchDebts, fetchMeta, fetchSummary, probeAccess, resetAccessProbe } from '../../lib/budget/clientRead'
 import { migrateLegacyTab, type LegacyChoice } from '../../lib/budget/panelVisibility'
-import type { Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import type { Account, Category, DebtDetail, DebtSlice, IsoDate, MetaResponse, SummaryResponse } from '../../lib/budget/types'
 import type { BudgetPage } from '../../lib/budget/sectionLink'
 import { defaultTabFor, savedViewOfState, useBudgetViewState, type BudgetTab, type DrillStep, type GroupBy } from '../../lib/budget/viewState'
 import { sameSavedView, type SavedView } from '../../lib/budget/savedView'
@@ -23,6 +23,7 @@ import BudgetFilters from './BudgetFilters.vue'
 import BudgetTable from './BudgetTable.vue'
 import LoansPage from './LoansPage.vue'
 import ReceiptsPage from './ReceiptsPage.vue'
+import BanksPage from './BanksPage.vue'
 import DebtPanel from './DebtPanel.vue'
 import SpendingPanel from './SpendingPanel.vue'
 
@@ -307,6 +308,12 @@ function onCategoryAdded(c: Category) {
   if (m && !m.categories.some((x) => x.id === c.id)) meta.value = { ...m, categories: [...m.categories, c] }
 }
 
+/** An account made from the Banks page: the pickers and the Overview read `meta.accounts`, so it goes in there. */
+function onAccountAdded(a: Account) {
+  const m = meta.value
+  if (m && !m.accounts.some((x) => x.id === a.id)) meta.value = { ...m, accounts: [...m.accounts, a] }
+}
+
 // ── Pages ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Overview or Loans (lib/budget/viewState.ts keeps it in `b_page`). The shell tells App when it changes (the top
 // bar crumbs and the remembered page) and App asks for a page through `goPage` (the ☰ menu, the crumbs).
@@ -363,7 +370,7 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <BudgetFilters
-          v-if="state.page !== 'receipts'"
+          v-if="state.page !== 'receipts' && state.page !== 'banks'"
           :from="state.from"
           :to="state.to"
           :person="state.person"
@@ -388,6 +395,8 @@ onBeforeUnmount(() => {
         />
 
         <ReceiptsPage v-else-if="state.page === 'receipts'" :categories="meta.categories" />
+
+        <BanksPage v-else-if="state.page === 'banks'" :accounts="meta.accounts" @account-added="onAccountAdded" />
 
         <template v-else>
         <div class="b-tabs" role="tablist" aria-label="Budget view">

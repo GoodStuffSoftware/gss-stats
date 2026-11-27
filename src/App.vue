@@ -31,6 +31,7 @@ import AccountMenu from './components/AccountMenu.vue'
 import { accessibleSections, type NavSection } from './lib/codeSections'
 import { BUDGET_SECTION, budgetPageOf, parseBudgetPage, budgetSectionOpen, searchWithSection, type BudgetPage } from './lib/budget/sectionLink'
 import { readLastPage, writeLastPage } from './lib/budget/lastPage'
+import { captureOAuthReturn } from './lib/budget/plaidLink'
 import { useLiveChanges } from './composables/useLiveChanges'
 import { viewOnly, vEdit } from './lib/viewOnly'
 import { useBuildCheck } from './composables/useBuildCheck'
@@ -211,6 +212,8 @@ function syncPageUrl() {
 // the page. Opening adds a history entry (Back returns to the page); closing replaces it. Every other
 // query param (`?page=`, utm_*) is kept. It never touches the layout or its save path.
 const BudgetSection = defineAsyncComponent(() => import('./components/budget/BudgetSection.vue'))
+// A bank's OAuth redirect comes back to /banks/return: pick it up (and move the address to the Banks page) first.
+captureOAuthReturn()
 const budgetOpen = ref(budgetSectionOpen(globalThis.location?.search ?? ''))
 // The section's page (Overview or Loans, `b_page`): BudgetSection owns it and reports changes (`page`); this
 // copy feeds the ☰ menu's current row and the top bar crumbs, and the viewer's last page is remembered per login.
@@ -220,7 +223,9 @@ const budgetSectionRef = ref<{ goPage: (page: BudgetPage) => void } | null>(null
 // just "Budget"; a loan opened from the Loans list keeps "Budget > Loans" (BudgetSection `fromOverview`).
 const budgetLoanFromOverview = ref(false)
 const budgetCrumbs = computed(() =>
-  budgetPage.value === 'receipts'
+  budgetPage.value === 'banks'
+    ? [{ key: 'budget', label: 'Budget' }, { key: 'banks', label: 'Banks' }]
+    : budgetPage.value === 'receipts'
     ? [{ key: 'budget', label: 'Budget' }, { key: 'receipts', label: 'Receipts' }]
     : budgetPage.value === 'loans' && !budgetLoanFromOverview.value ? [{ key: 'budget', label: 'Budget' }, { key: 'loans', label: 'Loans' }] : [{ key: 'budget', label: 'Budget' }],
 )

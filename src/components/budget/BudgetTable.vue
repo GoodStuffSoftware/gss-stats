@@ -360,6 +360,7 @@ const canExclude = (t: Txn) => SPENDING_KINDS.includes(t.kind) || t.included ===
           @click="toggleTip(row, $event)"
           @focus="focusTip(row, $event)"
         >{{ row.merchantName || row.description }}</button>
+        <span v-if="row.pending" class="bt-badge bt-badge-pending" data-testid="pending-tag" title="The bank has not posted this yet">Pending</span>
         <!-- A row confirmed here keeps these two lines (see lockRowHeight): "Use for all" or the Reviewed pill and tick take the
              pill and tick's place, and the note or error takes the reason line's. -->
         <span v-if="isReviewed(row)" class="bt-flags" data-testid="review-held" :title="noReason.has(row.id) ? (heldLine(row)?.text ?? undefined) : undefined">
@@ -741,6 +742,11 @@ tr:hover .bt-note-empty,
   background: rgb(var(--amber-tint));
   border: 1px solid rgb(var(--amber));
   white-space: nowrap;
+}
+.bt-badge-pending {
+  color: rgb(var(--ink-2));
+  background: rgb(var(--surface));
+  border-color: rgb(var(--line-2));
 }
 .bt-badge-error {
   color: rgb(var(--g4));

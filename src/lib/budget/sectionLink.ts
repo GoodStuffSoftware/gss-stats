@@ -9,17 +9,18 @@ export const BUDGET_SECTION = 'budget'
 export const BUDGET_PARAM_PREFIX = 'b_'
 
 /** The section's pages. `b_page=loans` names the Loans page; Overview is the default and writes nothing. */
-export type BudgetPage = 'overview' | 'loans' | 'receipts'
+export type BudgetPage = 'overview' | 'loans' | 'receipts' | 'banks'
 export const BUDGET_PAGES: ReadonlyArray<{ id: BudgetPage; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'loans', label: 'Loans' },
   { id: 'receipts', label: 'Receipts' },
+  { id: 'banks', label: 'Banks' },
 ]
 export const PAGE_PARAM = `${BUDGET_PARAM_PREFIX}page`
 
 /** A page id read from outside (URL, storage): only a known page is kept, anything else is Overview. */
 export function parseBudgetPage(raw: unknown): BudgetPage {
-  return raw === 'loans' || raw === 'receipts' ? raw : 'overview'
+  return raw === 'loans' || raw === 'receipts' || raw === 'banks' ? raw : 'overview'
 }
 /** The page a query string names. */
 export function budgetPageOf(search: string): BudgetPage {
