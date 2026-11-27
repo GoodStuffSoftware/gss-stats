@@ -122,18 +122,44 @@ describe('states', () => {
 })
 
 describe('slot counter', () => {
+  const FIXED = "Plaid's free plan allows 10 bank links for life. Unlinking a bank does not give its link back."
+  const slotsOf = async (used: number, over: Partial<BanksStatus> = {}) => {
+    wrapper?.unmount()
+    await mountPage(status({ slots: { used, limit: 10, left: 10 - used }, ...over }))
+  }
+  it('shows 0 of 10 with no warning and no extra line', async () => {
+    await slotsOf(0, { items: [] })
+    expect(byId('banks-slots-count').text()).toBe('0 of 10 bank links used')
+    expect(byId('banks-slots-extra').exists()).toBe(false)
+    expect(byId('banks-slots').classes()).not.toContain('bp-warn')
+  })
   it('shows used of limit with no warning while more than 3 are left', async () => {
-    await mountPage(status({ slots: { used: 6, limit: 10, left: 4 } }))
+    await slotsOf(6)
     expect(byId('banks-slots-count').text()).toBe('6 of 10 bank links used')
     expect(byId('banks-slots-extra').exists()).toBe(false)
+    expect(byId('banks-slots').classes()).not.toContain('bp-warn')
   })
-  it('warns at 3 left and again at none, and then the link button is off', async () => {
-    await mountPage(status({ slots: { used: 7, limit: 10, left: 3 } }))
+  it('takes the warning style from 7 used, saying how many are left', async () => {
+    await slotsOf(7)
     expect(byId('banks-slots-extra').text()).toBe('Only 3 left.')
-    wrapper!.unmount()
-    await mountPage(status({ slots: { used: 10, limit: 10, left: 0 }, linkEnabled: false }))
-    expect(byId('banks-slots-extra').text()).toContain('All 10 are used')
+    expect(byId('banks-slots').classes()).toContain('bp-warn')
+    await slotsOf(9)
+    expect(byId('banks-slots-count').text()).toBe('9 of 10 bank links used')
+    expect(byId('banks-slots-extra').text()).toBe('Only 1 left.')
+    expect(byId('banks-slots').classes()).toContain('bp-warn')
+    expect(byId('banks-link').attributes('disabled')).toBeUndefined()
+  })
+  it('at 10 used says so, keeps the warning style, and turns the link button off', async () => {
+    await slotsOf(10, { linkEnabled: false })
+    expect(byId('banks-slots-extra').text()).toBe('All 10 are used. More need a paid Plaid plan.')
+    expect(byId('banks-slots').classes()).toContain('bp-warn')
     expect(byId('banks-link').attributes('disabled')).toBeDefined()
+  })
+  it('always shows the free-plan line, at every count', async () => {
+    for (const used of [0, 7, 10]) {
+      await slotsOf(used, used === 0 ? { items: [] } : {})
+      expect(byId('banks-slots').text(), String(used)).toContain(FIXED)
+    }
   })
 })
 
@@ -146,10 +172,32 @@ describe('link flow', () => {
     await byId('banks-agree').setValue(true)
     expect(byId('banks-link').attributes('disabled')).toBeUndefined()
   })
-  it('once a bank is linked the consent card is gone', async () => {
+  it('once this person has linked a bank the consent card is gone', async () => {
     await mountPage(status())
     expect(byId('banks-consent').exists()).toBe(false)
     expect(byId('banks-link').attributes('disabled')).toBeUndefined()
+  })
+  it('a person with no bank of their own still sees the consent card when the other person has linked one', async () => {
+    await mountPage(status({ items: [item({ mine: false })] }))
+    expect(byId('banks-consent').exists()).toBe(true)
+    expect(byId('banks-link').attributes('disabled')).toBeDefined()
+    await byId('banks-agree').setValue(true)
+    expect(byId('banks-link').attributes('disabled')).toBeUndefined()
+    // Ticked, the link goes through and sends the consent version, which stamps this person's own consent time.
+    await byId('banks-link').trigger('click')
+    await flushPromises()
+    R('POST /api/budget/banks/link-token', { body: { linkToken: 'link-sandbox-aaa', expiration: 'x' } })
+    modal('banks-link-confirm')!.click()
+    await flushPromises()
+    expect(calls.find((c) => c.path.endsWith('/link-token'))!.body).toEqual({ consent: 1 })
+  })
+  it('each person is asked until they have a bank: with both banks present neither sees the card', async () => {
+    await mountPage(status({ items: [item({ mine: false }), item({ id: 'it-2', mine: true })] }))
+    expect(byId('banks-consent').exists()).toBe(false)
+  })
+  it('a person with a bank of their own but who has had it revoked is not asked again', async () => {
+    await mountPage(status({ items: [item({ status: 'revoked' })] }))
+    expect(byId('banks-consent').exists()).toBe(false)
   })
   it('Link a bank asks first (using 1 of N), then makes a token, opens Link, and success exchanges and reloads', async () => {
     await mountPage(none())
@@ -245,8 +293,10 @@ describe('banks and accounts (masked, no ids)', () => {
     expect(byId('banks-other-owner').text()).toBe('Linked by the other person.')
     for (const id of ['banks-reconnect', 'banks-unlink', 'banks-new-accounts']) expect(byId(id).exists(), id).toBe(false)
     expect(byId('banks-new-accounts-line').exists()).toBe(false)
-    const sel = allById('banks-account-select')
-    for (const s of sel) expect(s.attributes('disabled')).toBeDefined()
+    // Not editable: the editor controls are not rendered at all; the cells read as plain text.
+    for (const id of ['banks-account-select', 'banks-sync-on', 'banks-sync-off']) expect(allById(id).length, id).toBe(0)
+    expect(byId('banks-item').text()).toContain('Everyday Checking')
+    expect(text()).toContain('ending 0042')
   })
   it('Reconnect shows for the owner of an item that needs it; Share new accounts when the bank has new ones', async () => {
     await mountPage(status({ items: [item({ status: 'needs_reconnect', newAccounts: true, lastError: 'item_login_required' })] }))
@@ -256,6 +306,9 @@ describe('banks and accounts (masked, no ids)', () => {
     expect(byId('banks-sync-now').attributes('disabled')).toBeDefined()
   })
 })
+
+/** The requests made after the link token was asked for, as "METHOD path". */
+const afterToken = () => calls.slice(calls.findIndex((c) => c.path.endsWith('/link-token')) + 1).map((c) => `${c.method} ${c.path}`)
 
 describe('actions', () => {
   it('Reconnect: update-mode token with the item id, then reconnected, then reload', async () => {
@@ -268,8 +321,8 @@ describe('actions', () => {
     R('GET /api/budget/banks/status', { body: status() })
     cfgs[0].onSuccess('public-sandbox-ignored', {})
     await flushPromises()
-    expect(calls.some((c) => c.path === '/api/budget/banks/items/it-1/reconnected')).toBe(true)
-    expect(calls.some((c) => c.path.endsWith('/accounts-refresh'))).toBe(false)
+    expect(afterToken()).toEqual(['POST /api/budget/banks/items/it-1/reconnected', 'GET /api/budget/banks/status'])
+    expect(calls.some((c) => c.path.endsWith('/exchange'))).toBe(false)
     expect(byId('banks-notice').text()).toBe('Reconnected.')
   })
   it('Share new accounts: account-selection token, reconnected, then accounts-refresh', async () => {
@@ -283,8 +336,13 @@ describe('actions', () => {
     R('GET /api/budget/banks/status', { body: status() })
     cfgs[0].onSuccess('public-sandbox-ignored', {})
     await flushPromises()
-    const paths = calls.map((c) => c.path)
-    expect(paths.indexOf('/api/budget/banks/items/it-1/reconnected')).toBeLessThan(paths.indexOf('/api/budget/banks/items/it-1/accounts-refresh'))
+    // In this order, once each, then one status read.
+    expect(afterToken()).toEqual([
+      'POST /api/budget/banks/items/it-1/reconnected',
+      'POST /api/budget/banks/items/it-1/accounts-refresh',
+      'GET /api/budget/banks/status',
+    ])
+    expect(calls.some((c) => c.path.endsWith('/exchange'))).toBe(false)
     expect(byId('banks-notice').text()).toBe('New accounts added below.')
   })
   it('Sync now queues a sync and says when it starts', async () => {
@@ -403,6 +461,47 @@ describe('OAuth resume', () => {
     cfgs[0].onSuccess('public-sandbox-x', { institution: { institution_id: 'ins_1', name: 'Example Bank' }, accounts: [] })
     await flushPromises()
     expect(calls.some((c) => c.path.endsWith('/exchange'))).toBe(true)
+  })
+  const RETURN = 'https://stats.example.com/banks/return?oauth_state_id=abc'
+  it('a Reconnect resumed after the redirect finishes as a Reconnect, even when the bank has new accounts', async () => {
+    saveLink('link-sandbox-bbb', 'it-1')
+    setOAuthReturn(RETURN)
+    await mountPage(status({ items: [item({ status: 'needs_reconnect', newAccounts: true })] }))
+    expect(cfgs[0]).toMatchObject({ token: 'link-sandbox-bbb', receivedRedirectUri: RETURN })
+    R('POST /api/budget/banks/items/it-1/reconnected', { body: { ok: true } })
+    R('GET /api/budget/banks/status', { body: status() })
+    const before = calls.length
+    cfgs[0].onSuccess('public-sandbox-ignored', {})
+    await flushPromises()
+    expect(calls.slice(before).map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/budget/banks/items/it-1/reconnected', 'GET /api/budget/banks/status'])
+    expect(calls.some((c) => c.path.endsWith('/exchange') || c.path.endsWith('/accounts-refresh'))).toBe(false)
+    expect(byId('banks-notice').text()).toBe('Reconnected.')
+  })
+  it('a Share-new-accounts resumed after the redirect reconnects, refreshes the accounts, then reloads', async () => {
+    saveLink('link-sandbox-ccc', 'it-1', Date.now(), true)
+    setOAuthReturn(RETURN)
+    await mountPage(status({ items: [item({ newAccounts: true })] }))
+    expect(cfgs[0]).toMatchObject({ token: 'link-sandbox-ccc', receivedRedirectUri: RETURN })
+    R('POST /api/budget/banks/items/it-1/reconnected', { body: { ok: true } })
+    R('POST /api/budget/banks/items/it-1/accounts-refresh', { body: { added: 1 } })
+    R('GET /api/budget/banks/status', { body: status() })
+    const before = calls.length
+    cfgs[0].onSuccess('public-sandbox-ignored', {})
+    await flushPromises()
+    expect(calls.slice(before).map((c) => `${c.method} ${c.path}`)).toEqual([
+      'POST /api/budget/banks/items/it-1/reconnected',
+      'POST /api/budget/banks/items/it-1/accounts-refresh',
+      'GET /api/budget/banks/status',
+    ])
+    expect(calls.some((c) => c.path.endsWith('/exchange'))).toBe(false)
+    expect(byId('banks-notice').text()).toBe('New accounts added below.')
+  })
+  it('the mode is saved when the person starts an update, so the resume has it', async () => {
+    await mountPage(status({ items: [item({ newAccounts: true })] }))
+    R('POST /api/budget/banks/link-token', { body: { linkToken: 'link-sandbox-ccc', expiration: 'x' } })
+    await byId('banks-new-accounts').trigger('click')
+    await flushPromises()
+    expect(JSON.parse(window.localStorage.getItem('gss-banks-link')!)).toMatchObject({ itemId: 'it-1', share: true })
   })
   it('with no saved token nothing reopens', async () => {
     setOAuthReturn('https://stats.example.com/banks/return?oauth_state_id=abc')

@@ -917,6 +917,10 @@ export const LOAN_PROMOS_SQL = `SELECT ${PROMO_COLUMNS} FROM statement_promos p 
 export const LOAN_BANK_SQL = `SELECT ba.account_id, l.last_statement_date, l.min_due_cents, l.next_monthly_payment_cents, l.next_due_date, l.escrow_cents, l.fetched_at
   FROM bank_accounts ba JOIN bank_liabilities l ON l.bank_account_id = ba.id
   WHERE ba.sync = 'on' AND ba.account_id IN (${LOAN_SCOPE})`
+/** The same snapshot read for the one debt of the debt detail (?1 = the account), so Loans and the detail agree. */
+export const DEBT_BANK_ONE_SQL = `SELECT ba.account_id, l.last_statement_date, l.min_due_cents, l.next_monthly_payment_cents, l.next_due_date, l.escrow_cents, l.fetched_at
+  FROM bank_accounts ba JOIN bank_liabilities l ON l.bank_account_id = ba.id
+  WHERE ba.sync = 'on' AND ba.account_id = ?`
 
 /**
  * The latest-statement block of a Loans row: the bank snapshot's min due, due date and escrow replace the statement's only
@@ -982,7 +986,7 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
   if (!acct) return null
   const account = mapAccount(acct)
   const paymentSql = account.kind === 'external_debt' ? DEBT_PAYMENTS_SQL.external : DEBT_PAYMENTS_SQL.account
-  const [statements, manual, payments, terms, latest, promos] = await db.batch<Row>([
+  const [statements, manual, payments, terms, latest, promos, bank] = await db.batch<Row>([
     db.prepare(
       `SELECT period_end, closing_balance_cents, apr_bp, interest_cents, principal_paid_cents, advances_cents FROM statements WHERE account_id = ? ORDER BY period_end DESC LIMIT 24`,
     ).bind(id),
@@ -991,6 +995,7 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
     db.prepare(TERMS_SQL).bind(id),
     db.prepare(LATEST_ONE_SQL).bind(id),
     db.prepare(PROMOS_ONE_SQL).bind(id),
+    db.prepare(DEBT_BANK_ONE_SQL).bind(id),
   ])
   const history: DebtDetail['history'] = [
     ...statements.results.filter((r) => r.closing_balance_cents !== null).map((r) => ({ asOf: str(r.period_end), balanceCents: Number(r.closing_balance_cents), source: 'statement' as const, aprBp: numOrNull(r.apr_bp) })),
@@ -1003,7 +1008,7 @@ export async function loadDebtDetail(db: D1Database, id: string): Promise<DebtDe
   return {
     account, history, periods,
     terms: terms.results[0] ? mapTerms(terms.results[0]) : null,
-    latest: latest.results[0] ? mapLatest(latest.results[0]) : null,
+    latest: preferBankLatest(latest.results[0] ? mapLatest(latest.results[0]) : null, bank.results[0]),
     promos: promos.results.map(mapPromo),
     // Amounts are what was paid toward the debt: positive, whichever side of the move the row sits on.
     payments: payments.results.map((r) => ({

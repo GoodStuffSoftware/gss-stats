@@ -71,7 +71,7 @@ describe('DebtDetail: what it shows', () => {
 
   it('labels the balance by where it came from: statement, typed in, or from your bank', async () => {
     const withLatest = (source: 'statement' | 'manual' | 'bank'): DebtDetailData => ({ ...DETAIL, history: [...DETAIL.history, { asOf: '2026-11-10', balanceCents: 80000, source, aprBp: null }] })
-    const labels = { statement: 'as of Nov 10 (statement)', manual: 'as of Nov 10 (typed in)', bank: 'as of Nov 10 (from your bank)' } as const
+    const labels = { statement: 'as of Nov 10 (statement)', manual: 'as of Nov 10 (typed in)', bank: 'From the bank, Nov 10' } as const
     for (const source of ['statement', 'manual', 'bank'] as const) {
       route(withLatest(source))
       const w = await mountDetail()

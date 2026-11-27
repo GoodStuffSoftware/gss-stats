@@ -15,11 +15,12 @@ export const OAUTH_RETURN_PATH = '/banks/return'
 /** Where the page goes once an OAuth return has been picked up. */
 export const BANKS_URL = '/?section=budget&b_page=banks'
 
-export interface SavedLink { token: string; itemId?: string; at: number }
+/** `share`: the update-mode Link was started as "Share new accounts" (not Reconnect), so an OAuth resume finishes the same way. */
+export interface SavedLink { token: string; itemId?: string; share?: boolean; at: number }
 
-export function saveLink(token: string, itemId?: string, now = Date.now()): void {
+export function saveLink(token: string, itemId?: string, now = Date.now(), share = false): void {
   try {
-    const v: SavedLink = { token, at: now, ...(itemId ? { itemId } : {}) }
+    const v: SavedLink = { token, at: now, ...(itemId ? { itemId } : {}), ...(itemId && share ? { share: true } : {}) }
     window.localStorage.setItem(LINK_STORAGE_KEY, JSON.stringify(v))
   } catch {
     // storage blocked: only the OAuth resume is lost
@@ -42,7 +43,7 @@ export function readLink(now = Date.now()): SavedLink | null {
       clearLink()
       return null
     }
-    return { token: v.token, at: v.at, ...(typeof v.itemId === 'string' && v.itemId ? { itemId: v.itemId } : {}) }
+    return { token: v.token, at: v.at, ...(typeof v.itemId === 'string' && v.itemId ? { itemId: v.itemId, ...(v.share === true ? { share: true } : {}) } : {}) }
   } catch {
     clearLink()
     return null
@@ -107,6 +108,8 @@ export interface OpenOptions {
   token: string
   /** Update mode (Reconnect, Share new accounts): the Item the token is for. */
   itemId?: string
+  /** Update mode started as "Share new accounts": kept so an OAuth resume finishes the same way. */
+  share?: boolean
   /** OAuth return: the full address Plaid sent the browser back to. */
   receivedRedirectUri?: string
   /** A new Link (no itemId) finished: the public token and what Link shows about the bank. */
@@ -117,7 +120,7 @@ export interface OpenOptions {
 
 /** Saves the token, loads the script (first call only), opens Link. Rejects `link_unavailable` when the script cannot load. */
 export async function openLink(o: OpenOptions): Promise<void> {
-  if (!o.receivedRedirectUri) saveLink(o.token, o.itemId) // a resume keeps the original time stamp
+  if (!o.receivedRedirectUri) saveLink(o.token, o.itemId, Date.now(), o.share) // a resume keeps the original time stamp
   await loadPlaidScript()
   const p = plaid()
   if (!p) throw new Error('link_unavailable')
@@ -127,6 +130,7 @@ export async function openLink(o: OpenOptions): Promise<void> {
     ...(o.receivedRedirectUri ? { receivedRedirectUri: o.receivedRedirectUri } : {}),
     onSuccess: (publicToken, metadata) => {
       clearLink()
+      handler?.destroy()
       void o.onSuccess(publicToken ? toLinkResult(publicToken, metadata) : null, publicToken ?? '')
     },
     onExit: () => {
@@ -164,14 +168,14 @@ export function setOAuthReturn(href: string | null): void {
 }
 
 /** Reopens Link for an OAuth return with the saved token and `receivedRedirectUri`. False when no fresh token was saved. */
-export async function resumeLink(href: string, o: Omit<OpenOptions, 'token' | 'itemId' | 'receivedRedirectUri'>): Promise<{ itemId?: string } | null> {
+export async function resumeLink(href: string, o: Omit<OpenOptions, 'token' | 'itemId' | 'share' | 'receivedRedirectUri'>): Promise<{ itemId?: string; share?: boolean } | null> {
   const saved = readLink()
   if (!saved) return null
-  await openLink({ ...o, token: saved.token, itemId: saved.itemId, receivedRedirectUri: href })
+  await openLink({ ...o, token: saved.token, itemId: saved.itemId, share: saved.share, receivedRedirectUri: href })
   try {
     window.history.replaceState(window.history.state, '', BANKS_URL)
   } catch {
     // the address stays as it is
   }
-  return { itemId: saved.itemId }
+  return { itemId: saved.itemId, ...(saved.share ? { share: true } : {}) }
 }

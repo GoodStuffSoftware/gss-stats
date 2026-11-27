@@ -3,7 +3,7 @@
 // uses an index), the rule engine's write path, and the route wrapper.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_LATEST_SQL, LOAN_PAYMENTS_SQL, LOAN_BANK_SQL, LOAN_PROMOS_SQL, LOAN_TERMS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
+  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_BANK_ONE_SQL, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_LATEST_SQL, LOAN_PAYMENTS_SQL, LOAN_BANK_SQL, LOAN_PROMOS_SQL, LOAN_TERMS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
   encodeCursor, getTxn, isIsoDate, loadDebtDetail, loadDebts, loadLoans, mapAccount, mapRule, mapTxn, nextStamp, parseManualBalance, parseRange, parseSummaryQuery,
   parseTxnQuery, readJsonObject, runSummary, runTxnList,
 } from './budgetDb'
@@ -686,6 +686,30 @@ describe('bank links: debt balances and loans from the bank', () => {
     }
     linkLiability(4, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500 }, 'off')
     expect(await loadLoans(db.d1, 'all', NOW)).toEqual(plain)
+  })
+
+  it('the debt detail shows the same latest block as the Loans list (same min due and due date), bank or statement', async () => {
+    const detailLatest = async (id: string) => (await loadDebtDetail(db.d1, id))!.latest
+    // Statement only: the same block in both.
+    expect(await detailLatest('card-a')).toEqual(await latestOf('card-a'))
+    linkLiability(6, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500, next_due_date: '2027-01-14', escrow_cents: 700 })
+    expect(await detailLatest('card-a')).toEqual({ periodEnd: '2026-12-20', minDueCents: 3500, dueDate: '2027-01-14', payoffCents: null, escrowCents: 700, interestCents: null })
+    expect(await detailLatest('card-a')).toEqual(await latestOf('card-a'))
+    // An older bank snapshot: the statement keeps the block, in both.
+    db.exec(`UPDATE bank_liabilities SET last_statement_date = '2026-11-30'`)
+    expect(await detailLatest('card-a')).toMatchObject({ periodEnd: '2026-12-04', minDueCents: 2500, dueDate: '2026-12-29' })
+    expect(await detailLatest('card-a')).toEqual(await latestOf('card-a'))
+    // A snapshot of an account that is not synced is ignored.
+    db.exec(`UPDATE bank_accounts SET sync = 'off', sync_from = NULL`)
+    db.exec(`UPDATE bank_liabilities SET last_statement_date = '2026-12-20'`)
+    expect(await detailLatest('card-a')).toMatchObject({ periodEnd: '2026-12-04', minDueCents: 2500 })
+  })
+
+  it('the debt detail reads the bank snapshot of one account through idx_bank_acct_on', () => {
+    linkLiability(7, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500 })
+    const plan = db.explain(DEBT_BANK_ONE_SQL, ['card-a']).join('\n')
+    expect(plan, plan).toContain('idx_bank_acct_on')
+    expect(plan, plan).not.toMatch(/SCAN (ba|l|bank_accounts|bank_liabilities)\b/)
   })
 
   it('reads the bank snapshots in one statement per /loans call, through idx_bank_acct_on and the key of bank_liabilities', async () => {

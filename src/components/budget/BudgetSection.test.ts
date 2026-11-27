@@ -7,6 +7,7 @@ import { resetAccessProbe } from '../../lib/budget/clientRead'
 import { LAYOUT_KEY, panelsKey } from '../../lib/budget/panelVisibility'
 import { defaultSavedView, type SavedView } from '../../lib/budget/savedView'
 import type { DebtSlice, MetaResponse, SummaryResponse } from '../../lib/budget/types'
+import BanksPage from './BanksPage.vue'
 import BudgetFilters from './BudgetFilters.vue'
 import BudgetSection from './BudgetSection.vue'
 import BudgetTable from './BudgetTable.vue'
@@ -347,6 +348,47 @@ describe('BudgetSection: data', () => {
     await flushPromises()
     expect(w.findComponent(ReceiptsPage).exists()).toBe(false)
     expect(w.find('[data-testid="budget-range"]').exists()).toBe(true)
+  })
+
+  it('opens on the Banks page from a deep link: filters, range and overview table are not shown; page reported', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_page=banks')
+    expect(w.findComponent(BanksPage).exists()).toBe(true)
+    expect(w.findComponent(BudgetFilters).exists()).toBe(false)
+    expect(w.find('[data-testid="budget-range"]').exists()).toBe(false)
+    expect(w.findComponent(BudgetTable).exists()).toBe(false)
+    expect(w.findComponent(ReceiptsPage).exists()).toBe(false)
+    expect(w.emitted('page')?.[0]).toEqual(['banks'])
+  })
+
+  it('goPage reaches Banks and back, hides the filters on Banks, and writes b_page=banks', async () => {
+    route()
+    const w = await mountSection()
+    expect(w.findComponent(BudgetFilters).exists()).toBe(true)
+    const vm = w.vm as unknown as { goPage: (p: 'overview' | 'loans' | 'receipts' | 'banks') => void }
+    vm.goPage('banks')
+    await flushPromises()
+    expect(w.findComponent(BanksPage).exists()).toBe(true)
+    expect(w.findComponent(BudgetFilters).exists()).toBe(false)
+    expect(new URLSearchParams(location.search).get('b_page')).toBe('banks')
+    vm.goPage('overview')
+    await flushPromises()
+    expect(w.findComponent(BanksPage).exists()).toBe(false)
+    expect(w.findComponent(BudgetFilters).exists()).toBe(true)
+  })
+
+  it('Banks gets meta.accounts, and an account made there lands in meta.accounts once (no duplicate on a repeat)', async () => {
+    route()
+    const w = await mountSection('/?section=budget&b_page=banks')
+    const page = w.findComponent(BanksPage)
+    expect(page.props('accounts').map((a: { id: string }) => a.id)).toEqual(['acct-1'])
+    const made = { id: 'new-acct-1', label: 'Everyday Checking', kind: 'checking', personId: null, last4: '0042', isDebt: false, inSpending: true, creditLimitCents: null, aprBp: null }
+    page.vm.$emit('account-added', made)
+    await flushPromises()
+    expect(w.findComponent(BanksPage).props('accounts').map((a: { id: string }) => a.id)).toEqual(['acct-1', 'new-acct-1'])
+    w.findComponent(BanksPage).vm.$emit('account-added', made)
+    await flushPromises()
+    expect(w.findComponent(BanksPage).props('accounts')).toHaveLength(2)
   })
 
   it('an unknown b_page still opens Overview', async () => {

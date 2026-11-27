@@ -175,6 +175,17 @@ describe('openLink', () => {
   it('update mode keeps the item id in the saved token', async () => {
     await open({ itemId: 'item-1' })
     expect(readLink()?.itemId).toBe('item-1')
+    expect(readLink()?.share).toBeUndefined()
+  })
+  it('Share new accounts keeps its mode with the item id, and a resume hands it back', async () => {
+    await open({ itemId: 'item-1', share: true })
+    expect(readLink()).toMatchObject({ itemId: 'item-1', share: true })
+    expect(await resumeLink('https://x.example/banks/return?oauth_state_id=abc', { onSuccess: vi.fn(), onExit: vi.fn() })).toEqual({ itemId: 'item-1', share: true })
+  })
+  it('success destroys the handler as exit does', async () => {
+    await open()
+    cfgs[0].onSuccess('public-sandbox-x', { institution: { institution_id: 'ins_1', name: 'Example Bank' }, accounts: [] })
+    expect(handler.destroy).toHaveBeenCalled()
   })
   it('a missing Plaid after the script loaded rejects link_unavailable', async () => {
     const { added } = stubHead()

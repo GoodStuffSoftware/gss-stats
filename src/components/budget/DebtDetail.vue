@@ -264,7 +264,7 @@ async function submit() {
         <div>
           <dt>Balance</dt>
           <dd data-testid="debt-balance">{{ latest ? formatAmount(latest.balanceCents) : 'No balance yet' }}</dd>
-          <dd v-if="latest" class="dd-sub">as of {{ formatDate(latest.asOf) }} ({{ latest.source === 'manual' ? 'typed in' : latest.source === 'bank' ? 'from your bank' : 'statement' }})</dd>
+          <dd v-if="latest" class="dd-sub">{{ latest.source === 'bank' ? `From the bank, ${formatDate(latest.asOf)}` : `as of ${formatDate(latest.asOf)} (${latest.source === 'manual' ? 'typed in' : 'statement'})` }}</dd>
         </div>
         <div>
           <dt>Rate</dt>

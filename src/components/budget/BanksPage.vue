@@ -6,8 +6,8 @@
 // cursor ever reaches it. Owner-only buttons (Reconnect, Unlink, Share new accounts, the account switches) are shown to
 // the owner only; the server enforces the same rule.
 //
-// States: loading / failed (Retry) / not configured (one calm line) / the page: slot counter, consent card (nobody has
-// linked yet), Link a bank, one card per bank with its accounts table, and the rows the bank removed.
+// States: loading / failed (Retry) / not configured (one calm line) / the page: slot counter, consent card (until this
+// person has linked a bank of their own), Link a bank, one card per bank with its accounts table, and the rows the bank removed.
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   banksMessage,
@@ -84,7 +84,8 @@ const left = computed(() => status.value?.slots.left ?? 0)
 const limit = computed(() => status.value?.slots.limit ?? 10)
 const used = computed(() => status.value?.slots.used ?? 0)
 const items = computed(() => status.value?.items ?? [])
-const noLinksYet = computed(() => items.value.length === 0)
+/** The consent card shows to each person until they have a bank of their own, so each person's consent time is real. */
+const noLinksYet = computed(() => !items.value.some((i) => i.mine))
 const warn = computed(() => left.value <= 3)
 const slotsLine = computed(() => `${used.value} of ${limit.value} bank links used`)
 const slotsExtra = computed(() => (left.value === 0 ? `All ${limit.value} are used. More need a paid Plaid plan.` : warn.value ? `Only ${left.value} left.` : ''))
@@ -143,7 +144,7 @@ async function startUpdate(item: BankItemView, shareAccounts: boolean) {
   notice.value = null
   try {
     const { linkToken } = await createLinkToken(shareAccounts ? { itemId: item.id, accountSelection: true } : { itemId: item.id })
-    await openLink({ token: linkToken, itemId: item.id, onSuccess: () => onUpdated(item.id, shareAccounts), onExit })
+    await openLink({ token: linkToken, itemId: item.id, share: shareAccounts, onSuccess: () => onUpdated(item.id, shareAccounts), onExit })
   } catch (e) {
     fail(e)
     busy.value = false
@@ -315,12 +316,14 @@ onMounted(async () => {
   await load()
   // A bank's OAuth page sent the browser back: reopen Link with the token saved before it left.
   if (href && readLink() && status.value?.linkEnabled !== undefined) {
-    const itemId = readLink()?.itemId
-    const item = itemId ? items.value.find((i) => i.id === itemId) : undefined
+    // What the person started (Reconnect, Share new accounts, or a new link) was saved with the token: finish the same way.
+    const saved = readLink()
+    const itemId = saved?.itemId
+    const share = !!saved?.share
     busy.value = true
     try {
       const r = await resumeLink(href, {
-        onSuccess: (res) => (itemId ? onUpdated(itemId, !!item?.newAccounts) : onNewLinked(res)),
+        onSuccess: (res) => (itemId ? onUpdated(itemId, share) : onNewLinked(res)),
         onExit,
       })
       if (!r) busy.value = false

@@ -51,6 +51,7 @@ function stubBudget(access: () => Response | Promise<Response>) {
       case '/api/budget/meta': return json(META)
       case '/api/budget/summary': return json({ level: 'category', slices: [], totalCents: 0, reviewCount: 0 })
       case '/api/budget/debts': return json({ debts: [] })
+      case '/api/budget/banks/status': return json({ configured: false, linkEnabled: false, slots: { used: 0, limit: 10, left: 10 }, items: [], dropped: [] })
       default: return base(input, init)
     }
   })
@@ -204,6 +205,25 @@ describe('App: Budget pages (Overview, Loans)', () => {
     section.vm.$emit('fromOverview', false)
     await flushPromises()
     expect(label()).toBe('Budget›Loans')
+  })
+
+  it('the Banks page reads Budget › Banks in the top bar, and the Budget crumb goes back to Overview', async () => {
+    const w = await mountAt('/?section=budget&b_page=banks')
+    await vi.waitFor(() => expect(w.find('[data-testid="banks-page"]').exists()).toBe(true), { timeout: 4000 })
+    expect(w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')).toBe('Budget›Banks')
+    expect(w.get('[data-testid="crumb-0"]').text()).toBe('Budget')
+    await w.get('[data-testid="crumb-0"]').trigger('click')
+    await flushPromises()
+    expect(params().has('b_page')).toBe(false)
+    expect(w.find('[data-testid="banks-page"]').exists()).toBe(false)
+  })
+
+  it("a bank's OAuth return at /banks/return is picked up before the Budget section reads the address: Budget opens on Banks, the address is the Banks page", async () => {
+    const w = await mountAt('/banks/return?oauth_state_id=abc')
+    await sectionShown(w)
+    await vi.waitFor(() => expect(w.find('[data-testid="banks-page"]').exists()).toBe(true), { timeout: 4000 })
+    expect(location.pathname + location.search).toBe('/?section=budget&b_page=banks')
+    expect(w.get('[data-testid="budget-label"]').text().replace(/\s+/g, '')).toBe('Budget›Banks')
   })
 
   it('the Budget crumb goes back to Overview with one history entry (Back returns to Loans)', async () => {
