@@ -8,7 +8,7 @@
 import { BANKS_CONSENT_VERSION } from '../../../../src/lib/budget/types'
 import { budgetJson } from '../../../_lib/budgetAccess'
 import { BudgetHttpError, badRequest, defineRoute, readJsonObject } from '../../../_lib/budgetDb'
-import { BANKS_TIMEOUT_MS, callBanks, requireBanks } from '../../../_lib/banks'
+import { BANKS_TIMEOUT_MS, callBanks, isItemId, requireBanks } from '../../../_lib/banks'
 
 export const MAX_BODY_EXCHANGE = 8192
 const PUBLIC_TOKEN_RE = /^public-(sandbox|production)-[A-Za-z0-9-]{1,80}$/
@@ -48,7 +48,7 @@ export const onRequest = defineRoute({
     const answer = await callBanks(ctx.env, '/exchange', {
       ownerEmail: email.trim().toLowerCase(), consentVersion: BANKS_CONSENT_VERSION, publicToken: body.publicToken, institution, accounts,
     }, BANKS_TIMEOUT_MS.exchange)
-    if (typeof answer.itemId !== 'string') throw new BudgetHttpError(502, 'banks_failed')
+    if (!isItemId(answer.itemId)) throw new BudgetHttpError(502, 'banks_failed')
     return budgetJson(200, { itemId: answer.itemId })
   },
 })

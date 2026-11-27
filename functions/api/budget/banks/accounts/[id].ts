@@ -110,7 +110,7 @@ export const onRequest = defineRoute({
     try {
       await db.batch(stmts)
     } catch (err) {
-      if (/UNIQUE|constraint/i.test(String((err as Error)?.message))) throw new BudgetHttpError(409, 'account_taken', 'Another bank account already feeds that account.')
+      if (/UNIQUE constraint failed: bank_accounts\.account_id/i.test(String((err as Error)?.message))) throw new BudgetHttpError(409, 'account_taken', 'Another bank account already feeds that account.')
       throw err
     }
     const synced = await db.prepare('SELECT sync_from FROM bank_accounts WHERE id = ?').bind(id).first<{ sync_from: string | null }>()

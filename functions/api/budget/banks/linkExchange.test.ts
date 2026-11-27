@@ -197,6 +197,15 @@ describe('exchange', () => {
     noLeak(body)
   })
 
+  it('a Worker answer whose itemId is not a Budget item id is 502 banks_failed and nothing from it reaches the browser', async () => {
+    banks.answer('/exchange', 200, { itemId: SECRETS.plaidItem })
+    const res = await exch(good())
+    expect(res.status).toBe(502)
+    const body = await json(res)
+    expect(body.error).toBe('banks_failed')
+    noLeak(body)
+  })
+
   it('a Worker code that is not a plain lower-case code becomes banks_failed (no free text reaches the browser)', async () => {
     banks.answer('/exchange', 400, { code: 'Bad Code: access-sandbox-secret-9' })
     const res = await exch(good())

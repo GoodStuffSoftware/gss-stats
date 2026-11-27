@@ -146,4 +146,10 @@ describe('BANKS_TIMEOUT_MS', () => {
     const { PLAID_TIMEOUT_MS } = await import('../../workers/banks/src/plaid')
     expect(BANKS_TIMEOUT_MS.exchange).toBeGreaterThan(3 * PLAID_TIMEOUT_MS)
   })
+
+  it('the unlink and accounts-refresh limits sit above one Plaid call plus the D1 work', async () => {
+    const { PLAID_TIMEOUT_MS } = await import('../../workers/banks/src/plaid')
+    expect(BANKS_TIMEOUT_MS.unlink).toBeGreaterThan(PLAID_TIMEOUT_MS)
+    expect(BANKS_TIMEOUT_MS.accounts).toBeGreaterThan(PLAID_TIMEOUT_MS)
+  })
 })

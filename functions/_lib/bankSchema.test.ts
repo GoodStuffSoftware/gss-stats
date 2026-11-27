@@ -14,6 +14,14 @@ const M4 = readFileSync('migrations/gss-budget/0004_receipts.sql', 'utf8')
 const M5 = readFileSync('migrations/gss-budget/0005_bank_links.sql', 'utf8')
 const NOW = '2026-12-05T10:00:00.000Z'
 
+/**
+ * The synthetic load for a database that has only migrations 0001-0004. The load carries the bank load guard (a read of
+ * bank_accounts per row, src/lib/budget/sqlFile.ts: "Needs migration 0005 applied"), so a 0004 database needs a stand-in
+ * table while it runs; the stand-in is empty (no account is linked, every row loads) and dropped again, leaving a plain 0004 database.
+ */
+const seedFor0004 = async (): Promise<string> =>
+  `CREATE TABLE bank_accounts (account_id TEXT, sync TEXT, sync_from TEXT);\n${await syntheticSeedSql()}DROP TABLE bank_accounts;\n`
+
 const NEW_TABLES = ['bank_items', 'plaid_slot_log', 'bank_accounts', 'bank_txns', 'bank_liabilities', 'bank_sync_runs']
 const NEW_INDEXES = [
   'idx_bank_items_due', 'idx_bank_acct_item', 'idx_bank_acct_budget', 'idx_bank_acct_on',
@@ -576,7 +584,7 @@ describe('0005 over an existing database', () => {
     const d = new DatabaseSync(':memory:')
     d.exec('PRAGMA foreign_keys = ON')
     d.exec(M1); d.exec(M2); d.exec(M3); d.exec(M4)
-    d.exec(await syntheticSeedSql())
+    d.exec(await seedFor0004())
     return d
   }
 
@@ -649,7 +657,7 @@ describe('rollback and re-apply', () => {
     const d = new DatabaseSync(':memory:')
     d.exec('PRAGMA foreign_keys = ON')
     d.exec(M1); d.exec(M2); d.exec(M3); d.exec(M4)
-    d.exec(await syntheticSeedSql())
+    d.exec(await seedFor0004())
     const base = d.prepare(`SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`).all()
     const tx = (d.prepare('SELECT COUNT(*) AS n FROM transactions').get() as { n: number }).n
     d.exec(M5)

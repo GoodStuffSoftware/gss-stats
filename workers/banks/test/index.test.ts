@@ -41,6 +41,18 @@ describe('routing', () => {
     expect(await code(get)).toBe('not_found')
   })
 
+  it('hands the /unlink and /accounts-refresh runs to waitUntil too, so a Pages timeout cannot cut the Plaid call or the wipe', async () => {
+    const held: Promise<unknown>[] = []
+    const c = { waitUntil: (p: Promise<unknown>) => void held.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext
+    for (const path of ['/unlink', '/accounts-refresh']) {
+      held.length = 0
+      const res = await handleFetch(new Request(`https://banks.internal${path}`, { method: 'POST', body: JSON.stringify({ ownerEmail: 'owner@example.com' }) }), env, c)
+      expect(res.status).toBe(400)
+      expect(held).toHaveLength(1)
+      await expect(held[0]).resolves.toBeUndefined()
+    }
+  })
+
   it('hands the /exchange run to waitUntil, so a caller that goes away cannot cut it between the Item and its stored token', async () => {
     const held: Promise<unknown>[] = []
     const c = { waitUntil: (p: Promise<unknown>) => void held.push(p), passThroughOnException: () => {} } as unknown as ExecutionContext
