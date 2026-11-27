@@ -343,7 +343,7 @@ export interface RunCtx {
   itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string; more?: boolean; chunk?: number; counts?: Counts
   /** The cursor this update began at ('' = the very start); saved with the cursor while `more`, cleared when the update finishes. */
   base?: string
-  /** The last page of the update said the historical pull is complete: only then does a NULL sync_from get its value. */
+  /** The historical pull is complete (the update's last page said so, or the webhook flag was set before the run): only then does a NULL sync_from get its value. */
   historical?: boolean
 }
 
@@ -460,7 +460,7 @@ export interface QueryBudget { used: number }
  */
 export async function syncItem(db: D1Database, env: Env, client: PlaidClient, keys: Keys, itemId: string, now: Date, budget: QueryBudget = { used: 0 }): Promise<boolean> {
   const facts = await db
-    .prepare(`SELECT sync_cursor, sync_cursor_base, initial_done, sync_requested_at, last_webhook_at, status, environment FROM bank_items WHERE id = ?1`)
+    .prepare(`SELECT sync_cursor, sync_cursor_base, initial_done, historical_done, sync_requested_at, last_webhook_at, status, environment FROM bank_items WHERE id = ?1`)
     .bind(itemId).first<Row>()
   budget.used += ITEM_FIXED_QUERIES
   if (!facts || (facts.status !== 'active' && facts.status !== 'pending_disconnect')) return false
@@ -493,15 +493,21 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
     // base: the cursor the in-progress update began at ('' = the very start), NULL when the saved cursor is a finished one. A mutation
     // error restarts at base, never at the saved mid-way cursor (Plaid: restart at the update's first cursor).
     let base = cursor === null ? null : sn(facts.sync_cursor_base)
+    // The historical pull was complete before this run began (the webhook flag): an update this run reads to its end holds it.
+    const historicalBefore = Number(facts.historical_done) === 1
+    // At most one rebase per run: a second mutation on a mid-way chunk fails the run (sync_mutation) and the next tick retries, so a
+    // run never cycles between the base and a mid-way cursor.
+    let rebased = false
     const totals = zeroCounts()
     let pairs = 0
     for (let chunk = 0; ; chunk++) {
       if (base === null) base = cursor ?? '' // this chunk begins a new update
-      const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES, restartCursor: base === '' ? null : base })
+      const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES, restartCursor: base === '' ? null : base, rebase: !rebased })
       pages += res.pages
       if (res.kind === 'noop') { await finishRun(db, runId, now, pages); await release(db, itemId, now); log('sync_noop', { pages }); return true }
       if (res.kind === 'needs_reconnect') return await fail(plaidErrorCode('ITEM_LOGIN_REQUIRED'), 'needs_reconnect')
       if (res.kind === 'error') return await fail(res.code)
+      if (res.rebased) rebased = true
       const norm = prepareUpdate(res)
       const st = await loadState(db, itemId, norm, now)
       const plan = await decide(norm, st)
@@ -509,7 +515,7 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
       plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
       addCounts(totals, plan.counts)
       pairs += plan.pairs.length
-      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: res.historical })
+      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: res.historical || historicalBefore })
       budget.used += st.queries + 1 + batches + Math.ceil(plan.inPlace.filter((p) => p.pending === 0).length / CHUNK)
       cursor = res.nextCursor
       if (!res.more) break
