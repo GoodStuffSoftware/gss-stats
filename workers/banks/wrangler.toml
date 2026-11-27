@@ -1,0 +1,63 @@
+# gss-budget-banks: the Plaid bank-link Worker. Holds every Plaid secret and the access-token AES key; the gss-stats
+# Pages project reaches it only through the BANKS Service Binding (/link-token, /exchange, /unlink, /accounts-refresh,
+# /webhook). A cron runs the transaction sync. See src/index.ts and the bank links plan (ADR 0009).
+#
+# Deploy (from the repo root):  npx wrangler deploy -c workers/banks/wrangler.toml
+# Check without deploying:      npx wrangler deploy -c workers/banks/wrangler.toml --dry-run
+# Secrets (Secrets Store, never printed, created BEFORE the first deploy): see the bindings below.
+name = "gss-budget-banks"
+main = "src/index.ts"
+compatibility_date = "2026-09-26"
+
+# NOT public: no workers.dev URL, no preview URLs, no route. The only way in is the Pages Service Binding.
+workers_dev = false
+preview_urls = false
+
+# Every ten minutes: sync (flagged or stale items), the daily reconnect check, liabilities.
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Counts and codes only in logs, never a name, amount, description, token, cursor or Plaid id.
+[observability]
+enabled = true
+
+# The Budget database (ADR 0007), the same one the Pages Functions and the receipts Worker bind.
+[[d1_databases]]
+binding = "BUDGET_DB"
+database_name = "gss-budget"
+database_id = "1194bb36-100d-480e-baed-61d545e7873c"
+
+# Account-level Secrets Store (the same store workers/receipts uses); secret name = binding name.
+[[secrets_store_secrets]]
+binding = "PLAID_CLIENT_ID"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "PLAID_CLIENT_ID"
+
+[[secrets_store_secrets]]
+binding = "PLAID_SECRET"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "PLAID_SECRET"
+
+# Current AES-256 key, base64. Its own key, not RECEIPTS_TOKEN_KEY. Generated straight into the store, never printed.
+[[secrets_store_secrets]]
+binding = "BANKS_TOKEN_KEY"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "BANKS_TOKEN_KEY"
+
+# Key rotation only: the previous key (the same value as the current key until the first rotation).
+[[secrets_store_secrets]]
+binding = "BANKS_TOKEN_KEY_OLD"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "BANKS_TOKEN_KEY_OLD"
+
+# The existing allowed list (comma-separated); bound here, not copied.
+[[secrets_store_secrets]]
+binding = "RECEIPTS_ALLOWED_EMAILS"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "RECEIPTS_ALLOWED_EMAILS"
+
+# Locally: --var PLAID_ENV:sandbox, and an empty PLAID_WEBHOOK_URL (no webhook locally).
+[vars]
+PLAID_ENV = "production"
+PLAID_WEBHOOK_URL = "https://stats.goodstuff.software/hooks/plaid"
+PLAID_REDIRECT_URI = "https://stats.goodstuff.software/banks/return"
