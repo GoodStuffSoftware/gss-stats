@@ -381,11 +381,11 @@ describe('BudgetSection: data', () => {
     route()
     const w = await mountSection('/?section=budget&b_page=banks')
     const page = w.findComponent(BanksPage)
-    expect(page.props('accounts').map((a: { id: string }) => a.id)).toEqual(['acct-1'])
+    expect(page.props('accounts')!.map((a: { id: string }) => a.id)).toEqual(['acct-1'])
     const made = { id: 'new-acct-1', label: 'Everyday Checking', kind: 'checking', personId: null, last4: '0042', isDebt: false, inSpending: true, creditLimitCents: null, aprBp: null }
     page.vm.$emit('account-added', made)
     await flushPromises()
-    expect(w.findComponent(BanksPage).props('accounts').map((a: { id: string }) => a.id)).toEqual(['acct-1', 'new-acct-1'])
+    expect(w.findComponent(BanksPage).props('accounts')!.map((a: { id: string }) => a.id)).toEqual(['acct-1', 'new-acct-1'])
     w.findComponent(BanksPage).vm.$emit('account-added', made)
     await flushPromises()
     expect(w.findComponent(BanksPage).props('accounts')).toHaveLength(2)

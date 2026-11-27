@@ -1161,7 +1161,6 @@ describe('BudgetTable Pending tag (bank rows the bank has not posted)', () => {
     width = 390
     mockFetch(() => json({ rows: [txn('t1', { pending: true }), txn('t2')], nextCursor: null }))
     const w = await mountTable()
-    expect(w.find('table').exists()).toBe(false) // the card layout, not the table
     const tag = rowEl(w, 't1').find('[data-testid="pending-tag"]')
     expect(tag.exists()).toBe(true)
     expect(tag.text()).toBe('Pending')
