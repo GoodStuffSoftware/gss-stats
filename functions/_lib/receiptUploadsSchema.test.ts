@@ -159,6 +159,7 @@ describe.each(VARIANTS)('0006 $name', (v) => {
     expect(all(d, 'PRAGMA foreign_key_check')).toEqual([])
     expect(get(d, `SELECT typeof(total_cents) AS t, typeof(attempts) AS a FROM receipts WHERE id = '${rid(1)}'`)).toEqual({ t: 'integer', a: 'integer' })
     expect(all(d, `SELECT DISTINCT source FROM receipts`)).toEqual([{ source: 'email' }])
+    expect(get(d, `SELECT "notnull" AS n FROM pragma_table_info('receipts') WHERE name = 'id'`).n).toBe(1)
     expect(all(d, `SELECT name FROM pragma_table_info('receipts')`).map((r) => r.name)).toEqual([...R_COLS, 'source', 'uploader_email', 'image_key', 'image_sha256', 'image_bytes'])
   })
 
@@ -222,6 +223,8 @@ describe.each(VARIANTS)('0006 $name', (v) => {
     for (const k of [`img/${rid(109)}.png`, `img/${rid(109)}.JPG`, `img/R${rid(109).slice(1)}.jpg`, `img/${rid(109).slice(0, 16)}g.jpg`, `img/${rid(109).slice(0, 16)}.jpg`, `img/${rid(109)}0.jpg`,
       `tmp/${rid(109)}.jpg`, `../${rid(109)}.jpg`, `img/x${rid(109).slice(1)}.jpg`, `img/${rid(109).toUpperCase()}.jpg`, '', 'img/.jpg']) bad({ image_key: k })
     for (const b of [0, -1, 3000001, 12.5, 'big']) bad({ image_bytes: b })
+    bad({ id: null, image_key: '../x.jpg' }, 'NOT NULL')        // a NULL id makes the image_key CHECK NULL, which would pass
+    bad({ id: undefined, image_key: '../x.jpg' }, 'NOT NULL')   // id missing: the column would default to NULL
     bad({ image_key: KEY(rid(108)) })   // well formed, but names another receipt: the key must be built from the row's own id
     bad({ source: 'photo' })
     bad({ source: 'email' })
@@ -247,6 +250,8 @@ describe.each(VARIANTS)('0006 $name', (v) => {
     rejects(() => email({ connection_id: 'c00000000000000ff', gmail_msg_id: '18c3f2a9b7d4e698' }, rid(201)), 'FOREIGN KEY')
     for (const m of ['', '18c3f2a', '18c3f2a9b7d4e61g', '18C3F2A9B7D4E610', 'a'.repeat(33)]) rejects(() => email({ gmail_msg_id: m }, rid(201)))
     for (const id of ['c0123456789abcdef', 'r0123456789abcde', 'r0123456789ABCDEF', '']) rejects(() => email({ gmail_msg_id: '18c3f2a9b7d4e697' }, id))
+    rejects(() => email({ id: null, gmail_msg_id: '18c3f2a9b7d4e695' }), 'NOT NULL')
+    rejects(() => email({ id: undefined, gmail_msg_id: '18c3f2a9b7d4e694' }), 'NOT NULL')
     for (const dt of ['2026-02-30', '2026-19-01', '20261110', '']) rejects(() => email({ email_date: dt, gmail_msg_id: '18c3f2a9b7d4e696' }, rid(201)))
     rejects(() => email({ email_date: undefined, gmail_msg_id: '18c3f2a9b7d4e696' }, rid(201)), 'NOT NULL')
     rejects(() => email({ status: 'done', gmail_msg_id: '18c3f2a9b7d4e696' }, rid(201)))
@@ -310,6 +315,17 @@ describe.each(VARIANTS)('0006 $name', (v) => {
     const skewed = UP.replace('created_at, updated_at, updated_by FROM _m6_receipts;', "created_at, updated_at, 'someone-else' FROM _m6_receipts;")
     expect(skewed).not.toBe(UP)
     expect(() => d.exec(skewed)).toThrow(/CHECK constraint failed/)
+  })
+
+  it('fails the whole file, changing nothing, when receipts already holds a NULL id (0004 allowed one)', () => {
+    const e = before(v)
+    put(e, 'receipts', { id: null, connection_id: CONN, gmail_msg_id: 'feedfacecafe0001', email_date: '2026-11-10', status: 'pending', created_at: NOW, updated_at: NOW, updated_by: 'x' })
+    const snap = snapshot(e)
+    e.exec('BEGIN')
+    expect(() => e.exec(UP)).toThrow(/NOT NULL constraint failed: receipts\.id/)
+    e.exec('ROLLBACK')
+    expect(snapshot(e)).toEqual(snap)
+    expect(count(e, 'receipts')).toBe(7)
   })
 
   it('refuses to run a second time, before it changes anything, so upload rows can never be pushed through the email-only restore', () => {

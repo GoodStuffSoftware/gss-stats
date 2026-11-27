@@ -9,9 +9,13 @@
 -- and every one of its queries filters connection_id = ?, which no upload row matches. The reverse does not hold: the upload
 -- code names the new columns (even the email receipt list selects source and image_key), so 0006 must be applied BEFORE
 -- release 0.89.0 merges to main (a merge to main deploys). Private data never lives in this file; schema only.
--- D1 read budget: this account's D1 allows 5M rows read per day (UTC), shared with the live site. The file reads each row of
--- receipts, receipt_items and receipt_matches about ten times (counts, copies, restore, guard), so its cost is about ten times
--- their combined row count. Check the result with one count per table; never a probe sweep over production.
+-- D1 budget: this account's D1 allows 5M rows read and 100,000 rows written per day (UTC; the Free plan's limits), shared
+-- with the live site. Reads: the file reads each row of receipts, receipt_items and receipt_matches about ten times (counts,
+-- copies, restore, guard), so about ten times their combined row count. Writes: each receipt row up to 7 times (its copy, the
+-- table row, its id and dedupe keys, idx_rcpt_review and up to two partial indexes), each match up to 5, each item 2, so up to
+-- 7R + 2I + 5M rows written (R, I, M: the three row counts) plus a few dozen schema rows; the rollback block costs the same.
+-- Before applying, take one count per table and go ahead only if 7R + 2I + 5M is well under what is left of the day's 100,000;
+-- check the result the same way. Never a probe sweep over production.
 -- Note: gss-budget is shared by Preview and Production, so applying this for the preview touches production's file.
 --
 -- NUMBERING AND ORDER: the number is 0006 because 0005 is the bank-link migration (release 0.88.0: six bank_* tables, three
@@ -43,8 +47,10 @@
 --   * Restoring uses INSERT, which fires no AFTER DELETE trigger, and parents before children. categories is never touched, so
 --     the SET NULL columns (category_hint, proposed_category_id) are copied and restored with their values.
 --   * NULLs are distinct in a UNIQUE constraint, so UNIQUE (connection_id, gmail_msg_id) never collides on upload rows.
---   * A CHECK that evaluates to NULL passes, so every column CHECK below is written NULL-safe (IS NULL OR ...) and the row-shape
---     CHECK uses only IS [NOT] NULL tests and source = '...' on a NOT NULL column, so it always evaluates to 0 or 1.
+--   * A CHECK that evaluates to NULL passes, so every column CHECK below is written NULL-safe (IS NULL OR ...) or sits on a NOT
+--     NULL column, and the row-shape CHECK uses only IS [NOT] NULL tests and source = '...' on a NOT NULL column, so it always
+--     evaluates to 0 or 1. id is NOT NULL here although 0004 let it be NULL (a TEXT PRIMARY KEY on a rowid table allows NULL),
+--     so the image_key CHECK can never be NULL; a NULL id already in receipts fails the restore and so the whole file.
 --
 -- Safety nets inside this file, in order: (1) a precheck that fails the file, before anything changes, if receipts already has
 -- the new columns (so a second run can never restore upload rows through the email-only path); (2) row counts and a full-content
@@ -57,8 +63,8 @@
 -- (SQLITE_ERROR no such table) and the WHOLE FILE WAS ROLLED BACK: receipts still had its 24 original columns, the four old
 -- indexes and the trigger were intact, no _m6_* table existed, the row counts were unchanged (2 receipts, 1 item), and
 -- d1_migrations did not list 0006. The unmodified file then applied cleanly (receipts 29 columns, counts unchanged, no
--- leftover _m6_* table; rehearsed on the draft, which differs from this file only in comments and the image_key CHECK). So
--- local D1 applies a migration file atomically. That is evidence about local D1
+-- leftover _m6_* table; rehearsed on the draft, which differs from this file only in comments, the image_key CHECK and the
+-- NOT NULL on receipts.id). So local D1 applies a migration file atomically. That is evidence about local D1
 -- (workerd's SQLite), not a proof about production D1, which cannot be rehearsed without touching it; hence the bookmark.
 -- If production were NOT atomic, the guard in step 6 still stops the run and leaves every original row in the _m6_* tables
 -- (see Safety nets); the operator then restores the bookmark.
@@ -96,12 +102,13 @@ DROP TABLE receipt_matches;
 DROP TABLE receipt_items;
 DROP TABLE receipts;
 
--- 4. receipts, new shape. Every 0004 column, CHECK and default is kept verbatim; the five new columns come LAST (as an ALTER
+-- 4. receipts, new shape. Every 0004 column, CHECK and default is kept verbatim, except that connection_id and gmail_msg_id
+--    lose NOT NULL (gmail_msg_id's CHECK gains IS NULL OR) and id gains it; the five new columns come LAST (as an ALTER
 --    ... ADD would have put them) so nothing that reads by position moves. For an upload row: email_date = the upload day (UTC),
 --    connection_id and gmail_msg_id are NULL, uploader_email is the lower-cased login, image_sha256 is the hash of the stripped
 --    bytes (kept after the image is deleted: household-wide dedupe), image_key is NULL once the image is deleted.
 CREATE TABLE receipts (
-  id              TEXT PRIMARY KEY CHECK (id GLOB 'r[0-9a-f]*' AND length(id) = 17 AND substr(id, 2) NOT GLOB '*[^0-9a-f]*'),
+  id              TEXT NOT NULL PRIMARY KEY CHECK (id GLOB 'r[0-9a-f]*' AND length(id) = 17 AND substr(id, 2) NOT GLOB '*[^0-9a-f]*'),
   connection_id   TEXT REFERENCES email_connections(id) ON DELETE CASCADE,
   gmail_msg_id    TEXT CHECK (gmail_msg_id IS NULL OR (length(gmail_msg_id) BETWEEN 8 AND 32 AND gmail_msg_id NOT GLOB '*[^0-9a-f]*')),
   email_date      TEXT NOT NULL CHECK (email_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]' AND date(email_date) IS email_date),
@@ -129,7 +136,7 @@ CREATE TABLE receipts (
   updated_by      TEXT NOT NULL,
   source          TEXT NOT NULL DEFAULT 'email' CHECK (source IN ('email','upload')),
   uploader_email  TEXT CHECK (uploader_email IS NULL OR (uploader_email = lower(uploader_email) AND instr(uploader_email, '@') > 1 AND instr(uploader_email, '@') < length(uploader_email) AND length(uploader_email) <= 254)),
-  image_key       TEXT CHECK (image_key IS NULL OR image_key = ('img/' || id || '.jpg')),   -- this row's own id only (id is checked above); NULL once the image is deleted
+  image_key       TEXT CHECK (image_key IS NULL OR image_key = ('img/' || id || '.jpg')),   -- this row's own id only (id is NOT NULL and checked above); NULL once the image is deleted
   image_sha256    TEXT CHECK (image_sha256 IS NULL OR (length(image_sha256) = 64 AND image_sha256 NOT GLOB '*[^0-9a-f]*')),   -- of the stripped bytes; kept after the image goes
   image_bytes     INTEGER CHECK (image_bytes IS NULL OR (typeof(image_bytes) = 'integer' AND image_bytes BETWEEN 1 AND 3000000)),
   CHECK ((source = 'email'  AND connection_id IS NOT NULL AND gmail_msg_id IS NOT NULL AND uploader_email IS NULL
