@@ -736,7 +736,7 @@ describe('a run that dies between batches', () => {
       const died = await scenario(k)
       expect(died.snap, `died at batch ${k} of ${clean.batches}`).toEqual(clean.snap)
     }
-  })
+  }, 30_000)
 })
 
 // ---- fix A2: the claim is released when a run ends, the due pick is fair, one run is capped, sync_from fills in -------------

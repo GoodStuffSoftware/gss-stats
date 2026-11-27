@@ -2733,7 +2733,8 @@ production Item is ever created from a test, script or agent. From your worktree
    documented test user (any password), never real credentials.
 
 Stop both servers and delete `.wrangler/state` and `.dev.vars` when done (`npm run dev:stop -- --port 8797`). There is
-no webhook locally, so "Sync now" plus the cron call is how a sync runs.
+no webhook locally, so "Sync now" plus the cron call is how a sync runs. Start the banks Worker and wait until it is ready
+before starting Pages dev; to restart, stop both and start them in that order.
 
 **Tests.** `npm test` runs the vitest suite. For auth, `functions/_lib/auth.test.ts`
 covers the allowlist (exact match only: superstrings, substrings and non-ASCII

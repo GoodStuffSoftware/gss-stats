@@ -8,10 +8,15 @@
 // mode sends the item's access_token and no `products`.
 import type { RouteInput } from './index'
 import { LIVE_STATUSES, clientUserId, getItem, openToken, readKeys } from './store'
-import { createPlaidClient, type PlaidClient } from './plaid'
+import { PlaidError, createPlaidClient, type PlaidClient } from './plaid'
 import { failFromError, planDeps, reply as jsonResponse, type BankDeps } from './exchange'
 import { SLOT_LIMIT, slotEnvironment, slotsUsed } from './slots'
 import { log } from './log'
+
+/** Plaid refused the link token request itself (a 4xx JSON answer of type INVALID_REQUEST or INVALID_INPUT, such as an unregistered redirect URI): our setup, not the bank. */
+export function isSetupRefusal(e: unknown): boolean {
+  return e instanceof PlaidError && e.refused && e.status >= 400 && e.status < 500 && (e.type === 'INVALID_REQUEST' || e.type === 'INVALID_INPUT')
+}
 
 const ITEM_ID = /^i[0-9a-f]{16}$/
 
@@ -71,6 +76,10 @@ export async function handleLinkToken(input: RouteInput, deps: Partial<BankDeps>
     log('link_token_created', { update: itemId === undefined ? 0 : 1 })
     return jsonResponse(200, { ok: true, linkToken: res.link_token, expiration: typeof res.expiration === 'string' ? res.expiration : null })
   } catch (e) {
+    if (isSetupRefusal(e)) {
+      log('link_failed', {}, 'plaid_setup')
+      return jsonResponse(502, { ok: false, code: 'plaid_setup' })
+    }
     return failFromError(e, 'link')
   }
 }

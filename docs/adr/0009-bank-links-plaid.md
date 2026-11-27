@@ -68,7 +68,12 @@ return its slot, so a careless link is a permanent cost.
    saved with the first chunk and cleared with the chunk that ends the update (`has_more` false). If a mutation error or an
    `INVALID_REQUEST` arrives on the first page of a resumed chunk, the run restarts once from the base, and only once per run: a
    second failure, or a failure from the base itself, fails the run normally and the Item stays as it was for the next tick.
-   Rows already applied are rewritten to the same state, so the restart is safe.
+   Rows already applied are rewritten to the same state, so the restart is safe for every row the replay from the base lists.
+   **Known edge case.** A row written in an already-saved 6-page chunk that Plaid then removes during a mid-update mutation is not
+   in the replay from the base, so it stays as an extra row. It takes an update over 3,000 rows plus a mutation part way through.
+   A person can exclude the row, no person edit is lost, and pending-to-posted is not affected (the posted row's pending id maps
+   to the earlier row and posts it in place). Follow-up fix: stamp the rows written since the base, then after the replay prune
+   the unedited ones the replay did not list.
    **Tick budget.** D1 allows 1,000 queries per Worker invocation (a batch counts as one). A chunk starts only if the queries used
    so far plus `WORST_CHUNK_QUERIES` (280, derived in `sync.ts` from the 3,000-update chunk: 120 loading state, 35 planning pairs,
    122 applying) fit under `TICK_QUERY_BUDGET` (600); `OTHER_TICK_QUERIES` (150) is reserved for the reconnect check and the

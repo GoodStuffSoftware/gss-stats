@@ -106,7 +106,7 @@ describe('banksMessage', () => {
     'banks_not_configured', 'consent_required', 'not_owner', 'not_found', 'item_not_found', 'item_not_active', 'duplicate_item', 'slots_full',
     'store_failed', 'binding_timeout', 'banks_failed', 'kind_mismatch', 'account_taken', 'already_on', 'account_synced', 'bad_request',
     'too_large', 'method_not_allowed', 'forbidden', 'budget_denied', 'unauthorized', 'server_error',
-    'not_allowed', 'bad_signature', 'key_unavailable', 'secrets_missing', 'decrypt_failed', 'plaid_timeout', 'plaid_api_error',
+    'not_allowed', 'bad_signature', 'key_unavailable', 'secrets_missing', 'decrypt_failed', 'plaid_timeout', 'plaid_api_error', 'plaid_setup',
     'item_login_required', 'needs_reconnect', 'too_many_pages', 'sync_mutation', 'bad_response',
   ]
   it('has its own sentence for every fixed code', () => {
@@ -117,6 +117,10 @@ describe('banksMessage', () => {
       expect(m, c).not.toContain(c)
       expect(m.length, c).toBeGreaterThan(10)
     }
+  })
+  it('a setup refusal says so, while a bank-side Plaid code keeps the retry line', () => {
+    expect(banksMessage('plaid_setup')).toBe('Bank links need a setup fix in the Plaid dashboard. Nothing was linked.')
+    expect(banksMessage('plaid_item_error')).toBe('The bank reported a problem. It retries on its own.')
   })
   it('names the ten-link limit and the reconnect hint', () => {
     expect(banksMessage('slots_full')).toContain('10')

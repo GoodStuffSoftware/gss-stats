@@ -406,9 +406,23 @@ describe('POST /link-token', () => {
   })
 
   it('a Plaid error maps to 502 plaid_<type>', async () => {
-    known[LINK] = () => json({ error_type: 'INVALID_REQUEST', error_code: 'INVALID_FIELD' }, 400)
+    known[LINK] = () => json({ error_type: 'RATE_LIMIT_EXCEEDED', error_code: 'RATE_LIMIT' }, 429)
     const res = await link(makeEnv())
     expect(res.status).toBe(502)
-    expect(((await res.json()) as { code: string }).code).toBe('plaid_invalid_request')
+    expect(((await res.json()) as { code: string }).code).toBe('plaid_rate_limit_exceeded')
+  })
+
+  it('a refused link token request (our setup, such as an unregistered redirect) maps to 502 plaid_setup, logging only the code', async () => {
+    known[LINK] = () => json({ error_type: 'INVALID_REQUEST', error_code: 'INVALID_FIELD', error_message: 'secret-looking text' }, 400)
+    const res = await link(makeEnv())
+    expect(res.status).toBe(502)
+    expect(((await res.json()) as { code: string }).code).toBe('plaid_setup')
+    expect(logs.join('\n')).not.toContain('secret-looking')
+  })
+
+  it('a bank-side error on the link token request keeps plaid_<type>', async () => {
+    known[LINK] = () => json({ error_type: 'ITEM_ERROR', error_code: 'ITEM_LOGIN_REQUIRED' }, 400)
+    const res = await link(makeEnv())
+    expect(((await res.json()) as { code: string }).code).toBe('plaid_item_error')
   })
 })

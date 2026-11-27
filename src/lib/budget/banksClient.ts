@@ -38,6 +38,7 @@ const MESSAGES: Record<string, string> = {
   secrets_missing: 'Bank links are not fully set up on the server yet.',
   decrypt_failed: 'This bank link needs to be reconnected.',
   plaid_timeout: 'The bank did not answer in time. Please try again.',
+  plaid_setup: 'Bank links need a setup fix in the Plaid dashboard. Nothing was linked.',
   plaid_api_error: 'The bank service reported a problem. Please try again in a few minutes.',
   // an Item's lastError (sync and webhook outcomes)
   item_login_required: 'The bank wants you to sign in again. Use Reconnect.',
