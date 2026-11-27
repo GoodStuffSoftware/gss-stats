@@ -74,7 +74,7 @@ describe('repair', () => {
     const a = await seedItem(1)
     queue.push(itemOk)
     expect(await check()).toEqual({ checked: 1, repaired: 1 })
-    expect(itemRow(a)).toMatchObject({ status: 'active', last_error: null, sync_requested_at: t.toISOString(), last_sync_at: t.toISOString() })
+    expect(itemRow(a)).toMatchObject({ status: 'active', last_error: null, sync_requested_at: t.toISOString(), last_sync_at: new Date(t.getTime() - 15 * 60_000 - 1).toISOString() }) // the claim is released: due on the next tick
     expect(fetched).toEqual([{ url: ITEM_GET, body: { access_token: ACCESS, client_id: 'client-id-sandbox-test', secret: 'secret-value-sandbox-test' } }])
     expect(one('SELECT COUNT(*) AS n FROM bank_sync_runs')!.n).toBe(0)
   })

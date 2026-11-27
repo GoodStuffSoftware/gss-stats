@@ -89,6 +89,17 @@ describe('reconnected', () => {
     expect(banks.calls).toEqual([])
   })
 
+  it('releases a fresh claim stamp so the next tick picks the Item, and leaves an older stamp alone', async () => {
+    setStatus('needs_reconnect')
+    const fresh = new Date().toISOString()
+    db.exec(`UPDATE bank_items SET last_sync_at = '${fresh}' WHERE id = '${ITEM}'`)
+    await act(reconnected, 'reconnected')
+    expect(String(row().last_sync_at) < new Date(Date.now() - 15 * 60_000).toISOString()).toBe(true)
+    db.exec(`UPDATE bank_items SET status = 'needs_reconnect', last_sync_at = '2026-01-01T00:00:00.000Z' WHERE id = '${ITEM}'`)
+    await act(reconnected, 'reconnected')
+    expect(row().last_sync_at).toBe('2026-01-01T00:00:00.000Z')
+  })
+
   it.each(['revoked', 'removed'])('409 item_not_active for a %s Item, status unchanged', async (status) => {
     setStatus(status)
     const res = await act(reconnected, 'reconnected')
@@ -204,7 +215,7 @@ describe('query plans', () => {
 
   it('Sync now and reconnected update by primary key, never a scan', () => {
     for (const sql of [SYNC_REQUEST_SQL, RECONNECTED_SQL]) {
-      const p = plan(sql, [NOW, ITEM])
+      const p = plan(sql, sql === RECONNECTED_SQL ? [NOW, ITEM, NOW] : [NOW, ITEM])
       expect(p).toMatch(/SEARCH bank_items USING/)
       expect(p).not.toMatch(/SCAN/)
     }

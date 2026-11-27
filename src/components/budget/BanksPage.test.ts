@@ -302,8 +302,20 @@ describe('banks and accounts (masked, no ids)', () => {
     await mountPage(status({ items: [item({ status: 'needs_reconnect', newAccounts: true, lastError: 'item_login_required' })] }))
     expect(byId('banks-reconnect').exists()).toBe(true)
     expect(byId('banks-new-accounts').exists()).toBe(true)
-    expect(byId('banks-item-error').text()).toBe('The bank wants you to sign in again. Use Reconnect.')
+    expect(byId('banks-item-error').text()).toBe('The bank login has to be redone. Use Reconnect; nothing syncs until you do.')
     expect(byId('banks-sync-now').attributes('disabled')).toBeDefined()
+  })
+  it('a needs_reconnect card (a Plaid login-required code, a sync still requested) says to reconnect, not that it retries or is queued', async () => {
+    await mountPage(status({ items: [item({ status: 'needs_reconnect', lastError: 'plaid_item_login_required', syncRequested: true })] }))
+    expect(byId('banks-item-error').text()).toBe('The bank login has to be redone. Use Reconnect; nothing syncs until you do.')
+    expect(byId('banks-item-synced').text()).not.toContain('queued')
+    expect(text()).not.toContain('retries on its own')
+  })
+  it('the other person sees the linker has to reconnect, with no Reconnect button', async () => {
+    await mountPage(status({ items: [item({ status: 'needs_reconnect', mine: false, lastError: 'plaid_item_login_required', syncRequested: true })] }))
+    expect(byId('banks-item-error').text()).toBe('The person who linked this bank has to reconnect it. Nothing syncs until they do.')
+    expect(byId('banks-reconnect').exists()).toBe(false)
+    expect(byId('banks-item-synced').text()).not.toContain('queued')
   })
 })
 

@@ -11,6 +11,7 @@ import { SQL, KEEP_RUNS, ITEM_FIXED_QUERIES, applyPlan, syncItem, syncTick } fro
 import { handleScheduled } from '../src/index'
 import { createPlaidClient } from '../src/plaid'
 import { openToken, sealToken, type Keys } from '../src/store'
+import { markRepaired } from '../src/webhook'
 import { CHUNK_PAGES, OTHER_TICK_QUERIES, TICK_QUERY_BUDGET, WORST_CHUNK_QUERIES, claim, pickDue, plaidErrorCode } from '../src/sync'
 import type { Env } from '../src/env'
 
@@ -769,6 +770,19 @@ describe('claim release and the fair pick', () => {
     expect(item().last_error).toBeNull()
   })
 
+  it('a login-required run keeps its claim; Reconnect (markRepaired) leaves the Item due on the very next tick', async () => {
+    queue.push(() => plaidError('ITEM_LOGIN_REQUIRED'))
+    await sync(page())
+    expect(item().status).toBe('needs_reconnect')
+    const soon = new Date(t.getTime() + 2 * MIN)
+    expect(await markRepaired(db.d1, ITEM, soon)).toBe(1)
+    expect(await pickDue(db.d1, soon, 'sandbox')).toEqual([ITEM]) // inside 15 minutes of the failed run, still picked
+    queue.push(() => page({ next_cursor: 'cur-2' }))
+    const client = createPlaidClient({ env: env(), fetch: stubFetch, now: () => soon })
+    expect(await syncItem(db.d1, env(), client, KEYS, ITEM, soon)).toBe(true)
+    expect(item().last_error).toBeNull()
+  })
+
   it('an Item in the other environment is never picked here', async () => {
     run(`UPDATE bank_items SET environment = 'production' WHERE id = ?`, ITEM)
     expect(await sync(page())).toBe(false)
@@ -991,6 +1005,16 @@ describe('fix A3: cursor base, historical gate, unpair, in-place pairing, chunk 
       await sync(page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', next_cursor: 'cur-2', added: [ptxn('plaid-old', { date: '2026-09-01', amount: 7 })] }))
       expect(txnOf('plaid-old')).toBeDefined() // not skipped as older than a too-early sync_from
       expect(syncFrom()).toBe('2026-09-01')
+    })
+
+    it('the page status persists initial_done and historical_done with no webhook, never back to 0', async () => {
+      run('UPDATE bank_items SET initial_done = 0, historical_done = 0 WHERE id = ?', ITEM)
+      await sync(page({ transactions_update_status: 'INITIAL_UPDATE_COMPLETE', added: [ptxn('plaid-new', { date: '2026-11-20' })] }))
+      expect([item().initial_done, item().historical_done]).toEqual([1, 0])
+      await sync(page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', next_cursor: 'cur-2', added: [ptxn('plaid-old', { date: '2026-09-01', amount: 7 })] }))
+      expect([item().initial_done, item().historical_done]).toEqual([1, 1])
+      await sync(page({ transactions_update_status: 'NOT_READY', next_cursor: 'cur-3', added: [ptxn('plaid-x', { date: '2026-11-21', amount: 3 })] }))
+      expect([item().initial_done, item().historical_done]).toEqual([1, 1])
     })
 
     it('the webhook historical flag, set before the run, counts as complete', async () => {

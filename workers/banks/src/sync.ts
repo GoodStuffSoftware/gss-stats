@@ -158,6 +158,8 @@ interface SyncPage {
 
 /** Plaid's page status once the historical pull is done too (INITIAL_UPDATE_COMPLETE means the historical pull is still pending). */
 export const HISTORICAL_COMPLETE = 'HISTORICAL_UPDATE_COMPLETE'
+/** Plaid's page status once the first 30 days are in (the historical pull may still be pending). */
+export const INITIAL_COMPLETE = 'INITIAL_UPDATE_COMPLETE'
 
 export type FetchResult =
   /**
@@ -165,6 +167,8 @@ export type FetchResult =
    * historical: the last page said HISTORICAL_UPDATE_COMPLETE, so the log it caught up to already holds the historical rows (the stream is append-only: rows that arrive later come after any cursor we saved).
    */
   | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean
+      /** The last page said INITIAL_UPDATE_COMPLETE or HISTORICAL_UPDATE_COMPLETE: persisted into bank_items.initial_done (monotonic), so a sync needs no webhook for it. */
+      initial: boolean
       /** The pass that produced this went back from a saved mid-way cursor to restartCursor (see fetchUpdate). */
       rebased: boolean }
   /** Nothing to apply, nothing moves: the Item is not ready yet (empty next_cursor, or PRODUCT_NOT_READY). */
@@ -203,6 +207,7 @@ export async function fetchUpdate(
     let cursor = start
     let pass = 0 // pages fetched since the pass began (resets on a restart)
     let historical = false // the status of the page last read
+    let initial = false
     const added: PlaidTxn[] = []
     const modified: PlaidTxn[] = []
     const removed: PlaidRemoved[] = []
@@ -243,6 +248,7 @@ export async function fetchUpdate(
         return { kind: 'error', code: 'bad_response', pages }
       }
       historical = page.transactions_update_status === HISTORICAL_COMPLETE
+      initial = historical || page.transactions_update_status === INITIAL_COMPLETE
       added.push(...a)
       modified.push(...m)
       removed.push(...r)
@@ -251,8 +257,8 @@ export async function fetchUpdate(
         return { kind: 'error', code: 'bad_response', pages }
       }
       cursor = next
-      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical, rebased }
-      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical, rebased }
+      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical, initial, rebased }
+      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical, initial, rebased }
     }
   }
 }

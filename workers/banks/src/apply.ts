@@ -345,6 +345,8 @@ export interface RunCtx {
   base?: string
   /** The historical pull is complete (the update's last page said so, or the webhook flag was set before the run): only then does a NULL sync_from get its value. */
   historical?: boolean
+  /** The update's last page said INITIAL or HISTORICAL complete: initial_done goes to 1 (never back to 0). */
+  initial?: boolean
 }
 
 const INSERT_TXN = `INSERT INTO transactions (id, account_id, statement_end, import_id, posted_date, txn_date, amount_cents, description, merchant_key,
@@ -415,10 +417,10 @@ export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D
     ...(more || !c.historical ? [] : [db.prepare(FIRST_SYNC_FROM).bind(c.itemId, at)]),
     // The cursor moves last, together with the run row; a flag set during the run (later than run_start) survives it. A run that
     // is done (not `more`) also releases its claim (releasedStamp), so only a run in flight or one that crashed holds the Item.
-    db.prepare(`UPDATE bank_items SET sync_cursor = ?2, sync_cursor_base = ?7, last_ok_at = ?3, last_error = NULL, updated_at = ?3,
+    db.prepare(`UPDATE bank_items SET sync_cursor = ?2, sync_cursor_base = ?7, initial_done = MAX(initial_done, ?8), historical_done = MAX(historical_done, ?9), last_ok_at = ?3, last_error = NULL, updated_at = ?3,
       sync_requested_at = CASE WHEN ?5 = 1 THEN COALESCE(sync_requested_at, ?3) WHEN sync_requested_at <= ?4 THEN NULL ELSE sync_requested_at END,
       last_sync_at = CASE WHEN ?5 = 0 AND last_sync_at = ?3 THEN ?6 ELSE last_sync_at END
-      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart, more, releasedStamp(c.now), more ? (c.base ?? '') : null),
+      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart, more, releasedStamp(c.now), more ? (c.base ?? '') : null, c.initial || c.historical ? 1 : 0, c.historical ? 1 : 0),
     db.prepare(`UPDATE bank_sync_runs SET finished_at = ?2, pages = ?3, added = ?4, modified = ?5, removed = ?6, inserted = ?7, matched = ?8,
       flagged = ?9, posted = ?10, dropped = ?11, skipped = ?12, error_code = NULL WHERE id = ?1`)
       .bind(c.runId, at, c.pages, k.added, k.modified, k.removed, k.inserted, k.matched, k.flagged, k.posted, k.dropped, k.skipped),
@@ -515,7 +517,7 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
       plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
       addCounts(totals, plan.counts)
       pairs += plan.pairs.length
-      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: res.historical || historicalBefore })
+      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: res.historical || historicalBefore, initial: res.initial })
       budget.used += st.queries + 1 + batches + Math.ceil(plan.inPlace.filter((p) => p.pending === 0).length / CHUNK)
       cursor = res.nextCursor
       if (!res.more) break

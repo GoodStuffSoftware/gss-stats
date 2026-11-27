@@ -377,8 +377,9 @@ onMounted(async () => {
           <span class="bp-dot" :class="{ off: item.status !== 'active' }" aria-hidden="true"></span>{{ bankName(item) }}
           <span class="bp-status" data-testid="banks-item-status">{{ STATUS_WORDS[item.status] ?? item.status }}</span>
         </p>
-        <p class="bp-muted" data-testid="banks-item-synced">Last good sync {{ ago(item.lastOkAt) }}.<template v-if="item.syncRequested"> A sync is queued.</template></p>
-        <p v-if="item.lastError" class="bp-warn-text" data-testid="banks-item-error">{{ banksMessage(item.lastError) }}</p>
+        <p class="bp-muted" data-testid="banks-item-synced">Last good sync {{ ago(item.lastOkAt) }}.<template v-if="item.syncRequested && item.status !== 'needs_reconnect'"> A sync is queued.</template></p>
+        <p v-if="item.status === 'needs_reconnect'" class="bp-warn-text" data-testid="banks-item-error">{{ item.mine ? 'The bank login has to be redone. Use Reconnect; nothing syncs until you do.' : 'The person who linked this bank has to reconnect it. Nothing syncs until they do.' }}</p>
+        <p v-else-if="item.lastError" class="bp-warn-text" data-testid="banks-item-error">{{ banksMessage(item.lastError) }}</p>
         <p v-if="!item.mine" class="bp-muted" data-testid="banks-other-owner">Linked by the other person.</p>
         <p v-if="item.mine && item.newAccounts" class="bp-muted" data-testid="banks-new-accounts-line">This bank has accounts you have not shared yet.</p>
         <div class="bp-row">
