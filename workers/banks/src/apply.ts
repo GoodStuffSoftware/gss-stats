@@ -445,7 +445,7 @@ export async function applyPlan(db: D1Database, plan: Plan, c: RunCtx): Promise<
 // ---- the tick ---------------------------------------------------------------------------------------------------------
 
 /** Fixed D1 queries one Item costs outside the update: facts, claim, trigger, run row, item + token, finish (rounded up). */
-const ITEM_FIXED_QUERIES = 10
+export const ITEM_FIXED_QUERIES = 10
 
 const zeroCounts = (): Counts => ({ added: 0, modified: 0, removed: 0, inserted: 0, matched: 0, flagged: 0, posted: 0, dropped: 0, skipped: 0 })
 const addCounts = (to: Counts, c: Counts): void => { for (const k of Object.keys(to) as Array<keyof Counts>) to[k] += c[k] }

@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBudgetDb, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { keyFingerprint } from '../../receipts/src/tokenCrypto'
-import { SQL, KEEP_RUNS, applyPlan, syncItem, syncTick } from '../src/apply'
+import { SQL, KEEP_RUNS, ITEM_FIXED_QUERIES, applyPlan, syncItem, syncTick } from '../src/apply'
 import { handleScheduled } from '../src/index'
 import { createPlaidClient } from '../src/plaid'
 import { openToken, sealToken, type Keys } from '../src/store'
-import { CHUNK_PAGES, TICK_QUERY_BUDGET, claim, pickDue, plaidErrorCode } from '../src/sync'
+import { CHUNK_PAGES, OTHER_TICK_QUERIES, TICK_QUERY_BUDGET, WORST_CHUNK_QUERIES, claim, pickDue, plaidErrorCode } from '../src/sync'
 import type { Env } from '../src/env'
 
 const secret = (v: string) => ({ get: async () => v })
@@ -905,5 +905,191 @@ describe('sync_from of an account linked without statement rows', () => {
     expect(syncFrom(BA_CHK)).toBeNull()
     await go({ used: 0 })
     expect(syncFrom(BA_CHK)).toBe(`2026-11-${String(20 - CHUNK_PAGES - 1).padStart(2, '0')}`)
+  })
+})
+
+// Fix A3 regressions: each fails at 915c87e (see the leg notes for the fail-before evidence).
+describe('fix A3: cursor base, historical gate, unpair, in-place pairing, chunk cost', () => {
+  const go = (budget = { used: 0 }) => {
+    t = new Date(t.getTime() + 20 * MIN)
+    return syncItem(db.d1, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t, budget)
+  }
+  /** Pages from..to of one update (1 row each, page i ends at cur-p<i>); the page `last` has has_more false. */
+  const pages = (from: number, to: number, last: number) => {
+    for (let i = from; i <= to; i++) {
+      queue.push(() => page({ added: [ptxn(`plaid-u${i}`, { amount: 1 + i, name: `Shop ${i}` })], next_cursor: `cur-p${i}`, has_more: i < last }))
+    }
+  }
+  const invalid = () => json({ error_type: 'INVALID_REQUEST', error_code: 'INVALID_FIELD', error_message: 'text', request_id: 'r' }, 400)
+  const cursors = () => fetched.map((f) => f.body.cursor ?? null)
+  const bankRows = () => Number(one(`SELECT count(*) AS n FROM transactions WHERE bank_ref LIKE 'plaid:%'`)!.n)
+  /** One saved chunk of an 8-page update that began at cur-0: cursor cur-p6, base cur-0. */
+  const savedChunk = async () => {
+    pages(1, CHUNK_PAGES, 8)
+    expect(await go({ used: TICK_QUERY_BUDGET - 1 })).toBe(true)
+    expect(item()).toMatchObject({ sync_cursor: `cur-p${CHUNK_PAGES}`, sync_cursor_base: 'cur-0' })
+    fetched.length = 0
+  }
+
+  describe('(1) a mutation after a saved chunk', () => {
+    beforeEach(() => seedWorld({ lastOk: null }))
+
+    it('restarts at the update base, not the saved mid-way cursor; the base is cleared when the update finishes', async () => {
+      await savedChunk()
+      queue.push(() => plaidError('TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION'))
+      pages(1, 8, 8)
+      expect(await go()).toBe(true)
+      expect(cursors()).toEqual(['cur-p6', 'cur-0', 'cur-p1', 'cur-p2', 'cur-p3', 'cur-p4', 'cur-p5', 'cur-p6', 'cur-p7'])
+      expect(item()).toMatchObject({ sync_cursor: 'cur-p8', sync_cursor_base: null, last_error: null })
+      expect(bankRows()).toBe(8) // the re-pull is keyed: nothing doubled
+      expect(queue).toHaveLength(0)
+    })
+
+    it('rebases at most once per run: a second mid-way mutation fails the run, with no loop; the base stays for the next tick', async () => {
+      await savedChunk()
+      queue.push(() => plaidError('TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION'))
+      pages(1, CHUNK_PAGES, 8)
+      queue.push(() => plaidError('TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION'))
+      expect(await go()).toBe(true)
+      expect(cursors()).toEqual(['cur-p6', 'cur-0', 'cur-p1', 'cur-p2', 'cur-p3', 'cur-p4', 'cur-p5', 'cur-p6'])
+      expect(queue).toHaveLength(0)
+      expect(item()).toMatchObject({ sync_cursor: 'cur-p6', sync_cursor_base: 'cur-0', last_error: 'sync_mutation' })
+      expect(lastRun().error_code).toBe('sync_mutation')
+    })
+
+    it('Plaid refusing the mid-way cursor rebases once; the same refusal at the base fails the run normally', async () => {
+      await savedChunk()
+      queue.push(invalid, invalid)
+      expect(await go()).toBe(true)
+      expect(cursors()).toEqual(['cur-p6', 'cur-0'])
+      expect(queue).toHaveLength(0)
+      expect(item().last_error).toBe(plaidErrorCode('INVALID_FIELD'))
+      expect(item()).toMatchObject({ sync_cursor: 'cur-p6', sync_cursor_base: 'cur-0' })
+    })
+
+    it('a first sync (no cursor) saves an empty base, and a mutation after its first chunk restarts with no cursor', async () => {
+      run('UPDATE bank_items SET sync_cursor = NULL WHERE id = ?', ITEM)
+      pages(1, CHUNK_PAGES, 8)
+      await go({ used: TICK_QUERY_BUDGET - 1 })
+      expect(item()).toMatchObject({ sync_cursor: `cur-p${CHUNK_PAGES}`, sync_cursor_base: '' })
+      fetched.length = 0
+      queue.push(() => plaidError('TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION'))
+      pages(1, 8, 8)
+      await go()
+      expect(cursors().slice(0, 2)).toEqual(['cur-p6', null])
+      expect(item()).toMatchObject({ sync_cursor: 'cur-p8', sync_cursor_base: null, last_error: null })
+    })
+  })
+
+  describe('(2) sync_from waits for the historical pull', () => {
+    beforeEach(() => seedWorld({ syncFrom: null, lastOk: null }))
+    const syncFrom = () => one<{ sync_from: string | null }>('SELECT sync_from FROM bank_accounts WHERE id = ?', BA_CHK)!.sync_from
+
+    it('stays NULL after INITIAL_UPDATE_COMPLETE; the older historical rows still arrive and set it to the earliest date', async () => {
+      await sync(page({ transactions_update_status: 'INITIAL_UPDATE_COMPLETE', added: [ptxn('plaid-new', { date: '2026-11-20' })] }))
+      expect(syncFrom()).toBeNull()
+      await sync(page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', next_cursor: 'cur-2', added: [ptxn('plaid-old', { date: '2026-09-01', amount: 7 })] }))
+      expect(txnOf('plaid-old')).toBeDefined() // not skipped as older than a too-early sync_from
+      expect(syncFrom()).toBe('2026-09-01')
+    })
+
+    it('the webhook historical flag, set before the run, counts as complete', async () => {
+      run('UPDATE bank_items SET historical_done = 1 WHERE id = ?', ITEM)
+      await sync(page({ added: [ptxn('plaid-a', { date: '2026-11-18' })] }))
+      expect(syncFrom()).toBe('2026-11-18')
+    })
+  })
+
+  describe('(3) a removal never leaves a dangling pair_id', () => {
+    beforeEach(() => seedWorld())
+    const pairUp = async () => {
+      await sync(page({ added: [ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' }),
+        ptxn('plaid-d', { account_id: 'acc-crd', name: 'Payment Thank You', amount: -50, date: '2026-11-21' })] }))
+      const c = txnOf('plaid-c')!, d = txnOf('plaid-d')!
+      expect(txn(c).pair_id).toBe(d)
+      return { c, d }
+    }
+
+    it('the partner a person edited loses only its link; its category, kind, included and note stay', async () => {
+      const { c, d } = await pairUp()
+      personEdit(d)
+      const before = editState(d)
+      await sync(page({ next_cursor: 'cur-2', removed: [{ transaction_id: 'plaid-c' }] }))
+      expect(one('SELECT 1 AS x FROM transactions WHERE id = ?', c)).toBeUndefined()
+      expect(txn(d).pair_id).toBeNull()
+      expect(editState(d)).toEqual(before)
+      expect(one('SELECT count(*) AS n FROM transactions WHERE pair_id IS NOT NULL AND pair_id NOT IN (SELECT id FROM transactions)')!.n).toBe(0)
+    })
+
+    it('a removed row a person edited after the read is kept, and so is its partner link', async () => {
+      const { c, d } = await pairUp()
+      personEdit(c)
+      const zero = { added: 0, modified: 0, removed: 1, inserted: 0, matched: 0, flagged: 0, posted: 0, dropped: 0, skipped: 0 }
+      const plan = { inserts: [], matches: [], inPlace: [], updates: [], unmap: [], dropped: [], deletes: [{ txnId: c, pairId: d }], pairs: [], counts: zero }
+      const runId = lastRun().id as number
+      await applyPlan(db.d1, plan, { itemId: ITEM, runId, now: t, runStart: t.toISOString(), pages: 1, nextCursor: 'cur-9' })
+      expect(txn(c)).toBeTruthy()
+      expect(txn(d).pair_id).toBe(c)
+    })
+  })
+
+  describe('(5) pending rows that post in place', () => {
+    beforeEach(() => seedWorld())
+
+    it('two pending sides that both post in one update are paired', async () => {
+      await sync(page({ added: [ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21', pending: true }),
+        ptxn('plaid-d', { account_id: 'acc-crd', name: 'Payment Thank You', amount: -50, date: '2026-11-21', pending: true })] }))
+      const c = txnOf('plaid-c')!, d = txnOf('plaid-d')!
+      await sync(page({ next_cursor: 'cur-2', added: [
+        ptxn('plaid-c2', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-22', pending_transaction_id: 'plaid-c' }),
+        ptxn('plaid-d2', { account_id: 'acc-crd', name: 'Payment Thank You', amount: -50, date: '2026-11-22', pending_transaction_id: 'plaid-d' })] }))
+      expect(txnOf('plaid-c2')).toBe(c)
+      expect(txn(c)).toMatchObject({ pending: 0, pair_id: d })
+      expect(txn(d)).toMatchObject({ pending: 0, pair_id: c })
+    })
+  })
+
+  describe('(6) the worst-case chunk fits WORST_CHUNK_QUERIES', () => {
+    beforeEach(() => seedWorld({ lastOk: null }))
+
+    it('the reserve arithmetic holds', () => {
+      expect(1 + ITEM_FIXED_QUERIES + WORST_CHUNK_QUERIES).toBeLessThanOrEqual(TICK_QUERY_BUDGET) // one Item always fits a fresh tick
+      expect(TICK_QUERY_BUDGET + OTHER_TICK_QUERIES).toBeLessThan(1000)
+    })
+
+    it('3,000 pending rows posting in place, each pairing with an existing row, cost at most WORST_CHUNK_QUERIES', { timeout: 300_000 }, async () => {
+      const N = 500
+      const cents = (i: number, j: number) => 1000 + i * N + j
+      for (let i = 1; i <= CHUNK_PAGES; i++) {
+        queue.push(() => page({ added: Array.from({ length: N }, (_, j) => ptxn(`pend-${i}-${j}`, { name: 'Online Transfer To Card', amount: cents(i, j) / 100, date: '2026-11-20', pending: true })),
+          next_cursor: `cur-a${i}`, has_more: i < CHUNK_PAGES }))
+      }
+      expect(await go()).toBe(true)
+      expect(bankRows()).toBe(CHUNK_PAGES * N)
+      for (let i = 1; i <= CHUNK_PAGES; i++) for (let j = 0; j < N; j++) stmtRow(`s${i}x${j}x`, 'crd', '2026-11-19', cents(i, j), 'Payment Thank You', { kind: 'card_payment', updated_by: 'tool:build-load-sql' })
+      for (let i = 1; i <= CHUNK_PAGES; i++) {
+        queue.push(() => page({ added: Array.from({ length: N }, (_, j) => ptxn(`post-${i}-${j}`, { name: 'Online Transfer To Card', amount: cents(i, j) / 100, date: '2026-11-21', pending_transaction_id: `pend-${i}-${j}` })),
+          next_cursor: `cur-b${i}`, has_more: i < CHUNK_PAGES }))
+      }
+      const sizes: number[] = []
+      const real = db.d1
+      const counting = new Proxy(real, {
+        get(tg, p) {
+          if (p === 'batch') return async (s: any) => { sizes.push(s.length); return (tg as any).batch(s) }
+          const v = (tg as any)[p]
+          return typeof v === 'function' ? v.bind(tg) : v
+        },
+      }) as D1Database
+      const before = db.statements.length
+      const budget = { used: 0 }
+      t = new Date(t.getTime() + 20 * MIN)
+      expect(await syncItem(counting, env(), createPlaidClient({ env: env(), fetch: stubFetch, now: () => t }), KEYS, ITEM, t, budget)).toBe(true)
+      const queries = db.statements.length - before - sizes.reduce((a, b) => a + b, 0) + sizes.length // a batch is one query
+      expect(lastRun()).toMatchObject({ posted: CHUNK_PAGES * N, error_code: null })
+      expect(Number(one('SELECT count(*) AS n FROM transactions WHERE pair_id IS NOT NULL')!.n)).toBe(2 * CHUNK_PAGES * N) // every row paired
+      expect(budget.used).toBeGreaterThanOrEqual(queries) // the estimate never undercounts
+      expect(queries - ITEM_FIXED_QUERIES).toBeLessThanOrEqual(WORST_CHUNK_QUERIES)
+      console.info(`worst-case chunk: ${queries} D1 queries incl. the Item's fixed ones; estimate ${budget.used}`)
+    })
   })
 })
