@@ -3,11 +3,12 @@
 // uses an index), the rule engine's write path, and the route wrapper.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_LATEST_SQL, LOAN_PAYMENTS_SQL, LOAN_PROMOS_SQL, LOAN_TERMS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
-  encodeCursor, getTxn, isIsoDate, loadDebts, mapAccount, mapRule, mapTxn, nextStamp, parseManualBalance, parseRange, parseSummaryQuery,
+  APPLY_CANDIDATES_SQL, BudgetHttpError, CHUNK_BYTES, DEBT_PAYMENTS_SQL, LATEST_ONE_SQL, LOAN_LATEST_SQL, LOAN_PAYMENTS_SQL, LOAN_BANK_SQL, LOAN_PROMOS_SQL, LOAN_TERMS_SQL, PROMOS_ONE_SQL, RANGE_SQL, TERMS_SQL, applyRules, accountIdsFor, assertCategory, buildSummary, buildTxnList, chunkBySize, decodeCursor, defineRoute,
+  encodeCursor, getTxn, isIsoDate, loadDebtDetail, loadDebts, loadLoans, mapAccount, mapRule, mapTxn, nextStamp, parseManualBalance, parseRange, parseSummaryQuery,
   parseTxnQuery, readJsonObject, runSummary, runTxnList,
 } from './budgetDb'
 import { addPersonB, createBudgetDb, insertTxn, testTxnId, type FakeBudgetDb } from './testing/budgetDb'
+import { seedBankAccount, seedBankItem } from './testing/banksFake'
 import type { SummaryQuery, TxnQuery } from '../../src/lib/budget/types'
 
 const sp = (o: Record<string, string>) => new URLSearchParams(o)
@@ -600,5 +601,100 @@ describe('defineRoute and readJsonObject', () => {
     await expect(readJsonObject(req('{}', { 'Content-Length': '5000' }), 100)).rejects.toMatchObject({ status: 413 })
     await expect(readJsonObject(req('é'.repeat(80)), 100)).rejects.toMatchObject({ status: 413 }) // bytes, not characters
     for (const bad of ['', '{nope', '[]', '5', 'null']) await expect(readJsonObject(req(bad), 100)).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+// ---------- bank links: the pending flag and the bank debt source (leg 10) -------------------------
+
+describe('bank links: pending flag', () => {
+  it('maps pending only when the column is 1 (absent otherwise), through the mapper and a stored row', async () => {
+    const row = db.get<Record<string, unknown>>('SELECT * FROM transactions LIMIT 1')!
+    expect(mapTxn({ ...row, pending: 1 })).toMatchObject({ pending: true })
+    for (const off of [0, null, undefined]) expect('pending' in mapTxn({ ...row, pending: off })).toBe(false)
+    const id = insertTxn(db, { account_id: 'chk-a', posted_date: '2026-12-01' })
+    expect('pending' in (await getTxn(db.d1, id))!).toBe(false)
+    db.exec(`UPDATE transactions SET pending = 1 WHERE id = '${id}'`)
+    expect(await getTxn(db.d1, id)).toMatchObject({ id, pending: true })
+  })
+})
+
+describe('bank links: debt balances and loans from the bank', () => {
+  const T = '2026-12-10T00:00:00.000Z'
+  const NOW = new Date('2026-12-15T12:00:00.000Z')
+  const bankBalance = (account: string, asOf: string, cents: number, by = 'sync:plaid') =>
+    db.exec(`INSERT INTO debt_balances (account_id, as_of, balance_cents, apr_bp, entered_at, entered_by) VALUES ('${account}', '${asOf}', ${cents}, NULL, '${T}', '${by}')`)
+  /** One linked bank account on a Budget account, with a liabilities snapshot. */
+  function linkLiability(n: number, accountId: string, snap: Record<string, string | number | null>, sync = 'on'): void {
+    const item = `i${n.toString(16).padStart(16, '0')}`
+    const acct = `b${n.toString(16).padStart(16, '0')}`
+    seedBankItem(db, { id: item })
+    seedBankAccount(db, { id: acct, itemId: item, accountId, sync, syncFrom: sync === 'on' ? '2026-12-01' : null })
+    const cols = { kind: 'credit', fetched_at: '2026-12-14T08:00:00.000Z', ...snap }
+    db.sqlite.prepare(`INSERT INTO bank_liabilities (bank_account_id, ${Object.keys(cols).join(', ')}) VALUES (?, ${Object.keys(cols).map(() => '?').join(', ')})`)
+      .run(acct, ...Object.values(cols))
+  }
+  const latestOf = async (id: string) => (await loadLoans(db.d1, 'all', NOW)).debts.find((d) => d.accountId === id)!.latest
+
+  it("loadDebts reports source 'bank' only for the sync's own row; a person's row stays manual", async () => {
+    bankBalance('card-a', '2026-12-06', 16_000, 'person@example.com')
+    expect((await loadDebts(db.d1, 'all')).find((d) => d.accountId === 'card-a')).toMatchObject({ balanceCents: 16_000, asOf: '2026-12-06', source: 'manual' })
+    bankBalance('card-a', '2026-12-10', 15_500)
+    expect((await loadDebts(db.d1, 'all')).find((d) => d.accountId === 'card-a')).toMatchObject({ balanceCents: 15_500, asOf: '2026-12-10', source: 'bank' })
+    bankBalance('card-a', '2026-12-11', 15_000, 'person@example.com')
+    expect((await loadDebts(db.d1, 'all')).find((d) => d.accountId === 'card-a')).toMatchObject({ balanceCents: 15_000, source: 'manual' })
+    // A payments-only debt the bank reports on.
+    bankBalance('mtg', '2026-12-10', 24_000_000)
+    expect((await loadDebts(db.d1, 'all')).find((d) => d.accountId === 'mtg')).toMatchObject({ balanceCents: 24_000_000, source: 'bank' })
+  })
+
+  it("the debt detail history labels the sync's rows 'bank', in date order beside statements and typed rows", async () => {
+    bankBalance('card-a', '2026-12-10', 15_500)
+    bankBalance('card-a', '2026-12-06', 16_000, 'person@example.com')
+    const d = (await loadDebtDetail(db.d1, 'card-a'))!
+    expect(d.history.map((h) => [h.asOf, h.source])).toEqual([['2026-12-04', 'statement'], ['2026-12-06', 'manual'], ['2026-12-10', 'bank']])
+    expect(d.history[2]).toMatchObject({ balanceCents: 15_500 })
+  })
+
+  it('loadLoans: the bank snapshot replaces the latest block only when its statement date is newer than the newest statement', async () => {
+    linkLiability(1, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500, next_due_date: '2027-01-14', escrow_cents: 700 })
+    expect(await latestOf('card-a')).toEqual({ periodEnd: '2026-12-20', minDueCents: 3500, dueDate: '2027-01-14', payoffCents: null, escrowCents: 700, interestCents: null })
+    // The same date, then an older one: the statement file keeps the block.
+    for (const date of ['2026-12-04', '2026-11-30']) {
+      db.exec(`UPDATE bank_liabilities SET last_statement_date = '${date}'`)
+      expect(await latestOf('card-a'), date).toMatchObject({ periodEnd: '2026-12-04', minDueCents: 2500, dueDate: '2026-12-29', interestCents: 1900 })
+    }
+  })
+
+  it('loadLoans: a snapshot with no statement date (a mortgage) wins only where there is no statement at all', async () => {
+    linkLiability(2, 'mtg', { kind: 'mortgage', last_statement_date: null, min_due_cents: null, next_monthly_payment_cents: 160_000, next_due_date: '2027-01-01', escrow_cents: 40_000 })
+    expect(await latestOf('mtg')).toEqual({ periodEnd: '2026-12-14', minDueCents: 160_000, dueDate: '2027-01-01', payoffCents: null, escrowCents: 40_000, interestCents: null })
+    db.exec(`INSERT INTO statements (account_id, period_start, period_end, closing_balance_cents, min_due_cents, due_date) VALUES ('mtg', '2026-11-01', '2026-11-30', 25000000, 150000, '2026-12-01')`)
+    expect(await latestOf('mtg')).toMatchObject({ periodEnd: '2026-11-30', minDueCents: 150_000 })
+  })
+
+  it('loadLoans ignores a snapshot of an account that is not synced (sync off)', async () => {
+    linkLiability(3, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500 }, 'off')
+    expect(await latestOf('card-a')).toMatchObject({ periodEnd: '2026-12-04', minDueCents: 2500 })
+  })
+
+  it('parity: with no bank rows loadLoans is the statement-only answer, and an unsynced bank row changes nothing', async () => {
+    const plain = await loadLoans(db.d1, 'all', NOW)
+    for (const d of plain.debts) {
+      const s = db.get<Record<string, unknown>>(LATEST_ONE_SQL.replace('?', `'${d.accountId}'`))
+      expect(d.latest?.periodEnd ?? null, d.accountId).toBe((s?.period_end as string | undefined) ?? null)
+      expect(d.latest?.interestCents ?? null, d.accountId).toBe((s?.interest_cents as number | null | undefined) ?? null)
+    }
+    linkLiability(4, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500 }, 'off')
+    expect(await loadLoans(db.d1, 'all', NOW)).toEqual(plain)
+  })
+
+  it('reads the bank snapshots in one statement per /loans call, through idx_bank_acct_on and the key of bank_liabilities', async () => {
+    linkLiability(5, 'card-a', { last_statement_date: '2026-12-20', min_due_cents: 3500 })
+    const before = db.statements.length
+    await loadLoans(db.d1, 'all', NOW)
+    expect(db.statements.slice(before).filter((s) => s.includes('bank_liabilities'))).toHaveLength(1)
+    const plan = db.explain(LOAN_BANK_SQL, ['all']).join('\n')
+    expect(plan, plan).toContain('idx_bank_acct_on')
+    expect(plan, plan).not.toMatch(/SCAN (ba|l|bank_accounts|bank_liabilities)\b/)
   })
 })
