@@ -350,9 +350,13 @@ export async function readUpload(env: Env, row: S.UploadRow, ctx: { apiKey: stri
   const r = await extractReceiptImage({ jpegB64: toBase64(bytes), uploadDate: row.emailDate, categoryIds: ctx.categoryIds }, { apiKey: ctx.apiKey, model }, ctx.fetch)
   if (!r.ok) {
     if (r.code === 'extract_invalid') {
-      await S.recordFailure(db, row.id, 'extract_invalid', ctx.now())
-      return { outcome: 'failed', code: 'extract_invalid' }
+      const code = r.reason === 'max_tokens' ? 'max_tokens' : 'extract_invalid'
+      await S.recordFailure(db, row.id, code, ctx.now())
+      return { outcome: 'failed', code }
     }
+    // A 400 on an image is likely this image (the sanitizer checks structure, not decodability): it costs an attempt so the row
+    // ends as could-not-read and the queue moves on. The pass still stops, so a global fault (a bad model name) ends it too.
+    if (r.reason === 'api_rejected') await S.recordFailure(db, row.id, 'api_rejected', ctx.now())
     return { outcome: 'stop', code: r.reason ?? 'api_unavailable' }
   }
   await S.completeReceipt(db, row.id, r.receipt, r.model, null, ctx.now())
@@ -374,21 +378,26 @@ export async function runUploads(env: Env, deps: RunDeps = {}): Promise<UploadRu
   const out: UploadRunResult = { read: 0, failed: 0, matched: 0, code: null }
   try {
     if (!selectImageStore(env)) return out // uploads are not set up: nothing stored, nothing to retry
-    const rows = await S.loadUploadRetries(db, Math.min(UPLOAD_RETRY_BATCH, Math.max(1, Math.floor(intVar(env.RECEIPTS_MAX_PER_RUN, 60)))))
-    if (rows.length === 0) return out
     const [apiKey, allowed] = await Promise.all([readSecret(env.RECEIPTS_ANTHROPIC_KEY), allowedEmails(env)])
-    if (!apiKey || allowed === null) { out.code = 'secrets_missing'; return out }
-    const categoryIds = (await db.prepare(CATEGORIES_SQL).all<{ id: string }>()).results.map((c) => c.id)
-    const startedMs = clock().getTime()
-    const people = new Set<string>()
-    for (const row of rows) {
-      if (deps.budgetMs !== undefined && clock().getTime() - startedMs >= deps.budgetMs) break
-      if (!allowed.has(row.uploaderEmail)) continue
-      const r = await readUpload(env, row, { apiKey, categoryIds, fetch: deps.fetch ?? fetch, now: clock })
-      if (r.outcome === 'stop') { out.code = r.code; break }
-      if (r.outcome === 'read') { out.read++; people.add(row.uploaderEmail) } else out.failed++
+    if (allowed === null) { out.code = 'secrets_missing'; return out }
+    const rows = await S.loadUploadRetries(db, Math.min(UPLOAD_RETRY_BATCH, Math.max(1, Math.floor(intVar(env.RECEIPTS_MAX_PER_RUN, 60)))))
+    if (rows.length > 0 && !apiKey) out.code = 'secrets_missing'
+    if (apiKey && rows.length > 0) {
+      const categoryIds = (await db.prepare(CATEGORIES_SQL).all<{ id: string }>()).results.map((c) => c.id)
+      const startedMs = clock().getTime()
+      for (const row of rows) {
+        if (deps.budgetMs !== undefined && clock().getTime() - startedMs >= deps.budgetMs) break
+        if (!allowed.has(row.uploaderEmail)) continue
+        const r = await readUpload(env, row, { apiKey, categoryIds, fetch: deps.fetch ?? fetch, now: clock })
+        if (r.outcome === 'stop') { out.code = r.code; break }
+        if (r.outcome === 'read') out.read++
+        else out.failed++
+      }
     }
-    for (const email of people) {
+    // Re-match every person's open uploads, read now or earlier: a bank row that posts days after the photo is still
+    // suggested, and the stale sweep covers uploads too. The set read is idx_rcpt_up_open (open uploads only).
+    for (const email of await S.loadOpenUploaders(db)) {
+      if (!allowed.has(email)) continue
       try { out.matched += (await rematch(env, { kind: 'upload', email }, clock())).suggested } catch { out.code = out.code ?? 'match_failed' }
     }
   } catch {
@@ -414,7 +423,14 @@ export async function sweepImages(env: Env, deps: RunDeps = {}): Promise<{ swept
     if (!store) return { swept, code }
     const now = clock()
     const cutoff = new Date(now.getTime() - keepDays(env.RECEIPTS_IMAGE_KEEP_DAYS) * 86_400_000)
-    for (const img of await S.loadExpiredImages(env.BUDGET_DB, cutoff, SWEEP_BATCH)) {
+    const allowed = await allowedEmails(env)
+    if (allowed === null) return { swept, code: 'secrets_missing' }
+    const expired: S.ExpiredImage[] = []
+    for (const email of allowed) {
+      if (expired.length >= SWEEP_BATCH) break
+      expired.push(...(await S.loadExpiredImages(env.BUDGET_DB, email, cutoff, SWEEP_BATCH - expired.length)))
+    }
+    for (const img of expired) {
       try {
         await store.delete(img.imageKey)
         await S.clearImageKey(env.BUDGET_DB, img.id, now)

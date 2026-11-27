@@ -691,6 +691,55 @@ describe('uploads: runUploads and readUpload', () => {
   })
 })
 
+describe('uploads: later cron passes and image failures', () => {
+  it('a bank row that posts after the read is suggested by a later cron pass; the upload is never applied', async () => {
+    const mem = memKv()
+    const id = await addUpload(mem)
+    await upRun(upEnv(mem, { RECEIPTS_AUTO_APPLY: '1' }), makeNet())
+    expect(rcpt(id).status).toBe('unmatched')
+    expect(count('receipt_matches')).toBe(0)
+    insertTxn(db, { posted_date: '2026-12-02', amount_cents: -1234, merchant_name: 'Fake Mart' })
+    const net = makeNet()
+    const r = await upRun(upEnv(mem, { RECEIPTS_AUTO_APPLY: '1' }), net)
+    expect(net.anthropic).toBe(0) // nothing to read: only the re-match ran
+    expect(r.matched).toBe(1)
+    expect(rcpt(id).status).toBe('suggested')
+    expect(db.get<{ n: number }>("SELECT count(*) n FROM receipt_matches WHERE status = 'applied'")!.n).toBe(0)
+  })
+  it('the cron re-match also dismisses an open upload that went stale', async () => {
+    const mem = memKv()
+    const id = await addUpload(mem, { at: new Date(NOW.getTime() - 90 * 86_400_000) })
+    db.exec(`UPDATE receipts SET status = 'unmatched', merchant = 'Old Shop', email_date = '2026-08-01', total_cents = 500 WHERE id = '${id}'`)
+    await upRun(upEnv(mem), makeNet())
+    expect(rcpt(id).status).toBe('dismissed')
+  })
+  it('a 400 on an image costs an attempt and still stops the pass; after 3 the row is an error and the queue moves on', async () => {
+    const mem = memKv()
+    const a = await addUpload(mem)
+    const bad = makeNet({ anthropicStatus: 400 })
+    const r1 = await upRun(upEnv(mem), bad)
+    expect(r1.code).toBe('api_rejected')
+    expect(bad.anthropic).toBe(1)
+    expect(rcpt(a)).toMatchObject({ status: 'pending', attempts: 1 })
+    await upRun(upEnv(mem), makeNet({ anthropicStatus: 400 }))
+    await upRun(upEnv(mem), makeNet({ anthropicStatus: 400 }))
+    expect(rcpt(a)).toMatchObject({ status: 'error', attempts: 3, error_code: 'api_rejected' })
+    const b = await addUpload(mem)
+    const good = makeNet()
+    const r4 = await upRun(upEnv(mem), good)
+    expect(r4).toMatchObject({ read: 1, code: null })
+    expect(good.anthropic).toBe(1) // only the new upload; the rejected one is not sent again
+    expect(rcpt(b).status).not.toBe('pending')
+  })
+  it('a reply cut off at max_tokens is its own failure code and costs an attempt', async () => {
+    const mem = memKv()
+    const id = await addUpload(mem)
+    const net = { urls: [] as string[], queries: [] as string[], anthropic: 0, gets: 0, fetch: vi.fn(async () => new Response(JSON.stringify({ stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"is_receipt": true, "items": [' }], usage: { input_tokens: 10, output_tokens: 2400 } }))) as unknown as typeof fetch }
+    await runUploads(upEnv(mem), { fetch: net.fetch, now: () => NOW })
+    expect(rcpt(id)).toMatchObject({ status: 'pending', attempts: 1, error_code: 'max_tokens' })
+  })
+})
+
 describe('uploads: rematch scopes', () => {
   it('an upload-scope re-match leaves an email receipt in the same bank window alone, and the reverse', async () => {
     const mem = memKv()

@@ -23,6 +23,7 @@ import {
   type MatchReceipt,
   type ReceiptMatchResult,
 } from '../../../src/lib/budget/receiptMatch'
+import { log } from './log'
 import { groupQueries, type ReceiptQueries } from './gmail'
 import type { ExtractedReceipt } from './extract'
 
@@ -582,8 +583,10 @@ export async function autoApplyMatches(db: Db, proposals: readonly MatchProposal
     try {
       const res = await db.batch(stmts)
       if ((res[0].meta?.changes ?? 0) > 0) applied++
-    } catch {
+    } catch (e) {
       // A constraint (another receipt already applied to the row) rolls this proposal back; the rest go on.
+      // A missing column means migration 0006 is not applied yet: say so (a code only), so it is not silent.
+      if (/no such column/i.test(e instanceof Error ? e.message : '')) log('auto_apply_schema_old', {}, 'schema_old')
     }
   }
   return applied
@@ -617,8 +620,10 @@ export const UPLOAD_BY_ID_SQL = `SELECT id, uploader_email, status, image_key, a
 export const UPLOADS_TODAY_SQL = `SELECT count(*) AS n FROM receipts WHERE uploader_email = ?1 AND uploader_email IS NOT NULL AND created_at >= ?2`
 export const UPLOAD_RETRY_SQL = `SELECT id, uploader_email, status, image_key, attempts, email_date FROM receipts
 WHERE uploader_email IS NOT NULL AND status IN ('pending','error') AND attempts < ${MAX_ATTEMPTS} ORDER BY attempts, id LIMIT ?1`
-/** Rows whose image is past retention (?1 = ISO cutoff). Scans the small idx_rcpt_up_day partial index: uploads are few. */
-export const EXPIRED_IMAGES_SQL = `SELECT id, image_key FROM receipts WHERE uploader_email IS NOT NULL AND created_at < ?1 AND image_key IS NOT NULL ORDER BY created_at LIMIT ?2`
+/** One person's rows whose image is past retention (?1 = ISO cutoff, ?2 = limit, ?3 = address). A seek on idx_rcpt_up_day, already in created_at order: no scan of every upload, no sort. */
+export const EXPIRED_IMAGES_SQL = `SELECT id, image_key FROM receipts WHERE uploader_email = ?3 AND created_at < ?1 AND image_key IS NOT NULL ORDER BY created_at LIMIT ?2`
+/** People with at least one open upload (idx_rcpt_up_open; open uploads go stale after 75 days, so the set stays small). */
+export const OPEN_UPLOADERS_SQL = `SELECT DISTINCT uploader_email FROM receipts INDEXED BY idx_rcpt_up_open WHERE uploader_email IS NOT NULL AND status IN ('unmatched','suggested')`
 export const CLEAR_IMAGE_KEY_SQL = `UPDATE receipts SET image_key = NULL, updated_at = ?2, updated_by = '${ACTOR}' WHERE id = ?1 AND uploader_email IS NOT NULL AND image_key IS NOT NULL`
 export const DELETE_UPLOAD_SQL = `DELETE FROM receipts WHERE id = ?1 AND uploader_email = ?2 AND uploader_email IS NOT NULL`
 
@@ -653,7 +658,7 @@ export async function uploadsToday(db: Db, email: string, now: Date): Promise<nu
   return r?.n ?? 0
 }
 
-/** Pending or failed uploads still under the attempt limit, across people, oldest attempts first. */
+/** Pending or failed uploads still under the attempt limit, oldest attempts first. */
 export async function loadUploadRetries(db: Db, limit: number): Promise<UploadRow[]> {
   const { results } = await db.prepare(UPLOAD_RETRY_SQL).bind(Math.max(1, Math.floor(limit))).all<Record<string, unknown>>()
   return results.map(uploadRow)
@@ -665,9 +670,15 @@ export async function deleteUploadReceipt(db: Db, id: string, email: string): Pr
   return (res.meta?.changes ?? 0) > 0
 }
 
+/** Addresses that have an open (unmatched or suggested) upload, for the cron re-match. */
+export async function loadOpenUploaders(db: Db): Promise<string[]> {
+  const { results } = await db.prepare(OPEN_UPLOADERS_SQL).all<{ uploader_email: string }>()
+  return results.map((r) => r.uploader_email)
+}
+
 export interface ExpiredImage { id: string; imageKey: string }
-export async function loadExpiredImages(db: Db, olderThan: Date, limit: number): Promise<ExpiredImage[]> {
-  const { results } = await db.prepare(EXPIRED_IMAGES_SQL).bind(iso(olderThan), Math.max(1, Math.floor(limit))).all<{ id: string; image_key: string }>()
+export async function loadExpiredImages(db: Db, email: string, olderThan: Date, limit: number): Promise<ExpiredImage[]> {
+  const { results } = await db.prepare(EXPIRED_IMAGES_SQL).bind(iso(olderThan), Math.max(1, Math.floor(limit)), email).all<{ id: string; image_key: string }>()
   return results.map((r) => ({ id: r.id, imageKey: r.image_key }))
 }
 

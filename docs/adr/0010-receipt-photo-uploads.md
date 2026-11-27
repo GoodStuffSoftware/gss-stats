@@ -44,3 +44,12 @@ fields, the same matching and the same suggestions as an emailed receipt.
 - The Worker needs the R2 binding and a token that can deploy it; R2 must be enabled on the account first.
 - Pages gains three routes under `/api/budget/uploads` and one var; the upload cap (2,000,000 bytes) is checked in
   Pages by header and by counting the stream, and again in the Worker.
+
+## Rollout order
+
+1. Apply migration 0006 by hand (after a Time Travel bookmark) BEFORE this Worker deploys: the upload code names `receipts.source`
+   and `image_key`, so on the old schema the email receipt list and auto-apply fail (auto-apply logs `schema_old`).
+2. Create the R2 bucket lifecycle rule on prefix `img/` (keep days + 1, so 91 days at the default) at the landing step, when
+   the `RECEIPT_IMAGES` binding is added. It is the backstop for an image whose row insert never happened. The KV store has
+   its own per-key `expirationTtl` (keep days x 86400 s, above KV 60 s minimum).
+3. Then merge to main, which deploys the Worker and Pages.

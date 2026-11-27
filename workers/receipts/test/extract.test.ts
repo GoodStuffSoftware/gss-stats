@@ -210,6 +210,18 @@ describe('extractReceiptImage', () => {
     expect(body.messages[0].content[1].type).toBe('text')
   })
 
+  it('gives an image reply room for 20 line items, and reports a max_tokens stop as its own reason', async () => {
+    const f = mockFetch(reply(good()))
+    await extractReceiptImage(IMG, ENV, f)
+    const body = JSON.parse(((f.mock.calls[0] as unknown) as [string, RequestInit])[1].body as string)
+    expect(body.max_tokens).toBeGreaterThanOrEqual(20 * 60 + 400)
+    const cut = mockFetch(new Response(JSON.stringify({ stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"is_receipt": true' }] })))
+    expect(await extractReceiptImage(IMG, ENV, cut)).toEqual({ ok: false, code: 'extract_invalid', reason: 'max_tokens' })
+    const items = Array.from({ length: 20 }, (_, i) => ({ description: `Item ${i}`, amount_cents: 100, quantity: 1, category_hint: 'shopping' }))
+    const ok = await extractReceiptImage(IMG, ENV, mockFetch(reply(good({ items, total_cents: 2000, tax_cents: null, charges: [] }))))
+    expect(ok.ok && ok.receipt.items).toHaveLength(20)
+  })
+
   it('applies the same validation as email', async () => {
     for (const over of [{ system_prompt: 'leaked' }, { total_cents: -1 }, { kind: 'wire_money' }, { merchant: 'x'.repeat(81) }]) {
       expect(await extractReceiptImage(IMG, ENV, mockFetch(reply(good(over))))).toEqual(INVALID)

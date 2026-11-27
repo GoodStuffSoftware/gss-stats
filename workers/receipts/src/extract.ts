@@ -9,6 +9,8 @@ import { log } from './log'
 export const API_URL = 'https://api.anthropic.com/v1/messages'
 export const API_VERSION = '2023-06-01'
 export const MAX_TOKENS = 800
+/** A photo can list 20 items (about 40 tokens each) plus the header fields: room for all of it with headroom. */
+export const IMAGE_MAX_TOKENS = 2400
 /** Email text beyond this many characters is cut before it is sent (cost cap). */
 export const MAX_EMAIL_CHARS = 16000
 
@@ -21,7 +23,7 @@ export const MAX_EMAIL_CHARS = 16000
  */
 export type ExtractCode = 'extract_invalid' | 'stop_run' | 'auth_failed'
 /** api_rejected = 400 (a bad request that retrying cannot fix); api_limited = 429/529; api_unavailable = 5xx or network. */
-export type ExtractReason = 'api_rejected' | 'api_limited' | 'api_unavailable' | 'auth_failed'
+export type ExtractReason = 'api_rejected' | 'api_limited' | 'api_unavailable' | 'auth_failed' | 'max_tokens'
 
 export type ReceiptKind = 'purchase' | 'refund' | 'subscription' | 'payment_sent' | 'payment_received' | 'decline' | 'other'
 export type PaymentVia = 'card' | 'paypal' | 'venmo' | 'apple' | 'amazon' | 'google' | 'bank' | 'other'
@@ -82,7 +84,7 @@ order_ref (string|null), receipt_date (YYYY-MM-DD|null), related_date (YYYY-MM-D
 total_cents, tax_cents, shipping_cents (integer|null), charges (array of up to 5 {amount_cents, last4}),
 items (array of up to 20 {description, amount_cents, quantity, category_hint}).
 Money is integer cents. Dates are YYYY-MM-DD. card_last4 is only the last four digits of the card or account the
-email says was charged. order_ref is the order number exactly as printed (letters, digits, '-' or '#', at most 64
+receipt says was charged. order_ref is the order number exactly as printed (letters, digits, '-' or '#', at most 64
 characters), never a card or account number. Use category_hint only from
 this list, else null: ${categoryIds.join(', ')}. Never copy addresses, phone numbers, full names or account numbers into any field.`
 }
@@ -130,7 +132,7 @@ export interface ExtractImageInput {
 export function buildImageRequestBody(model: string, input: ExtractImageInput): Record<string, unknown> {
   return {
     model,
-    max_tokens: MAX_TOKENS,
+    max_tokens: IMAGE_MAX_TOKENS,
     system: buildImageSystemPrompt(input.categoryIds),
     messages: [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: input.jpegB64 } },
@@ -343,6 +345,10 @@ async function callModel(reqBody: Record<string, unknown>, anchorDate: string, c
     .filter((b): b is { type: string; text: string } => isObj(b) && b.type === 'text' && typeof b.text === 'string')
     .map((b) => b.text)
     .join('')
+  if (body.stop_reason === 'max_tokens') {
+    log('model_truncated', {}, 'max_tokens')
+    return { ok: false, code: 'extract_invalid', reason: 'max_tokens' }
+  }
   const usage = readUsage(body)
   const withUsage = usage ? { usage } : {}
   const receipt = parseAndValidate(text, anchorDate, categoryIds, opts)

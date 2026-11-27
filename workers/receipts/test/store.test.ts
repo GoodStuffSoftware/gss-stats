@@ -1,5 +1,4 @@
 // Receipts Worker store against the real budget schema in SQLite (node:sqlite, D1's dialect). Made-up rows only.
-import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createBudgetDb, insertTxn, type FakeBudgetDb } from '../../../functions/_lib/testing/budgetDb'
 import { isStale, matchReceipts, STALE_AFTER_DAYS, type MatchProposal } from '../../../src/lib/budget/receiptMatch'
@@ -588,12 +587,13 @@ describe('upload helpers', () => {
     const old = await putUpload({ at: new Date('2026-08-01T00:00:00.000Z'), sha: hex(700) })
     const fresh = await putUpload({ at: NOW })
     const cutoff = new Date('2026-09-01T00:00:00.000Z')
-    expect(await S.loadExpiredImages(d1(), cutoff, 50)).toEqual([{ id: old.id, imageKey: `img/${old.id}.jpg` }])
+    expect(await S.loadExpiredImages(d1(), UP_A, cutoff, 50)).toEqual([{ id: old.id, imageKey: `img/${old.id}.jpg` }])
     await S.clearImageKey(d1(), old.id, NOW)
     const row = db.get<Record<string, unknown>>('SELECT image_key, image_sha256 FROM receipts WHERE id = ?', old.id)!
     expect(row.image_key).toBeNull()
     expect(row.image_sha256).toBe(hex(700))
-    expect(await S.loadExpiredImages(d1(), cutoff, 50)).toEqual([])
+    expect(await S.loadExpiredImages(d1(), UP_A, cutoff, 50)).toEqual([])
+    expect(await S.loadExpiredImages(d1(), UP_B, cutoff, 50)).toEqual([])
     expect((await S.loadUpload(d1(), fresh.id))?.imageKey).toBe(`img/${fresh.id}.jpg`)
   })
 })
@@ -662,17 +662,20 @@ describe('upload query plans use the 0006 partial indexes', () => {
     scan(plan(S.DELETE_UPLOAD_SQL, ['r1', UP_A]))
     scan(plan(S.CLEAR_IMAGE_KEY_SQL, ['r1', 'x']))
   })
-  it('the retention read is served by idx_rcpt_up_day (a partial index of uploads only)', () => {
-    expect(plan(S.EXPIRED_IMAGES_SQL, ['2026-09-01T00:00:00.000Z', 50])).toMatch(/idx_rcpt_up_day/)
+  it('the retention read is a seek on idx_rcpt_up_day with no sort; the open-uploaders read uses idx_rcpt_up_open', () => {
+    const p = plan(S.EXPIRED_IMAGES_SQL, ['2026-09-01T00:00:00.000Z', 50, UP_A])
+    expect(p).toMatch(/idx_rcpt_up_day \(uploader_email=\? AND created_at<\?\)/)
+    expect(p).not.toMatch(/TEMP B-TREE/)
+    expect(plan(S.OPEN_UPLOADERS_SQL, [])).toMatch(/idx_rcpt_up_open/)
   })
 })
 
 describe('email SQL stays byte-identical', () => {
-  const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
-  it('the email statements keep the text they had before uploads', () => {
+  const sha = async (s: string): Promise<string> => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('')
+  it('the email statements keep the text they had before uploads', async () => {
     expect({
-      STALE_SUPERSEDE_SQL: sha(S.STALE_SUPERSEDE_SQL), STALE_DISMISS_SQL: sha(S.STALE_DISMISS_SQL), OPEN_RECEIPTS_SQL: sha(S.OPEN_RECEIPTS_SQL),
-      APPLIED_SIBLINGS_SQL: sha(S.APPLIED_SIBLINGS_SQL), RETRY_SQL: sha(S.RETRY_SQL), KNOWN_IDS_SQL: sha(S.KNOWN_IDS_SQL),
+      STALE_SUPERSEDE_SQL: await sha(S.STALE_SUPERSEDE_SQL), STALE_DISMISS_SQL: await sha(S.STALE_DISMISS_SQL), OPEN_RECEIPTS_SQL: await sha(S.OPEN_RECEIPTS_SQL),
+      APPLIED_SIBLINGS_SQL: await sha(S.APPLIED_SIBLINGS_SQL), RETRY_SQL: await sha(S.RETRY_SQL), KNOWN_IDS_SQL: await sha(S.KNOWN_IDS_SQL),
     }).toEqual(EMAIL_SQL_HASHES)
   })
 })
