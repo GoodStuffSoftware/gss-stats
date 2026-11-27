@@ -76,22 +76,23 @@
 <p>GSS Budget Receipts' use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Limited Use requirements</a>.</p>
 
 <h2 id="bank-links">Bank links (Plaid)</h2>
-<p><strong>What it is.</strong> The people allowed into Budget can link a bank login through Plaid, so transactions arrive without statement files. Your bank username and password go to Plaid, never to this site.</p>
+<p><strong>What it is.</strong> The people allowed into Budget can link a bank login through Plaid, so transactions arrive without statement files. Your bank username and password go to Plaid, never to this site. Plaid is told who is linking by a short code scrambled from the Budget login, not by the login itself.</p>
 <p><strong>What it reads.</strong> Through Plaid, it reads:</p>
 <ul>
   <li>Transactions for up to two years: the date, amount, description, merchant name, and whether the bank shows it as pending or posted.</li>
-  <li>Each account's name, type, last four digits and balances.</li>
-  <li>For credit cards and loans, the interest rate, minimum payment, due date, statement balance, last payment, escrow balance, and payoff or maturity dates.</li>
+  <li>Each account's name, type, last four digits, balances and credit limit.</li>
+  <li>For credit cards, mortgages and student loans, whichever of these the bank provides: the interest rate, minimum payment, next monthly payment, due date, whether the account is overdue, the past-due amount, last statement date and balance, last payment amount and date, escrow balance, original loan amount and date, interest and principal paid so far this year, and payoff or maturity dates.</li>
 </ul>
-<p>It does not read or keep full account numbers, routing numbers, addresses or identity details.</p>
-<p><strong>What it keeps, and how.</strong> It keeps those fields in a private database on Cloudflare, with any digits inside descriptions and account names masked. It also keeps the bank's name, the Budget login that linked it, when that person agreed, and the link's status. The access key Plaid issues is stored encrypted (AES-256-GCM), and the key that decrypts it is held only by the server's secret store, not in the database. Sync logs hold counts and codes, never content.</p>
+<p>It does not ask Plaid for routing numbers or identity details. Plaid's card and loan data can arrive with full account numbers and property or lender addresses; the app's server ignores them and never uses, stores or logs them.</p>
+<p><strong>What it keeps, and how.</strong> It keeps those fields in a private database on Cloudflare. In transaction descriptions, account names and the bank's name, any run of five or more digits, and any number of nine or more digits written in groups (for example with spaces or dashes), is cut to its last four digits; shorter numbers such as store numbers, dates and phone numbers stay as written. It also keeps the bank's name, the Budget login that linked it, when that person agreed, the link's status, and Plaid's own reference numbers for the link, its accounts and its transactions. The access key Plaid issues is stored encrypted (AES-256-GCM), and the key that decrypts it is held only by the server's secret store, not in the database. Sync logs hold counts and codes, never content.</p>
+<p><strong>Agreeing.</strong> Each person is shown what is read and kept, and asked to agree, before their own first bank link; the time they agreed is stored with the link they made.</p>
 <p><strong>How it is used.</strong> Only to show the household's own budget. We do not sell it, share it with anyone else, use it for advertising, or send it to any AI service.</p>
 <p><strong>Who can see it.</strong> The people signed in to this household's budget can see every linked account and transaction. Only the person who linked a bank can unlink it, reconnect it, or choose which Budget account each of its accounts feeds. Plaid also handles the data under its own privacy policy: <a href="https://plaid.com/legal/#end-user-privacy-policy">Plaid's end user privacy policy</a>.</p>
 <p><strong>Unlinking and deleting.</strong> In the app, open Budget, then Banks, and choose Unlink on the bank. When you unlink:</p>
 <ul>
   <li>The app asks Plaid to end its access, and deletes the stored access key, the sync position, and the card and loan details.</li>
-  <li>Transactions already added to Budget stay as household records. So do the bank's name and each account's masked name, last four digits and balances, and the record of who linked it and when they agreed.</li>
-  <li>Unlinking does not give the link back: Plaid's free plan allows a fixed number of bank links for life, and the app keeps count.</li>
+  <li>Transactions already added to Budget stay as household records. So do the bank's name, each account's masked name, type, last four digits and balances, Plaid's reference numbers for the link, its accounts and its transactions, the record of who linked it and when they agreed, and the counts and codes from past syncs.</li>
+  <li>Unlinking does not give the link back: Plaid's free plan allows a fixed number of bank links for life, and the app keeps a count that stays for good, holding Plaid's reference number for each link, the bank's Plaid code and the Budget login that started it.</li>
 </ul>
 <p>The app has no way to delete those remaining records yet. To have them deleted, contact the site owner (below). If you revoke access at your bank or through Plaid, the app stops syncing and deletes the same items once Plaid reports it.</p>
 

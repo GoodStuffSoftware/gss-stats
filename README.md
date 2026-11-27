@@ -2868,7 +2868,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   payment details arrive without statement files. The design, the one public webhook path and the safety rules are in
   [ADR 0009](docs/adr/0009-bank-links-plaid.md); this is only how to run it. The public side is the Bank links section
   of `/privacy` (`public/privacy.html`).
-  - **Link and share.** Any listed Budget person can link a bank after reading the consent text and ticking the box;
+  - **Link and share.** Any listed Budget person can link a bank after reading the consent text and ticking the box, which is asked of each person until they own a bank of their own;
     Plaid's Link SDK is loaded from `cdn.plaid.com` only when Link is clicked. The person who links is the owner: only
     they map each bank account to a Budget account (or make one) and switch Sync on or off, reconnect, share new accounts
     and unlink. Both listed people see every linked account and row, and either can press Sync now.
@@ -2894,7 +2894,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
     database, so its bank routes answer 503 `banks_not_configured`). Bitwarden (prod) keeps the Plaid values as
     `gss-stats--env--PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_SANDBOX_CLIENT_ID`, `PLAID_SANDBOX_SECRET` and
     `BANKS_TOKEN_KEY`; the sandbox secret is never put in the remote store.
-  - **Schema.** `migrations/gss-budget/0005_bank_links.sql` is additive (six `bank_*` and `plaid_slot_log` tables, three
+  - **Schema.** `migrations/gss-budget/0005_bank_links.sql` is additive (six tables: five `bank_*` and `plaid_slot_log`, three
     slot-log triggers, `transactions.pending`) and is applied by hand, once, never by an agent or CI: Time Travel
     bookmark first, `npx wrangler d1 migrations list gss-budget --remote` (read-only; it must list only
     `0005_bank_links.sql`), `npx wrangler d1 migrations apply gss-budget --remote`, then one aggregate check (6 tables,
@@ -2916,7 +2916,7 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
   OAuth redirect.
 - **Plaid webhook.** `POST /hooks/plaid` is the one path besides `/privacy` open without sign-in. It skips the
   session and origin checks, is accepted only with a header, at most 64 KB and a valid Plaid signature (checked in the
-  `gss-budget-banks` Worker before any database read), and only sets sync flags; see
+  `gss-budget-banks` Worker before any database read), and only sets sync flags (on a revoke it also removes the Item at Plaid and wipes its token); see
   [ADR 0009](docs/adr/0009-bank-links-plaid.md) decision 3. Bank access tokens are AES-256-GCM encrypted and never
   leave that Worker.
 - **Token hygiene.** The real tokens live only in a gitignored `.dev.vars` (local) and in

@@ -42,7 +42,8 @@ return its slot, so a careless link is a permanent cost.
    never parses or logs them. The Worker verifies Plaid's ES256 JWT (algorithm, key id, key age, signature over
    the header and payload, `iat` within five minutes, and the body's SHA-256 against the signed claim, compared in
    constant time) before it touches D1, and answers 401 with no detail otherwise. A webhook only sets flags
-   (sync requested, reconnect needed, new accounts); no HTTP path runs a sync.
+   (sync requested, reconnect needed, new accounts) or, on a revoke (`USER_PERMISSION_REVOKED`,
+   `USER_ACCOUNT_REVOKED`), removes the Item at Plaid and wipes its token; no HTTP path runs a sync.
 4. **The slot log is append-only.** `plaid_slot_log` gets one row per production exchange attempt, written before
    the exchange call and counted from then on (a timeout keeps counting: over-counting is the safe side). Three
    triggers refuse a delete, an update other than pending to done or failed, and an insert that reuses an id (how
@@ -79,10 +80,20 @@ return its slot, so a careless link is a permanent cost.
 10. **No Item from the preview.** `dev.gss-stats.pages.dev` shares the production budget database, so it does not
     bind `BANKS`: every bank route but the status read answers 503 `banks_not_configured` there, and so does the
     webhook path. No agent, test or script creates a production Item; development uses Plaid's sandbox, locally.
-11. **What is read and kept is bounded.** Transactions (date, amount, description with digits masked, merchant
-    name, pending or posted) for up to two years, USD only; each account's name (masked), type, last four digits
-    and balances; for cards and loans the typed payment fields. Never kept or logged: the full account number,
-    routing numbers, addresses, payment reference numbers, and Plaid's own category.
+11. **What is read and kept is bounded.** Transactions (date, amount, description, merchant name as the fallback
+    description, pending or posted) for up to two years, USD only; each account's name (masked), type, last four
+    digits, balances and credit limit; for cards, mortgages and student loans the typed fields: interest rate,
+    minimum payment, next monthly payment, due date, overdue flag, past-due amount, last statement date and balance,
+    last payment amount and date, escrow balance, original loan amount and date, interest and principal paid this
+    year, and payoff or maturity dates. Masking (`maskDigits`) cuts a run of 5 or more digits, and a number written
+    in groups (single spaces, dashes or slashes) that totals 9 or more digits, to a bullet plus its last four;
+    shorter numbers, dates and a lone phone number stay. It is applied to descriptions and to account and bank
+    names. Plaid's own ids are kept (item, institution, account and transaction ids, and `transactions.bank_ref`
+    as `plaid:` plus the transaction id) and stay after an unlink. Never kept or logged: the full account number,
+    routing numbers, property or servicer addresses, payment reference numbers, and Plaid's own category.
+    `/privacy` names every field above and must change with this list. Consent is asked of each person before
+    their own first link (the card shows until they own an Item); `consented_at` and `consent_version` are stored
+    per Item.
 12. **Deleting a Budget account that a bank account feeds is refused.** `bank_accounts.account_id` is
     `ON DELETE SET NULL`, but the table's CHECK (`sync <> 'on' OR account_id IS NOT NULL`) fails first, so such a
     delete errors. That is a backstop, pinned by a test. No account-delete route exists today; one added later must
@@ -95,7 +106,8 @@ return its slot, so a careless link is a permanent cost.
   or a flag, not a bank login.
 - Unlinking ends Plaid's access (`/item/remove`) and wipes the token, key id, cursor and the card and loan details;
   the Item's name, the accounts' masked names, last four digits and balances, and every transaction already in
-  Budget stay as household records, with the owner address and consent record. It does not return the slot.
+  Budget stay as household records, with the owner address, consent record, Plaid's ids and the sync-run counts. It
+  does not return the slot; `plaid_slot_log` keeps the Plaid item id, institution id and the linker's address.
   Revoking access at the bank or through Plaid does the same once Plaid sends the webhook.
 - The slot counter is only as right as the number of Items made outside this app, which a person enters once.
 - The one public path accepts anonymous POSTs; the cost is bounded (64 KB cap, a header check, then a signature

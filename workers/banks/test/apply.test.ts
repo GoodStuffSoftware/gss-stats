@@ -116,8 +116,8 @@ function stmtRow(key: string, account: string, date: string, cents: number, desc
 /** A person's edit of one row: category, kind, included, note, an audit row. */
 function personEdit(id: string): void {
   run(`UPDATE transactions SET category_id = 'groceries', category_source = 'manual', kind = 'spend', kind_source = 'manual', included = 0,
-         note = 'split with a friend', updated_by = 'kristen@example.com', updated_at = '2026-11-26T09:00:00.000Z' WHERE id = ?`, id)
-  run(`INSERT INTO category_edits (txn_id, old_category_id, new_category_id, edited_at, edited_by) VALUES (?, NULL, 'groceries', '2026-11-26T09:00:00.000Z', 'kristen@example.com')`, id)
+         note = 'split with a friend', updated_by = 'user-b@example.com', updated_at = '2026-11-26T09:00:00.000Z' WHERE id = ?`, id)
+  run(`INSERT INTO category_edits (txn_id, old_category_id, new_category_id, edited_at, edited_by) VALUES (?, NULL, 'groceries', '2026-11-26T09:00:00.000Z', 'user-b@example.com')`, id)
 }
 function receiptMatch(id: string): void {
   run(`INSERT INTO email_connections (id, owner_email, google_sub, status, token_ct, token_iv, key_id, scopes, consent_version, consented_at, created_at, updated_at)
@@ -256,7 +256,7 @@ describe('a manual edit is never overwritten', () => {
   it('survives a modify that changes the bank fields', async () => {
     const id = await edited()
     const before = editState(id)
-    expect(before).toMatchObject({ category_id: 'groceries', category_source: 'manual', kind: 'spend', kind_source: 'manual', included: 0, note: 'split with a friend', updated_by: 'kristen@example.com' })
+    expect(before).toMatchObject({ category_id: 'groceries', category_source: 'manual', kind: 'spend', kind_source: 'manual', included: 0, note: 'split with a friend', updated_by: 'user-b@example.com' })
     await sync(page({ modified: [ptxn('plaid-a', { amount: 15, date: '2026-11-21', name: 'Corner Cafe Downtown' })] }))
     expect(editState(id)).toEqual(before)
     expect(txn(id)).toMatchObject({ amount_cents: -1500, posted_date: '2026-11-21', description: 'Corner Cafe Downtown' })
@@ -307,7 +307,7 @@ describe('a manual edit is never overwritten', () => {
     ['a manual kind', (id) => run(`UPDATE transactions SET kind = 'fee', kind_source = 'manual' WHERE id = ?`, id)],
     ['a note', (id) => run(`UPDATE transactions SET note = 'keep me' WHERE id = ?`, id)],
     ['excluded from spending', (id) => run(`UPDATE transactions SET included = 0 WHERE id = ?`, id)],
-    ['a person as updated_by', (id) => run(`UPDATE transactions SET updated_by = 'kristen@example.com' WHERE id = ?`, id)],
+    ['a person as updated_by', (id) => run(`UPDATE transactions SET updated_by = 'user-b@example.com' WHERE id = ?`, id)],
     ['a receipt match', (id) => receiptMatch(id)],
   ]
   it.each(touches)('removed by Plaid with %s: the row stays and the map is dropped', async (_n, touch) => {
@@ -440,7 +440,7 @@ describe('pairing', () => {
   })
 
   it('an existing row whose updated_by holds an address (a person touched it, even only a note) is not paired or rewritten', async () => {
-    const stmt = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', updated_by: 'kristen@example.com' })
+    const stmt = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', updated_by: 'user-b@example.com' })
     const before = txn(stmt)
     await sync(page({ added: [ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' })] }))
     expect(txn(stmt)).toEqual(before)
@@ -448,7 +448,7 @@ describe('pairing', () => {
   })
 
   it('never pairs a pending row, and never touches an existing row a person edited', async () => {
-    const mine = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', category_source: 'manual', updated_by: 'kristen@example.com' })
+    const mine = stmtRow('stmt1', 'crd', '2026-11-19', 5000, 'Payment Thank You', { kind: 'card_payment', category_source: 'manual', updated_by: 'user-b@example.com' })
     const before = txn(mine)
     await sync(page({ added: [
       ptxn('plaid-c', { name: 'Online Transfer To Card', amount: 50, date: '2026-11-21' }),
