@@ -352,7 +352,7 @@ describe('the cron step', () => {
     const plan = (sql: string, ...v: unknown[]) => db.explain(sql, v).join('\n')
     const due = plan(LIAB_DUE_SQL, '2026-11-26T00:00:00.000Z')
     expect(due).toMatch(/SEARCH i USING (COVERING )?INDEX idx_bank_items_due/)
-    expect(due).toMatch(/SEARCH b USING .*idx_bank_acct_item/)
+    expect(due).toMatch(/SEARCH b (EXISTS )?USING .*idx_bank_acct_item/)
     expect(due).not.toMatch(/SCAN/)
     expect(plan(LIAB_CLAIM_SQL, ITEM, 'a', 'b')).toMatch(/SEARCH bank_items USING .*PRIMARY KEY|SEARCH bank_items USING .*autoindex/)
     const accts = plan(LIAB_ACCOUNTS_SQL, ITEM)
