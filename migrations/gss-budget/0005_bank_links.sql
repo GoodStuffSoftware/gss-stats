@@ -28,6 +28,7 @@ CREATE TABLE bank_items (
   token_iv         TEXT CHECK (token_iv IS NULL OR (length(token_iv) = 16 AND token_iv NOT GLOB '*[^A-Za-z0-9+/=]*')),                  -- base64 of 12 bytes
   key_id           TEXT CHECK (key_id IS NULL OR (length(key_id) = 8 AND key_id NOT GLOB '*[^0-9a-f]*')),                              -- first 8 hex of sha256(key)
   sync_cursor      TEXT CHECK (sync_cursor IS NULL OR length(sync_cursor) BETWEEN 1 AND 256),                                         -- /transactions/sync next_cursor; NULL = start from the beginning
+  sync_cursor_base TEXT CHECK (sync_cursor_base IS NULL OR length(sync_cursor_base) <= 256),                                          -- cursor the in-progress update began at (empty = the very start); NULL = no update in progress
   initial_done     INTEGER NOT NULL DEFAULT 0 CHECK (initial_done IN (0,1)),          -- SYNC_UPDATES_AVAILABLE initial_update_complete seen
   historical_done  INTEGER NOT NULL DEFAULT 0 CHECK (historical_done IN (0,1)),       -- historical_update_complete seen
   new_accounts     INTEGER NOT NULL DEFAULT 0 CHECK (new_accounts IN (0,1)),          -- NEW_ACCOUNTS_AVAILABLE seen; cleared by the accounts refresh after an update-mode link

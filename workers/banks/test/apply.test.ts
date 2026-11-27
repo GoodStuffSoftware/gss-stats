@@ -762,7 +762,7 @@ describe('claim release and the fair pick', () => {
     expect(await again()).toBe(true)
     expect(item().last_error).toBe('plaid_rate_limit_exceeded')
     released(1)
-    expect(await pickDue(db.d1, new Date(t.getTime() + 2 * MIN))).toEqual([ITEM]) // standing error: still due, retried on a later tick
+    expect(await pickDue(db.d1, new Date(t.getTime() + 2 * MIN), 'sandbox')).toEqual([ITEM]) // standing error: still due, retried on a later tick
     queue.push(() => page({ next_cursor: 'cur-2' }))
     expect(await again(3)).toBe(true)
     released(3)
@@ -772,8 +772,8 @@ describe('claim release and the fair pick', () => {
   it('an Item in the other environment keeps its claim (skipped for the window, then retried); a crashed run lapses by itself', async () => {
     run(`UPDATE bank_items SET environment = 'production' WHERE id = ?`, ITEM)
     expect(await sync(page())).toBe(false)
-    expect(await pickDue(db.d1, new Date(t.getTime() + 5 * MIN))).toEqual([])
-    expect(await pickDue(db.d1, new Date(t.getTime() + 16 * MIN))).toEqual([ITEM])
+    expect(await pickDue(db.d1, new Date(t.getTime() + 5 * MIN), 'sandbox')).toEqual([])
+    expect(await pickDue(db.d1, new Date(t.getTime() + 16 * MIN), 'sandbox')).toEqual([ITEM])
   })
 
   it('three Items in the wrong environment cannot hold every slot: the healthy due Item runs by the second tick', async () => {
@@ -795,7 +795,7 @@ describe('claim release and the fair pick', () => {
     expect(item().last_ok_at).not.toBeNull()
     // a quarter of an hour on, the mismatched Items are looked at again (never skipped for good)
     t = new Date(t.getTime() + 16 * MIN)
-    expect((await pickDue(db.d1, t)).filter((id) => id.includes('c'))).toHaveLength(3)
+    expect((await pickDue(db.d1, t, 'sandbox')).filter((id) => id.includes('c'))).toHaveLength(3)
   })
 })
 
@@ -836,7 +836,7 @@ describe('the per-run cap', () => {
     expect(item().sync_requested_at).not.toBeNull() // still due
     expect(bankRows()).toBe(3 * CHUNK_PAGES)
     expect(lastRun()).toMatchObject({ pages: CHUNK_PAGES, inserted: 3 * CHUNK_PAGES })
-    expect(await pickDue(db.d1, new Date(t.getTime() + MIN))).toEqual([ITEM]) // released: picked again at once
+    expect(await pickDue(db.d1, new Date(t.getTime() + MIN), 'sandbox')).toEqual([ITEM]) // released: picked again at once
     fetched.length = 0
     expect(await go({ used: TICK_QUERY_BUDGET - 1 })).toBe(true)
     expect(fetched[0].body.cursor).toBe(`cur-p${CHUNK_PAGES}`) // resumed, nothing re-read

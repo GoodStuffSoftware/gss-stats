@@ -15,7 +15,7 @@ import { pairUpdateSql } from '../../../src/lib/budget/sqlFile'
 import { log } from './log'
 import { createPlaidClient, type PlaidClient } from './plaid'
 import { getItem, openAndRefreshToken, type Keys } from './store'
-import { CHUNK_PAGES, TICK_QUERY_BUDGET, chooseTrigger, claim, fetchUpdate, release, releasedStamp, finishRun, normalize, pickDue, plaidErrorCode, startRun, type BankTxn, type FetchResult } from './sync'
+import { CHUNK_PAGES, TICK_QUERY_BUDGET, WORST_CHUNK_QUERIES, chooseTrigger, claim, fetchUpdate, release, releasedStamp, finishRun, normalize, pickDue, plaidErrorCode, startRun, type BankTxn, type FetchResult } from './sync'
 import type { Env } from './env'
 
 export const WRITER = 'sync:plaid'
@@ -121,6 +121,9 @@ export const SQL = {
   pairCandidates: `SELECT id, account_id, posted_date, amount_cents, kind, counterparty_last4 FROM transactions
     WHERE posted_date BETWEEN ?1 AND ?2 AND pair_id IS NULL AND pending = 0 AND kind_source NOT IN ('manual','rule')
     AND category_source <> 'manual' AND instr(updated_by,'@') = 0`,
+  // The pending rows that post in this update: still pending in D1 when the read above runs, so they get their own read. Same guards.
+  postedFacts: (n: number) => `SELECT id, account_id, kind, counterparty_last4 FROM transactions WHERE id IN (${marks(n)})
+    AND pair_id IS NULL AND kind_source NOT IN ('manual','rule') AND category_source <> 'manual' AND instr(updated_by,'@') = 0`,
 }
 
 type Row = Record<string, unknown>
@@ -308,7 +311,19 @@ export async function planPairs(db: D1Database, plan: Plan, accounts: Account[],
   // rerunDates: posted dates of this update's rows that an earlier, interrupted run already inserted (they are mapped, so not in
   // plan.inserts). The read below finds them as unpaired rows, so a run that died after the insert batch but before the pair batch
   // still pairs them on the rerun.
-  const dates = [...fresh.map((c) => c.postedDate), ...rerunDates].sort()
+  // Pending rows that post in place in this update are fresh candidates too (their read value is pending = 1, so the range read
+  // below cannot see them): their facts come from their own read, their date and amount are the new posted ones.
+  const posted = plan.inPlace.filter((p) => p.pending === 0)
+  const inPlace: PairCandidate[] = []
+  for (const part of chunks(posted, CHUNK)) {
+    const byId = new Map(part.map((p) => [p.txnId, p]))
+    const r = await db.prepare(SQL.postedFacts(part.length)).bind(...part.map((p) => p.txnId)).all<Row>()
+    for (const x of r.results ?? []) {
+      const p = byId.get(s(x.id))
+      if (p) inPlace.push({ id: p.txnId, accountId: s(x.account_id), postedDate: p.postedDate, amountCents: p.amountCents, kind: s(x.kind) as TxnKind, counterpartyLast4: sn(x.counterparty_last4), pairId: null })
+    }
+  }
+  const dates = [...fresh.map((c) => c.postedDate), ...inPlace.map((c) => c.postedDate), ...rerunDates].sort()
   if (dates.length === 0) return []
   const lo = new Date(Date.parse(`${dates[0]}T00:00:00Z`) - 5 * 86_400_000).toISOString().slice(0, 10)
   const hi = new Date(Date.parse(`${dates[dates.length - 1]}T00:00:00Z`) + 5 * 86_400_000).toISOString().slice(0, 10)
@@ -317,13 +332,20 @@ export async function planPairs(db: D1Database, plan: Plan, accounts: Account[],
     id: s(x.id), accountId: s(x.account_id), postedDate: s(x.posted_date), amountCents: Number(x.amount_cents), kind: s(x.kind) as TxnKind,
     counterpartyLast4: sn(x.counterparty_last4), pairId: null,
   }))
-  return pairTransfers([...existing, ...fresh], accounts)
+  const taken = new Set(inPlace.map((c) => c.id))
+  return pairTransfers([...existing.filter((c) => !taken.has(c.id)), ...fresh, ...inPlace], accounts)
 }
 
 // ---- apply (D1 writes) ----------------------------------------------------------------------------------------------
 
 /** more: the update has pages left (the cursor moves, the Item stays due). chunk: 0-based chunk of this run. counts: the run's totals so far. */
-export interface RunCtx { itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string; more?: boolean; chunk?: number; counts?: Counts }
+export interface RunCtx {
+  itemId: string; runId: number; now: Date; runStart: string; pages: number; nextCursor: string; more?: boolean; chunk?: number; counts?: Counts
+  /** The cursor this update began at ('' = the very start); saved with the cursor while `more`, cleared when the update finishes. */
+  base?: string
+  /** The whole update was fetched after Plaid said the historical pull is complete: only then does a NULL sync_from get its value. */
+  historical?: boolean
+}
 
 const INSERT_TXN = `INSERT INTO transactions (id, account_id, statement_end, import_id, posted_date, txn_date, amount_cents, description, merchant_key,
   merchant_name, store_no, counterparty_last4, bank_ref, kind, kind_source, category_id, category_source, rule_id, confidence, needs_review,
@@ -340,10 +362,15 @@ export const UPDATE_BANK_FIELDS_REF = `UPDATE transactions SET posted_date = ?2,
 const FIRST_SYNC_FROM = `UPDATE bank_accounts SET updated_at = ?2, sync_from = (SELECT MIN(t.posted_date) FROM bank_txns b JOIN transactions t ON t.id = b.txn_id
   WHERE b.bank_account_id = bank_accounts.id AND b.role = 'inserted') WHERE item_id = ?1 AND sync = 'on' AND sync_from IS NULL AND account_id IS NOT NULL
   AND EXISTS (SELECT 1 FROM bank_txns b2 WHERE b2.bank_account_id = bank_accounts.id AND b2.role = 'inserted')`
-const DELETE_UNTOUCHED = `DELETE FROM transactions WHERE id = ?1 AND instr(updated_by,'@') = 0 AND category_source <> 'manual' AND kind_source <> 'manual'
-  AND note IS NULL AND included = 1 AND NOT EXISTS (SELECT 1 FROM receipt_matches m WHERE m.txn_id = ?1)`
-const UNPAIR_PARTNER = `UPDATE transactions SET pair_id = NULL WHERE id = ?1 AND pair_id = ?2 AND instr(updated_by,'@') = 0
-  AND category_source <> 'manual' AND kind_source NOT IN ('manual','rule')`
+/** A row no person has touched, as SQL over the row `t` with id parameter `p` (the same test the removal's person-touched read makes). */
+const UNTOUCHED = (t: string, p: string): string => `instr(${t}updated_by,'@') = 0 AND ${t}category_source <> 'manual' AND ${t}kind_source <> 'manual'
+  AND ${t}note IS NULL AND ${t}included = 1 AND NOT EXISTS (SELECT 1 FROM receipt_matches m WHERE m.txn_id = ${p})`
+const DELETE_UNTOUCHED = `DELETE FROM transactions WHERE id = ?1 AND ${UNTOUCHED('', '?1')}`
+// The partner of a row about to be deleted loses its link to it (pair_id only; never category, kind, included or note, so a person's
+// edit of the partner does not matter and is never overwritten). It does so only while the DELETED row (?2) is still untouched: the
+// same test as the delete, in the same batch, so the two succeed or skip together if a person edited the row after it was read.
+const UNPAIR_PARTNER = `UPDATE transactions SET pair_id = NULL WHERE id = ?1 AND pair_id = ?2
+  AND EXISTS (SELECT 1 FROM transactions d WHERE d.id = ?2 AND ${UNTOUCHED('d.', '?2')})`
 
 export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D1PreparedStatement[][]; tail: D1PreparedStatement[] } {
   const at = c.now.toISOString()
@@ -383,13 +410,15 @@ export function planStatements(db: D1Database, plan: Plan, c: RunCtx): { body: D
   const k = c.counts ?? plan.counts
   const more = c.more ? 1 : 0
   const tail = [
-    ...(more ? [] : [db.prepare(FIRST_SYNC_FROM).bind(c.itemId, at)]),
+    // sync_from is set only at the end of an update that saw the historical pull complete; before that, the older rows still to come
+    // would fall under it and be skipped. NULL keeps the statement load skipping every bank-account row meanwhile (never double-counted).
+    ...(more || !c.historical ? [] : [db.prepare(FIRST_SYNC_FROM).bind(c.itemId, at)]),
     // The cursor moves last, together with the run row; a flag set during the run (later than run_start) survives it. A run that
     // is done (not `more`) also releases its claim (releasedStamp), so only a run in flight or one that crashed holds the Item.
-    db.prepare(`UPDATE bank_items SET sync_cursor = ?2, last_ok_at = ?3, last_error = NULL, updated_at = ?3,
+    db.prepare(`UPDATE bank_items SET sync_cursor = ?2, sync_cursor_base = ?7, last_ok_at = ?3, last_error = NULL, updated_at = ?3,
       sync_requested_at = CASE WHEN ?5 = 1 THEN COALESCE(sync_requested_at, ?3) WHEN sync_requested_at <= ?4 THEN NULL ELSE sync_requested_at END,
       last_sync_at = CASE WHEN ?5 = 0 AND last_sync_at = ?3 THEN ?6 ELSE last_sync_at END
-      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart, more, releasedStamp(c.now)),
+      WHERE id = ?1 AND status IN ('active','pending_disconnect')`).bind(c.itemId, c.nextCursor, at, c.runStart, more, releasedStamp(c.now), more ? (c.base ?? '') : null),
     db.prepare(`UPDATE bank_sync_runs SET finished_at = ?2, pages = ?3, added = ?4, modified = ?5, removed = ?6, inserted = ?7, matched = ?8,
       flagged = ?9, posted = ?10, dropped = ?11, skipped = ?12, error_code = NULL WHERE id = ?1`)
       .bind(c.runId, at, c.pages, k.added, k.modified, k.removed, k.inserted, k.matched, k.flagged, k.posted, k.dropped, k.skipped),
@@ -431,7 +460,7 @@ export interface QueryBudget { used: number }
  */
 export async function syncItem(db: D1Database, env: Env, client: PlaidClient, keys: Keys, itemId: string, now: Date, budget: QueryBudget = { used: 0 }): Promise<boolean> {
   const facts = await db
-    .prepare(`SELECT sync_cursor, initial_done, sync_requested_at, last_webhook_at, status, environment FROM bank_items WHERE id = ?1`)
+    .prepare(`SELECT sync_cursor, sync_cursor_base, initial_done, sync_requested_at, last_webhook_at, status, environment FROM bank_items WHERE id = ?1`)
     .bind(itemId).first<Row>()
   budget.used += ITEM_FIXED_QUERIES
   if (!facts || (facts.status !== 'active' && facts.status !== 'pending_disconnect')) return false
@@ -461,10 +490,15 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
     if (!item) { await finishRun(db, runId, now, 0, 'item_missing'); await release(db, itemId, now); return false }
     const token = await openAndRefreshToken(db, item, keys)
     let cursor = sn(facts.sync_cursor)
+    // base: the cursor the in-progress update began at ('' = the very start), NULL when the saved cursor is a finished one. A mutation
+    // error restarts at base, never at the saved mid-way cursor (Plaid: restart at the update's first cursor).
+    let base = cursor === null ? null : sn(facts.sync_cursor_base)
+    let hist = false // an update begun in an earlier run: its early pages were not seen, so the historical gate stays shut for it
     const totals = zeroCounts()
     let pairs = 0
     for (let chunk = 0; ; chunk++) {
-      const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES })
+      if (base === null) { base = cursor ?? ''; hist = true } // this chunk begins a new update
+      const res = await fetchUpdate(client, token, cursor, { maxPages: CHUNK_PAGES, restartCursor: base === '' ? null : base })
       pages += res.pages
       if (res.kind === 'noop') { await finishRun(db, runId, now, pages); await release(db, itemId, now); log('sync_noop', { pages }); return true }
       if (res.kind === 'needs_reconnect') return await fail(plaidErrorCode('ITEM_LOGIN_REQUIRED'), 'needs_reconnect')
@@ -476,11 +510,13 @@ export async function syncItem(db: D1Database, env: Env, client: PlaidClient, ke
       plan.pairs = await planPairs(db, plan, st.budgetAccounts, rerunDates)
       addCounts(totals, plan.counts)
       pairs += plan.pairs.length
-      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals } })
-      budget.used += st.queries + 1 + batches
+      hist = res.restarts > 0 ? res.historical : hist && res.historical // a restart began the pass at the update's first cursor
+      const batches = await applyPlan(db, plan, { itemId, runId, now, runStart, pages, nextCursor: res.nextCursor, more: res.more, chunk, counts: { ...totals }, base, historical: hist })
+      budget.used += st.queries + 1 + batches + Math.ceil(plan.inPlace.filter((p) => p.pending === 0).length / CHUNK)
       cursor = res.nextCursor
       if (!res.more) break
-      if (budget.used >= TICK_QUERY_BUDGET) { await release(db, itemId, now); log('sync_partial', { ...totals, pairs, pages }); return true } // the next tick resumes at the cursor just written
+      // Another chunk only if its worst case still fits (see TICK_QUERY_BUDGET: the rest of the invocation is reserved on top of it).
+      if (budget.used + WORST_CHUNK_QUERIES > TICK_QUERY_BUDGET) { await release(db, itemId, now); log('sync_partial', { ...totals, pairs, pages }); return true } // the next tick resumes at the cursor just written
     }
     log('sync_ok', { ...totals, pairs, pages })
     return true
@@ -498,8 +534,8 @@ export async function syncTick(env: Env, fetchFn: typeof fetch, keys: Keys, now:
   const client = createPlaidClient({ env, fetch: fetchFn, now })
   let ran = 0
   budget.used += 1
-  for (const id of await pickDue(db, now())) {
-    if (budget.used >= TICK_QUERY_BUDGET) { log('sync_budget', { used: budget.used }); break }
+  for (const id of await pickDue(db, now(), env.PLAID_ENV ?? '')) {
+    if (budget.used + ITEM_FIXED_QUERIES + WORST_CHUNK_QUERIES > TICK_QUERY_BUDGET) { log('sync_budget', { used: budget.used }); break }
     try {
       if (await syncItem(db, env, client, keys, id, now(), budget)) ran++
     } catch {
