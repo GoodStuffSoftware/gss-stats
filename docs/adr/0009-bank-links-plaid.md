@@ -62,6 +62,18 @@ return its slot, so a careless link is a permanent cost.
    mutation, stopping at 60 pages), then applies it in D1 batches whose last statement moves the cursor. A run that
    dies part way and repeats from the old cursor ends in the same state. A daily check asks Plaid about Items that
    need a reconnect, and liabilities and balances refresh about every 20 hours (never the paid balance call).
+   **Chunks and the cursor base.** A long first sync is applied in chunks of 6 pages, each ending with its own cursor write, so a
+   later tick resumes mid-update. Plaid can refuse a mid-update cursor (`TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION`) when the data changes under it, so the Item also keeps
+   `sync_cursor_base`, the cursor the update began at (empty for the very first sync, NULL when no update is in progress). It is
+   saved with the first chunk and cleared with the chunk that ends the update (`has_more` false). If a mutation error or an
+   `INVALID_REQUEST` arrives on the first page of a resumed chunk, the run restarts once from the base, and only once per run: a
+   second failure, or a failure from the base itself, fails the run normally and the Item stays as it was for the next tick.
+   Rows already applied are rewritten to the same state, so the restart is safe.
+   **Tick budget.** D1 allows 1,000 queries per Worker invocation (a batch counts as one). A chunk starts only if the queries used
+   so far plus `WORST_CHUNK_QUERIES` (280, derived in `sync.ts` from the 3,000-update chunk: 120 loading state, 35 planning pairs,
+   122 applying) fit under `TICK_QUERY_BUDGET` (600); `OTHER_TICK_QUERIES` (150) is reserved for the reconnect check and the
+   liabilities tick in the same invocation, so the worst case is 600 + 150 = 750, under 1,000. A test counts the real queries of a
+   worst-case chunk against the constant.
 7. **Dedupe, and what a person's edit is worth.** A Plaid transaction maps to a Budget row in `bank_txns`: the sync
    either inserted the row or only claimed an existing statement row (role `matched`, never written). A pending row
    that posts is updated in place, keeping its id, category, edits and receipt matches. At the cutover (`sync_from`,
@@ -69,9 +81,13 @@ return its slot, so a careless link is a permanent cost.
    `possible_duplicate`, none inserts. A manual category or kind, a note and an address in `updated_by` are never
    overwritten by a modify, a posting or a resync. If Plaid removes a row a person has edited, it is marked
    `dropped` and waits for Delete or Keep on the Banks page; an unedited removed row is deleted.
+   Deleting a removed row first unpairs its partner, in the same batch and only while the removed row is still untouched, so a
+   delete never leaves a dangling `pair_id` and a kept row keeps its link. Only the partner's `pair_id` is cleared; its category,
+   kind, included and note are never written, so a person's edit of the partner survives. Two pending sides that post in the
+   same update are paired like any other new rows.
 8. **The statement load steps aside for a linked account.** The load's insert is guarded: rows dated on or after
    `sync_from` for an account whose bank feed is on are skipped, so a file and the bank never double up. Rows before
-   the cutover still load, and the statement's own facts (balances, APR) load as before. When an account is linked with no statement rows, its `sync_from` is NULL and is set to the earliest posted date the bank returned for it when its first sync completes. Loan and debt readings
+   the cutover still load, and the statement's own facts (balances, APR) load as before. When an account is linked with no statement rows, its `sync_from` is NULL and is set to the earliest posted date the bank returned for it, but only once Plaid reports the historical pull complete (`HISTORICAL_UPDATE_COMPLETE` on a page, or the `historical_done` flag the webhook sets), because the initial update carries only the recent days and the older historical rows arrive later, and setting it earlier would skip them. Loan and debt readings
    taken from the bank are marked source `bank` and never replace a person's own entry for the same day.
 9. **Bank data is household data; management is the linker's.** Both listed Budget people see every linked
    account and row (the person filter is only a view), as with statement files. Only the person who linked an Item

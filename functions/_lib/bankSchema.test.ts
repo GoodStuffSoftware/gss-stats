@@ -177,6 +177,15 @@ describe('bank_items', () => {
     for (const col of ['initial_done', 'historical_done', 'new_accounts']) rejects(() => item({ [col]: 2 }, ITEM2, 'item-sandbox-002'))
   })
 
+  it('sync_cursor_base takes NULL (no update in progress) and the empty string (a first sync), up to 256 characters, and no more', () => {
+    item({ sync_cursor_base: null })
+    item({ sync_cursor_base: '' }, ITEM2, 'item-sandbox-002')
+    item({ sync_cursor_base: 'c'.repeat(256) }, 'i00000000000000a1', 'item-sandbox-003')
+    rejects(() => item({ sync_cursor_base: 'c'.repeat(257) }, 'i00000000000000a2', 'item-sandbox-004'))
+    const stored = db.sqlite.prepare('SELECT id, sync_cursor_base AS b FROM bank_items ORDER BY id').all() as Array<{ id: string; b: string | null }>
+    expect(stored.map((r) => (r.b === null ? null : r.b.length))).toEqual([256, null, 0]) // ordered by id; the 257-character row was refused
+  })
+
   it('needs consent_version >= 1, consented_at and both stamps', () => {
     rejects(() => item({ consent_version: 0 }))
     rejects(() => item({ consent_version: undefined }), 'NOT NULL')
