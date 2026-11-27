@@ -153,7 +153,7 @@ export function wipeItemStatements(db: D1Database, itemId: string, status: 'revo
     db.prepare(`UPDATE bank_accounts SET sync = 'off', updated_at = ?2 WHERE item_id = ?1 AND sync <> 'off'`).bind(itemId, at),
     db
       .prepare(
-        `UPDATE bank_items SET status = ?2, token_ct = NULL, token_iv = NULL, key_id = NULL, sync_cursor = NULL, updated_at = ?3
+        `UPDATE bank_items SET status = ?2, token_ct = NULL, token_iv = NULL, key_id = NULL, sync_cursor = NULL, sync_cursor_base = NULL, updated_at = ?3
           WHERE id = ?1`,
       )
       .bind(itemId, status, at),

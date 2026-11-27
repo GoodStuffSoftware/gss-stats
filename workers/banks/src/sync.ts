@@ -18,20 +18,28 @@ export const MAX_RESTARTS = 3
  * D1 https://developers.cloudflare.com/d1/platform/limits/ : 1,000 queries per Worker invocation (Paid; 50 on Free), a db.batch
  * counts as ONE query, 100 bound parameters per statement. Workers https://developers.cloudflare.com/workers/platform/limits/ :
  * 10,000 subrequests per invocation (Paid; 50 on Free), cron CPU 30 s default (Paid; 10 ms on Free), 15 min wall time.
- * A chunk is CHUNK_PAGES pages (about 3,000 rows, about 130 queries) and commits the cursor; the tick starts no more chunks or
- * Items once TICK_QUERY_BUDGET estimated queries are used. A longer first sync resumes at the cursor on the next tick.
- * On Workers Free (50 queries) both numbers would have to drop first.
+ * A chunk is CHUNK_PAGES pages (about 3,000 rows) and commits the cursor. The tick starts a chunk or an Item only while
+ * used + WORST_CHUNK_QUERIES <= TICK_QUERY_BUDGET, so the sync half never goes past TICK_QUERY_BUDGET (the estimate does not
+ * undercount, tested). The same invocation then runs the reconnect check (at most 3 Items, about 5 queries each) and the
+ * liabilities tick (at most 3 Items, about 35 each with a few dozen accounts): OTHER_TICK_QUERIES reserves 150 for both.
+ * Worst case 600 + 150 = 750 of the 1,000, a margin of 250. A longer first sync resumes at the cursor on the next tick.
+ * On Workers Free (50 queries) all of these numbers would have to drop first.
  */
 export const CHUNK_PAGES = 6
 export const TICK_QUERY_BUDGET = 600
+/** D1 queries one full chunk (CHUNK_PAGES pages of 500 rows, measured by the per-run cap test) can cost, rounded up with slack. */
+export const WORST_CHUNK_QUERIES = 160
+/** Reserved for the reconnect check and the liabilities tick that run after the sync half in the same invocation. */
+export const OTHER_TICK_QUERIES = 150
 
 /**
  * The due pick (plan 4.1, made fair): ?1 = now - 20 h, ?2 = now - the claim window (a recently claimed Item cannot hold a slot).
  * Requested Items without a standing error first, then the rest; within a group the least recently claimed first, so an Item that
- * keeps failing, or sits in another Plaid environment, rotates to the back instead of taking every slot. At most 3 per tick.
+ * keeps failing rotates to the back instead of taking every slot. ?3 = this Worker's Plaid environment: an Item linked in the
+ * other environment is never picked (it could not be synced here, and would otherwise sit at the front of the pick forever). At most 3 per tick.
  */
 export const DUE_SQL =
-  `SELECT id FROM bank_items WHERE status IN ('active','pending_disconnect') AND (sync_requested_at IS NOT NULL OR last_ok_at IS NULL OR last_ok_at < ?1)
+  `SELECT id FROM bank_items WHERE status IN ('active','pending_disconnect') AND environment = ?3 AND (sync_requested_at IS NOT NULL OR last_ok_at IS NULL OR last_ok_at < ?1)
    AND (last_sync_at IS NULL OR last_sync_at < ?2)
    ORDER BY (sync_requested_at IS NULL OR last_error IS NOT NULL), COALESCE(last_sync_at, ''), sync_requested_at LIMIT ${PICK_LIMIT}`
 /** The daily reconnect check pick (plan 4.1). */
@@ -42,8 +50,8 @@ export const MAPPED_SQL = `SELECT 1 AS x FROM bank_txns WHERE bank_account_id IN
 const iso = (ms: number): string => new Date(ms).toISOString()
 
 /** Items to sync this tick: ids, requested ones first. */
-export async function pickDue(db: D1Database, now: Date): Promise<string[]> {
-  const r = await db.prepare(DUE_SQL).bind(iso(now.getTime() - DUE_AFTER_MS), iso(now.getTime() - CLAIM_WINDOW_MS)).all<{ id: string }>()
+export async function pickDue(db: D1Database, now: Date, environment: string): Promise<string[]> {
+  const r = await db.prepare(DUE_SQL).bind(iso(now.getTime() - DUE_AFTER_MS), iso(now.getTime() - CLAIM_WINDOW_MS), environment).all<{ id: string }>()
   return (r.results ?? []).map((x) => x.id)
 }
 
@@ -135,11 +143,18 @@ interface SyncPage {
   removed?: unknown
   next_cursor?: unknown
   has_more?: unknown
+  transactions_update_status?: unknown
 }
 
+/** Plaid's page status once the historical pull is done too (INITIAL_UPDATE_COMPLETE means the historical pull is still pending). */
+export const HISTORICAL_COMPLETE = 'HISTORICAL_UPDATE_COMPLETE'
+
 export type FetchResult =
-  /** more: stopped after maxPages with pages left; nextCursor is where the next call resumes. */
-  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean }
+  /**
+   * more: stopped after maxPages with pages left; nextCursor is where the next call resumes.
+   * historical: every page of this pass said HISTORICAL_UPDATE_COMPLETE. restarts: how many times the pass began again at restartCursor.
+   */
+  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean; restarts: number }
   /** Nothing to apply, nothing moves: the Item is not ready yet (empty next_cursor, or PRODUCT_NOT_READY). */
   | { kind: 'noop'; pages: number }
   | { kind: 'needs_reconnect'; pages: number }
@@ -155,16 +170,23 @@ export function plaidErrorCode(code: string): string {
 const arr = <T>(v: unknown): T[] | null => (Array.isArray(v) ? (v as T[]) : v === undefined ? [] : null)
 
 /**
- * Fetch one whole update from `cursor0` (NULL = from the beginning), looping while has_more and keeping everything in
- * memory. A mutation during pagination restarts from cursor0 (at most 3 restarts), more than 60 calls stops. Neither
- * a stop nor a no-op applies anything.
+ * Fetch up to one update from `cursor0` (NULL = from the beginning), looping while has_more and keeping everything in
+ * memory. `restartCursor` is where the UPDATE began (default: cursor0): Plaid says a mutation during pagination means the
+ * whole loop restarts at the update's first cursor, and a saved mid-way cursor is not that. So a mutation error, or Plaid
+ * refusing a mid-way cursor as invalid (INVALID_REQUEST on the first page), restarts at restartCursor (at most 3 restarts;
+ * NULL = a full re-pull, safe because every write unit is keyed). More than 60 calls stops. Neither a stop nor a no-op applies anything.
  */
-export async function fetchUpdate(client: PlaidClient, accessToken: string, cursor0: string | null, opts: { maxPages?: number } = {}): Promise<FetchResult> {
+export async function fetchUpdate(
+  client: PlaidClient, accessToken: string, cursor0: string | null, opts: { maxPages?: number; restartCursor?: string | null } = {},
+): Promise<FetchResult> {
+  const restartAt = opts.restartCursor === undefined ? cursor0 : opts.restartCursor
   let pages = 0
   let restarts = 0
+  let start = cursor0
   for (;;) {
-    let cursor = cursor0
-    let pass = 0 // pages fetched since cursor0 (resets on a restart)
+    let cursor = start
+    let pass = 0 // pages fetched since the pass began (resets on a restart)
+    let historical = true
     const added: PlaidTxn[] = []
     const modified: PlaidTxn[] = []
     const removed: PlaidRemoved[] = []
@@ -182,10 +204,12 @@ export async function fetchUpdate(client: PlaidClient, accessToken: string, curs
       } catch (e) {
         if (e instanceof PlaidTimeoutError) return { kind: 'error', code: 'plaid_timeout', pages }
         if (!(e instanceof PlaidError)) throw e
-        if (e.code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION') {
+        const midway = pass === 1 && start !== restartAt // the first page of a pass that began at a saved mid-way cursor
+        if (e.code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION' || (midway && e.type === 'INVALID_REQUEST')) {
           if (restarts >= MAX_RESTARTS) return { kind: 'error', code: 'sync_mutation', pages }
           restarts++
-          break // drop what was collected, start over from cursor0
+          start = restartAt
+          break // drop what was collected, start over from the update's first cursor
         }
         if (e.code === 'ITEM_LOGIN_REQUIRED') return { kind: 'needs_reconnect', pages }
         if (e.code === 'PRODUCT_NOT_READY') return { kind: 'noop', pages }
@@ -196,6 +220,7 @@ export async function fetchUpdate(client: PlaidClient, accessToken: string, curs
       if (!a || !m || !r || typeof next !== 'string' || next.length > 256 || typeof page.has_more !== 'boolean') {
         return { kind: 'error', code: 'bad_response', pages }
       }
+      if (page.transactions_update_status !== HISTORICAL_COMPLETE) historical = false
       added.push(...a)
       modified.push(...m)
       removed.push(...r)
@@ -204,8 +229,8 @@ export async function fetchUpdate(client: PlaidClient, accessToken: string, curs
         return { kind: 'error', code: 'bad_response', pages }
       }
       cursor = next
-      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false }
-      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true }
+      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical, restarts }
+      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical, restarts }
     }
   }
 }

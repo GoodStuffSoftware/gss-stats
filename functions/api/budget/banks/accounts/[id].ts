@@ -105,7 +105,7 @@ export const onRequest = defineRoute({
     // sync_from: the day after the newest row the Budget account holds (NULL for none; idx_txn_account serves MAX).
     stmts.push(
       db.prepare(MAP_SQL).bind(accountId, now, id),
-      db.prepare("UPDATE bank_items SET sync_cursor = NULL, sync_requested_at = ?1, updated_at = ?1 WHERE id = ?2 AND status IN ('active','needs_reconnect','pending_disconnect')").bind(now, t.itemId),
+      db.prepare("UPDATE bank_items SET sync_cursor = NULL, sync_cursor_base = NULL, sync_requested_at = ?1, updated_at = ?1 WHERE id = ?2 AND status IN ('active','needs_reconnect','pending_disconnect')").bind(now, t.itemId),
     )
     try {
       await db.batch(stmts)

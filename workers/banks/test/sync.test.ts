@@ -68,7 +68,7 @@ describe('pickDue', () => {
     seedItem(iid(6), { last_ok_at: null, status: 'needs_reconnect' }) // not in the sync pick
     seedItem(iid(7), { last_ok_at: null, status: 'revoked' })
     seedItem(iid(8), { last_ok_at: ago(30 * HOUR), status: 'pending_disconnect' })
-    const ids = await pickDue(db.d1, NOW)
+    const ids = await pickDue(db.d1, NOW, 'sandbox')
     expect(ids).toHaveLength(3)
     expect(ids.slice(0, 2)).toEqual([iid(4), iid(5)])
     expect([iid(2), iid(3), iid(8)]).toContain(ids[2])
@@ -78,11 +78,11 @@ describe('pickDue', () => {
 
   it('nothing due returns an empty list', async () => {
     seedItem(iid(1))
-    expect(await pickDue(db.d1, NOW)).toEqual([])
+    expect(await pickDue(db.d1, NOW, 'sandbox')).toEqual([])
   })
 
   it('every pick and claim read uses an index', () => {
-    const due = db.explain(DUE_SQL, [ago(20 * HOUR), ago(15 * 60_000)]).join('\n')
+    const due = db.explain(DUE_SQL, [ago(20 * HOUR), ago(15 * 60_000), 'sandbox']).join('\n')
     expect(due).toMatch(/idx_bank_items_due/)
     expect(due).not.toMatch(/SCAN bank_items(?! USING)/)
     expect(db.explain(RECONNECT_SQL, [ago(24 * HOUR)]).join('\n')).toMatch(/idx_bank_items_due/)
@@ -161,10 +161,10 @@ describe('release and the fair pick', () => {
   it('a claimed Item (a run in flight, or one that crashed) is not picked for 15 minutes; a released one is picked at once', async () => {
     seedItem(iid(1), { last_ok_at: null })
     expect(await claim(db.d1, iid(1), NOW)).toBe(true)
-    expect(await pickDue(db.d1, at(5))).toEqual([]) // in flight or crashed: skipped inside the window
-    expect(await pickDue(db.d1, at(16))).toEqual([iid(1)]) // a crashed run lapses by itself
+    expect(await pickDue(db.d1, at(5), 'sandbox')).toEqual([]) // in flight or crashed: skipped inside the window
+    expect(await pickDue(db.d1, at(16), 'sandbox')).toEqual([iid(1)]) // a crashed run lapses by itself
     await release(db.d1, iid(1), NOW)
-    expect(await pickDue(db.d1, at(5))).toEqual([iid(1)]) // a finished run does not hold the Item
+    expect(await pickDue(db.d1, at(5), 'sandbox')).toEqual([iid(1)]) // a finished run does not hold the Item
     expect(await claim(db.d1, iid(1), at(5))).toBe(true)
   })
 
@@ -179,7 +179,7 @@ describe('release and the fair pick', () => {
   it('Items with a standing error sort after the rest: the healthy requested Item is picked first', async () => {
     for (const n of [1, 2, 3]) { seedItem(iid(n), { last_ok_at: ago(HOUR), sync_requested_at: ago(3 * HOUR) }); standingError(iid(n)) }
     seedItem(iid(4), { last_ok_at: ago(HOUR), sync_requested_at: ago(HOUR) })
-    expect((await pickDue(db.d1, NOW))[0]).toBe(iid(4))
+    expect((await pickDue(db.d1, NOW, 'sandbox'))[0]).toBe(iid(4))
   })
 
   it('five Items with a standing error are all retried within a few ticks, none skipped forever; a healthy Item is never starved', async () => {
@@ -188,7 +188,7 @@ describe('release and the fair pick', () => {
     const picked = new Map<string, number>()
     for (let tick = 0; tick < 4; tick++) {
       const now = at(tick) // one minute apart: far inside the claim window, so only release lets an Item back in
-      for (const id of await pickDue(db.d1, now)) {
+      for (const id of await pickDue(db.d1, now, 'sandbox')) {
         expect(await claim(db.d1, id, now)).toBe(true)
         picked.set(id, (picked.get(id) ?? 0) + 1)
         await release(db.d1, id, now) // the run failed again: it finished with its error
@@ -204,7 +204,7 @@ describe('release and the fair pick', () => {
     const seen = new Set<string>()
     for (let tick = 0; tick < 3; tick++) {
       const now = at(tick)
-      for (const id of await pickDue(db.d1, now)) {
+      for (const id of await pickDue(db.d1, now, 'sandbox')) {
         await claim(db.d1, id, now)
         seen.add(id)
         run(`UPDATE bank_items SET last_ok_at = ? WHERE id = ?`, now.toISOString(), id) // done: no longer due
