@@ -2278,6 +2278,20 @@ variable `LIVE_DEPLOY_PAUSED=true` skips it. `gss-live` has no secrets and no D1
 Durable Object migration ships in its own config. Dry run, no auth needed: `npm run live:check`.
 See [Live updates](#live-updates) for the first-merge order and recovery.
 
+**The bank-links Worker (`gss-budget-banks`) deploys on merge too, and before Pages** — a job
+(`deploy-banks`) that the Pages `deploy` job waits for, because Pages binds it as the `BANKS` service. It runs the
+Worker's and the shared budget library's tests, then `npx wrangler deploy -c workers/banks/wrangler.toml`, when a push
+to `main` changes `workers/banks/**`, the few files from `workers/receipts/src/` and `src/lib/budget/` it imports
+(listed in the job), `package-lock.json`, the root `tsconfig.json` or `deploy.yml`; **Run workflow** deploys it, on
+`main` only. It uses the same token rule as `deploy-worker` and needs no new GitHub secret. Its four Secrets Store
+secrets (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `BANKS_TOKEN_KEY`, `BANKS_TOKEN_KEY_OLD`) must exist before the first run on
+`main`, or the deploy fails and Pages fails to bind the missing Worker. Create each with
+`wrangler secrets-store secret create <store id> --name <NAME> --scopes workers --remote`, the value on **stdin**
+(never an argument, never printed), as `scripts/ads-reads/worker-secrets.ts` does; the store id is the one in
+`workers/receipts/wrangler.toml`. Dry run, no auth needed: `npx wrangler deploy -c workers/banks/wrangler.toml --dry-run`.
+The Worker has no URL, so the check after a deploy is `npx wrangler deployments list --name gss-budget-banks`, and
+`POST /hooks/plaid` with no header answering 400. See [Budget section](#budget-section) for the schema step and key rotation.
+
 **Manual** (local fallback / preview), with the token from a local, gitignored file:
 
 ```powershell
@@ -2698,6 +2712,29 @@ every other worktree session shares. A worktree agent should instead:
 
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 
+**Bank links in the Plaid sandbox (local only).** The Banks page needs the `gss-budget-banks` Worker running beside
+Pages dev; without it every bank route but `status` answers 503 `banks_not_configured`. Use Plaid's **sandbox** only,
+never `--remote`, never the preview (it shares the production budget database), and never a production secret; no
+production Item is ever created from a test, script or agent. From your worktree:
+
+1. Start from a wiped `.wrangler/state`, then `npm run budget:migrate:local` (it applies 0005 too).
+2. `.dev.vars` from [`.dev.vars.example`](.dev.vars.example), with `AUTH_DEV_BYPASS=1`, an invented `AUTH_DEV_EMAIL` and
+   the Budget allowlist set to two invented addresses.
+3. Put the sandbox Plaid client id and sandbox secret (Bitwarden `gss-stats--env--PLAID_SANDBOX_CLIENT_ID` and
+   `gss-stats--env--PLAID_SANDBOX_SECRET`) into the **local** Secrets Store as `PLAID_CLIENT_ID` and `PLAID_SECRET`,
+   with a throwaway `BANKS_TOKEN_KEY` and `BANKS_TOKEN_KEY_OLD` and the two invented addresses as
+   `RECEIPTS_ALLOWED_EMAILS` (values on stdin, no `--remote`, the store under `.wrangler/state`).
+4. Run the Worker on its own port, hidden (no new window): `node node_modules/wrangler/bin/wrangler.js dev
+   -c workers/banks/wrangler.toml --port 8798 --ip localhost --persist-to .wrangler/state --test-scheduled
+   --var PLAID_ENV:sandbox --var PLAID_REDIRECT_URI:http://localhost:8797/banks/return --var PLAID_WEBHOOK_URL:`
+   (the empty webhook URL means Plaid sends none locally). The cron is `curl "http://localhost:8798/__scheduled?cron=*/10+*+*+*+*"`.
+5. `npm run build`, then `npm run dev:start -- --port 8797` (never 8788). `http://localhost:8797/banks/return` must be on
+   the redirect-URI list in the Plaid dashboard for OAuth banks to come back. Link Plaid's sandbox test bank with its
+   documented test user (any password), never real credentials.
+
+Stop both servers and delete `.wrangler/state` and `.dev.vars` when done (`npm run dev:stop -- --port 8797`). There is
+no webhook locally, so "Sync now" plus the cron call is how a sync runs.
+
 **Tests.** `npm test` runs the vitest suite. For auth, `functions/_lib/auth.test.ts`
 covers the allowlist (exact match only: superstrings, substrings and non-ASCII
 look-alikes are refused), fail-closed configuration (including a bad
@@ -2827,6 +2864,48 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
     (`0` by default).
   - **Deploy order.** The Worker must deploy before Pages, because Pages binds it (`deploy.yml` orders the jobs).
     All Secrets Store secrets must exist before the Worker's first deploy.
+- **Bank links.** Budget > Banks links a bank through Plaid so transactions, balances and (for cards and loans)
+  payment details arrive without statement files. The design, the one public webhook path and the safety rules are in
+  [ADR 0009](docs/adr/0009-bank-links-plaid.md); this is only how to run it. The public side is the Bank links section
+  of `/privacy` (`public/privacy.html`).
+  - **Link and share.** Any listed Budget person can link a bank after reading the consent text and ticking the box;
+    Plaid's Link SDK is loaded from `cdn.plaid.com` only when Link is clicked. The person who links is the owner: only
+    they map each bank account to a Budget account (or make one) and switch Sync on or off, reconnect, share new accounts
+    and unlink. Both listed people see every linked account and row, and either can press Sync now.
+  - **Ten links for life.** Plaid's free plan allows 10 production bank logins for life, and unlinking does not return
+    one. The page shows "N of 10 bank links used" and disables Link at 10. The count is the append-only `plaid_slot_log`
+    table, never anything computed from live Items; Items made outside the app are entered once as `prior` rows. Linking
+    the same bank login twice spends another one, so a duplicate is refused before the exchange. No test, script or agent
+    ever creates a production Item: development uses Plaid's sandbox only (Local development, below).
+  - **Sync.** The Worker's cron (every 10 minutes) syncs Items flagged by a webhook or Sync now, and any not synced for
+    20 hours; a daily check asks Plaid whether a needs-reconnect Item has recovered, and card and loan details refresh
+    about every 20 hours. Rows the bank still shows as pending carry a Pending tag and are updated in place when they
+    post, keeping the person's category and note. When Sync is switched on, only bank rows from the day after the
+    account's newest row arrive, and the statement load skips rows from that day on for that account; a row Plaid
+    removes after a person edited it waits under "Removed by the bank" for Delete or Keep. A Budget account that a
+    synced bank account feeds cannot be deleted (no delete route exists; a future one must answer 409 `account_synced`,
+    ADR 0009 decision 12).
+  - **Names (values never in the repo).** Secrets Store, read by the Worker `gss-budget-banks` only: `PLAID_CLIENT_ID`,
+    `PLAID_SECRET`, `BANKS_TOKEN_KEY`, `BANKS_TOKEN_KEY_OLD`, and the existing `RECEIPTS_ALLOWED_EMAILS` (bound, not
+    copied). Worker vars in `workers/banks/wrangler.toml`: `PLAID_ENV` (`production`), `PLAID_WEBHOOK_URL`
+    (`https://stats.goodstuff.software/hooks/plaid`) and `PLAID_REDIRECT_URI` (`https://stats.goodstuff.software/banks/return`,
+    also on the redirect-URI list in the Plaid dashboard). Pages gets no secret and no var, only the `BANKS` service
+    binding at the top level of `wrangler.toml` (never under `env.preview`: the preview shares the production budget
+    database, so its bank routes answer 503 `banks_not_configured`). Bitwarden (prod) keeps the Plaid values as
+    `gss-stats--env--PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_SANDBOX_CLIENT_ID`, `PLAID_SANDBOX_SECRET` and
+    `BANKS_TOKEN_KEY`; the sandbox secret is never put in the remote store.
+  - **Schema.** `migrations/gss-budget/0005_bank_links.sql` is additive (six `bank_*` and `plaid_slot_log` tables, three
+    slot-log triggers, `transactions.pending`) and is applied by hand, once, never by an agent or CI: Time Travel
+    bookmark first, `npx wrangler d1 migrations list gss-budget --remote` (read-only; it must list only
+    `0005_bank_links.sql`), `npx wrangler d1 migrations apply gss-budget --remote`, then one aggregate check (6 tables,
+    3 triggers, the `pending` column). Apply it before the deploy, since the statement load's bank guard reads
+    `bank_accounts`. The rollback is the comment block at the end of the file; leave 0005 in place if only the code is
+    reverted.
+  - **Rotating `BANKS_TOKEN_KEY`.** Put the current key in `BANKS_TOKEN_KEY_OLD`, a new random key in `BANKS_TOKEN_KEY`
+    and deploy. A sync that opens a token with the old key re-encrypts it under the new one, so every syncing Item
+    carries the new `key_id` after a day; one query checks (`SELECT count(*) FROM bank_items WHERE key_id IS NOT NULL
+    AND key_id <> '<first 8 hex of sha256 of the new key>'`). An Item that is not syncing (needs reconnect) keeps its
+    old key until it does, so keep the old key in `_OLD` until that count is 0, then `_OLD` may take the new value.
 
 ## Security / hardening
 
@@ -2835,6 +2914,11 @@ the privacy decisions are in [ADR 0007](docs/adr/0007-budget-section.md); this i
 - **Host guard.** The same middleware 404s any non-canonical host, including
   `*.pages.dev` and preview URLs, so there is exactly one origin for cookies and the
   OAuth redirect.
+- **Plaid webhook.** `POST /hooks/plaid` is the one path besides `/privacy` open without sign-in. It skips the
+  session and origin checks, is accepted only with a header, at most 64 KB and a valid Plaid signature (checked in the
+  `gss-budget-banks` Worker before any database read), and only sets sync flags; see
+  [ADR 0009](docs/adr/0009-bank-links-plaid.md) decision 3. Bank access tokens are AES-256-GCM encrypted and never
+  leave that Worker.
 - **Token hygiene.** The real tokens live only in a gitignored `.dev.vars` (local) and in
   Cloudflare Pages secrets (production), never in the repo (see [Environment data](#environment-data)). Follow-up: mint a
   least-privilege token with only "Account Analytics Read" and set it as the
@@ -2853,6 +2937,7 @@ the Cloudflare account id come from one of these at run time, never from a commi
 | `gss-stats-sync` Worker | Cloudflare Secrets Store (the four Google Ads credentials) | `npm run ads:worker-secrets` (from Bitwarden) |
 | GitHub Actions | Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_WORKERS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GSS_GEO_D1_ID` | `gh secret set <NAME>`, value on stdin |
 | Local scripts (`scripts/`) | Bitwarden Secrets Manager (`bws`, token from `BWS_ACCESS_TOKEN`, else the file `~/.bws-token`) or env vars; the account id is `CLOUDFLARE_ACCOUNT_ID`, else bws prod `infra--cloud-routine-env--CLOUDFLARE_ACCOUNT_ID` | `bws secret create` |
+| `gss-budget-banks` Worker | Cloudflare Secrets Store (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `BANKS_TOKEN_KEY`, `BANKS_TOKEN_KEY_OLD`); copies kept in Bitwarden prod (`gss-stats--env--PLAID_*`, `BANKS_TOKEN_KEY`) | `wrangler secrets-store secret create`, value on stdin ([Budget section](#budget-section)) |
 | Local `wrangler pages dev` | The gitignored `.dev.vars` ([`.dev.vars.example`](.dev.vars.example) lists the names) | by hand |
 
 What stays committed, on purpose: the binding ids `wrangler.toml` and `workers/sync/wrangler.toml`

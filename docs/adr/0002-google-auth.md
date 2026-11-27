@@ -6,6 +6,8 @@
   gate refuses every write a viewer sends. Both lists are still re-checked on every request, and
   the role is never stored in the cookie. Details: README "Auth → View-only access".
 - **Amended 2026-09-30: one hosted preview host** (see the end).
+- **Amended 2026-11-27: one more unauthenticated path.** `POST /hooks/plaid` (Plaid's webhook) skips the session
+  gate and is checked by Plaid's signature instead; see [ADR 0009](0009-bank-links-plaid.md) decision 3.
 - **Date:** 2026-09-25
 - **Code:** `functions/_middleware.ts` (host guard, then the auth gate),
   `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`,

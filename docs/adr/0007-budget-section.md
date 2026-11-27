@@ -5,6 +5,7 @@
 - **Amends:** [ADR 0002](0002-google-auth.md) (a second allowlist, listed-viewer writes under
   `/api/budget/*`); one row added to [ADR 0005](0005-retire-bespoke-widgets.md)'s Exceptions.
 - **Amended by:** [ADR 0008](0008-email-receipts.md) (decision 2 no longer holds: the receipts Worker also binds the budget database).
+- **Amended by:** [ADR 0009](0009-bank-links-plaid.md) (decision 2 again: the banks Worker also binds the budget database; bank rows now reach the transactions table).
 
 ## Context
 

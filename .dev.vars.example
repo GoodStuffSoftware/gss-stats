@@ -36,3 +36,7 @@ RECEIPTS_GMAIL_CLIENT_ID=your-gmail-oauth-client-id
 RECEIPTS_SHARE=fields
 # Worker-only secrets (Secrets Store, never in .dev.vars or the repo): RECEIPTS_GMAIL_CLIENT_SECRET,
 # RECEIPTS_TOKEN_KEY, RECEIPTS_TOKEN_KEY_OLD, RECEIPTS_ANTHROPIC_KEY, RECEIPTS_ALLOWED_EMAILS.
+
+# Budget bank links (README "Budget"): the Pages side needs no bank secret or var, only the BANKS service
+# binding in wrangler.toml. Plaid and bank-token secrets are NEVER in .dev.vars: they live in the Secrets Store
+# of the gss-budget-banks Worker (README "Bank links in the Plaid sandbox" for the local, sandbox-only setup).

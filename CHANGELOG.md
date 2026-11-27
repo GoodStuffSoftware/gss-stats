@@ -7,6 +7,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Privacy policy covers bank links** — the public /privacy page now says what a linked bank shares (transactions, balances and card and loan payment details, never full account numbers or addresses), where it is kept, who can see it and how unlinking works.
 - **Link a bank** — a new Banks page in Budget links a bank through Plaid, shows each bank's accounts with the last 4 digits only, and lets the person who linked it choose which Budget account each one feeds, reconnect it, share new accounts, sync now or unlink.
 - **Bank link counter** — the Banks page shows how many of the 10 free bank links are used, warns at 3 left, and explains that unlinking does not give a link back.
 - **Pending bank rows** — a transaction the bank has not posted yet shows a muted Pending tag beside the merchant.
