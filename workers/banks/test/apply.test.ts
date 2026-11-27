@@ -35,7 +35,7 @@ const BA_UNM = 'b00000000000000a4'
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
 const plaidError = (code: string) => json({ error_type: 'ITEM_ERROR', error_code: code, error_message: 'text', request_id: 'r' }, 400)
-const page = (o: Partial<{ added: unknown[]; modified: unknown[]; removed: unknown[]; next_cursor: string; has_more: boolean }> = {}) =>
+const page = (o: Partial<{ added: unknown[]; modified: unknown[]; removed: unknown[]; next_cursor: string; has_more: boolean; transactions_update_status: string }> = {}) =>
   json({ added: [], modified: [], removed: [], next_cursor: 'cur-1', has_more: false, ...o })
 /** A Plaid transaction on the checking account. Plaid sends money OUT as a positive amount. */
 const ptxn = (id: string, over: Record<string, unknown> = {}) => ({
@@ -769,15 +769,15 @@ describe('claim release and the fair pick', () => {
     expect(item().last_error).toBeNull()
   })
 
-  it('an Item in the other environment keeps its claim (skipped for the window, then retried); a crashed run lapses by itself', async () => {
+  it('an Item in the other environment is never picked here', async () => {
     run(`UPDATE bank_items SET environment = 'production' WHERE id = ?`, ITEM)
     expect(await sync(page())).toBe(false)
     expect(await pickDue(db.d1, new Date(t.getTime() + 5 * MIN), 'sandbox')).toEqual([])
-    expect(await pickDue(db.d1, new Date(t.getTime() + 16 * MIN), 'sandbox')).toEqual([ITEM])
+    expect(await pickDue(db.d1, new Date(t.getTime() + 16 * MIN), 'sandbox')).toEqual([])
   })
 
-  it('three Items in the wrong environment cannot hold every slot: the healthy due Item runs by the second tick', async () => {
-    for (const n of [1, 2, 3]) {
+  it('six Items in the wrong environment never hold a slot: the healthy due Item runs on the first tick', async () => {
+    for (const n of [1, 2, 3, 4, 5, 6]) {
       run(`INSERT INTO bank_items (id, owner_email, environment, plaid_item_id, status, token_ct, token_iv, key_id, sync_cursor, initial_done, sync_requested_at,
              consent_version, consented_at, created_at, updated_at)
            VALUES (?, ?, 'production', ?, 'active', 'QUJD', 'AAAAAAAAAAAAAAAA', 'abcdef01', 'cur-0', 1, '2026-11-20T00:00:00Z', 1, '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')`,
@@ -786,16 +786,11 @@ describe('claim release and the fair pick', () => {
     queue.push(() => page({ added: [ptxn('plaid-a')] }))
     t = new Date(t.getTime() + 20 * MIN)
     const tick = () => syncTick(env(), stubFetch, KEYS, () => t)
-    await tick() // the three requested mismatches take the slots and are claimed
-    expect(fetched).toHaveLength(0)
-    expect(q(`SELECT last_sync_at FROM bank_items WHERE environment = 'production'`).every((r) => r.last_sync_at === t.toISOString())).toBe(true)
-    t = new Date(t.getTime() + MIN)
-    await tick() // inside their claim window: the healthy Item is next
-    expect(fetched).toHaveLength(1)
+    await tick() // before the environment filter, the mismatches took every slot
+    expect(fetched).toHaveLength(1) // the healthy Item ran on the first tick
     expect(item().last_ok_at).not.toBeNull()
-    // a quarter of an hour on, the mismatched Items are looked at again (never skipped for good)
     t = new Date(t.getTime() + 16 * MIN)
-    expect((await pickDue(db.d1, t, 'sandbox')).filter((id) => id.includes('c'))).toHaveLength(3)
+    expect((await pickDue(db.d1, t, 'sandbox')).filter((id) => id.includes('c'))).toHaveLength(0)
   })
 })
 
@@ -884,11 +879,11 @@ describe('sync_from of an account linked without statement rows', () => {
   beforeEach(() => seedWorld({ syncFrom: null, lastOk: null }))
 
   it('the first completed sync sets it to the earliest posted date the bank returned for that account; later syncs leave it', async () => {
-    await sync(page({ added: [ptxn('plaid-a', { date: '2026-11-18' }), ptxn('plaid-b', { date: '2026-11-22' }), ptxn('plaid-c', { account_id: 'acc-crd', date: '2026-11-25', amount: 5 })] }))
+    await sync(page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', added: [ptxn('plaid-a', { date: '2026-11-18' }), ptxn('plaid-b', { date: '2026-11-22' }), ptxn('plaid-c', { account_id: 'acc-crd', date: '2026-11-25', amount: 5 })] }))
     expect(syncFrom(BA_CHK)).toBe('2026-11-18')
     expect(syncFrom(BA_CRD)).toBe('2026-11-25')
     expect(syncFrom(BA_OFF)).toBeNull() // an account that is not synced gets none
-    await sync(page({ next_cursor: 'cur-2', added: [ptxn('plaid-d', { date: '2026-11-02', amount: 9 })] }))
+    await sync(page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', next_cursor: 'cur-2', added: [ptxn('plaid-d', { date: '2026-11-02', amount: 9 })] }))
     expect(syncFrom(BA_CHK)).toBe('2026-11-18') // set once
   })
 
@@ -899,7 +894,7 @@ describe('sync_from of an account linked without statement rows', () => {
 
   it('a first sync in chunks sets it only when the last chunk is applied, to the earliest date over all chunks', async () => {
     for (let i = 1; i <= CHUNK_PAGES + 1; i++) {
-      queue.push(() => page({ added: [ptxn(`plaid-q${i}`, { date: `2026-11-${String(20 - i).padStart(2, '0')}`, amount: 2 + i })], next_cursor: `cur-q${i}`, has_more: i < CHUNK_PAGES + 1 }))
+      queue.push(() => page({ transactions_update_status: 'HISTORICAL_UPDATE_COMPLETE', added: [ptxn(`plaid-q${i}`, { date: `2026-11-${String(20 - i).padStart(2, '0')}`, amount: 2 + i })], next_cursor: `cur-q${i}`, has_more: i < CHUNK_PAGES + 1 }))
     }
     const go = (budget: { used: number }) => {
       t = new Date(t.getTime() + 20 * MIN)

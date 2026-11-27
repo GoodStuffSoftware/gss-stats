@@ -152,9 +152,9 @@ export const HISTORICAL_COMPLETE = 'HISTORICAL_UPDATE_COMPLETE'
 export type FetchResult =
   /**
    * more: stopped after maxPages with pages left; nextCursor is where the next call resumes.
-   * historical: every page of this pass said HISTORICAL_UPDATE_COMPLETE. restarts: how many times the pass began again at restartCursor.
+   * historical: the last page said HISTORICAL_UPDATE_COMPLETE, so the log it caught up to already holds the historical rows (the stream is append-only: rows that arrive later come after any cursor we saved).
    */
-  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean; restarts: number }
+  | { kind: 'ok'; added: PlaidTxn[]; modified: PlaidTxn[]; removed: PlaidRemoved[]; nextCursor: string; pages: number; more: boolean; historical: boolean }
   /** Nothing to apply, nothing moves: the Item is not ready yet (empty next_cursor, or PRODUCT_NOT_READY). */
   | { kind: 'noop'; pages: number }
   | { kind: 'needs_reconnect'; pages: number }
@@ -186,7 +186,7 @@ export async function fetchUpdate(
   for (;;) {
     let cursor = start
     let pass = 0 // pages fetched since the pass began (resets on a restart)
-    let historical = true
+    let historical = false // the status of the page last read
     const added: PlaidTxn[] = []
     const modified: PlaidTxn[] = []
     const removed: PlaidRemoved[] = []
@@ -220,7 +220,7 @@ export async function fetchUpdate(
       if (!a || !m || !r || typeof next !== 'string' || next.length > 256 || typeof page.has_more !== 'boolean') {
         return { kind: 'error', code: 'bad_response', pages }
       }
-      if (page.transactions_update_status !== HISTORICAL_COMPLETE) historical = false
+      historical = page.transactions_update_status === HISTORICAL_COMPLETE
       added.push(...a)
       modified.push(...m)
       removed.push(...r)
@@ -229,8 +229,8 @@ export async function fetchUpdate(
         return { kind: 'error', code: 'bad_response', pages }
       }
       cursor = next
-      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical, restarts }
-      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical, restarts }
+      if (!page.has_more) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: false, historical }
+      if (opts.maxPages !== undefined && pass >= opts.maxPages) return { kind: 'ok', added, modified, removed, nextCursor: next, pages, more: true, historical }
     }
   }
 }
