@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Statement files and bank links don't double up** — once a bank account is linked, a statement load skips rows the bank already sends.
+
 ## [0.86.1] — 2026-11-27
 
 ### Fixed
